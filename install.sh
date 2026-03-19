@@ -380,12 +380,13 @@ main() {
   _get_module_config() {
     local lookup="$1"
     local default="${2:-}"
-    local i
-    for i in ${!MODULE_CONFIG_KEYS[@]+"${!MODULE_CONFIG_KEYS[@]}"}; do
+    local i=0
+    while [ $i -lt ${#MODULE_CONFIG_KEYS[@]} ]; do
       if [ "${MODULE_CONFIG_KEYS[$i]}" = "$lookup" ]; then
         echo "${MODULE_CONFIG_VALS[$i]}"
         return 0
       fi
+      i=$((i + 1))
     done
     echo "$default"
   }
@@ -533,13 +534,14 @@ main() {
   )
 
   # Add module-specific configs
-  local cfg_idx
-  for cfg_idx in ${!MODULE_CONFIG_KEYS[@]+"${!MODULE_CONFIG_KEYS[@]}"}; do
+  local cfg_idx=0
+  while [ $cfg_idx -lt ${#MODULE_CONFIG_KEYS[@]} ]; do
     local cfg_key="${MODULE_CONFIG_KEYS[$cfg_idx]}"
     case "$cfg_key" in
-      *__LOG_REPO__*|*__defaultMode__*) continue ;;
+      *__LOG_REPO__*|*__defaultMode__*) cfg_idx=$((cfg_idx + 1)); continue ;;
     esac
     env_entries+=("CCGM_MODULE_${cfg_key}=${MODULE_CONFIG_VALS[$cfg_idx]}")
+    cfg_idx=$((cfg_idx + 1))
   done
 
   if [ "$install_global" = true ]; then
