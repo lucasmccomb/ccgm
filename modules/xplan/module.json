@@ -1,0 +1,15 @@
+{
+  "name": "xplan",
+  "displayName": "xplan Planning System",
+  "description": "Deep research + planning + execution framework. Spawns parallel research/review agents, creates comprehensive plans, and executes via parallel agent waves.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["multi-agent"],
+  "files": {
+    "commands/xplan.md": { "target": "commands/xplan.md", "type": "command", "template": false },
+    "commands/xplan-status.md": { "target": "commands/xplan-status.md", "type": "command", "template": false },
+    "commands/xplan-resume.md": { "target": "commands/xplan-resume.md", "type": "command", "template": false }
+  },
+  "tags": ["planning", "execution", "research", "parallel"],
+  "configPrompts": []
+}

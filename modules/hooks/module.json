@@ -1,0 +1,44 @@
+{
+  "name": "hooks",
+  "displayName": "Git Workflow Hooks",
+  "description": "Python hooks that enforce git workflow rules: issue-first workflow, commit message format, branch protection, and auto-approval for file operations.",
+  "category": "core",
+  "scope": ["global"],
+  "dependencies": ["settings"],
+  "files": {
+    "hooks/enforce-git-workflow.py": {
+      "target": "hooks/enforce-git-workflow.py",
+      "type": "hook",
+      "template": true
+    },
+    "hooks/enforce-issue-workflow.py": {
+      "target": "hooks/enforce-issue-workflow.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/auto-approve-bash.py": {
+      "target": "hooks/auto-approve-bash.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/auto-approve-file-ops.py": {
+      "target": "hooks/auto-approve-file-ops.py",
+      "type": "hook",
+      "template": false
+    },
+    "settings.partial.json": {
+      "target": "settings.json",
+      "type": "config",
+      "merge": true,
+      "template": false
+    }
+  },
+  "tags": ["hooks", "git", "workflow", "auto-approve"],
+  "configPrompts": [
+    {
+      "key": "protectedBranches",
+      "prompt": "Additional protected branches (comma-separated, e.g. staging,develop)?",
+      "default": ""
+    }
+  ]
+}

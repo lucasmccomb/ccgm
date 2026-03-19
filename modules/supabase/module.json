@@ -1,0 +1,13 @@
+{
+  "name": "supabase",
+  "displayName": "Supabase Rules",
+  "description": "Supabase-specific rules: API key terminology (publishable/secret), environment variable naming, migration validation, and database change workflow.",
+  "category": "tech-specific",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/supabase.md": { "target": "rules/supabase.md", "type": "rule", "template": false }
+  },
+  "tags": ["supabase", "database", "migrations", "auth"],
+  "configPrompts": []
+}

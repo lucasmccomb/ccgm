@@ -1,0 +1,13 @@
+{
+  "name": "browser-automation",
+  "displayName": "Browser Automation",
+  "description": "Rules for browser automation tool selection: Chrome extension, Playwright, and WebMCP. Includes verification priority order and UI verification workflow.",
+  "category": "patterns",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "rules/browser-automation.md": { "target": "rules/browser-automation.md", "type": "rule", "template": false }
+  },
+  "tags": ["browser", "automation", "chrome", "playwright", "webmcp"],
+  "configPrompts": []
+}

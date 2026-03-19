@@ -1,0 +1,25 @@
+{
+  "name": "settings",
+  "displayName": "Settings & Permissions",
+  "description": "Base settings.json with comprehensive tool permissions (800+ allow entries), deny list for dangerous operations, and plugin configuration. Defaults to 'ask' mode for safety.",
+  "category": "core",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "settings.base.json": {
+      "target": "settings.json",
+      "type": "config",
+      "merge": true,
+      "template": true
+    }
+  },
+  "tags": ["settings", "permissions", "security"],
+  "configPrompts": [
+    {
+      "key": "defaultMode",
+      "prompt": "Default permission mode? (ask = prompt for unknown commands, dontAsk = auto-approve all)",
+      "default": "ask",
+      "options": ["ask", "dontAsk"]
+    }
+  ]
+}

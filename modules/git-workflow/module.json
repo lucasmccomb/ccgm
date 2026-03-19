@@ -1,0 +1,17 @@
+{
+  "name": "git-workflow",
+  "displayName": "Git Workflow",
+  "description": "Git workflow rules: sync before history changes, rebase by default, post-merge cleanup, PR template detection, no AI attribution in commits.",
+  "category": "core",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/git-workflow.md": {
+      "target": "rules/git-workflow.md",
+      "type": "rule",
+      "template": false
+    }
+  },
+  "tags": ["git", "workflow", "branching", "pr"],
+  "configPrompts": []
+}

@@ -1,0 +1,27 @@
+{
+  "name": "session-logging",
+  "displayName": "Session Logging",
+  "description": "Structured agent session logging system with mandatory log triggers, log repo management, and session startup command.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "rules/session-logging.md": { "target": "rules/session-logging.md", "type": "rule", "template": false },
+    "log-system.md": { "target": "log-system.md", "type": "doc", "template": false },
+    "commands/startup.md": { "target": "commands/startup.md", "type": "command", "template": false }
+  },
+  "tags": ["logging", "session", "agent", "coordination"],
+  "configPrompts": [
+    {
+      "key": "__LOG_REPO__",
+      "prompt": "Agent log repo name (e.g. yourname-agent-logs)?",
+      "default": ""
+    },
+    {
+      "key": "createLogRepo",
+      "prompt": "Create the agent log repo now? (requires gh CLI)",
+      "default": "no",
+      "options": ["yes", "no"]
+    }
+  ]
+}

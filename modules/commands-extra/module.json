@@ -1,0 +1,16 @@
+{
+  "name": "commands-extra",
+  "displayName": "Extra Commands",
+  "description": "Additional slash commands: /audit (codebase audit), /pwv (Playwright visual verify), /walkthrough (step-by-step guide), /promote-rule (promote repo rules to global).",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "commands/audit.md": { "target": "commands/audit.md", "type": "command", "template": false },
+    "commands/pwv.md": { "target": "commands/pwv.md", "type": "command", "template": false },
+    "commands/walkthrough.md": { "target": "commands/walkthrough.md", "type": "command", "template": false },
+    "commands/promote-rule.md": { "target": "commands/promote-rule.md", "type": "command", "template": false }
+  },
+  "tags": ["commands", "audit", "verification", "walkthrough"],
+  "configPrompts": []
+}
