@@ -3,7 +3,7 @@ description: Create a new GitHub issue with proper labels
 allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
 ---
 
-# /new-issue - Create GitHub Issue
+# /ghi - Create GitHub Issue
 
 Create a new GitHub issue with appropriate labels based on the type of work.
 

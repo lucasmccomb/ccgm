@@ -1,7 +1,7 @@
 {
   "name": "commands-core",
   "displayName": "Core Commands",
-  "description": "Essential slash commands: /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /new-issue.",
+  "description": "Essential slash commands: /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue).",
   "category": "commands",
   "scope": ["global"],
   "dependencies": [],
@@ -10,7 +10,7 @@
     "commands/pr.md": { "target": "commands/pr.md", "type": "command", "template": false },
     "commands/cpm.md": { "target": "commands/cpm.md", "type": "command", "template": false },
     "commands/gs.md": { "target": "commands/gs.md", "type": "command", "template": false },
-    "commands/new-issue.md": { "target": "commands/new-issue.md", "type": "command", "template": false }
+    "commands/ghi.md": { "target": "commands/ghi.md", "type": "command", "template": false }
   },
   "tags": ["commands", "git", "github", "workflow"],
   "configPrompts": []

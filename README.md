@@ -32,7 +32,7 @@ The interactive installer walks you through module selection. For a quick setup,
 | **git-workflow** | core | Git workflow rules: sync before history changes, rebase by default, post-merge cleanup, PR template detection, no AI attribution in commits. | - | global, project |
 | **settings** | core | Base settings.json with comprehensive tool permissions (800+ allow entries), deny list for dangerous operations, and plugin configuration. Defaults to 'ask' mode for safety. | - | global |
 | **hooks** | core | Python hooks that enforce git workflow rules: issue-first workflow, commit message format, branch protection, and auto-approval for file operations. | settings | global |
-| **commands-core** | commands | Essential slash commands: /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /new-issue. | - | global |
+| **commands-core** | commands | Essential slash commands: /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue). | - | global |
 | **commands-extra** | commands | Additional slash commands: /audit (codebase audit), /pwv (Playwright visual verify), /walkthrough (step-by-step guide), /promote-rule (promote repo rules to global). | - | global |
 | **github-protocols** | workflow | GitHub repository management protocols: issue-first workflow, PR conventions, label taxonomy, code review standards. | - | global, project |
 | **session-logging** | workflow | Structured agent session logging system with mandatory log triggers, log repo management, and session startup command. | - | global |
