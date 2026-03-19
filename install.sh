@@ -192,8 +192,8 @@ main() {
   default_timezone="${default_timezone:-UTC}"
 
   # GitHub username
-  local github_username=""
-  if command -v gh &>/dev/null; then
+  local github_username="${CCGM_USERNAME:-}"
+  if [ -z "$github_username" ] && command -v gh &>/dev/null; then
     github_username=$(gh api user --jq '.login' 2>/dev/null || true)
   fi
   github_username=$(ui_input "GitHub username" "$github_username")
@@ -205,11 +205,11 @@ main() {
 
   # Code workspace directory
   local code_dir
-  code_dir=$(ui_input "Code workspace directory" "$default_code_dir")
+  code_dir=$(ui_input "Code workspace directory" "${CCGM_CODE_DIR:-$default_code_dir}")
 
   # Timezone
   local timezone
-  timezone=$(ui_input "Timezone" "$default_timezone")
+  timezone=$(ui_input "Timezone" "${CCGM_TIMEZONE:-$default_timezone}")
 
   # Default permission mode
   local default_mode

@@ -19,6 +19,10 @@ _has_gum() {
   command -v gum &>/dev/null
 }
 
+_is_non_interactive() {
+  [ "${CCGM_NON_INTERACTIVE:-}" = "1" ]
+}
+
 # --- Banner ---
 ui_banner() {
   if _has_gum; then
@@ -96,6 +100,11 @@ ui_confirm() {
   local prompt="$1"
   local default="${2:-yes}"
 
+  if _is_non_interactive; then
+    # Auto-confirm with default in non-interactive mode
+    if [ "$default" = "yes" ]; then return 0; else return 1; fi
+  fi
+
   if _has_gum; then
     if [ "$default" = "yes" ]; then
       gum confirm --default=yes "$prompt"
@@ -131,6 +140,12 @@ ui_input() {
   local prompt="$1"
   local default="$2"
 
+  if _is_non_interactive; then
+    # Return default value in non-interactive mode
+    echo "${default:-}"
+    return 0
+  fi
+
   if _has_gum; then
     local args=(--placeholder "$prompt")
     if [ -n "$default" ]; then
@@ -165,6 +180,12 @@ ui_choose() {
   local prompt="$1"
   shift
   local options=("$@")
+
+  if _is_non_interactive; then
+    # Return first option in non-interactive mode
+    echo "${options[0]}"
+    return 0
+  fi
 
   if _has_gum; then
     echo -e "${UI_CYAN}? ${UI_RESET}${UI_BOLD}$prompt${UI_RESET}" >&2
