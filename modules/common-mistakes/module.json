@@ -1,0 +1,13 @@
+{
+  "name": "common-mistakes",
+  "displayName": "Common Mistakes",
+  "description": "8 battle-tested anti-patterns to avoid: shallow directory exploration, dependency blindness, ESLint Fast Refresh, and more.",
+  "category": "patterns",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/common-mistakes.md": { "target": "rules/common-mistakes.md", "type": "rule", "template": false }
+  },
+  "tags": ["anti-patterns", "mistakes", "debugging", "best-practices"],
+  "configPrompts": []
+}

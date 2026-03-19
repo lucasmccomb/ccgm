@@ -1,0 +1,13 @@
+{
+  "name": "code-quality",
+  "displayName": "Code Quality Standards",
+  "description": "Code standards, testing requirements, error handling patterns, security practices, build verification, and living documents maintenance.",
+  "category": "patterns",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/code-quality.md": { "target": "rules/code-quality.md", "type": "rule", "template": false }
+  },
+  "tags": ["code-quality", "testing", "security", "standards"],
+  "configPrompts": []
+}

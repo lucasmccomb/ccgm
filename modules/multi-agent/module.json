@@ -1,0 +1,15 @@
+{
+  "name": "multi-agent",
+  "displayName": "Multi-Agent Coordination",
+  "description": "Multi-clone architecture for parallel agent work with issue claiming, port allocation, and the /mawf workflow command.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["session-logging"],
+  "files": {
+    "rules/multi-agent.md": { "target": "rules/multi-agent.md", "type": "rule", "template": false },
+    "multi-agent-system.md": { "target": "multi-agent-system.md", "type": "doc", "template": false },
+    "commands/mawf.md": { "target": "commands/mawf.md", "type": "command", "template": false }
+  },
+  "tags": ["multi-agent", "parallel", "coordination", "workflow"],
+  "configPrompts": []
+}

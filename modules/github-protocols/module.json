@@ -1,0 +1,14 @@
+{
+  "name": "github-protocols",
+  "displayName": "GitHub Protocols",
+  "description": "GitHub repository management protocols: issue-first workflow, PR conventions, label taxonomy, code review standards.",
+  "category": "workflow",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/github-protocols.md": { "target": "rules/github-protocols.md", "type": "rule", "template": false },
+    "github-repo-protocols.md": { "target": "github-repo-protocols.md", "type": "doc", "template": false }
+  },
+  "tags": ["github", "protocols", "issues", "pr", "code-review"],
+  "configPrompts": []
+}

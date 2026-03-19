@@ -1,0 +1,13 @@
+{
+  "name": "cloudflare",
+  "displayName": "Cloudflare Rules",
+  "description": "Cloudflare-specific rules: Pages vs Workers selection, deployment methods, Git integration requirements.",
+  "category": "tech-specific",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/cloudflare.md": { "target": "rules/cloudflare.md", "type": "rule", "template": false }
+  },
+  "tags": ["cloudflare", "pages", "workers", "deployment"],
+  "configPrompts": []
+}

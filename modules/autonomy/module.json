@@ -1,0 +1,17 @@
+{
+  "name": "autonomy",
+  "displayName": "Full Autonomy",
+  "description": "Configure Claude as a fully autonomous Staff-level engineer who executes tasks end-to-end without asking unnecessary questions.",
+  "category": "core",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/autonomy.md": {
+      "target": "rules/autonomy.md",
+      "type": "rule",
+      "template": false
+    }
+  },
+  "tags": ["autonomy", "workflow", "productivity"],
+  "configPrompts": []
+}

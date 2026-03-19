@@ -1,0 +1,72 @@
+# hooks
+
+Python hooks that enforce git workflow rules: issue-first workflow, commit message format, branch protection, and auto-approval for file operations.
+
+## What It Does
+
+This module installs four Python hooks and a settings partial:
+
+| Hook | Event | Purpose |
+|------|-------|---------|
+| `enforce-git-workflow.py` | PreToolUse (Bash) | Blocks commits on protected branches and enforces `#issue: description` commit message format |
+| `enforce-issue-workflow.py` | UserPromptSubmit | Injects a workflow reminder when Claude detects a work request (create issue first, create branch, then implement) |
+| `auto-approve-bash.py` | PreToolUse (Bash) | Reads allow/deny patterns from settings.json and auto-approves matching Bash commands |
+| `auto-approve-file-ops.py` | PreToolUse (Read/Edit/Write) | Reads path patterns from settings.json and auto-approves file operations on allowed paths |
+
+The `settings.partial.json` wires these hooks into your `~/.claude/settings.json`.
+
+## Dependencies
+
+This module depends on the **settings** module. The auto-approve hooks read permission patterns from `settings.json`, so the settings module must be installed first.
+
+## Template Variables
+
+`enforce-git-workflow.py` contains one template variable:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `__USERNAME__` | Your GitHub username | `myuser` |
+
+During installation, `__USERNAME__/ccgm` in the `DIRECT_TO_MAIN_REPOS` list will be replaced with your actual GitHub username. This allows the ccgm config repo itself to use direct-to-main commits.
+
+## Manual Installation
+
+```bash
+# 1. Copy hooks
+cp hooks/enforce-git-workflow.py ~/.claude/hooks/enforce-git-workflow.py
+cp hooks/enforce-issue-workflow.py ~/.claude/hooks/enforce-issue-workflow.py
+cp hooks/auto-approve-bash.py ~/.claude/hooks/auto-approve-bash.py
+cp hooks/auto-approve-file-ops.py ~/.claude/hooks/auto-approve-file-ops.py
+
+# 2. Make executable
+chmod +x ~/.claude/hooks/enforce-git-workflow.py
+chmod +x ~/.claude/hooks/enforce-issue-workflow.py
+chmod +x ~/.claude/hooks/auto-approve-bash.py
+chmod +x ~/.claude/hooks/auto-approve-file-ops.py
+
+# 3. Replace template variable in enforce-git-workflow.py
+# Edit the DIRECT_TO_MAIN_REPOS list to use your GitHub username
+
+# 4. Merge settings.partial.json into ~/.claude/settings.json
+# Add the "hooks" section from settings.partial.json
+```
+
+## Configuration
+
+You can add additional protected branches by creating `~/.claude/git-flow-protected-branches.json`:
+
+```json
+["staging", "develop", "release"]
+```
+
+The default protected branches are: main, master, production, prod, staging, stag, develop, dev, release, trunk.
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `hooks/enforce-git-workflow.py` | Branch protection and commit message format enforcement (template) |
+| `hooks/enforce-issue-workflow.py` | Issue-first workflow reminder injection |
+| `hooks/auto-approve-bash.py` | Bash command auto-approval based on settings.json patterns |
+| `hooks/auto-approve-file-ops.py` | File operation auto-approval based on settings.json path patterns |
+| `settings.partial.json` | Hook wiring configuration to merge into settings.json |
