@@ -192,8 +192,8 @@ main() {
   default_timezone="${default_timezone:-UTC}"
 
   # GitHub username
-  local github_username=""
-  if command -v gh &>/dev/null; then
+  local github_username="${CCGM_USERNAME:-}"
+  if [ -z "$github_username" ] && command -v gh &>/dev/null; then
     github_username=$(gh api user --jq '.login' 2>/dev/null || true)
   fi
   github_username=$(ui_input "GitHub username" "$github_username")
@@ -205,11 +205,11 @@ main() {
 
   # Code workspace directory
   local code_dir
-  code_dir=$(ui_input "Code workspace directory" "$default_code_dir")
+  code_dir=$(ui_input "Code workspace directory" "${CCGM_CODE_DIR:-$default_code_dir}")
 
   # Timezone
   local timezone
-  timezone=$(ui_input "Timezone" "$default_timezone")
+  timezone=$(ui_input "Timezone" "${CCGM_TIMEZONE:-$default_timezone}")
 
   # Default permission mode
   local default_mode
@@ -367,7 +367,29 @@ main() {
   # ===========================================================
   # Step 7: Collect module-specific config
   # ===========================================================
-  declare -A MODULE_CONFIGS
+  # Store module configs as indexed array of "key=value" pairs
+  # (bash 3.x compatible - no associative arrays)
+  MODULE_CONFIG_KEYS=()
+  MODULE_CONFIG_VALS=()
+
+  _set_module_config() {
+    MODULE_CONFIG_KEYS+=("$1")
+    MODULE_CONFIG_VALS+=("$2")
+  }
+
+  _get_module_config() {
+    local lookup="$1"
+    local default="${2:-}"
+    local i=0
+    while [ $i -lt ${#MODULE_CONFIG_KEYS[@]} ]; do
+      if [ "${MODULE_CONFIG_KEYS[$i]}" = "$lookup" ]; then
+        echo "${MODULE_CONFIG_VALS[$i]}"
+        return 0
+      fi
+      i=$((i + 1))
+    done
+    echo "$default"
+  }
 
   for mod in "${RESOLVED_MODULES[@]}"; do
     if [ "$has_jq" = true ]; then
@@ -391,7 +413,7 @@ main() {
             value=$(ui_input "$prompt" "$default")
           fi
 
-          MODULE_CONFIGS["${mod}__${key}"]="$value"
+          _set_module_config "${mod}__${key}" "$value"
         done < <(get_module_config_prompts "$mod")
       fi
     fi
@@ -500,7 +522,8 @@ main() {
 
   # Write .ccgm.env
   local env_file="${global_dir}/.ccgm.env"
-  local log_repo="${MODULE_CONFIGS[session-logging____LOG_REPO__]:-${github_username}-agent-logs}"
+  local log_repo
+  log_repo=$(_get_module_config "session-logging____LOG_REPO__" "${github_username}-agent-logs")
   local env_entries=(
     "CCGM_HOME=${HOME}"
     "CCGM_USERNAME=${github_username}"
@@ -511,12 +534,14 @@ main() {
   )
 
   # Add module-specific configs
-  local cfg_key
-  for cfg_key in "${!MODULE_CONFIGS[@]}"; do
+  local cfg_idx=0
+  while [ $cfg_idx -lt ${#MODULE_CONFIG_KEYS[@]} ]; do
+    local cfg_key="${MODULE_CONFIG_KEYS[$cfg_idx]}"
     case "$cfg_key" in
-      *__LOG_REPO__*|*__defaultMode__*) continue ;;
+      *__LOG_REPO__*|*__defaultMode__*) cfg_idx=$((cfg_idx + 1)); continue ;;
     esac
-    env_entries+=("CCGM_MODULE_${cfg_key}=${MODULE_CONFIGS[$cfg_key]}")
+    env_entries+=("CCGM_MODULE_${cfg_key}=${MODULE_CONFIG_VALS[$cfg_idx]}")
+    cfg_idx=$((cfg_idx + 1))
   done
 
   if [ "$install_global" = true ]; then
@@ -528,7 +553,7 @@ main() {
   INSTALLED_FILES=()
 
   local entry action src target template mod_name
-  for entry in "${install_plan[@]}"; do
+  for entry in ${install_plan[@]+"${install_plan[@]}"}; do
     IFS='|' read -r action src target template mod_name <<< "$entry"
 
     # Create target parent directory
@@ -597,7 +622,7 @@ main() {
   local verify_errors=0
 
   local file
-  for file in "${INSTALLED_FILES[@]}"; do
+  for file in ${INSTALLED_FILES[@]+"${INSTALLED_FILES[@]}"}; do
     if [ ! -e "$file" ]; then
       ui_error "Missing: $file"
       verify_errors=$((verify_errors + 1))
@@ -606,7 +631,7 @@ main() {
 
   # Check for unexpanded templates
   local remaining
-  for file in "${INSTALLED_FILES[@]}"; do
+  for file in ${INSTALLED_FILES[@]+"${INSTALLED_FILES[@]}"}; do
     if [ -f "$file" ] && has_unexpanded_templates "$file"; then
       remaining=$(list_unexpanded_templates "$file")
       ui_warn "Unexpanded templates in $file: $remaining"

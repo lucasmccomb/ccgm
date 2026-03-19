@@ -252,12 +252,13 @@ resolve_dependencies() {
     local v
 
     # Already resolved?
-    for v in "${resolved[@]}"; do
+    # Use ${arr[@]+...} pattern for bash 3.x compatibility (empty array = unbound)
+    for v in ${resolved[@]+"${resolved[@]}"}; do
       [ "$v" = "$mod" ] && return 0
     done
 
     # Cycle detection
-    for v in "${visited[@]}"; do
+    for v in ${visited[@]+"${visited[@]}"}; do
       [ "$v" = "$mod" ] && return 0
     done
     visited+=("$mod")
@@ -276,11 +277,11 @@ resolve_dependencies() {
     resolved+=("$mod")
   }
 
-  for mod in "${input_modules[@]}"; do
+  for mod in ${input_modules[@]+"${input_modules[@]}"}; do
     _resolve_visit "$mod"
   done
 
-  printf '%s\n' "${resolved[@]}"
+  printf '%s\n' ${resolved[@]+"${resolved[@]}"}
 }
 
 # --- Load preset ---
