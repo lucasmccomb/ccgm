@@ -33,12 +33,12 @@ expand_templates() {
   local home_val username_val code_dir_val log_repo_val timezone_val default_mode_val
 
   if [ -f "$env_file" ]; then
-    home_val=$(grep '^CCGM_HOME=' "$env_file" | cut -d= -f2-)
-    username_val=$(grep '^CCGM_USERNAME=' "$env_file" | cut -d= -f2-)
-    code_dir_val=$(grep '^CCGM_CODE_DIR=' "$env_file" | cut -d= -f2-)
-    log_repo_val=$(grep '^CCGM_LOG_REPO=' "$env_file" | cut -d= -f2-)
-    timezone_val=$(grep '^CCGM_TIMEZONE=' "$env_file" | cut -d= -f2-)
-    default_mode_val=$(grep '^CCGM_DEFAULT_MODE=' "$env_file" | cut -d= -f2-)
+    home_val=$(grep '^CCGM_HOME=' "$env_file" | cut -d= -f2- || true)
+    username_val=$(grep '^CCGM_USERNAME=' "$env_file" | cut -d= -f2- || true)
+    code_dir_val=$(grep '^CCGM_CODE_DIR=' "$env_file" | cut -d= -f2- || true)
+    log_repo_val=$(grep '^CCGM_LOG_REPO=' "$env_file" | cut -d= -f2- || true)
+    timezone_val=$(grep '^CCGM_TIMEZONE=' "$env_file" | cut -d= -f2- || true)
+    default_mode_val=$(grep '^CCGM_DEFAULT_MODE=' "$env_file" | cut -d= -f2- || true)
   fi
 
   # Use sensible defaults for unset values
