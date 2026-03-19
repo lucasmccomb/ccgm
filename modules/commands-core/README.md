@@ -10,7 +10,7 @@ Provides five foundational commands that cover the most common development opera
 - **/pr** - Push branch and create a pull request that closes an issue
 - **/cpm** - One-shot commit + PR + merge workflow for solo developers
 - **/gs** - Show git status and project overview
-- **/new-issue** - Create a GitHub issue with proper labels
+- **/ghi** - Create a GitHub issue with proper labels
 
 ## Files
 
@@ -20,7 +20,7 @@ Provides five foundational commands that cover the most common development opera
 | `commands/pr.md` | command | Push branch and create PR closing an issue |
 | `commands/cpm.md` | command | Commit, create PR, and merge in one shot |
 | `commands/gs.md` | command | Git status dashboard with project info |
-| `commands/new-issue.md` | command | Create GitHub issue with labels |
+| `commands/ghi.md` | command | Create GitHub issue with labels |
 
 ## Dependencies
 
@@ -39,7 +39,7 @@ cp commands/commit.md ~/.claude/commands/commit.md
 cp commands/pr.md ~/.claude/commands/pr.md
 cp commands/cpm.md ~/.claude/commands/cpm.md
 cp commands/gs.md ~/.claude/commands/gs.md
-cp commands/new-issue.md ~/.claude/commands/new-issue.md
+cp commands/ghi.md ~/.claude/commands/ghi.md
 ```
 
-After copying, the commands are available as `/commit`, `/pr`, `/cpm`, `/gs`, and `/new-issue` in Claude Code.
+After copying, the commands are available as `/commit`, `/pr`, `/cpm`, `/gs`, and `/ghi` in Claude Code.

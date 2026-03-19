@@ -87,7 +87,7 @@ Based on the gathered state, suggest the most logical next action:
 |-------|---------------|
 | Uncommitted changes on feature branch | Run `/commit` to commit your changes |
 | Committed changes, no PR | Run `/pr` to push and create a pull request |
-| On main with no changes | Create a feature branch or run `/new-issue` |
+| On main with no changes | Create a feature branch or run `/ghi` |
 | Behind main on feature branch | Run `git fetch origin && git rebase origin/main` |
 | PR open and CI passing | Run `gh pr merge --squash --delete-branch` |
 | Merge conflicts | Resolve conflicts, then `git rebase --continue` |
