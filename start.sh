@@ -160,18 +160,23 @@ main() {
   # Detect package manager
   local pkg_manager=""
   local pkg_install=""
+  local sudo_cmd="sudo"
+  # Skip sudo if already running as root (e.g., Docker containers)
+  if [ "$(id -u)" -eq 0 ]; then
+    sudo_cmd=""
+  fi
   if command -v brew &>/dev/null; then
     pkg_manager="brew"
     pkg_install="brew install"
   elif command -v apt-get &>/dev/null; then
     pkg_manager="apt"
-    pkg_install="sudo apt-get install -y"
+    pkg_install="${sudo_cmd:+$sudo_cmd }apt-get install -y"
   elif command -v dnf &>/dev/null; then
     pkg_manager="dnf"
-    pkg_install="sudo dnf install -y"
+    pkg_install="${sudo_cmd:+$sudo_cmd }dnf install -y"
   elif command -v pacman &>/dev/null; then
     pkg_manager="pacman"
-    pkg_install="sudo pacman -S --noconfirm"
+    pkg_install="${sudo_cmd:+$sudo_cmd }pacman -S --noconfirm"
   fi
 
   # Define prerequisites: name|required|check_cmd|pkg_name_brew|pkg_name_apt|description
