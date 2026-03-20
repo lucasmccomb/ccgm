@@ -4,6 +4,33 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+## Table of Contents
+
+- [What is CCGM?](#what-is-ccgm)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Module Catalog](#module-catalog)
+- [Customization](#customization)
+- [Manual Installation](#manual-installation)
+- [Contributing](#contributing)
+
+## What is CCGM?
+
+CCGM is a curated collection of 15 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+
+Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
+
+### What gets installed
+
+CCGM places files into `~/.claude/` (global) or `.claude/` (project-level):
+
+| Directory | What | How Claude Uses It |
+|-----------|------|-------------------|
+| `rules/*.md` | Behavior rules | Loaded automatically at session start |
+| `commands/*.md` | Slash commands | Available as `/commit`, `/pr`, etc. |
+| `hooks/*.py` | Workflow hooks | Triggered on Claude Code events |
+| `settings.json` | Permissions | Controls tool access and auto-approval |
+
 ## Requirements
 
 - macOS or Linux
@@ -47,6 +74,8 @@ CCGM_NON_INTERACTIVE=1 \
 
 Restart Claude Code or start a new session after installation.
 
+### Presets
+
 For a quick install with a preset:
 
 ```bash
@@ -73,23 +102,6 @@ For a quick install with a preset:
 ./update.sh      # Pull latest changes and re-apply
 ./uninstall.sh   # Remove only CCGM-installed files
 ```
-
-## What is CCGM?
-
-CCGM is a curated collection of 15 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
-
-Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
-
-### What gets installed
-
-CCGM places files into `~/.claude/` (global) or `.claude/` (project-level):
-
-| Directory | What | How Claude Uses It |
-|-----------|------|-------------------|
-| `rules/*.md` | Behavior rules | Loaded automatically at session start |
-| `commands/*.md` | Slash commands | Available as `/commit`, `/pr`, etc. |
-| `hooks/*.py` | Workflow hooks | Triggered on Claude Code events |
-| `settings.json` | Permissions | Controls tool access and auto-approval |
 
 ## Module Catalog
 
