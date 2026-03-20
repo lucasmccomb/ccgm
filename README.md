@@ -1,112 +1,127 @@
 # CCGM (Claude Code God Mode)
 
-Modular Claude Code configuration system - pick the modules you want, install in seconds.
+Modular configuration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) - pick the modules you want, install in seconds. Works with Claude Code CLI, VS Code, Cursor, the macOS Claude app, and any other editor with Claude Code support.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## What is CCGM?
+## Requirements
 
-CCGM is a curated collection of configuration modules for [Claude Code](https://claude.ai/code), Anthropic's CLI coding agent. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, CCGM lets you pick from 15 ready-made modules and install them with a single command.
+- macOS or Linux
+- bash 4+ or zsh
+- git
 
-Each module is self-contained with its own documentation, so you can also copy individual files manually if you prefer.
+The installer checks for additional tools (jq, Python 3, gh CLI, gum) and offers to install any that are missing.
 
-## Quick Start
+## Install
 
 ```bash
-git clone https://github.com/your-username/ccgm.git
+git clone https://github.com/lucasmccomb/ccgm.git
 cd ccgm
 ./start.sh
 ```
 
-That's it. The interactive setup walks you through everything - module selection, scope, configuration. No flags needed.
+The interactive setup handles everything: prerequisite checks, module selection, and configuration. No flags needed.
 
-For a quick setup, you can optionally pass a preset:
+For a quick install with a preset:
 
 ```bash
 ./start.sh --preset standard
 ```
 
-## Module Catalog
-
-| Module | Category | Description | Dependencies | Scope |
-|--------|----------|-------------|--------------|-------|
-| **autonomy** | core | Configure Claude as a fully autonomous Staff-level engineer who executes tasks end-to-end without asking unnecessary questions. | - | global, project |
-| **git-workflow** | core | Git workflow rules: sync before history changes, rebase by default, post-merge cleanup, PR template detection, no AI attribution in commits. | - | global, project |
-| **settings** | core | Base settings.json with comprehensive tool permissions (800+ allow entries), deny list for dangerous operations, and plugin configuration. Defaults to 'ask' mode for safety. | - | global |
-| **hooks** | core | Python hooks that enforce git workflow rules: issue-first workflow, commit message format, branch protection, and auto-approval for file operations. | settings | global |
-| **commands-core** | commands | Essential slash commands: /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue). | - | global |
-| **commands-extra** | commands | Additional slash commands: /audit (codebase audit), /pwv (Playwright visual verify), /walkthrough (step-by-step guide), /promote-rule (promote repo rules to global). | - | global |
-| **github-protocols** | workflow | GitHub repository management protocols: issue-first workflow, PR conventions, label taxonomy, code review standards. | - | global, project |
-| **session-logging** | workflow | Structured agent session logging system with mandatory log triggers, log repo management, and session startup command. | - | global |
-| **multi-agent** | workflow | Multi-clone architecture for parallel agent work with issue claiming, port allocation, and the /mawf workflow command. | session-logging | global |
-| **xplan** | workflow | Deep research + planning + execution framework. Spawns parallel research/review agents, creates comprehensive plans, and executes via parallel agent waves. | multi-agent | global |
-| **code-quality** | patterns | Code standards, testing requirements, error handling patterns, security practices, build verification, and living documents maintenance. | - | global, project |
-| **browser-automation** | patterns | Rules for browser automation tool selection: Chrome extension, Playwright, and WebMCP. Includes verification priority order and UI verification workflow. | - | global |
-| **common-mistakes** | patterns | 8 battle-tested anti-patterns to avoid: shallow directory exploration, dependency blindness, ESLint Fast Refresh, and more. | - | global, project |
-| **cloudflare** | tech-specific | Cloudflare-specific rules: Pages vs Workers selection, deployment methods, Git integration requirements. | - | global, project |
-| **supabase** | tech-specific | Supabase-specific rules: API key terminology (publishable/secret), environment variable naming, migration validation, and database change workflow. | - | global, project |
-
-## Presets
-
-Presets are named collections of modules for common use cases:
-
 | Preset | Modules | Best For |
 |--------|---------|----------|
-| **minimal** | autonomy, git-workflow | Getting started with the basics |
+| **minimal** | autonomy, git-workflow | Getting started |
 | **standard** | autonomy, git-workflow, hooks, settings, commands-core | Most users |
-| **full** | All 15 modules | Power users who want everything |
-| **team** | autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality | Teams with shared conventions |
+| **full** | All 15 modules | Power users |
+| **team** | standard + github-protocols, code-quality | Teams |
 
-## Installation Options
+### Installing from an editor
+
+If you use Claude Code in VS Code, Cursor, or another editor with a built-in terminal, run the install commands in that terminal. If your editor doesn't have one, use Terminal.app (macOS) or any terminal emulator. CCGM installs to `~/.claude/`, which is shared across all Claude Code environments - install once, works everywhere.
+
+### Agent installation
+
+For AI agents installing CCGM programmatically:
 
 ```bash
-# Interactive mode (recommended) - walks you through everything
-./start.sh
-
-# Optional shortcuts:
-./start.sh --preset standard       # Skip module selection, use a preset
-./start.sh --scope project         # Install to .claude/ in current project instead of ~/.claude/
-./start.sh --link                  # Symlink files instead of copying (for CCGM developers)
+git clone https://github.com/lucasmccomb/ccgm.git ~/ccgm
+cd ~/ccgm
+CCGM_NON_INTERACTIVE=1 \
+  CCGM_USERNAME="$(gh api user --jq '.login' 2>/dev/null || echo 'github-user')" \
+  ./start.sh --preset standard
 ```
 
-## What Gets Installed
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CCGM_NON_INTERACTIVE` | Set to `1` to skip all prompts | - |
+| `CCGM_USERNAME` | GitHub username | auto-detected via `gh` |
+| `CCGM_CODE_DIR` | Code workspace directory | `~/code` |
+| `CCGM_TIMEZONE` | Timezone | auto-detected |
 
-CCGM installs files into `~/.claude/` (global) or `.claude/` (project-level):
+Restart Claude Code or start a new session after installation.
 
+### Other install options
+
+```bash
+./start.sh --scope project    # Install to .claude/ in current project instead of ~/.claude/
+./start.sh --link             # Symlink instead of copy (for CCGM developers)
 ```
-~/.claude/
-├── rules/*.md             # Claude Code rules (loaded automatically)
-├── commands/*.md           # Custom slash commands (available as /command-name)
-├── hooks/*.py              # Git workflow automation hooks
-├── settings.json           # Permissions and tool configurations
-├── .ccgm-manifest.json     # Tracks which modules are installed
-└── .ccgm.env               # Your configuration values (template variables)
+
+### Update / Uninstall
+
+```bash
+./update.sh      # Pull latest changes and re-apply
+./uninstall.sh   # Remove only CCGM-installed files
 ```
 
-- **Rules** are markdown files that Claude reads automatically at session start. They shape Claude's behavior, coding style, and decision-making.
-- **Commands** are slash commands you can invoke in Claude Code (e.g., `/commit`, `/pr`).
-- **Hooks** are Python scripts triggered by Claude Code events (PreToolUse, UserPromptSubmit) that enforce workflow rules and auto-approve safe operations.
-- **Settings** control which tools Claude can use without asking, which commands are denied, and plugin configuration.
-- **Manifest** tracks installed modules so updates and uninstalls work correctly.
-- **Env file** stores your personal configuration values (GitHub username, code directory path, etc.) used to expand template variables.
+## What is CCGM?
+
+CCGM is a curated collection of 15 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+
+Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
+
+### What gets installed
+
+CCGM places files into `~/.claude/` (global) or `.claude/` (project-level):
+
+| Directory | What | How Claude Uses It |
+|-----------|------|-------------------|
+| `rules/*.md` | Behavior rules | Loaded automatically at session start |
+| `commands/*.md` | Slash commands | Available as `/commit`, `/pr`, etc. |
+| `hooks/*.py` | Workflow hooks | Triggered on Claude Code events |
+| `settings.json` | Permissions | Controls tool access and auto-approval |
+
+## Module Catalog
+
+| Module | Category | Description | Dependencies |
+|--------|----------|-------------|--------------|
+| **autonomy** | core | Claude as a fully autonomous engineer - executes tasks end-to-end without unnecessary questions | - |
+| **git-workflow** | core | Git rules: sync before history changes, rebase by default, post-merge cleanup, no AI attribution | - |
+| **settings** | core | Base settings.json with 800+ tool permissions, deny list, plugin config. Defaults to safe 'ask' mode | - |
+| **hooks** | core | Python hooks: issue-first workflow, commit format, branch protection, auto-approval for safe ops | settings |
+| **commands-core** | commands | /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue) | - |
+| **commands-extra** | commands | /audit (codebase audit), /pwv (Playwright verify), /walkthrough, /promote-rule | - |
+| **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
+| **session-logging** | workflow | Structured agent session logging with mandatory triggers and startup command | - |
+| **multi-agent** | workflow | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | session-logging |
+| **xplan** | workflow | Deep research + planning + execution framework with parallel agent waves | multi-agent |
+| **code-quality** | patterns | Code standards, testing requirements, error handling, security, build verification | - |
+| **browser-automation** | patterns | Browser tool selection (Chrome, Playwright, WebMCP), verification priority, UI testing workflow | - |
+| **common-mistakes** | patterns | 8 battle-tested anti-patterns: shallow exploration, dependency blindness, ESLint Fast Refresh, more | - |
+| **cloudflare** | tech-specific | Pages vs Workers selection, deployment methods, Git integration requirements | - |
+| **supabase** | tech-specific | API key terminology, env var naming, migration validation, database workflow | - |
 
 ## Customization
 
-### Personal rules
-
-Create `~/.claude/rules/personal.md` with any rules specific to your workflow. CCGM will not overwrite this file.
-
-### Settings overrides
-
-Claude Code natively supports `~/.claude/settings.local.json` as a local override file. Any settings you put there will take precedence over the CCGM-managed `settings.json`.
-
-### MCP servers
-
-MCP server configuration lives in `~/.claude/mcp.json`, which is not managed by CCGM. Configure your MCP servers there independently.
+| What | How |
+|------|-----|
+| Personal rules | Create `~/.claude/rules/personal.md` - CCGM won't overwrite it |
+| Settings overrides | Use `~/.claude/settings.local.json` (native Claude Code feature) |
+| MCP servers | Configure in `~/.claude/mcp.json` (not managed by CCGM) |
 
 ### Template variables
 
-Some modules use `__PLACEHOLDER__` template variables in their config files. During installation, you are prompted for values. These are stored in `~/.ccgm.env` and expanded at install time:
+Config files use placeholders that are expanded during installation:
 
 | Variable | Description | Used By |
 |----------|-------------|---------|
@@ -117,99 +132,19 @@ Some modules use `__PLACEHOLDER__` template variables in their config files. Dur
 | `__TIMEZONE__` | Your timezone | session-logging |
 | `__DEFAULT_MODE__` | Permission mode (ask/dontAsk) | settings |
 
-## Updating
-
-Pull the latest changes and re-run the installer to pick up new modules or updates to existing ones:
-
-```bash
-cd ccgm
-./update.sh
-```
-
-## Uninstalling
-
-Remove all CCGM-installed files (uses the manifest to remove only what CCGM installed):
-
-```bash
-cd ccgm
-./uninstall.sh
-```
-
 ## Manual Installation
 
-Every module has its own `README.md` with copy-paste instructions for manual installation without the installer. Browse the `modules/` directory and copy the files you want:
+Every module has its own README with copy-paste instructions. Browse `modules/` and copy what you want:
 
 ```bash
-# Example: manually install the autonomy module
-cp modules/autonomy/rules/autonomy.md ~/.claude/rules/autonomy.md
+# Example: install the autonomy module
+mkdir -p ~/.claude/rules
+cp modules/autonomy/rules/autonomy.md ~/.claude/rules/
 
-# Example: manually install core commands
+# Example: install core commands
 mkdir -p ~/.claude/commands
 cp modules/commands-core/commands/*.md ~/.claude/commands/
 ```
-
-## Works Everywhere Claude Code Runs
-
-CCGM installs to `~/.claude/`, which is the shared configuration directory for Claude Code across **all** environments:
-
-- **Claude Code CLI** (terminal)
-- **VS Code** (Claude Code extension)
-- **Cursor** (Claude Code extension)
-- **macOS Claude app** (Claude Code integration)
-- **Any other editor** with Claude Code support
-
-You only need to run `./start.sh` once from any terminal. After that, every Claude Code environment on your machine picks up the installed rules, commands, hooks, and settings automatically.
-
-### Installing from inside an editor
-
-If you're using Claude Code within VS Code, Cursor, or another editor with a built-in terminal:
-
-1. Open the built-in terminal (`` Ctrl+` `` in VS Code)
-2. Run the Quick Start commands there
-3. Restart Claude Code / reload the editor
-
-If your editor doesn't have a built-in terminal, open Terminal.app (macOS) or your preferred terminal emulator and run the commands there.
-
-## Agent Installation
-
-If you're an AI agent (or a user asking an agent to install CCGM), here are the steps to install programmatically:
-
-```bash
-# 1. Clone the repo
-git clone https://github.com/lucasmccomb/ccgm.git ~/ccgm
-
-# 2. Run the installer non-interactively with a preset
-cd ~/ccgm
-CCGM_NON_INTERACTIVE=1 CCGM_USERNAME="$(gh api user --jq '.login' 2>/dev/null || echo 'github-user')" ./start.sh --preset standard
-
-# 3. Verify installation
-ls ~/.claude/rules/     # Should contain .md rule files
-ls ~/.claude/commands/   # Should contain .md command files
-cat ~/.claude/.ccgm-manifest.json  # Should list installed modules
-```
-
-**Environment variables for non-interactive mode:**
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CCGM_NON_INTERACTIVE` | Set to `1` to skip all prompts | - |
-| `CCGM_USERNAME` | GitHub username | auto-detected via `gh` |
-| `CCGM_CODE_DIR` | Code workspace directory | `~/code` |
-| `CCGM_TIMEZONE` | Timezone | auto-detected |
-
-**Preset options:** `minimal`, `standard` (recommended), `full`, `team`
-
-After installation, restart Claude Code or start a new session for the changes to take effect.
-
-## Requirements
-
-- macOS or Linux
-- bash 4+ or zsh
-- git
-- **gh CLI** (for modules that interact with GitHub: commands-core, commands-extra, github-protocols)
-- **Python 3** (for the hooks module)
-- **jq** (for the settings and hooks modules - merges JSON configurations)
-- **gum** (optional - provides enhanced terminal UI during installation; falls back to plain bash prompts)
 
 ## Contributing
 
