@@ -548,8 +548,17 @@ main() {
         local mod_display
         mod_display=$(get_module_display_name "$mod")
         ui_info "$mod_display"
+
+        # Read all prompts into an array first to avoid stdin conflicts
+        # (gum input reads from stdin, which conflicts with process substitution)
+        local config_lines=()
+        while IFS= read -r line; do
+          [ -n "$line" ] && config_lines+=("$line")
+        done < <(get_module_config_prompts "$mod")
+
         local key prompt default options value
-        while IFS='|' read -r key prompt default options; do
+        for config_line in "${config_lines[@]}"; do
+          IFS='|' read -r key prompt default options <<< "$config_line"
           [ -z "$key" ] && continue
 
           if [ -n "$options" ]; then
@@ -579,7 +588,7 @@ main() {
             esac
           fi
           _set_module_config "${mod}__${key}" "$value"
-        done < <(get_module_config_prompts "$mod")
+        done
         echo ""
       fi
     fi
