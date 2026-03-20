@@ -236,27 +236,65 @@ main() {
           exit 1
         fi
       else
-        ui_error "Cannot continue without required prerequisites."
-        ui_info "Please install the following and re-run ./start.sh:"
-        for tool in "${missing_required[@]}"; do
-          case "$tool" in
-            git)     ui_info "  git: https://git-scm.com/downloads" ;;
-            python3) ui_info "  python3: https://www.python.org/downloads/" ;;
-            jq)      ui_info "  jq: https://jqlang.github.io/jq/download/" ;;
-          esac
-        done
+        ui_info "No problem. Install them when you're ready:"
+        ui_info "  $pkg_install ${missing_required[*]}"
+        ui_info ""
+        ui_info "Then re-run ./start.sh"
+        exit 1
+      fi
+    elif [ "$os_type" = "macOS" ]; then
+      # macOS without Homebrew - offer to install it
+      ui_info "No package manager found. On macOS, Homebrew is the standard way to install developer tools."
+      echo ""
+      if ui_confirm "Install Homebrew? (https://brew.sh)"; then
+        ui_info "Installing Homebrew..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        # Add brew to PATH for this session (Apple Silicon vs Intel)
+        if [ -f /opt/homebrew/bin/brew ]; then
+          eval "$(/opt/homebrew/bin/brew shellenv)"
+        elif [ -f /usr/local/bin/brew ]; then
+          eval "$(/usr/local/bin/brew shellenv)"
+        fi
+        if command -v brew &>/dev/null; then
+          ui_success "Homebrew installed"
+          pkg_manager="brew"
+          pkg_install="brew install"
+          ui_info "Installing required tools: ${missing_required[*]}"
+          if brew install "${missing_required[@]}"; then
+            ui_success "Required tools installed successfully"
+            command -v jq &>/dev/null && has_jq=true
+          else
+            ui_error "Installation failed. Please run 'brew install ${missing_required[*]}' manually and re-run ./start.sh"
+            exit 1
+          fi
+        else
+          ui_error "Homebrew installation didn't complete successfully."
+          ui_info "Try installing manually: https://brew.sh"
+          ui_info "Then re-run ./start.sh"
+          exit 1
+        fi
+      else
+        ui_info "No problem. You can install Homebrew later from https://brew.sh"
+        ui_info "Then install the required tools:"
+        ui_info "  brew install ${missing_required[*]}"
+        ui_info ""
+        ui_info "Re-run ./start.sh when ready."
         exit 1
       fi
     else
+      # Linux without apt/dnf/pacman - genuinely unusual
       ui_error "No supported package manager found (brew, apt, dnf, pacman)."
-      ui_info "Please install the following manually and re-run ./start.sh:"
+      ui_info ""
+      ui_info "Please install the following tools using your system's package manager:"
       for tool in "${missing_required[@]}"; do
         case "$tool" in
-          git)     ui_info "  git: https://git-scm.com/downloads" ;;
-          python3) ui_info "  python3: https://www.python.org/downloads/" ;;
-          jq)      ui_info "  jq: https://jqlang.github.io/jq/download/" ;;
+          git)     ui_info "  git     - https://git-scm.com/downloads" ;;
+          python3) ui_info "  python3 - https://www.python.org/downloads/" ;;
+          jq)      ui_info "  jq      - https://jqlang.github.io/jq/download/" ;;
         esac
       done
+      ui_info ""
+      ui_info "Re-run ./start.sh when ready."
       exit 1
     fi
   fi
