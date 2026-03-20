@@ -140,9 +140,9 @@ main() {
   ui_banner
 
   # ===========================================================
-  # Step 2: Detect environment
+  # Step 2: Check prerequisites
   # ===========================================================
-  ui_header "Environment Detection"
+  ui_header "Checking Prerequisites"
 
   local os_type="unknown"
   case "$OSTYPE" in
@@ -153,26 +153,131 @@ main() {
 
   local shell_type
   shell_type="$(basename "${SHELL:-/bin/bash}")"
+
+  ui_info "OS: $os_type | Shell: $shell_type"
+  echo ""
+
+  # Detect package manager
+  local pkg_manager=""
+  local pkg_install=""
+  if command -v brew &>/dev/null; then
+    pkg_manager="brew"
+    pkg_install="brew install"
+  elif command -v apt-get &>/dev/null; then
+    pkg_manager="apt"
+    pkg_install="sudo apt-get install -y"
+  elif command -v dnf &>/dev/null; then
+    pkg_manager="dnf"
+    pkg_install="sudo dnf install -y"
+  elif command -v pacman &>/dev/null; then
+    pkg_manager="pacman"
+    pkg_install="sudo pacman -S --noconfirm"
+  fi
+
+  # Define prerequisites: name|required|check_cmd|pkg_name_brew|pkg_name_apt|description
+  local -a missing_required=()
+  local -a missing_optional=()
   local has_gum=false
   local has_jq=false
 
-  command -v gum &>/dev/null && has_gum=true
-  command -v jq &>/dev/null && has_jq=true
+  # Check each prerequisite
+  _check_prereq() {
+    local name="$1"
+    local required="$2"
+    local description="$3"
 
-  ui_info "OS: $os_type"
-  ui_info "Shell: $shell_type"
-  if [ "$has_gum" = true ]; then
-    ui_success "gum: installed (enhanced TUI)"
-  else
-    ui_info "gum: not found (using basic prompts)"
-    ui_info "  Install for better experience: brew install gum"
+    if command -v "$name" &>/dev/null; then
+      ui_success "$name: installed"
+      return 0
+    else
+      if [ "$required" = "true" ]; then
+        ui_error "$name: missing (required) - $description"
+        missing_required+=("$name")
+      else
+        ui_warn "$name: missing (optional) - $description"
+        missing_optional+=("$name")
+      fi
+      return 1
+    fi
+  }
+
+  # Required prerequisites
+  _check_prereq "git" "true" "version control" || true
+  _check_prereq "python3" "true" "needed for hooks module" || true
+  _check_prereq "jq" "true" "needed for settings.json merging" || true
+  if command -v jq &>/dev/null; then has_jq=true; fi
+
+  # Optional but recommended
+  _check_prereq "gh" "false" "GitHub CLI for issue/PR commands" || true
+  _check_prereq "gum" "false" "enhanced terminal UI" || true
+  if command -v gum &>/dev/null; then has_gum=true; fi
+
+  echo ""
+
+  # Handle missing required prerequisites
+  if [ ${#missing_required[@]} -gt 0 ]; then
+    ui_header "Missing Required Prerequisites"
+    ui_warn "The following required tools are not installed:"
+    for tool in "${missing_required[@]}"; do
+      echo "  - $tool"
+    done
+    echo ""
+
+    if [ -n "$pkg_manager" ]; then
+      local install_cmd="$pkg_install ${missing_required[*]}"
+      if ui_confirm "Install missing required tools with $pkg_manager? ($install_cmd)"; then
+        ui_info "Installing: ${missing_required[*]}"
+        if $pkg_install "${missing_required[@]}"; then
+          ui_success "Required tools installed successfully"
+          # Re-check jq
+          command -v jq &>/dev/null && has_jq=true
+        else
+          ui_error "Installation failed. Please install manually and re-run ./start.sh"
+          exit 1
+        fi
+      else
+        ui_error "Cannot continue without required prerequisites."
+        ui_info "Please install the following and re-run ./start.sh:"
+        for tool in "${missing_required[@]}"; do
+          case "$tool" in
+            git)     ui_info "  git: https://git-scm.com/downloads" ;;
+            python3) ui_info "  python3: https://www.python.org/downloads/" ;;
+            jq)      ui_info "  jq: https://jqlang.github.io/jq/download/" ;;
+          esac
+        done
+        exit 1
+      fi
+    else
+      ui_error "No supported package manager found (brew, apt, dnf, pacman)."
+      ui_info "Please install the following manually and re-run ./start.sh:"
+      for tool in "${missing_required[@]}"; do
+        case "$tool" in
+          git)     ui_info "  git: https://git-scm.com/downloads" ;;
+          python3) ui_info "  python3: https://www.python.org/downloads/" ;;
+          jq)      ui_info "  jq: https://jqlang.github.io/jq/download/" ;;
+        esac
+      done
+      exit 1
+    fi
   fi
-  if [ "$has_jq" = true ]; then
-    ui_success "jq: installed"
-  else
-    ui_warn "jq: not found - settings.json merging will be skipped"
-    ui_info "  Install: brew install jq (macOS) or apt install jq (Linux)"
+
+  # Handle missing optional prerequisites
+  if [ ${#missing_optional[@]} -gt 0 ] && [ -n "$pkg_manager" ]; then
+    if ui_confirm "Install optional tools for a better experience? (${missing_optional[*]})"; then
+      ui_info "Installing: ${missing_optional[*]}"
+      if $pkg_install "${missing_optional[@]}"; then
+        ui_success "Optional tools installed"
+        command -v gum &>/dev/null && has_gum=true
+      else
+        ui_info "Optional install failed - continuing without them"
+      fi
+    else
+      ui_info "Skipping optional tools - continuing with basic setup"
+    fi
   fi
+
+  echo ""
+  ui_success "All prerequisites satisfied"
 
   # ===========================================================
   # Step 3: Collect user info
