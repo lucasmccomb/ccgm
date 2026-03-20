@@ -354,10 +354,6 @@ main() {
   local timezone
   timezone=$(ui_input "Timezone" "${CCGM_TIMEZONE:-$default_timezone}")
 
-  # Default permission mode
-  local default_mode
-  default_mode=$(ui_choose "Default permission mode" "ask" "dontAsk")
-
   # ===========================================================
   # Step 4: Choose scope
   # ===========================================================
@@ -667,6 +663,8 @@ main() {
   local env_file="${global_dir}/.ccgm.env"
   local log_repo
   log_repo=$(_get_module_config "session-logging____LOG_REPO__" "${github_username}-agent-logs")
+  local default_mode
+  default_mode=$(_get_module_config "settings__defaultMode" "ask")
   local env_entries=(
     "CCGM_HOME=${HOME}"
     "CCGM_USERNAME=${github_username}"
