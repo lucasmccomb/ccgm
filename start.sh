@@ -182,7 +182,6 @@ main() {
   # Define prerequisites: name|required|check_cmd|pkg_name_brew|pkg_name_apt|description
   local -a missing_required=()
   local -a missing_optional=()
-  local has_gum=false
   local has_jq=false
 
   # Check each prerequisite
@@ -231,8 +230,6 @@ main() {
 
   # Optional but recommended
   _check_prereq "gh" "false" "GitHub CLI for issue/PR commands" || true
-  _check_prereq "gum" "false" "enhanced terminal UI" || true
-  if command -v gum &>/dev/null; then has_gum=true; fi
 
   echo ""
 
@@ -327,7 +324,6 @@ main() {
       ui_info "Installing: ${missing_optional[*]}"
       if $pkg_install "${missing_optional[@]}"; then
         ui_success "Optional tools installed"
-        command -v gum &>/dev/null && has_gum=true
       else
         ui_info "Optional install failed - continuing without them"
       fi
@@ -572,7 +568,7 @@ main() {
         ui_info "$mod_display"
 
         # Read all prompts into an array first to avoid stdin conflicts
-        # (gum input reads from stdin, which conflicts with process substitution)
+        # (ui_input uses read, which conflicts with process substitution)
         local config_lines=()
         while IFS= read -r line; do
           [ -n "$line" ] && config_lines+=("$line")
