@@ -725,6 +725,12 @@ main() {
   case "$auto_update_raw" in
     yes|true|1) auto_update_check="true" ;;
   esac
+  local auto_startup_raw
+  auto_startup_raw=$(_get_module_config "session-logging__autoStartup" "yes")
+  local auto_startup="false"
+  case "$auto_startup_raw" in
+    yes|true|1) auto_startup="true" ;;
+  esac
   local env_entries=(
     "CCGM_HOME=${HOME}"
     "CCGM_USERNAME=${github_username}"
@@ -733,6 +739,7 @@ main() {
     "CCGM_TIMEZONE=${timezone}"
     "CCGM_DEFAULT_MODE=${default_mode}"
     "CCGM_AUTO_UPDATE_CHECK=${auto_update_check}"
+    "CCGM_AUTO_STARTUP=${auto_startup}"
   )
 
   # Add module-specific configs
@@ -740,7 +747,7 @@ main() {
   while [ $cfg_idx -lt ${#MODULE_CONFIG_KEYS[@]} ]; do
     local cfg_key="${MODULE_CONFIG_KEYS[$cfg_idx]}"
     case "$cfg_key" in
-      *__LOG_REPO__*|*__defaultMode__*|*__autoUpdateCheck__*) cfg_idx=$((cfg_idx + 1)); continue ;;
+      *__LOG_REPO__*|*__defaultMode__*|*__autoUpdateCheck__*|*__autoStartup__*) cfg_idx=$((cfg_idx + 1)); continue ;;
     esac
     env_entries+=("CCGM_MODULE_${cfg_key}=${MODULE_CONFIG_VALS[$cfg_idx]}")
     cfg_idx=$((cfg_idx + 1))
