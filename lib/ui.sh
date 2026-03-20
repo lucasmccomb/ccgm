@@ -53,7 +53,7 @@ ui_header() {
   local title="$1"
   if _has_gum; then
     echo ""
-    gum style --foreground 99 --bold "--- $title ---"
+    gum style --foreground 99 --bold -- "--- $title ---"
   else
     echo ""
     echo -e "${UI_CYAN}${UI_BOLD}--- $title ---${UI_RESET}"
@@ -63,7 +63,7 @@ ui_header() {
 # --- Status messages ---
 ui_success() {
   if _has_gum; then
-    gum style --foreground 2 "  $1"
+    gum style --foreground 2 -- "  $1"
   else
     echo -e "${UI_GREEN}  $1${UI_RESET}"
   fi
@@ -71,7 +71,7 @@ ui_success() {
 
 ui_error() {
   if _has_gum; then
-    gum style --foreground 1 "  $1"
+    gum style --foreground 1 -- "  $1"
   else
     echo -e "${UI_RED}  $1${UI_RESET}"
   fi
@@ -79,7 +79,7 @@ ui_error() {
 
 ui_warn() {
   if _has_gum; then
-    gum style --foreground 3 "  $1"
+    gum style --foreground 3 -- "  $1"
   else
     echo -e "${UI_YELLOW}  $1${UI_RESET}"
   fi
@@ -87,7 +87,7 @@ ui_warn() {
 
 ui_info() {
   if _has_gum; then
-    gum style --foreground 4 "  $1"
+    gum style --foreground 4 -- "  $1"
   else
     echo -e "${UI_BLUE}  $1${UI_RESET}"
   fi
@@ -282,7 +282,7 @@ ui_preview_file() {
 # --- Divider ---
 ui_divider() {
   if _has_gum; then
-    gum style --foreground 240 "$(printf '%.0s-' {1..50})"
+    gum style --foreground 240 -- "$(printf '%.0s-' {1..50})"
   else
     echo -e "${UI_DIM}$(printf '%.0s-' {1..50})${UI_RESET}"
   fi
@@ -294,7 +294,7 @@ ui_list_item() {
   local name="$1"
   local desc="$2"
   if _has_gum; then
-    gum style "  $(gum style --foreground 2 --bold "$name")  $desc"
+    gum style -- "  $(gum style --foreground 2 --bold -- "$name")  $desc"
   else
     echo -e "  ${UI_GREEN}${UI_BOLD}$name${UI_RESET}  $desc"
   fi
