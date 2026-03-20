@@ -11,6 +11,7 @@ This module establishes a centralized logging system where Claude Code agents re
 - **Context preservation**: Capture details that do not fit in git commits or issues
 - **Work tracking**: Record completed work, blockers, and decisions made
 - **Remote backup**: All logs are git-tracked with a GitHub remote
+- **Auto-startup**: Automatically run `/startup` on new sessions (works in VS Code, Cursor, and desktop app)
 
 ## Files
 
@@ -19,6 +20,8 @@ This module establishes a centralized logging system where Claude Code agents re
 | `rules/session-logging.md` | rule | Mandatory log triggers and living documents protocol |
 | `log-system.md` | doc | Full logging system documentation |
 | `commands/startup.md` | command | Session startup protocol (/startup) |
+| `hooks/auto-startup.py` | hook | SessionStart hook that auto-runs /startup |
+| `settings.partial.json` | config | Hook wiring for SessionStart event |
 
 ## Configuration
 
@@ -26,6 +29,7 @@ During installation, you will be prompted for:
 
 - **Agent log repo name**: The name of the git repository for storing agent logs (e.g., `yourname-agent-logs`)
 - **Create log repo now**: Whether to create the log repo immediately via `gh` CLI
+- **Auto-run /startup**: Whether to automatically run `/startup` on new sessions (default: yes). This works across all Claude Code clients including VS Code, Cursor, and the desktop app. Can be toggled later via `CCGM_AUTO_STARTUP` in `~/.claude/.ccgm.env`.
 
 ## Dependencies
 
@@ -56,13 +60,48 @@ cp log-system.md ~/.claude/log-system.md
 # Copy the startup command
 mkdir -p ~/.claude/commands
 cp commands/startup.md ~/.claude/commands/startup.md
+
+# Copy the auto-startup hook
+mkdir -p ~/.claude/hooks
+cp hooks/auto-startup.py ~/.claude/hooks/auto-startup.py
 ```
 
-### 3. Configure Paths
+### 3. Configure the Hook
+
+Add the SessionStart hook to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/auto-startup.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### 4. Enable/Disable Auto-Startup
+
+Add or update in `~/.claude/.ccgm.env`:
+
+```bash
+CCGM_AUTO_STARTUP=true   # or false to disable
+```
+
+### 5. Configure Paths
 
 After copying, update the log repo path references in the rule file and log-system.md to point to your actual log repository location (e.g., `~/code/your-agent-logs/`).
 
-### 4. Add to CLAUDE.md (Optional)
+### 6. Add to CLAUDE.md (Optional)
 
 Add a reference to the session logging rule in your global CLAUDE.md:
 
