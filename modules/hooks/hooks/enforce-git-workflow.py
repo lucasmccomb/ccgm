@@ -27,15 +27,15 @@ import sys
 # To add custom branches, append to this list or use the setup script
 # which writes them to a config file.
 PROTECTED_BRANCHES = [
+    "dev",
+    "develop",
     "main",
     "master",
-    "production",
     "prod",
-    "staging",
-    "stag",
-    "develop",
-    "dev",
+    "production",
     "release",
+    "stag",
+    "staging",
     "trunk",
 ]
 

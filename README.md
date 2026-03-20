@@ -112,7 +112,7 @@ For a quick install with a preset:
 | **autonomy** | core | Claude as a fully autonomous engineer - executes tasks end-to-end without unnecessary questions | - |
 | **git-workflow** | core | Git rules: sync before history changes, rebase by default, post-merge cleanup, no AI attribution | - |
 | **settings** | core | Base settings.json with 800+ tool permissions, deny list, plugin config. Defaults to safe 'ask' mode | - |
-| **hooks** | core | Python hooks: issue-first workflow, commit format, branch protection, auto-approval for safe ops | settings |
+| **hooks** | core | Python hooks: issue-first workflow, commit format, branch protection (dev, develop, main, master, prod, production, release, stag, staging, trunk), auto-approval for safe ops | settings |
 | **commands-core** | commands | /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue) | - |
 | **commands-extra** | commands | /audit (codebase audit), /pwv (Playwright verify), /walkthrough, /promote-rule | - |
 | **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |

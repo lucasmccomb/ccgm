@@ -37,7 +37,7 @@
   "configPrompts": [
     {
       "key": "protectedBranches",
-      "prompt": "Additional protected branches beyond main/master? (branches that require feature branches and PRs, comma-separated, e.g. staging,develop - leave empty if none)",
+      "prompt": "Any additional protected branches? (comma-separated, leave empty if none)",
       "default": ""
     }
   ]

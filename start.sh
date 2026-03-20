@@ -561,11 +561,23 @@ main() {
               __LOG_REPO__)
                 default="${default:-${github_username}-agent-logs}"
                 ;;
+              protectedBranches)
+                ui_info "Default protected branches (direct commits blocked, PRs required):"
+                echo "  develop, dev, main, master, prod, production, release, staging, stag, trunk"
+                echo ""
+                ;;
             esac
             value=$(ui_input "$prompt" "$default")
           fi
 
-          ui_success "Set: $value"
+          if [ -n "$value" ]; then
+            ui_success "Set: $value"
+          else
+            case "$key" in
+              protectedBranches) ui_success "Using defaults only" ;;
+              *) ui_success "Set: (empty)" ;;
+            esac
+          fi
           _set_module_config "${mod}__${key}" "$value"
         done < <(get_module_config_prompts "$mod")
         echo ""
