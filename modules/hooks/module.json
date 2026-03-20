@@ -26,6 +26,11 @@
       "type": "hook",
       "template": false
     },
+    "hooks/ccgm-update-check.py": {
+      "target": "hooks/ccgm-update-check.py",
+      "type": "hook",
+      "template": false
+    },
     "settings.partial.json": {
       "target": "settings.json",
       "type": "config",
@@ -39,6 +44,12 @@
       "key": "protectedBranches",
       "prompt": "Any additional protected branches? (comma-separated, leave empty if none)",
       "default": ""
+    },
+    {
+      "key": "autoUpdateCheck",
+      "prompt": "Check for CCGM updates daily? (notifies you when new updates are available)",
+      "default": "yes",
+      "options": ["yes", "no"]
     }
   ]
 }

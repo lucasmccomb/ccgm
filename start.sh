@@ -692,6 +692,12 @@ main() {
   log_repo=$(_get_module_config "session-logging____LOG_REPO__" "${github_username}-agent-logs")
   local default_mode
   default_mode=$(_get_module_config "settings__defaultMode" "ask")
+  local auto_update_raw
+  auto_update_raw=$(_get_module_config "hooks__autoUpdateCheck" "yes")
+  local auto_update_check="false"
+  case "$auto_update_raw" in
+    yes|true|1) auto_update_check="true" ;;
+  esac
   local env_entries=(
     "CCGM_HOME=${HOME}"
     "CCGM_USERNAME=${github_username}"
@@ -699,6 +705,7 @@ main() {
     "CCGM_LOG_REPO=${log_repo}"
     "CCGM_TIMEZONE=${timezone}"
     "CCGM_DEFAULT_MODE=${default_mode}"
+    "CCGM_AUTO_UPDATE_CHECK=${auto_update_check}"
   )
 
   # Add module-specific configs
@@ -706,7 +713,7 @@ main() {
   while [ $cfg_idx -lt ${#MODULE_CONFIG_KEYS[@]} ]; do
     local cfg_key="${MODULE_CONFIG_KEYS[$cfg_idx]}"
     case "$cfg_key" in
-      *__LOG_REPO__*|*__defaultMode__*) cfg_idx=$((cfg_idx + 1)); continue ;;
+      *__LOG_REPO__*|*__defaultMode__*|*__autoUpdateCheck__*) cfg_idx=$((cfg_idx + 1)); continue ;;
     esac
     env_entries+=("CCGM_MODULE_${cfg_key}=${MODULE_CONFIG_VALS[$cfg_idx]}")
     cfg_idx=$((cfg_idx + 1))

@@ -7,6 +7,11 @@
             "type": "command",
             "command": "python3 $HOME/.claude/hooks/enforce-issue-workflow.py",
             "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/ccgm-update-check.py",
+            "timeout": 15000
           }
         ]
       }
