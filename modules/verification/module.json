@@ -1,0 +1,13 @@
+{
+  "name": "verification",
+  "displayName": "Verification Before Completion",
+  "description": "Evidence-before-claims methodology. Requires fresh execution of verification commands, reading full output, and confirming results before asserting completion.",
+  "category": "patterns",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/verification.md": { "target": "rules/verification.md", "type": "rule", "template": false }
+  },
+  "tags": ["verification", "quality", "evidence", "completion"],
+  "configPrompts": []
+}

@@ -1,0 +1,13 @@
+{
+  "name": "shadcn",
+  "displayName": "shadcn/ui Patterns",
+  "description": "shadcn/ui component patterns: composition over custom builds, semantic theming tokens, proper form architecture, accessibility, and CLI workflow.",
+  "category": "tech-specific",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/shadcn.md": { "target": "rules/shadcn.md", "type": "rule", "template": false }
+  },
+  "tags": ["shadcn", "ui", "components", "react", "radix"],
+  "configPrompts": []
+}
