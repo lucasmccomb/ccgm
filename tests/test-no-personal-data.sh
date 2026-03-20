@@ -20,7 +20,7 @@ SCAN_TARGETS=(
   "$REPO_ROOT/modules/"
   "$REPO_ROOT/lib/"
   "$REPO_ROOT/presets/"
-  "$REPO_ROOT/install.sh"
+  "$REPO_ROOT/start.sh"
   "$REPO_ROOT/update.sh"
   "$REPO_ROOT/uninstall.sh"
   "$REPO_ROOT/README.md"

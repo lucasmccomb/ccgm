@@ -55,7 +55,7 @@ export HOME="$LINK_HOME"
 
 echo "--- Installing with --link --preset minimal ---"
 set +e
-"$REPO_ROOT/install.sh" --link --preset minimal --scope global </dev/null 2>&1
+"$REPO_ROOT/start.sh" --link --preset minimal --scope global </dev/null 2>&1
 installer_exit=$?
 set -e
 
@@ -116,7 +116,7 @@ export HOME="$LINK2_HOME"
 export CCGM_CODE_DIR="$LINK2_HOME/code"
 
 set +e
-"$REPO_ROOT/install.sh" --link --preset standard --scope global </dev/null 2>&1
+"$REPO_ROOT/start.sh" --link --preset standard --scope global </dev/null 2>&1
 installer_exit=$?
 set -e
 

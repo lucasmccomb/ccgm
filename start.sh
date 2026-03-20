@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# CCGM - Claude Code God Mode Installer
-# Usage: ./install.sh [--link] [--preset <name>] [--scope <global|project|both>]
+# CCGM - Claude Code God Mode
+# Usage: ./start.sh [--link] [--preset <name>] [--scope <global|project|both>]
 
 # --- Determine script location ---
 CCGM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -110,9 +110,9 @@ main() {
         shift 2
         ;;
       --help|-h)
-        echo "CCGM Installer"
+        echo "CCGM - Claude Code God Mode"
         echo ""
-        echo "Usage: ./install.sh [OPTIONS]"
+        echo "Usage: ./start.sh [OPTIONS]"
         echo ""
         echo "Options:"
         echo "  --link              Create symlinks instead of copies"
@@ -121,14 +121,14 @@ main() {
         echo "  -h, --help          Show this help"
         echo ""
         echo "Examples:"
-        echo "  ./install.sh                        Interactive installation"
-        echo "  ./install.sh --preset standard       Quick install with standard preset"
-        echo "  ./install.sh --link --preset full    Symlink full preset"
+        echo "  ./start.sh                        Interactive installation"
+        echo "  ./start.sh --preset standard       Quick install with standard preset"
+        echo "  ./start.sh --link --preset full    Symlink full preset"
         exit 0
         ;;
       *)
         echo "Unknown option: $1"
-        echo "Run ./install.sh --help for usage"
+        echo "Run ./start.sh --help for usage"
         exit 1
         ;;
     esac
@@ -684,7 +684,7 @@ main() {
   if [ "$LINK_MODE" = true ]; then
     echo "  3. Run './update.sh' to check for CCGM updates"
   else
-    echo "  3. Re-run './install.sh' to apply future CCGM updates"
+    echo "  3. Re-run './start.sh' to apply future CCGM updates"
   fi
   echo ""
   ui_info "Useful commands:"

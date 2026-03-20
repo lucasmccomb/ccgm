@@ -63,7 +63,7 @@ export HOME="$TEST1_HOME"
 
 # Run installer with minimal preset
 set +e
-"$REPO_ROOT/install.sh" --preset minimal --scope global </dev/null 2>&1
+"$REPO_ROOT/start.sh" --preset minimal --scope global </dev/null 2>&1
 installer_exit=$?
 set -e
 
@@ -136,7 +136,7 @@ export HOME="$TEST2_HOME"
 export CCGM_CODE_DIR="$TEST2_HOME/code"
 
 set +e
-"$REPO_ROOT/install.sh" --preset standard --scope global </dev/null 2>&1
+"$REPO_ROOT/start.sh" --preset standard --scope global </dev/null 2>&1
 installer_exit=$?
 set -e
 
@@ -199,7 +199,7 @@ export HOME="$TEST3_HOME"
 export CCGM_CODE_DIR="$TEST3_HOME/code"
 
 set +e
-"$REPO_ROOT/install.sh" --preset full --scope global </dev/null 2>&1
+"$REPO_ROOT/start.sh" --preset full --scope global </dev/null 2>&1
 installer_exit=$?
 set -e
 
