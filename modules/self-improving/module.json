@@ -1,0 +1,13 @@
+{
+  "name": "self-improving",
+  "displayName": "Self-Improving Agent",
+  "description": "Meta-learning patterns: extract experience from tasks, identify reusable patterns, update memory files, and systematically improve across sessions.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "rules/self-improving.md": { "target": "rules/self-improving.md", "type": "rule", "template": false }
+  },
+  "tags": ["meta-learning", "reflection", "improvement", "memory"],
+  "configPrompts": []
+}

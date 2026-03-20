@@ -1,0 +1,13 @@
+{
+  "name": "mcp-development",
+  "displayName": "MCP Server Development",
+  "description": "Guide for building Model Context Protocol servers: project structure, tool design, error handling, testing with MCP Inspector, and evaluation patterns.",
+  "category": "tech-specific",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/mcp-development.md": { "target": "rules/mcp-development.md", "type": "rule", "template": false }
+  },
+  "tags": ["mcp", "model-context-protocol", "tools", "servers"],
+  "configPrompts": []
+}

@@ -1,0 +1,13 @@
+{
+  "name": "frontend-design",
+  "displayName": "Frontend Design",
+  "description": "Principles for distinctive, production-grade web UI: intentional aesthetics, typography, color systems, spatial composition, and avoiding generic AI-generated design.",
+  "category": "patterns",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/frontend-design.md": { "target": "rules/frontend-design.md", "type": "rule", "template": false }
+  },
+  "tags": ["design", "ui", "frontend", "aesthetics", "css"],
+  "configPrompts": []
+}

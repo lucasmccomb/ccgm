@@ -1,0 +1,13 @@
+{
+  "name": "systematic-debugging",
+  "displayName": "Systematic Debugging",
+  "description": "4-phase root cause investigation methodology: investigate, analyze patterns, test hypotheses, implement fix. Prevents random fix attempts.",
+  "category": "patterns",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/systematic-debugging.md": { "target": "rules/systematic-debugging.md", "type": "rule", "template": false }
+  },
+  "tags": ["debugging", "root-cause", "methodology", "troubleshooting"],
+  "configPrompts": []
+}

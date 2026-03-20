@@ -1,0 +1,13 @@
+{
+  "name": "subagent-patterns",
+  "displayName": "Subagent Patterns",
+  "description": "Subagent dispatch methodology: task decomposition, spec-driven delegation, two-stage review (spec compliance then code quality), and parallel coordination.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "rules/subagent-patterns.md": { "target": "rules/subagent-patterns.md", "type": "rule", "template": false }
+  },
+  "tags": ["subagents", "delegation", "parallel", "coordination", "review"],
+  "configPrompts": []
+}

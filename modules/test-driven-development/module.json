@@ -1,0 +1,13 @@
+{
+  "name": "test-driven-development",
+  "displayName": "Test-Driven Development",
+  "description": "Strict red-green-refactor TDD discipline. No production code without a failing test first. Enforces test-first methodology for all new features and bug fixes.",
+  "category": "patterns",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/test-driven-development.md": { "target": "rules/test-driven-development.md", "type": "rule", "template": false }
+  },
+  "tags": ["testing", "tdd", "red-green-refactor", "methodology"],
+  "configPrompts": []
+}

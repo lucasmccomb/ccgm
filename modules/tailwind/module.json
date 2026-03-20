@@ -1,0 +1,13 @@
+{
+  "name": "tailwind",
+  "displayName": "Tailwind CSS Design System",
+  "description": "Tailwind CSS v4 design system patterns: CSS-first configuration, design token hierarchy, CVA component variants, dark mode, and responsive grid systems.",
+  "category": "tech-specific",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/tailwind.md": { "target": "rules/tailwind.md", "type": "rule", "template": false }
+  },
+  "tags": ["tailwind", "css", "design-system", "tokens", "theming"],
+  "configPrompts": []
+}
