@@ -196,6 +196,7 @@ ui_choose() {
     local i=1
     for opt in "${options[@]}"; do
       echo -e "  ${UI_CYAN}$i)${UI_RESET} $opt" >&2
+      ((i++))
     done
     while true; do
       echo -en "${UI_CYAN}> ${UI_RESET}Enter number (1-${#options[@]}): " >&2
@@ -227,6 +228,7 @@ ui_multichoose() {
     local i=1
     for opt in "${options[@]}"; do
       echo -e "  ${UI_CYAN}$i)${UI_RESET} $opt" >&2
+      ((i++))
     done
     echo -en "${UI_CYAN}> ${UI_RESET}Selection: " >&2
     local input
