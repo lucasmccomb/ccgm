@@ -206,6 +206,23 @@ main() {
     fi
   }
 
+  # Check for Claude Code first
+  if command -v claude &>/dev/null; then
+    ui_success "claude: installed"
+  else
+    echo ""
+    ui_warn "Claude Code is not installed."
+    ui_info "CCGM configures Claude Code, so you'll need it installed to use these configs."
+    ui_info "Install: npm install -g @anthropic-ai/claude-code"
+    ui_info "  Docs: https://docs.anthropic.com/en/docs/claude-code"
+    echo ""
+    if ! ui_confirm "Continue installing CCGM configs anyway?"; then
+      ui_info "Install Claude Code first, then re-run ./start.sh"
+      exit 0
+    fi
+    echo ""
+  fi
+
   # Required prerequisites
   _check_prereq "git" "true" "version control" || true
   _check_prereq "python3" "true" "needed for hooks module" || true

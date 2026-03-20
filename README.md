@@ -35,11 +35,12 @@ CCGM places files into `~/.claude/` (global) or `.claude/` (project-level):
 
 ## Requirements
 
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`)
 - macOS or Linux
 - bash 4+ or zsh
 - git
 
-The installer checks for additional tools (jq, Python 3, gh CLI, gum) and offers to install any that are missing.
+The installer checks for Claude Code, additional tools (jq, Python 3, gh CLI, gum), and offers to install any that are missing.
 
 ## Install
 
