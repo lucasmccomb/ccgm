@@ -22,19 +22,6 @@ cd ccgm
 
 The interactive setup handles everything: prerequisite checks, module selection, and configuration. No flags needed.
 
-For a quick install with a preset:
-
-```bash
-./start.sh --preset standard
-```
-
-| Preset | Modules | Best For |
-|--------|---------|----------|
-| **minimal** | autonomy, git-workflow | Getting started |
-| **standard** | autonomy, git-workflow, hooks, settings, commands-core | Most users |
-| **full** | All 15 modules | Power users |
-| **team** | standard + github-protocols, code-quality | Teams |
-
 ### Installing from an editor
 
 If you use Claude Code in VS Code, Cursor, or another editor with a built-in terminal, run the install commands in that terminal. If your editor doesn't have one, use Terminal.app (macOS) or any terminal emulator. CCGM installs to `~/.claude/`, which is shared across all Claude Code environments - install once, works everywhere.
@@ -59,6 +46,19 @@ CCGM_NON_INTERACTIVE=1 \
 | `CCGM_TIMEZONE` | Timezone | auto-detected |
 
 Restart Claude Code or start a new session after installation.
+
+For a quick install with a preset:
+
+```bash
+./start.sh --preset standard
+```
+
+| Preset | Modules | Best For |
+|--------|---------|----------|
+| **minimal** | autonomy, git-workflow | Getting started |
+| **standard** | autonomy, git-workflow, hooks, settings, commands-core | Most users |
+| **full** | All 15 modules | Power users |
+| **team** | standard + github-protocols, code-quality | Teams |
 
 ### Other install options
 
