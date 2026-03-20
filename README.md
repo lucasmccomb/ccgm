@@ -148,6 +148,59 @@ mkdir -p ~/.claude/commands
 cp modules/commands-core/commands/*.md ~/.claude/commands/
 ```
 
+## Works Everywhere Claude Code Runs
+
+CCGM installs to `~/.claude/`, which is the shared configuration directory for Claude Code across **all** environments:
+
+- **Claude Code CLI** (terminal)
+- **VS Code** (Claude Code extension)
+- **Cursor** (Claude Code extension)
+- **macOS Claude app** (Claude Code integration)
+- **Any other editor** with Claude Code support
+
+You only need to run `./start.sh` once from any terminal. After that, every Claude Code environment on your machine picks up the installed rules, commands, hooks, and settings automatically.
+
+### Installing from inside an editor
+
+If you're using Claude Code within VS Code, Cursor, or another editor with a built-in terminal:
+
+1. Open the built-in terminal (`` Ctrl+` `` in VS Code)
+2. Run the Quick Start commands there
+3. Restart Claude Code / reload the editor
+
+If your editor doesn't have a built-in terminal, open Terminal.app (macOS) or your preferred terminal emulator and run the commands there.
+
+## Agent Installation
+
+If you're an AI agent (or a user asking an agent to install CCGM), here are the steps to install programmatically:
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/lucasmccomb/ccgm.git ~/ccgm
+
+# 2. Run the installer non-interactively with a preset
+cd ~/ccgm
+CCGM_NON_INTERACTIVE=1 CCGM_USERNAME="$(gh api user --jq '.login' 2>/dev/null || echo 'github-user')" ./start.sh --preset standard
+
+# 3. Verify installation
+ls ~/.claude/rules/     # Should contain .md rule files
+ls ~/.claude/commands/   # Should contain .md command files
+cat ~/.claude/.ccgm-manifest.json  # Should list installed modules
+```
+
+**Environment variables for non-interactive mode:**
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CCGM_NON_INTERACTIVE` | Set to `1` to skip all prompts | - |
+| `CCGM_USERNAME` | GitHub username | auto-detected via `gh` |
+| `CCGM_CODE_DIR` | Code workspace directory | `~/code` |
+| `CCGM_TIMEZONE` | Timezone | auto-detected |
+
+**Preset options:** `minimal`, `standard` (recommended), `full`, `team`
+
+After installation, restart Claude Code or start a new session for the changes to take effect.
+
 ## Requirements
 
 - macOS or Linux
