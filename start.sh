@@ -861,7 +861,45 @@ main() {
   fi
 
   # ===========================================================
-  # Step 14: Next steps
+  # Step 14: Shell alias
+  # ===========================================================
+  ui_header "Shell Alias"
+
+  local rc_file=""
+  case "$shell_type" in
+    zsh)  rc_file="$HOME/.zshrc" ;;
+    bash) rc_file="$HOME/.bashrc" ;;
+  esac
+
+  local alias_installed=false
+  if [ -n "$rc_file" ]; then
+    local alias_name="ccgm"
+    local alias_cmd='claude /startup'
+
+    ui_info "You can add a shell alias to launch Claude Code with the /startup command."
+    ui_info "  alias ${alias_name}=\"${alias_cmd}\""
+    echo ""
+
+    if [ -f "$rc_file" ] && grep -qF "alias ${alias_name}=" "$rc_file" 2>/dev/null; then
+      ui_info "Alias '${alias_name}' already exists in ${rc_file} - skipping"
+    elif ui_confirm "Add '${alias_name}' alias to ${rc_file}?"; then
+      echo "" >> "$rc_file"
+      echo "# CCGM - launch Claude Code with startup command" >> "$rc_file"
+      echo "alias ${alias_name}=\"${alias_cmd}\"" >> "$rc_file"
+      ui_success "Alias added to ${rc_file}"
+      ui_info "Run 'source ${rc_file}' or open a new terminal to use it"
+      alias_installed=true
+    else
+      ui_info "Skipped - you can add it manually later:"
+      echo "  echo 'alias ${alias_name}=\"${alias_cmd}\"' >> ${rc_file}"
+    fi
+  else
+    ui_info "Unrecognized shell ($shell_type) - skipping alias setup"
+    ui_info "You can manually add: alias ccgm=\"claude /startup\""
+  fi
+
+  # ===========================================================
+  # Step 15: Next steps
   # ===========================================================
   ui_header "Installation Complete!"
 
@@ -879,17 +917,28 @@ main() {
   fi
 
   ui_info "Next steps:"
-  echo "  1. Open a new Claude Code session to pick up the new config"
+  local step=1
+  if [ "$alias_installed" = true ]; then
+    echo "  ${step}. Run 'source ${rc_file}' then type '${alias_name}' to start Claude Code"
+    step=$((step + 1))
+  else
+    echo "  ${step}. Open a new Claude Code session to pick up the new config"
+    step=$((step + 1))
+  fi
   if [ "$install_global" = true ]; then
-    echo "  2. Review ~/.claude/settings.json and adjust permissions"
+    echo "  ${step}. Review ~/.claude/settings.json and adjust permissions"
+    step=$((step + 1))
   fi
   if [ "$LINK_MODE" = true ]; then
-    echo "  3. Run './update.sh' to check for CCGM updates"
+    echo "  ${step}. Run './update.sh' to check for CCGM updates"
   else
-    echo "  3. Re-run './start.sh' to apply future CCGM updates"
+    echo "  ${step}. Re-run './start.sh' to apply future CCGM updates"
   fi
   echo ""
   ui_info "Useful commands:"
+  if [ "$alias_installed" = true ]; then
+    echo "  ${alias_name}            Launch Claude Code with /startup"
+  fi
   echo "  ./update.sh      Check for upstream updates"
   echo "  ./uninstall.sh   Remove installed modules"
   echo ""
