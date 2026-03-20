@@ -1,5 +1,7 @@
 # CCGM (Claude Code God Mode)
 
+<img width="369" height="135" alt="image" src="https://github.com/user-attachments/assets/29953ee7-3e7c-47cc-9ef7-e8b2e8ccbc89" />
+
 Modular configuration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) - pick the modules you want, install in seconds. Works with Claude Code CLI, VS Code, Cursor, the macOS Claude app, and any other editor with Claude Code support.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
