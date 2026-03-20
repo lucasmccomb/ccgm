@@ -147,6 +147,7 @@ ui_input() {
   fi
 
   if _has_gum; then
+    echo -e "${UI_CYAN}? ${UI_RESET}${UI_BOLD}$prompt${UI_RESET}" >&2
     local args=(--placeholder "$prompt")
     if [ -n "$default" ]; then
       args+=(--value "$default")
