@@ -1,5 +1,22 @@
 # Code Quality Standards
 
+## Minimize Dependencies and Complexity
+
+Prefer simpler, lower-level solutions over external tools and libraries. If a built-in language feature, standard library, or platform capability achieves an equal or better outcome, use it instead of adding a dependency.
+
+This applies to everything: CLI tools, npm packages, frameworks, shell utilities, and any external tooling.
+
+- **Before adding a dependency**, check whether the language or platform already provides what you need
+- **Built-in > library > framework** - use the simplest layer that solves the problem
+- **Fewer dependencies = fewer failure modes** - every dependency is a maintenance burden, a security surface, and a breaking-change risk
+- **Equal outcome = no dependency** - if the result is the same or better without the tool, don't use the tool
+
+Examples:
+- Pure bash with ANSI escapes instead of a TUI library for simple menus
+- `fetch()` instead of axios for HTTP requests
+- CSS variables instead of a theming library
+- Shell built-ins (`read`, `printf`) instead of external CLI tools
+
 ## Code Standards
 
 ### Environment Variables
@@ -46,8 +63,9 @@
 
 ### Dependencies
 
-- Justify new npm packages in PR description
-- Prefer well-maintained packages with good TypeScript support
+- **Question every new dependency** - can the standard library or a built-in do this?
+- Justify new npm packages in PR description (why is this needed over a simpler approach?)
+- Prefer well-maintained packages with good TypeScript support when a dependency is genuinely warranted
 
 ### Component Patterns (React/TypeScript)
 
