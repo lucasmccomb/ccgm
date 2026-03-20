@@ -348,7 +348,7 @@ main() {
 
   # Code workspace directory
   local code_dir
-  code_dir=$(ui_input "Code workspace directory" "${CCGM_CODE_DIR:-$default_code_dir}")
+  code_dir=$(ui_input "Code workspace directory (the parent directory for your code repositories)" "${CCGM_CODE_DIR:-$default_code_dir}")
 
   # Timezone
   local timezone
