@@ -55,7 +55,7 @@ _check_installed_drift() {
     ui_success "No drift detected - installed files match source"
   else
     ui_warn "$drift_count file(s) differ from source"
-    ui_info "Run ./install.sh to re-apply from source"
+    ui_info "Run ./start.sh to re-apply from source"
   fi
 }
 
@@ -85,15 +85,15 @@ _offer_reinstall() {
       if [ "$prev_link" = "true" ]; then
         args+=("--link")
       fi
-      exec "${CCGM_ROOT}/install.sh" "${args[@]}"
+      exec "${CCGM_ROOT}/start.sh" "${args[@]}"
     else
-      ui_info "Run ./install.sh to configure a new installation."
+      ui_info "Run ./start.sh to configure a new installation."
     fi
   else
     if ui_confirm "Run the installer to apply updates?"; then
-      exec "${CCGM_ROOT}/install.sh"
+      exec "${CCGM_ROOT}/start.sh"
     else
-      ui_info "Run ./install.sh when ready to apply updates."
+      ui_info "Run ./start.sh when ready to apply updates."
     fi
   fi
 }
@@ -166,7 +166,7 @@ main() {
       case "$file" in
         modules/*) module_changes+=("$file") ;;
         presets/*) preset_changes+=("$file") ;;
-        install.sh|update.sh|uninstall.sh|lib/*) installer_changes+=("$file") ;;
+        start.sh|update.sh|uninstall.sh|lib/*) installer_changes+=("$file") ;;
         *) other_changes+=("$file") ;;
       esac
     done <<< "$changed_files"

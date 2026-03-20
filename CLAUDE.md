@@ -10,7 +10,7 @@ CCGM is a modular Claude Code configuration system. It contains 15 modules that 
 
 ```
 ccgm/
-├── install.sh          # Main installer (bash)
+├── start.sh            # Main entry point (bash)
 ├── update.sh           # Check for upstream changes
 ├── uninstall.sh        # Clean removal
 ├── lib/                # Installer utilities

@@ -15,13 +15,15 @@ Each module is self-contained with its own documentation, so you can also copy i
 ```bash
 git clone https://github.com/your-username/ccgm.git
 cd ccgm
-./install.sh
+./start.sh
 ```
 
-The interactive installer walks you through module selection. For a quick setup, use a preset:
+That's it. The interactive setup walks you through everything - module selection, scope, configuration. No flags needed.
+
+For a quick setup, you can optionally pass a preset:
 
 ```bash
-./install.sh --preset standard
+./start.sh --preset standard
 ```
 
 ## Module Catalog
@@ -58,17 +60,13 @@ Presets are named collections of modules for common use cases:
 ## Installation Options
 
 ```bash
-# Interactive mode - choose modules one by one
-./install.sh
+# Interactive mode (recommended) - walks you through everything
+./start.sh
 
-# Preset mode - install a named collection
-./install.sh --preset standard
-
-# Project-level install - writes to .claude/ in current project instead of ~/.claude/
-./install.sh --scope project
-
-# Symlink mode - symlinks files instead of copying (for CCGM developers)
-./install.sh --link
+# Optional shortcuts:
+./start.sh --preset standard       # Skip module selection, use a preset
+./start.sh --scope project         # Install to .claude/ in current project instead of ~/.claude/
+./start.sh --link                  # Symlink files instead of copying (for CCGM developers)
 ```
 
 ## What Gets Installed

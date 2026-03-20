@@ -183,7 +183,7 @@ main() {
   # Done
   echo ""
   ui_success "CCGM uninstalled."
-  ui_info "To reinstall: ./install.sh"
+  ui_info "To reinstall: ./start.sh"
   echo ""
 }
 
