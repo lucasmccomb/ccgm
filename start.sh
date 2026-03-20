@@ -345,14 +345,19 @@ main() {
     ui_error "GitHub username is required"
     exit 1
   fi
+  ui_success "Username: $github_username"
+  echo ""
 
   # Code workspace directory
   local code_dir
   code_dir=$(ui_input "Code workspace directory (the parent directory for your code repositories)" "${CCGM_CODE_DIR:-$default_code_dir}")
+  ui_success "Code directory: $code_dir"
+  echo ""
 
   # Timezone
   local timezone
   timezone=$(ui_input "Timezone" "${CCGM_TIMEZONE:-$default_timezone}")
+  ui_success "Timezone: $timezone"
 
   # ===========================================================
   # Step 4: Choose scope
@@ -530,11 +535,19 @@ main() {
     echo "$default"
   }
 
+  local has_module_config=false
   for mod in "${RESOLVED_MODULES[@]}"; do
     if [ "$has_jq" = true ]; then
       local prompt_count
       prompt_count=$(jq -r '.configPrompts | length' "${CCGM_ROOT}/modules/${mod}/module.json" 2>/dev/null || echo "0")
       if [ "$prompt_count" -gt 0 ] 2>/dev/null; then
+        if [ "$has_module_config" = false ]; then
+          ui_header "Module Configuration"
+          has_module_config=true
+        fi
+        local mod_display
+        mod_display=$(get_module_display_name "$mod")
+        ui_info "$mod_display"
         local key prompt default options value
         while IFS='|' read -r key prompt default options; do
           [ -z "$key" ] && continue
@@ -552,8 +565,10 @@ main() {
             value=$(ui_input "$prompt" "$default")
           fi
 
+          ui_success "Set: $value"
           _set_module_config "${mod}__${key}" "$value"
         done < <(get_module_config_prompts "$mod")
+        echo ""
       fi
     fi
   done
