@@ -18,7 +18,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 15 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 25 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 
@@ -89,7 +89,7 @@ For a quick install with a preset:
 |--------|---------|----------|
 | **minimal** | autonomy, git-workflow | Getting started |
 | **standard** | autonomy, git-workflow, hooks, settings, commands-core | Most users |
-| **full** | All 15 modules | Power users |
+| **full** | All 25 modules | Power users |
 | **team** | standard + github-protocols, code-quality | Teams |
 
 ### Other install options
@@ -113,18 +113,28 @@ For a quick install with a preset:
 | **autonomy** | core | Claude as a fully autonomous engineer - executes tasks end-to-end without unnecessary questions | - |
 | **git-workflow** | core | Git rules: sync before history changes, rebase by default, post-merge cleanup, no AI attribution | - |
 | **settings** | core | Base settings.json with 800+ tool permissions, deny list, plugin config. Defaults to safe 'ask' mode | - |
-| **hooks** | core | Python hooks: issue-first workflow, commit format, branch protection (dev, develop, main, master, prod, production, release, stag, staging, trunk), auto-approval for safe ops | settings |
+| **hooks** | core | Python hooks: issue-first workflow, commit format, branch protection, auto-approval for safe ops | settings |
 | **commands-core** | commands | /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue) | - |
 | **commands-extra** | commands | /audit (codebase audit), /pwv (Playwright verify), /walkthrough, /promote-rule | - |
+| **brand-naming** | commands | /brand (full naming pipeline with word exploration, domain/trademark/app store checks) and /brand-check (single-name deep verification) | - |
 | **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
 | **session-logging** | workflow | Structured agent session logging with mandatory triggers and startup command | - |
 | **multi-agent** | workflow | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | session-logging |
 | **xplan** | workflow | Deep research + planning + execution framework with parallel agent waves | multi-agent |
+| **self-improving** | workflow | Meta-learning: extract experience from tasks, identify patterns, update memory, improve across sessions | - |
+| **subagent-patterns** | workflow | Subagent dispatch: task decomposition, spec-driven delegation, two-stage review, parallel coordination | - |
 | **code-quality** | patterns | Code standards, testing requirements, error handling, security, build verification | - |
 | **browser-automation** | patterns | Browser tool selection (Chrome, Playwright, WebMCP), verification priority, UI testing workflow | - |
 | **common-mistakes** | patterns | 8 battle-tested anti-patterns: shallow exploration, dependency blindness, ESLint Fast Refresh, more | - |
+| **frontend-design** | patterns | Distinctive web UI: intentional aesthetics, typography, color systems, spatial composition | - |
+| **systematic-debugging** | patterns | 4-phase root cause investigation: investigate, analyze, test hypotheses, implement fix | - |
+| **test-driven-development** | patterns | Strict red-green-refactor TDD discipline. No production code without a failing test first | - |
+| **verification** | patterns | Evidence-before-claims: fresh execution of verification commands, read full output before asserting done | - |
 | **cloudflare** | tech-specific | Pages vs Workers selection, deployment methods, Git integration requirements | - |
 | **supabase** | tech-specific | API key terminology, env var naming, migration validation, database workflow | - |
+| **mcp-development** | tech-specific | Building MCP servers: project structure, tool design, error handling, testing, evaluation patterns | - |
+| **shadcn** | tech-specific | shadcn/ui patterns: composition, semantic theming tokens, form architecture, accessibility | - |
+| **tailwind** | tech-specific | Tailwind CSS v4 design system: CSS-first config, design tokens, CVA variants, dark mode, responsive grids | - |
 
 ## Customization
 
