@@ -31,6 +31,11 @@
       "type": "hook",
       "template": false
     },
+    "hooks/port-check.py": {
+      "target": "hooks/port-check.py",
+      "type": "hook",
+      "template": false
+    },
     "settings.partial.json": {
       "target": "settings.json",
       "type": "config",

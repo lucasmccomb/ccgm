@@ -5,30 +5,29 @@ When a task involves multiple independent issues or work items, prefer spawning 
 **When to parallelize:**
 - Multiple independent GitHub issues need to be completed
 - A project has issues that do not block each other
-- The repo has a multi-clone setup (`~/code/{repo}-repos/` with multiple clones)
+- The repo has a multi-clone setup (workspace model: `~/code/{repo}-workspaces/` or flat model: `~/code/{repo}-repos/`)
 
 **How:** Launch Task agents pointed at different clone directories. Each agent claims its own issue via GitHub labels and works independently. See `~/.claude/multi-agent-system.md` for the full coordination guide.
+
+**Workspace model** (preferred for delegated work): Use `/workspace-setup {repo}` to create isolated workspace groups. Each workspace has 4 clones. Point a coordinator agent at a workspace directory - it discovers its clones and delegates.
 
 ---
 
 # Dev Server Port Allocation (Multi-Clone)
 
-**Each clone gets isolated ports to prevent collisions.** Ports are offset by clone number:
-
-| Service | Formula | Clone 0 | Clone 1 | Clone 2 | Clone 3 |
-|---------|---------|---------|---------|---------|---------|
-| Frontend (Vite) | 5173 + N | 5173 | 5174 | 5175 | 5176 |
-| Backend (Wrangler/API) | 8787 + N | 8787 | 8788 | 8789 | 8790 |
+**Each clone gets isolated ports to prevent collisions.** Ports are assigned per-repo via `~/.claude/port-registry.json`, ensuring no collisions between different repos.
 
 **How it works:**
-- Each clone has a `.env.clone` file with `CLONE_NUMBER=N` (written during clone setup)
-- Projects should configure `vite.config.ts` and dev scripts to read `.env.clone` and offset ports automatically
-- If the project has not been configured yet, pass the port manually:
+- Each repo has a unique base port block (16 ports) in the registry
+- Each clone's `.env.clone` has pre-computed `FRONTEND_PORT` and `BACKEND_PORT`
+- A PreToolUse hook (`~/.claude/hooks/port-check.py`) warns about port mismatches and conflicts
+- Read ports from `.env.clone`:
   ```bash
-  CLONE_N=$(grep -oP 'CLONE_NUMBER=\K\d+' .env.clone 2>/dev/null || echo 0)
-  pnpm dev -- --port $((5173 + CLONE_N))
+  FRONTEND_PORT=$(grep 'FRONTEND_PORT=' .env.clone | cut -d= -f2)
+  BACKEND_PORT=$(grep 'BACKEND_PORT=' .env.clone | cut -d= -f2)
+  pnpm dev -- --port ${FRONTEND_PORT}
   ```
 
 **NEVER run `pnpm dev` or `wrangler dev` without clone-aware ports in a multi-clone repo.** Port collisions kill other agents' dev servers.
 
-See `~/.claude/multi-agent-system.md` for full details on dev server port allocation.
+See `~/.claude/multi-agent-system.md` for full details.

@@ -66,19 +66,19 @@ gh label create "human-agent" --color "f9d0c4" --description "Requires manual hu
 
 **Agent labels** (multi-agent repos only):
 
-Create one label per agent clone. The default setup uses 4 agents (0-3), but more can be added at any time:
+Create one label per agent clone. Two naming conventions exist:
+
+**Workspace model** (preferred): Labels follow `agent-wX-cY` pattern. Created automatically by `/workspace-setup`.
+
+**Flat clone model** (legacy): Labels follow `agent-N` pattern:
 
 ```bash
-# Color palette for agent labels (cycles for agents beyond 7)
 AGENT_COLORS=("0075ca" "1d76db" "5319e7" "0e8a16" "d93f0b" "e4e669" "006b75" "b60205")
 
-# Create labels for initial agents (adjust range as needed)
 for i in 0 1 2 3; do
   gh label create "agent-${i}" --color "${AGENT_COLORS[$i]}" --description "Being worked on by agent-${i}"
 done
 ```
-
-To add a label for a new agent later: `gh label create "agent-N" --color "HEX" --description "Being worked on by agent-N"`
 
 Total: 14 base labels + 1 agent label per clone.
 
@@ -89,11 +89,21 @@ Total: 14 base labels + 1 agent label per clone.
 
 ### D. Clone Setup (Multi-Agent Repos)
 
-See `~/.claude/multi-agent-system.md` for the full coordination guide. Quick setup:
+Two models are available. See `~/.claude/multi-agent-system.md` for full details.
+
+**Workspace model** (preferred for delegated parallel work):
+
+```
+/workspace-setup {repo-name}
+```
+
+This creates `~/code/{repo}-workspaces/` with 3 workspaces of 4 clones each (12 total), configures labels, env files, and dependencies.
+
+**Flat clone model** (legacy, for simple parallel work):
 
 ```bash
 REPO="my-repo"
-AGENT_COUNT=4  # Adjust as needed (default: 4 agents, numbered 0-3)
+AGENT_COUNT=4
 mkdir -p ~/code/${REPO}-repos
 for i in $(seq 0 $((AGENT_COUNT - 1))); do
   git clone git@github.com:{your-username}/${REPO}.git ~/code/${REPO}-repos/${REPO}-${i}
@@ -101,12 +111,10 @@ for i in $(seq 0 $((AGENT_COUNT - 1))); do
 done
 ```
 
-After cloning:
+After cloning (either model):
 - Copy `.env` / `.env.local` to each clone (if applicable)
 - Run `npm install` (or `pnpm install`) in each clone (if applicable)
 - Create agent labels (see above)
-
-**Adding a clone later**: See `~/.claude/multi-agent-system.md` for the "Adding an Agent to an Existing Repo" guide.
 
 ### E. Initial Files
 
@@ -162,7 +170,7 @@ This repo uses independent clones. New agents can be added at any time.
 See `~/.claude/multi-agent-system.md` for the full coordination protocol.
 
 ### Agent Labels
-Each clone has a corresponding `agent-N` GitHub label for issue claiming.
+Each clone has a corresponding agent label (`agent-wX-cY` in workspace model, `agent-N` in flat clone model) for issue claiming.
 ```
 
 **.gitignore** - Standard template (adapt per project):
@@ -454,8 +462,9 @@ Complete step-by-step workflow for implementing a GitHub issue.
 ```bash
 gh issue edit <number> --add-label "in-progress"
 
-# Multi-agent repos: also add your agent label
-gh issue edit <number> --add-label "agent-N"
+# Multi-agent repos: also add your agent label (agent-wX-cY or agent-N)
+AGENT_ID=$(grep 'AGENT_ID=' .env.clone 2>/dev/null | cut -d= -f2)
+gh issue edit <number> --add-label "${AGENT_ID}"
 ```
 
 - **UPDATE SESSION LOG** - Log that work is starting
@@ -525,7 +534,8 @@ gh pr merge --squash --delete-branch
 git checkout main && git pull origin main
 
 # Multi-clone repos:
-git fetch origin && git checkout agent-{N} && git reset --hard origin/main
+AGENT_ID=$(grep 'AGENT_ID=' .env.clone 2>/dev/null | cut -d= -f2)
+git fetch origin && git checkout "${AGENT_ID}" && git reset --hard origin/main
 ```
 
 **Dependencies**: If package files changed upstream, run `npm install`.
@@ -537,7 +547,8 @@ gh issue close <number> --comment "Completed: <summary>"
 gh issue edit <number> --remove-label "in-progress"
 
 # Multi-agent repos:
-gh issue edit <number> --remove-label "agent-N"
+AGENT_ID=$(grep 'AGENT_ID=' .env.clone 2>/dev/null | cut -d= -f2)
+gh issue edit <number> --remove-label "${AGENT_ID}"
 ```
 
 - **UPDATE SESSION LOG** - Mark `#completed`
@@ -599,7 +610,7 @@ When choosing issues to work on:
 - **Skip** issues labeled `in-review` unless explicitly directed
 
 **Multi-agent repos only:**
-- **Skip** issues with a different agent's label (e.g., agent-1 skips issues labeled `agent-2`)
+- **Skip** issues with a different agent's label (e.g., agent-w0-c1 skips issues labeled `agent-w0-c2`)
 - Do NOT check for agent labels in single-agent repos
 
 ### Discovering New Work

@@ -34,19 +34,54 @@ Each project has its own directory. Within each project, logs are organized by d
 
 ## Agent Identity Derivation
 
-Agent number is derived automatically from the working directory name:
+Agent identity is derived automatically from the working directory name. Two models are supported:
+
+### Workspace Model (preferred)
+
+Directory names follow `{repo}-w{X}-c{Y}` pattern:
+
+```bash
+WC_MATCH=$(basename "$PWD" | grep -oP 'w\d+-c\d+$')
+if [ -n "$WC_MATCH" ]; then
+  AGENT_ID="agent-${WC_MATCH}"
+fi
+```
+
+| Directory | Agent ID |
+|-----------|----------|
+| `habitpro-ai-w0-c0` | agent-w0-c0 |
+| `habitpro-ai-w1-c2` | agent-w1-c2 |
+| `habitpro-ai-w2-c3` | agent-w2-c3 |
+
+### Flat Clone Model (legacy)
+
+Directory names follow `{repo}-{N}` pattern:
 
 ```bash
 AGENT_NUM=$(basename "$PWD" | grep -oE '[0-9]+$' || echo "0")
+AGENT_ID="agent-${AGENT_NUM}"
 ```
 
-| Directory | Agent |
-|-----------|-------|
+| Directory | Agent ID |
+|-----------|----------|
 | `my-repo-0` or `my-repo` | agent-0 |
 | `my-repo-1` | agent-1 |
-| `my-repo-N` | agent-N |
 
-**Rule**: No suffix or suffix `-0` = agent-0. Any numeric suffix = that agent number. No upper limit.
+### Unified Derivation
+
+Use this to auto-detect the model:
+
+```bash
+WC_MATCH=$(basename "$PWD" | grep -oP 'w\d+-c\d+$')
+if [ -n "$WC_MATCH" ]; then
+  AGENT_ID="agent-${WC_MATCH}"
+elif [ -f .env.clone ] && grep -q 'AGENT_ID=' .env.clone 2>/dev/null; then
+  AGENT_ID=$(grep 'AGENT_ID=' .env.clone | cut -d= -f2)
+else
+  AGENT_NUM=$(basename "$PWD" | grep -oE '[0-9]+$' || echo "0")
+  AGENT_ID="agent-${AGENT_NUM}"
+fi
+```
 
 ## Repo Name Derivation
 
@@ -63,26 +98,28 @@ This ensures consistency regardless of the local directory name.
 The full path to an agent's log file:
 
 ```
-~/code/{log-repo-name}/{repo-name}/YYYYMMDD/agent-N.md
+~/code/{log-repo-name}/{repo-name}/YYYYMMDD/{agent-id}.md
 ```
 
-**Example**: `~/code/{log-repo-name}/my-project/20260207/agent-0.md`
+- Workspace model: `~/code/{log-repo-name}/my-project/20260207/agent-w1-c2.md`
+- Flat clone model: `~/code/{log-repo-name}/my-project/20260207/agent-0.md`
 
 ## File Naming Convention
 
 - **Date format**: `YYYYMMDD` (no dashes, no hyphens)
 - **Timezone**: Use your local timezone consistently across all sessions
-- **Agent file**: `agent-N.md` where N is the agent number
+- **Agent file**: `{agent-id}.md` (e.g., `agent-w1-c2.md` or `agent-0.md`)
 
 ## Log File Title Format
 
 Each log file starts with:
 
 ```markdown
-# agent-N - YYYYMMDD - {repo-name}
+# {agent-id} - YYYYMMDD - {repo-name}
 ```
 
-**Example**: `# agent-0 - 20260207 - my-project`
+- Workspace example: `# agent-w1-c2 - 20260207 - my-project`
+- Flat clone example: `# agent-0 - 20260207 - my-project`
 
 ## Session Startup Protocol
 
@@ -90,14 +127,14 @@ When starting a new session (via `/startup` command):
 
 1. **Pull latest logs**: `cd ~/code/{log-repo-name} && git pull --rebase`
 2. **Derive identity**: Determine agent number and repo name
-3. **Check for today's log**: Look for `~/code/{log-repo-name}/{repo-name}/YYYYMMDD/agent-N.md`
+3. **Check for today's log**: Look for `~/code/{log-repo-name}/{repo-name}/YYYYMMDD/{agent-id}.md`
 4. **Read context**:
    - If today's log exists for this agent, read it
    - If not, find most recent log for this agent in the repo directory
    - Also read other agents' logs from today for cross-agent awareness
 5. **Create today's log** if it does not exist:
    - Create the date subdirectory: `mkdir -p ~/code/{log-repo-name}/{repo-name}/YYYYMMDD`
-   - Create agent file with Session Start entry
+   - Create agent file with Session Start entry (filename: `{agent-id}.md`)
 6. **Freshness check**: If log repo has uncommitted changes older than 1 hour, auto-commit and push
 
 ## Cross-Agent Visibility
@@ -106,7 +143,8 @@ At session start, check what other agents have done today:
 
 ```bash
 ls ~/code/{log-repo-name}/{repo-name}/YYYYMMDD/
-# Output: agent-0.md  agent-1.md  agent-2.md
+# Workspace model output: agent-w0-c0.md  agent-w0-c1.md  agent-w1-c0.md
+# Flat clone model output: agent-0.md  agent-1.md  agent-2.md
 ```
 
 Read other agents' files to understand:
@@ -159,7 +197,7 @@ After updating your log file, commit and push to the log repo:
 ```bash
 cd ~/code/{log-repo-name}
 git add -A
-git commit -m "agent-N: {repo-name} update"
+git commit -m "{agent-id}: {repo-name} update"
 git pull --rebase
 git push
 ```
@@ -184,7 +222,7 @@ If a session continues past midnight in your timezone:
 ## Log File Template
 
 ```markdown
-# agent-N - YYYYMMDD - {repo-name}
+# {agent-id} - YYYYMMDD - {repo-name}
 
 > [Optional: Continued from previous session (YYYYMMDD)]
 
@@ -233,7 +271,7 @@ For complex projects, include a status table:
 
 **IMPORTANT**: Claude Code must automatically update the session log at these workflow trigger points. This ensures work is captured before moving to subsequent tasks.
 
-**Log file location**: `~/code/{log-repo-name}/{repo-name}/YYYYMMDD/agent-N.md`
+**Log file location**: `~/code/{log-repo-name}/{repo-name}/YYYYMMDD/{agent-id}.md`
 
 ### Pre-Commit Log Update
 
@@ -372,7 +410,7 @@ If you realize logging was skipped:
 
 The `dev-env` log captures changes to the shared development environment - tooling, configs, workflows, and optimizations that span all projects. Unlike project logs (tied to a specific repo), `dev-env` entries track cross-cutting infrastructure changes.
 
-**Location**: `~/code/{log-repo-name}/dev-env/YYYYMMDD/agent-N.md`
+**Location**: `~/code/{log-repo-name}/dev-env/YYYYMMDD/{agent-id}.md`
 
 ### Auto-Detection: When to Log to `dev-env`
 
@@ -449,7 +487,7 @@ cd "$LOG_REPO" && git pull --rebase
 if [ "$DIFF_MINUTES" -gt 60 ]; then
   cd "$LOG_REPO" && git add -A
   if ! git diff --cached --quiet; then
-    git commit -m "agent-$AGENT_NUM: auto-sync" && git pull --rebase && git push
+    git commit -m "${AGENT_ID}: auto-sync" && git pull --rebase && git push
   fi
 fi
 ```
