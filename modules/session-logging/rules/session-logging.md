@@ -20,6 +20,7 @@ Update the log **immediately** at each of these points - do NOT proceed until th
 4. **After closing an issue** - resolution, mark `#completed`, commit/push log repo
 5. **Before context compaction** - current WIP, uncommitted changes, next step
 6. **After PR merge - living docs check** - see "Living Documents" section below
+7. **After issue state changes** - tracking.csv is updated automatically by hooks. No manual tracking updates needed. The PostToolUse hook handles: branch creation (claim), PR creation (pr-created), merge (merged), issue close (closed).
 
 ## Log Repo Commits
 

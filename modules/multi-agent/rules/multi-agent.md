@@ -7,7 +7,9 @@ When a task involves multiple independent issues or work items, prefer spawning 
 - A project has issues that do not block each other
 - The repo has a multi-clone setup (workspace model: `~/code/{repo}-workspaces/` or flat model: `~/code/{repo}-repos/`)
 
-**How:** Launch Task agents pointed at different clone directories. Each agent claims its own issue via GitHub labels and works independently. See `~/.claude/multi-agent-system.md` for the full coordination guide.
+**How:** Launch Task agents pointed at different clone directories. Each agent claims its own issue via the tracking CSV (auto-registered by hooks on branch creation) and works independently. See `~/.claude/multi-agent-system.md` for the full coordination guide.
+
+**Issue tracking**: Uses `~/code/{log-repo-name}/{repo}/tracking.csv`. Hooks auto-update tracking on branch creation, commits, PR creation, merge, and issue close. See `~/.claude/multi-agent-system.md` for details.
 
 **Workspace model** (preferred for delegated work): Use `/workspace-setup {repo}` to create isolated workspace groups. Each workspace has 4 clones. Point a coordinator agent at a workspace directory - it discovers its clones and delegates.
 

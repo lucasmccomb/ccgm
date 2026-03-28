@@ -453,6 +453,27 @@ Whenever you make changes that match ANY of the categories below, automatically 
 - Temporary debugging changes that will be reverted
 - Reading/researching without making changes
 
+## Issue Tracking
+
+Each repo with multi-agent work has a `tracking.csv` file in the log repo at `{repo}/tracking.csv`. This file tracks which agent is working on which issue.
+
+**Format**: CSV with fields: issue, agent, status, branch, pr, epic, title, claimed_at, updated_at
+
+**Automatic updates**: Claude Code hooks update tracking.csv at these workflow points:
+- `git checkout -b {N}-*` -> claim issue N
+- `git commit -m "#N: ..."` -> heartbeat update (throttled to 30 min)
+- `gh pr create` -> status: pr-created
+- `gh pr merge` -> status: merged
+- `gh issue close` -> status: closed
+
+**Manual operations**: `python3 ~/.claude/lib/agent_tracking.py <command>`
+- `list --repo {repo}` - show all claims
+- `check {repo} {issue}` - check if an issue is claimed
+- `gc` - find stale claims (>24h with active status)
+- `import {repo}` - import existing GitHub-labeled issues
+
+**Concurrency**: Standard git flow. All agents read/write the same tracking.csv. Different-row edits auto-resolve via `git pull --rebase`.
+
 ## Adding a New Project
 
 To start logging for a new project:

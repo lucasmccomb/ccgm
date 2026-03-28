@@ -170,14 +170,16 @@ Check for:
 
 ### 7. Open Issues by Status
 
+> **Note**: Label-based queries below are deprecated in favor of the tracking dashboard (step 7b). They are kept for backward compatibility with repos that haven't adopted the tracking CSV system yet.
+
 ```bash
 # All open issues
 gh issue list --state open --limit 30 2>/dev/null
 
-# Issues assigned to this agent (multi-agent repos)
+# Issues assigned to this agent (multi-agent repos) [DEPRECATED - use tracking dashboard]
 gh issue list --state open --label "${AGENT_ID}" 2>/dev/null
 
-# In-progress issues
+# In-progress issues [DEPRECATED - use tracking dashboard]
 gh issue list --state open --label "in-progress" 2>/dev/null
 
 # Blocked issues
@@ -186,6 +188,30 @@ gh issue list --state open --label "blocked" 2>/dev/null
 # Human-agent issues (skip these)
 gh issue list --state open --label "human-agent" 2>/dev/null
 ```
+
+### 7b. Tracking Dashboard
+
+Pull the latest log repo and check the tracking CSV for the current repo:
+
+```bash
+# Pull latest log repo
+cd ~/code/{log-repo-name} && git pull --rebase 2>/dev/null
+```
+
+Display active claims, stale claims, and unclaimed issues:
+
+```bash
+# List all tracked issues for this repo (active claims, statuses)
+python3 ~/.claude/lib/agent_tracking.py list --repo "$REPO_NAME"
+
+# Garbage-collect stale claims (agents that abandoned work without updating)
+python3 ~/.claude/lib/agent_tracking.py gc --repo "$REPO_NAME"
+```
+
+The tracking dashboard replaces label-based issue queries. It shows:
+- **Active claims**: Which agent is working on which issue, with branch and status
+- **Stale claims**: Claims from agents that haven't updated in a long time
+- **Unclaimed issues**: Open issues not yet claimed by any agent
 
 ### 8. Dependency Check
 
