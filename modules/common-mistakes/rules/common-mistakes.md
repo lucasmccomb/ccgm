@@ -145,11 +145,17 @@ gh pr list --state open
 
 ## 6. Git Multi-Clone Repos
 
-Some repos use a multi-clone architecture for multi-agent parallel work. If your setup includes a multi-agent coordination guide, follow it for git workflow rules, issue claiming, and agent coordination.
+Some repos use a multi-clone architecture for multi-agent parallel work. Two models exist:
+
+- **Workspace model** (preferred): `~/code/{repo}-workspaces/{repo}-wX/{repo}-wX-cY/` with agent identity `agent-wX-cY`
+- **Flat clone model** (legacy): `~/code/{repo}-repos/{repo}-N/` with agent identity `agent-N`
+
+See `~/.claude/multi-agent-system.md` for full details on both models.
 
 Key reminders:
 - **Prefer branching from `origin/main`** - `git checkout -b {branch} origin/main` ensures you start from latest
 - **Check sibling clone branches** before claiming issues to avoid duplicate work
+- **Read `.env.clone`** for agent identity, port offset, and workspace/clone numbers
 
 ---
 

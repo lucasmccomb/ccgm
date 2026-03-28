@@ -3,8 +3,8 @@
 **Full documentation**: `~/.claude/log-system.md` - read it at session start if unfamiliar.
 
 **Log repo**: Your agent log repo (typically at `~/code/{log-repo-name}/`)
-**Log file**: `~/code/{log-repo-name}/{repo-name}/YYYYMMDD/agent-N.md`
-**Agent identity**: Derived from working directory name suffix (`my-repo-1` -> agent-1, no suffix -> agent-0).
+**Log file**: `~/code/{log-repo-name}/{repo-name}/YYYYMMDD/{agent-id}.md`
+**Agent identity**: Derived from working directory name. Workspace model: `habitpro-ai-w1-c2` -> `agent-w1-c2`. Flat model: `my-repo-1` -> `agent-1`.
 
 ## Session Start
 
@@ -24,7 +24,7 @@ Update the log **immediately** at each of these points - do NOT proceed until th
 ## Log Repo Commits
 
 ```bash
-cd ~/code/{log-repo-name} && git add -A && git commit -m "agent-N: {repo-name} update" && git pull --rebase && git push
+cd ~/code/{log-repo-name} && git add -A && git commit -m "{agent-id}: {repo-name} update" && git pull --rebase && git push
 ```
 
 Commit after: PR merge, issue close, session end, or every ~30 min of active work.

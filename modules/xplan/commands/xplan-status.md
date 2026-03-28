@@ -46,15 +46,25 @@ gh issue list --state open --repo {your-username}/{project-name} --limit 50
 # Check open PRs
 gh pr list --state open --repo {your-username}/{project-name}
 
-# Check clone states
-for i in 0 1 2 3; do
-  dir=~/code/{project-name}-repos/{project-name}-$i
-  if [ -d "$dir" ]; then
-    echo "=== Clone $i ==="
+# Check clone states (auto-detect workspace vs flat model)
+WORKSPACES_DIR=~/code/{project-name}-workspaces
+REPOS_DIR=~/code/{project-name}-repos
+
+if [ -d "$WORKSPACES_DIR" ]; then
+  for dir in "${WORKSPACES_DIR}"/{project-name}-w*/{project-name}-w*-c*/; do
+    [ -d "$dir" ] || continue
+    echo "=== $(basename $dir) ==="
     git -C "$dir" branch --show-current
     git -C "$dir" status --short
-  fi
-done
+  done
+elif [ -d "$REPOS_DIR" ]; then
+  for dir in "${REPOS_DIR}"/{project-name}-[0-9]*/; do
+    [ -d "$dir" ] || continue
+    echo "=== $(basename $dir) ==="
+    git -C "$dir" branch --show-current
+    git -C "$dir" status --short
+  done
+fi
 ```
 
 ### 4. Present Dashboard

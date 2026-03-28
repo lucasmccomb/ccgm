@@ -71,17 +71,30 @@ gh pr list --state open --repo {your-username}/{project-name}
 gh issue list --state open --repo {your-username}/{project-name} --limit 100
 gh issue list --state closed --repo {your-username}/{project-name} --limit 100
 
-# Check clone states
-for i in 0 1 2 3; do
-  dir=~/code/{project-name}-repos/{project-name}-$i
-  if [ -d "$dir" ]; then
-    echo "=== Clone $i ==="
+# Check clone states (auto-detect workspace vs flat model)
+# Workspace model: look for {project}-workspaces/{project}-w*/{project}-w*-c*/
+WORKSPACES_DIR=~/code/{project-name}-workspaces
+REPOS_DIR=~/code/{project-name}-repos
+
+if [ -d "$WORKSPACES_DIR" ]; then
+  for dir in "${WORKSPACES_DIR}"/{project-name}-w*/{project-name}-w*-c*/; do
+    [ -d "$dir" ] || continue
+    echo "=== $(basename $dir) ==="
     git -C "$dir" fetch origin
     git -C "$dir" branch --show-current
     git -C "$dir" status --short
     git -C "$dir" log --oneline -3
-  fi
-done
+  done
+elif [ -d "$REPOS_DIR" ]; then
+  for dir in "${REPOS_DIR}"/{project-name}-[0-9]*/; do
+    [ -d "$dir" ] || continue
+    echo "=== $(basename $dir) ==="
+    git -C "$dir" fetch origin
+    git -C "$dir" branch --show-current
+    git -C "$dir" status --short
+    git -C "$dir" log --oneline -3
+  done
+fi
 ```
 
 ### 5. Handle In-Flight Work
@@ -110,8 +123,9 @@ Before resuming execution, ensure all clones are on latest main:
 for i in 0 1 2 3; do
   dir=~/code/{project-name}-repos/{project-name}-$i
   if [ -d "$dir" ]; then
-    git -C "$dir" checkout main
     git -C "$dir" fetch origin
+    git -C "$dir" checkout main
+    # Safe: resets to remote ref (auto-approved by hook)
     git -C "$dir" reset --hard origin/main
   fi
 done

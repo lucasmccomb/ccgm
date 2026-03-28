@@ -85,9 +85,19 @@ Determine how to allocate agents based on:
 
 1. **Available clones**: Check how many clones exist
    ```bash
-   REPOS_DIR=$(dirname "$PWD")
-   REPO_BASE=$(basename "$PWD" | sed 's/-[0-9]*$//')
-   ls -d "${REPOS_DIR}/${REPO_BASE}"-[0-9]* 2>/dev/null | wc -l
+   # Detect model and discover clones
+   WC_MATCH=$(basename "$PWD" | grep -oP 'w\d+-c\d+$')
+
+   if [ -n "$WC_MATCH" ]; then
+     # Workspace model: clones are siblings in the workspace dir
+     WORKSPACE_DIR=$(dirname "$PWD")
+     ls -d "${WORKSPACE_DIR}"/*-c[0-9]*/ 2>/dev/null | wc -l
+   else
+     # Flat clone model
+     REPOS_DIR=$(dirname "$PWD")
+     REPO_BASE=$(basename "$PWD" | sed 's/-[0-9]*$//')
+     ls -d "${REPOS_DIR}/${REPO_BASE}"-[0-9]* 2>/dev/null | wc -l
+   fi
    ```
 
 2. **Issue dependencies**: Group into waves
@@ -100,18 +110,18 @@ Determine how to allocate agents based on:
    - Assign up to one issue per clone per wave
    - If more issues than clones, queue the extras for later waves
 
-Present the execution plan:
+Present the execution plan (agent IDs match the clone directory names):
 
 ```
 Execution Plan:
 
 Wave 1 (parallel):
-  agent-0 (clone-0): #{issue} - {title}
-  agent-1 (clone-1): #{issue} - {title}
-  agent-2 (clone-2): #{issue} - {title}
+  {agent-id-0} ({clone-dir-0}): #{issue} - {title}
+  {agent-id-1} ({clone-dir-1}): #{issue} - {title}
+  {agent-id-2} ({clone-dir-2}): #{issue} - {title}
 
 Wave 2 (after Wave 1):
-  agent-0 (clone-0): #{issue} - {title}
+  {agent-id-0} ({clone-dir-0}): #{issue} - {title}
 
 Human tasks (for you):
   #{issue} - {title}
@@ -132,7 +142,7 @@ Use the Task tool to launch one agent per assigned issue, each in its own clone 
 Each agent should:
 1. Navigate to its assigned clone directory
 2. Run `/startup` to initialize the session
-3. Claim the issue (add `in-progress` and `agent-N` labels)
+3. Claim the issue (add `in-progress` and its `agent-*` label from `.env.clone`)
 4. Create a feature branch from `origin/main`
 5. Implement the work with tests
 6. Run verification (lint, type-check, test, build)
@@ -153,11 +163,30 @@ When all agents in a wave complete:
 2. Merge passing PRs: `gh pr merge --squash --delete-branch`
 3. Sync all clones to latest main:
    ```bash
-   for dir in ${REPOS_DIR}/${REPO_BASE}-[0-9]*; do
-     git -C "$dir" fetch origin
-     git -C "$dir" checkout main 2>/dev/null || git -C "$dir" checkout agent-$(basename "$dir" | grep -oE '[0-9]+$')
-     git -C "$dir" reset --hard origin/main
-   done
+   # Detect model and iterate clones
+   WC_MATCH=$(basename "$PWD" | grep -oP 'w\d+-c\d+$')
+
+   if [ -n "$WC_MATCH" ]; then
+     # Workspace model
+     WORKSPACE_DIR=$(dirname "$PWD")
+     for dir in "${WORKSPACE_DIR}"/*-c[0-9]*/; do
+       [ -d "$dir" ] || continue
+       AGENT_ID=$(grep 'AGENT_ID=' "${dir}/.env.clone" 2>/dev/null | cut -d= -f2)
+       git -C "$dir" fetch origin
+       git -C "$dir" checkout "${AGENT_ID}" 2>/dev/null || git -C "$dir" checkout main
+       git -C "$dir" reset --hard origin/main
+     done
+   else
+     # Flat clone model
+     REPOS_DIR=$(dirname "$PWD")
+     REPO_BASE=$(basename "$PWD" | sed 's/-[0-9]*$//')
+     for dir in ${REPOS_DIR}/${REPO_BASE}-[0-9]*; do
+       AGENT_NUM=$(basename "$dir" | grep -oE '[0-9]+$')
+       git -C "$dir" fetch origin
+       git -C "$dir" checkout "agent-${AGENT_NUM}" 2>/dev/null || git -C "$dir" checkout main
+       git -C "$dir" reset --hard origin/main
+     done
+   fi
    ```
 4. Proceed to next wave
 

@@ -1,0 +1,80 @@
+{
+  "_comment": "Port allocation registry for multi-agent development. Each repo gets a block of 16 ports per service type. Within a block, offset = (workspace * clones_per_workspace) + clone. For flat clone repos, offset = clone_number.",
+  "_block_size": 16,
+  "_formula": "port = base_port + PORT_OFFSET (from .env.clone)",
+  "repos": {
+    "habitpro-ai": {
+      "frontend": 5173,
+      "backend": 8787,
+      "notes": "Vite + Wrangler API"
+    },
+    "openslide-ai": {
+      "frontend": 5189,
+      "backend": 8803,
+      "notes": "Vite editor + Wrangler worker"
+    },
+    "lem-photo": {
+      "frontend": 5205,
+      "backend": 8819,
+      "notes": "Vite client + tsx server"
+    },
+    "lem-work": {
+      "frontend": 5221,
+      "backend": 8835,
+      "notes": "Vite client + Wrangler worker"
+    },
+    "techenable": {
+      "frontend": 5237,
+      "backend": 8851,
+      "extra": {
+        "blog": 4321
+      },
+      "notes": "Vite web + Wrangler worker + Astro blog"
+    },
+    "lem-fyi": {
+      "frontend": 5253,
+      "backend": 8867,
+      "notes": "browser-sync / static build"
+    },
+    "nadaproof": {
+      "frontend": 5269,
+      "backend": 8883,
+      "notes": "Supabase-backed"
+    },
+    "darkly-suite": {
+      "frontend": 5285,
+      "backend": 8899,
+      "notes": "Chrome extension monorepo"
+    },
+    "ccgm": {
+      "frontend": 5301,
+      "backend": 8915,
+      "notes": "TBD"
+    },
+    "human-of-habit": {
+      "frontend": 5317,
+      "backend": 8931,
+      "notes": "TBD"
+    },
+    "sightagent": {
+      "frontend": 5333,
+      "backend": 8947,
+      "notes": "TBD"
+    },
+    "luke-stream": {
+      "frontend": 5349,
+      "backend": 8963,
+      "notes": "TBD"
+    },
+    "revisionary": {
+      "frontend": 5365,
+      "backend": 8979,
+      "notes": "TBD"
+    },
+    "rootstead": {
+      "frontend": 5381,
+      "backend": 8995,
+      "notes": "TBD"
+    }
+  }
+}
