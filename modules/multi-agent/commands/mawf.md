@@ -142,7 +142,7 @@ Use the Task tool to launch one agent per assigned issue, each in its own clone 
 Each agent should:
 1. Navigate to its assigned clone directory
 2. Run `/startup` to initialize the session
-3. Claim the issue (add `in-progress` and its `agent-*` label from `.env.clone`)
+3. Claim the issue by creating a branch (`git checkout -b {issue}-{desc} origin/main`). The PostToolUse hook auto-registers the claim in tracking.csv.
 4. Create a feature branch from `origin/main`
 5. Implement the work with tests
 6. Run verification (lint, type-check, test, build)

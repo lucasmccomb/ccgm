@@ -36,6 +36,21 @@
       "type": "hook",
       "template": false
     },
+    "hooks/agent-tracking-pre.py": {
+      "target": "hooks/agent-tracking-pre.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/agent-tracking-post.py": {
+      "target": "hooks/agent-tracking-post.py",
+      "type": "hook",
+      "template": false
+    },
+    "lib/agent_tracking.py": {
+      "target": "lib/agent_tracking.py",
+      "type": "lib",
+      "template": false
+    },
     "settings.partial.json": {
       "target": "settings.json",
       "type": "config",

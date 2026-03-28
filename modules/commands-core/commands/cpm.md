@@ -146,15 +146,15 @@ If still open, close manually:
 
 ```bash
 gh issue close "$ISSUE_NUM" --comment "Completed via PR merge"
-gh issue edit "$ISSUE_NUM" --remove-label "in-progress" 2>/dev/null
 ```
+
+Note: Tracking status is updated automatically by the PostToolUse hook. The hook sets status to "closed" on `gh issue close` and "merged" on `gh pr merge`. No manual label management needed.
 
 ### 10. Return to Main
 
 ```bash
-git fetch origin
 git checkout main
-git reset --hard origin/main
+git pull origin main --ff-only
 ```
 
 ### 11. Report Result

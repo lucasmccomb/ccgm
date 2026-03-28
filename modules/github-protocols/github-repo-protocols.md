@@ -64,23 +64,11 @@ gh label create "epic" --color "3e4b9e" --description "Tracking issue for a grou
 gh label create "human-agent" --color "f9d0c4" --description "Requires manual human action"
 ```
 
-**Agent labels** (multi-agent repos only):
+**Agent labels** (historical, no longer maintained):
 
-Create one label per agent clone. Two naming conventions exist:
+Agent labels (`agent-wX-cY`, `agent-N`) may exist from prior use but are **no longer used for coordination**. The tracking CSV at `~/code/{log-repo-name}/{repo}/tracking.csv` is the source of truth for issue claiming and agent assignment. Claude Code hooks auto-update tracking on branch creation, commits, PR creation, PR merge, and issue close.
 
-**Workspace model** (preferred): Labels follow `agent-wX-cY` pattern. Created automatically by `/workspace-setup`.
-
-**Flat clone model** (legacy): Labels follow `agent-N` pattern:
-
-```bash
-AGENT_COLORS=("0075ca" "1d76db" "5319e7" "0e8a16" "d93f0b" "e4e669" "006b75" "b60205")
-
-for i in 0 1 2 3; do
-  gh label create "agent-${i}" --color "${AGENT_COLORS[$i]}" --description "Being worked on by agent-${i}"
-done
-```
-
-Total: 14 base labels + 1 agent label per clone.
+Total: 14 base labels (agent labels are not part of the standard set).
 
 **Project-specific labels** (add as needed, NOT part of the standard set):
 - Domain labels (`frontend`, `backend`, `database`, etc.) - when tech stack is clear
@@ -459,13 +447,7 @@ Complete step-by-step workflow for implementing a GitHub issue.
 
 ### 2. Claim the Issue
 
-```bash
-gh issue edit <number> --add-label "in-progress"
-
-# Multi-agent repos: also add your agent label (agent-wX-cY or agent-N)
-AGENT_ID=$(grep 'AGENT_ID=' .env.clone 2>/dev/null | cut -d= -f2)
-gh issue edit <number> --add-label "${AGENT_ID}"
-```
+Tracking is automatic via Claude Code hooks. When you create a branch with `git checkout -b {N}-description`, the PostToolUse hook auto-registers the claim in `~/code/{log-repo-name}/{repo}/tracking.csv`. No manual label management is needed.
 
 - **UPDATE SESSION LOG** - Log that work is starting
 
@@ -504,11 +486,7 @@ gh pr create --title "{issue_number}: {description}" --body "Closes #{issue_numb
 ```
 
 - **UPDATE SESSION LOG** - Log PR number, mark `#in-review`
-- Update issue labels:
-  ```bash
-  gh issue view <number> --json state --jq '.state' | grep -q OPEN && \
-    gh issue edit <number> --remove-label "in-progress" --add-label "in-review"
-  ```
+- Tracking auto-updates to `pr-created` status via the PostToolUse hook on `gh pr create`. No manual label changes needed.
 
 ### 7. Merge PR
 
@@ -544,12 +522,9 @@ git fetch origin && git checkout "${AGENT_ID}" && git reset --hard origin/main
 
 ```bash
 gh issue close <number> --comment "Completed: <summary>"
-gh issue edit <number> --remove-label "in-progress"
-
-# Multi-agent repos:
-AGENT_ID=$(grep 'AGENT_ID=' .env.clone 2>/dev/null | cut -d= -f2)
-gh issue edit <number> --remove-label "${AGENT_ID}"
 ```
+
+Tracking auto-updates to `closed` on `gh issue close` and `merged` on `gh pr merge` via hooks. No manual label cleanup needed.
 
 - **UPDATE SESSION LOG** - Mark `#completed`
 
@@ -606,12 +581,12 @@ npm install  # Safe to run even if nothing changed
 
 When choosing issues to work on:
 - **Skip** issues labeled `human-agent` (require manual human action)
-- **Skip** issues labeled `in-progress` unless explicitly directed
-- **Skip** issues labeled `in-review` unless explicitly directed
+- **Skip** issues claimed in tracking.csv (check via `python3 ~/.claude/lib/agent_tracking.py check {repo} {issue}`)
+- **Skip** issues in `pr-created` or `merged` state in tracking.csv unless explicitly directed
 
 **Multi-agent repos only:**
-- **Skip** issues with a different agent's label (e.g., agent-w0-c1 skips issues labeled `agent-w0-c2`)
-- Do NOT check for agent labels in single-agent repos
+- **Skip** issues claimed by a different agent in tracking.csv
+- The tracking CSV at `~/code/{log-repo-name}/{repo}/tracking.csv` is the source of truth for all agent coordination
 
 ### Discovering New Work
 

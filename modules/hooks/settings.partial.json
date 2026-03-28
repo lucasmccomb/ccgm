@@ -16,6 +16,18 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/agent-tracking-post.py",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
@@ -33,6 +45,11 @@
           {
             "type": "command",
             "command": "python3 $HOME/.claude/hooks/port-check.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/agent-tracking-pre.py",
             "timeout": 5000
           }
         ]

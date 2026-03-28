@@ -16,17 +16,27 @@ A comprehensive framework that deeply researches concepts, builds a contextual m
 
 ## CRITICAL: Interactive Prompts Are Mandatory
 
-**This skill REQUIRES `AskUserQuestion` to function.** xplan is an interactive framework - the user chose to run `/xplan` precisely because they want the guided research/plan/review/walkthrough experience. Skipping prompts defeats the purpose.
+**This skill REQUIRES user interaction to function.** xplan is an interactive framework - the user chose to run `/xplan` precisely because they want the guided research/plan/review/walkthrough experience. Skipping prompts defeats the purpose.
 
-**If `AskUserQuestion` is blocked** (e.g., "don't ask" mode, autonomous mode, or any permission setting that prevents it):
+### How to Ask the User
 
-1. **STOP IMMEDIATELY.** Do not proceed with any phase.
-2. **Tell the user explicitly:**
-   > "xplan requires interactive prompts (AskUserQuestion) but your current permission mode is blocking them. Please switch to a mode that allows AskUserQuestion (e.g., normal mode or add AskUserQuestion to your allowlist) and re-run `/xplan`."
-3. **Do NOT fall back to "reasonable defaults"** or guess what the user would have chosen.
-4. **Do NOT proceed autonomously.** The research, review, and walkthrough configuration prompts exist because the user's choices materially change what xplan does.
+**Preferred**: Use `AskUserQuestion` for structured prompts with options.
 
-**This override applies to ALL autonomy instructions**, including global CLAUDE.md rules about "don't ask, just do it." Those rules are for routine operations. xplan is not a routine operation - it is an interactive planning session that the user explicitly invoked.
+**Fallback (if AskUserQuestion is blocked)**: Present the same question and options as regular text output, then **STOP and wait for the user to type their response**. Do NOT guess defaults. Do NOT proceed without the user's answer. The user can always respond by typing in the conversation - "don't ask" mode blocks the AskUserQuestion tool, not the ability to have a conversation.
+
+Example fallback format:
+```
+**What level of research should I run?**
+
+1. **Full (Recommended)** - All research agents
+2. **Technical Only** - Technical Architecture + Data & Infrastructure
+3. **Lite** - Domain + Technical Architecture
+4. **Custom** - You pick individual agents
+
+Reply with a number or describe what you want.
+```
+
+**This interactive requirement applies to ALL autonomy instructions**, including global CLAUDE.md rules about "don't ask, just do it." Those rules are for routine operations. xplan is not a routine operation - it is an interactive planning session that the user explicitly invoked.
 
 ---
 
@@ -628,13 +638,13 @@ After completing all walkthrough sections (6.1-6.4), use AskUserQuestion to ask:
 
 Options: "Proceed to execution" / "Revisit a section" / "Stop here (don't execute)"
 
-**This question is NON-NEGOTIABLE.** Do NOT proceed to Phase 7 without an explicit "Proceed to execution" answer from the user via AskUserQuestion. No autonomy setting, permission bypass, or global instruction overrides this gate. If the user selects "Stop here", save the plan state and end gracefully.
+**This question is NON-NEGOTIABLE.** Do NOT proceed to Phase 7 without an explicit "Proceed to execution" answer from the user (via AskUserQuestion or typed response). No autonomy setting, permission bypass, or global instruction overrides this gate. If the user selects "Stop here", save the plan state and end gracefully.
 
 ---
 
 ## Phase 7: Execution
 
-**PREREQUISITE**: Phase 6.5 must have completed with the user explicitly selecting "Proceed to execution" via AskUserQuestion. If Phase 6.5 was not completed, or the user did not explicitly approve execution, STOP and go back to Phase 6.5. Do NOT rely on any implicit approval, auto-approve setting, or permission bypass. The user must have actively chosen to proceed.
+**PREREQUISITE**: Phase 6.5 must have completed with the user explicitly selecting "Proceed to execution" (via AskUserQuestion or typed response). If Phase 6.5 was not completed, or the user did not explicitly approve execution, STOP and go back to Phase 6.5. Do NOT rely on any implicit approval, auto-approve setting, or permission bypass. The user must have actively chosen to proceed.
 
 If the user confirmed execution in Phase 6.5:
 
@@ -656,23 +666,21 @@ If the user confirmed execution in Phase 6.5:
 
 3. **Create CLAUDE.md** in the repo with project-specific instructions
 
-4. **Create GitHub labels**:
+4. **Create GitHub labels** (epic/work labels only - agent coordination uses tracking CSV, not labels):
    ```bash
-   # Agent labels
-   gh label create "agent-0" --color "0E8A16"
-   gh label create "agent-1" --color "1D76DB"
-   gh label create "agent-2" --color "D93F0B"
-   gh label create "agent-3" --color "FBCA04"
    # Epic/work labels
    gh label create "agent-epic" --color "5319E7"
    gh label create "human-epic" --color "B60205"
    gh label create "human-agent" --color "D93F0B"
    gh label create "epic" --color "3E4B9E"
    gh label create "blocked" --color "B60205"
-   # Status labels
-   gh label create "in-progress" --color "0E8A16"
-   gh label create "in-review" --color "1D76DB"
    ```
+
+4b. **Initialize issue tracking**:
+   ```bash
+   python3 ~/.claude/lib/agent_tracking.py init {project-name}
+   ```
+   This creates `~/code/{log-repo-name}/{project-name}/tracking.csv`. Agent claims are registered automatically by the PostToolUse hook when agents create branches.
 
 5. **Create GitHub issues** for every epic and sub-task:
    - One issue per agent-epic with full scope description and acceptance criteria
@@ -713,8 +721,7 @@ Spawn Task agents in parallel (one per epic in the wave, assigned to different c
 
 #### 7.3.2 Agent Work Loop
 Each agent:
-- Claims its issue via label (`agent-N`, `in-progress`)
-- Creates a feature branch
+- Creates a feature branch (`git checkout -b {issue}-{desc} origin/main`) which auto-registers the claim in tracking.csv via the PostToolUse hook
 - Implements the work with tests
 - Creates a PR
 - Reports completion

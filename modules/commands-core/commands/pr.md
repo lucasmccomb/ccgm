@@ -131,14 +131,9 @@ gh pr create \
 Closes #{issue_number}"
 ```
 
-### 8. Update Issue Labels
+### 8. Tracking Update
 
-If the issue exists and is open, update labels to reflect PR status:
-
-```bash
-gh issue view "$ISSUE_NUM" --json state --jq '.state' 2>/dev/null | grep -q OPEN && \
-  gh issue edit "$ISSUE_NUM" --remove-label "in-progress" --add-label "in-review" 2>/dev/null
-```
+Note: Tracking status is updated automatically by the PostToolUse hook on `gh pr create` (sets status to "pr-created"). No manual label management needed.
 
 ### 9. Report Result
 

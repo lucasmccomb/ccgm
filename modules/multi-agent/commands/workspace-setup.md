@@ -249,17 +249,16 @@ cd {repo}-w{W}-c0/
 ```
 
 Each sub-agent should:
-1. Run `/startup` to initialize
-2. Claim the issue with its `agent-w{W}-c{M}` label
-3. Create a feature branch from `origin/main`
-4. Implement, test, commit, and create a PR
-5. Report back
+1. Run `/startup` to initialize and check the tracking dashboard
+2. Create a feature branch: `git checkout -b {issue}-{desc} origin/main` (the PostToolUse hook auto-registers the claim in tracking.csv)
+3. Implement, test, commit, and create a PR
+4. Report back
 
-### Issue Claiming
+### Issue Tracking
 
-- Use labels `agent-w{W}-c0` through `agent-w{W}-c{max}` for claiming
-- Check for existing `agent-*` labels before claiming
-- Each clone claims issues independently
+- Claims are registered automatically in `{log-repo-name}/{repo}/tracking.csv` by the PostToolUse hook when a branch is created
+- Check tracking state: `python3 ~/.claude/lib/agent_tracking.py list --repo {repo}`
+- Each clone claims issues independently via branch creation
 
 ### Port Allocation
 
@@ -318,7 +317,7 @@ Structure:
   {repo}-w2/
     ...
 
-GitHub Labels: agent-w0-c0 through agent-w{max_w}-c{max_c}
+Issue Tracking: ~/code/{log-repo-name}/{repo}/tracking.csv (auto-updated by hooks)
 
 Usage:
   Point a coordinator agent at a workspace directory (e.g., ~/code/{repo}-workspaces/{repo}-w0/)
