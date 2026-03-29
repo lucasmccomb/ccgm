@@ -14,6 +14,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 - [Module Catalog](#module-catalog)
 - [Customization](#customization)
 - [Manual Installation](#manual-installation)
+- [Documentation](#documentation)
 - [Contributing](#contributing)
 
 ## What is CCGM?
@@ -170,6 +171,21 @@ cp modules/autonomy/rules/autonomy.md ~/.claude/rules/
 mkdir -p ~/.claude/commands
 cp modules/commands-core/commands/*.md ~/.claude/commands/
 ```
+
+## Documentation
+
+The `docs/` directory contains comprehensive documentation:
+
+| Document | Description |
+|----------|-------------|
+| [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 25 modules |
+| [Commands Reference](docs/commands.md) | All 17 slash commands with usage examples |
+| [Hooks Reference](docs/hooks.md) | All 9 hooks explained - what they do and when they fire |
+| [Presets](docs/presets.md) | Preset breakdowns and recommendations |
+| [Installer](docs/installer.md) | How the installer works, updating, uninstalling |
+| [Configuration](docs/configuration.md) | Customization, template variables, settings overrides |
+| [Multi-Agent System](docs/multi-agent.md) | Parallel agent coordination, port allocation, issue tracking |
 
 ## Contributing
 
