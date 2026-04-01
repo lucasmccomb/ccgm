@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# Claude Code status line script
+# Displays: model | directory branch | context usage | 5h & 7d rate limits with reset countdown
+
+input=$(cat)
+
+# --- Model (abbreviated: O-4.6, S-4.6, H-4.5, etc.)
+model_raw=$(echo "$input" | jq -r '.model.display_name // ""')
+case "$model_raw" in
+  *"Opus 4.6"*)   model_abbr="O-4.6"; is_latest=true ;;
+  *"Opus 4.5"*)   model_abbr="O-4.5"; is_latest=false ;;
+  *"Opus 4"*)     model_abbr="O-4"; is_latest=false ;;
+  *"Sonnet 4.6"*) model_abbr="S-4.6"; is_latest=false ;;
+  *"Sonnet 4.5"*) model_abbr="S-4.5"; is_latest=false ;;
+  *"Sonnet 4"*)   model_abbr="S-4"; is_latest=false ;;
+  *"Haiku 4.5"*)  model_abbr="H-4.5"; is_latest=false ;;
+  *"Haiku"*)      model_abbr="H"; is_latest=false ;;
+  "")             model_abbr=""; is_latest=false ;;
+  *)              model_abbr=$(echo "$model_raw" | sed 's/Claude //;s/ .*//'); is_latest=false ;;
+esac
+
+# --- Directory: immediate dir name only
+cwd=$(echo "$input" | jq -r '.cwd // ""')
+cwd_display="${cwd##*/}"
+
+# --- Git branch (skip optional locks to avoid hangs in multi-clone repos)
+git_branch=""
+if [ -d "$cwd/.git" ] || git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
+  git_branch=$(git -C "$cwd" -c core.fsmonitor=false symbolic-ref --short HEAD 2>/dev/null \
+    || git -C "$cwd" -c core.fsmonitor=false rev-parse --short HEAD 2>/dev/null)
+fi
+
+# --- Context used (inverted from remaining)
+remaining=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty')
+
+# --- Rate limits (5h session + 7-day)
+five_hour=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
+five_hour_resets=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
+weekly=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
+
+# --- ANSI color codes
+RESET='\033[0m'
+CYAN='\033[36m'
+YELLOW='\033[33m'
+GREEN='\033[32m'
+RED='\033[31m'
+DIM='\033[2m'
+BLUE='\033[34m'
+
+# Compact usage bar: 5 chars wide
+make_bar() {
+  local pct=$1 color=$2
+  local bar_len=5
+  local filled=$(( (pct * bar_len + 50) / 100 ))
+  [ "$filled" -gt "$bar_len" ] && filled=$bar_len
+  [ "$filled" -lt 0 ] && filled=0
+  local empty=$(( bar_len - filled ))
+  local bar=""
+  for ((i=0; i<filled; i++)); do bar="${bar}█"; done
+  local empty_part=""
+  for ((i=0; i<empty; i++)); do empty_part="${empty_part}░"; done
+  printf "${color}%s${DIM}%s${RESET}" "$bar" "$empty_part"
+}
+
+SEP=$(printf " ${DIM}|${RESET} ")
+sections=()
+
+# Model (abbreviated with warning if not Opus 4.6)
+if [ -n "$model_abbr" ]; then
+  if [ "$is_latest" = true ]; then
+    # Opus 4.6: blue, no warning
+    sections+=("$(printf "${BLUE}%s${RESET}" "$model_abbr")")
+  else
+    # Not Opus 4.6: red text with warning icon
+    sections+=("$(printf "${RED}⚠️ %s${RESET}" "$model_abbr")")
+  fi
+fi
+
+# Dir + git branch (combined)
+dir_part="$(printf "${CYAN}%s${RESET}" "$cwd_display")"
+if [ -n "$git_branch" ]; then
+  dir_part="${dir_part} $(printf "${YELLOW}%s${RESET}" "$git_branch")"
+fi
+sections+=("$dir_part")
+
+# Context used (100 - remaining)
+if [ -n "$remaining" ]; then
+  remaining_int=$(printf '%.0f' "$remaining")
+  used_int=$((100 - remaining_int))
+  if [ "$used_int" -lt 60 ]; then
+    ctx_color="$GREEN"
+  elif [ "$used_int" -lt 85 ]; then
+    ctx_color="$YELLOW"
+  else
+    ctx_color="$RED"
+  fi
+  sections+=("$(printf "${ctx_color}ctx:${used_int}%%${RESET}")")
+fi
+
+# 5-hour rate limit with bar and reset countdown
+if [ -n "$five_hour" ]; then
+  five_int=$(printf '%.0f' "$five_hour")
+  if [ "$five_int" -lt 60 ]; then
+    rl_color="$GREEN"
+  elif [ "$five_int" -lt 85 ]; then
+    rl_color="$YELLOW"
+  else
+    rl_color="$RED"
+  fi
+  five_part="$(printf "${rl_color}5h:${five_int}%%${RESET} ")$(make_bar "$five_int" "$rl_color")"
+  if [ -n "$five_hour_resets" ]; then
+    now=$(date +%s)
+    diff=$(( five_hour_resets - now ))
+    if [ "$diff" -gt 0 ]; then
+      hours=$(( diff / 3600 ))
+      mins=$(( (diff % 3600) / 60 ))
+      if [ "$hours" -gt 0 ]; then
+        five_part="${five_part} $(printf "${DIM}${hours}h${mins}m${RESET}")"
+      else
+        five_part="${five_part} $(printf "${DIM}${mins}m${RESET}")"
+      fi
+    fi
+  fi
+  sections+=("$five_part")
+fi
+
+# 7-day rate limit with bar
+if [ -n "$weekly" ]; then
+  weekly_int=$(printf '%.0f' "$weekly")
+  if [ "$weekly_int" -lt 60 ]; then
+    wk_color="$GREEN"
+  elif [ "$weekly_int" -lt 85 ]; then
+    wk_color="$YELLOW"
+  else
+    wk_color="$RED"
+  fi
+  sections+=("$(printf "${wk_color}7d:${weekly_int}%%${RESET} ")$(make_bar "$weekly_int" "$wk_color")")
+fi
+
+# Join sections with pipe separator
+output=""
+for i in "${!sections[@]}"; do
+  if [ "$i" -gt 0 ]; then
+    output="${output}${SEP}"
+  fi
+  output="${output}${sections[$i]}"
+done
+
+printf "%s" "$output"
