@@ -172,6 +172,51 @@ mkdir -p ~/.claude/commands
 cp modules/commands-core/commands/*.md ~/.claude/commands/
 ```
 
+## Utilities
+
+### statusline.sh - Claude Code Session Monitor
+
+Display live session metrics at the bottom of your Claude Code terminal. Shows model, directory, git branch, context usage, and 5-hour & 7-day rate limits with reset countdowns.
+
+**Usage:**
+
+```bash
+# Copy to your Claude Code config
+cp lib/statusline.sh ~/.claude/statusline-command.sh
+chmod +x ~/.claude/statusline-command.sh
+```
+
+Then configure Claude Code settings:
+
+```bash
+/statusline use ~/.claude/statusline-command.sh
+```
+
+Or manually add to `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline-command.sh"
+  }
+}
+```
+
+**Display Example:**
+
+```
+O-4.6 | code | ctx:8% | 5h:62% ███░░ 2h26m | 7d:79% ████░
+```
+
+**Features:**
+- Abbreviated model (O-4.6, S-4.6, H-4.5, etc.)
+- Current directory and git branch
+- Context window usage (0-100%)
+- 5-hour rate limit with bar and reset countdown
+- 7-day rate limit with bar
+- Color-coded by usage: green <60%, yellow <85%, red 85%+
+
 ## Documentation
 
 The `docs/` directory contains comprehensive documentation:
