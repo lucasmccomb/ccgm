@@ -4,19 +4,19 @@
 
 input=$(cat)
 
-# --- Model (abbreviated: O-4.6, S-4.6, H-4.5, etc.)
+# --- Model (abbreviated: O-4.6, S-4.6, H-4.5, etc.) with tier indicators
 model_raw=$(echo "$input" | jq -r '.model.display_name // ""')
 case "$model_raw" in
-  *"Opus 4.6"*)   model_abbr="O-4.6"; is_latest=true ;;
-  *"Opus 4.5"*)   model_abbr="O-4.5"; is_latest=false ;;
-  *"Opus 4"*)     model_abbr="O-4"; is_latest=false ;;
-  *"Sonnet 4.6"*) model_abbr="S-4.6"; is_latest=false ;;
-  *"Sonnet 4.5"*) model_abbr="S-4.5"; is_latest=false ;;
-  *"Sonnet 4"*)   model_abbr="S-4"; is_latest=false ;;
-  *"Haiku 4.5"*)  model_abbr="H-4.5"; is_latest=false ;;
-  *"Haiku"*)      model_abbr="H"; is_latest=false ;;
-  "")             model_abbr=""; is_latest=false ;;
-  *)              model_abbr=$(echo "$model_raw" | sed 's/Claude //;s/ .*//'); is_latest=false ;;
+  *"Opus 4.6"*)   model_abbr="O-4.6"; model_tier="opus-best" ;;
+  *"Opus 4.5"*)   model_abbr="O-4.5"; model_tier="opus-other" ;;
+  *"Opus 4"*)     model_abbr="O-4"; model_tier="opus-other" ;;
+  *"Sonnet 4.6"*) model_abbr="S-4.6"; model_tier="sonnet" ;;
+  *"Sonnet 4.5"*) model_abbr="S-4.5"; model_tier="sonnet" ;;
+  *"Sonnet 4"*)   model_abbr="S-4"; model_tier="sonnet" ;;
+  *"Haiku 4.5"*)  model_abbr="H-4.5"; model_tier="haiku" ;;
+  *"Haiku"*)      model_abbr="H"; model_tier="haiku" ;;
+  "")             model_abbr=""; model_tier="" ;;
+  *)              model_abbr=$(echo "$model_raw" | sed 's/Claude //;s/ .*//'); model_tier="unknown" ;;
 esac
 
 # --- Directory: immediate dir name only
@@ -46,6 +46,7 @@ GREEN='\033[32m'
 RED='\033[31m'
 DIM='\033[2m'
 BLUE='\033[34m'
+ORANGE='\033[38;5;208m'
 
 # Compact usage bar: 5 chars wide
 make_bar() {
@@ -65,15 +66,14 @@ make_bar() {
 SEP=$(printf " ${DIM}|${RESET} ")
 sections=()
 
-# Model (abbreviated with warning if not Opus 4.6)
+# Model with tier indicators
 if [ -n "$model_abbr" ]; then
-  if [ "$is_latest" = true ]; then
-    # Opus 4.6: blue, no warning
-    sections+=("$(printf "${BLUE}%s${RESET}" "$model_abbr")")
-  else
-    # Not Opus 4.6: red text with warning icon
-    sections+=("$(printf "${RED}⚠️ %s${RESET}" "$model_abbr")")
-  fi
+  case "$model_tier" in
+    opus-best)   sections+=("$(printf "${BLUE}🧠 %s${RESET}" "$model_abbr")") ;;
+    sonnet)      sections+=("$(printf "${ORANGE}🐢 %s${RESET}" "$model_abbr")") ;;
+    haiku)       sections+=("$(printf "${RED}⚠️ %s${RESET}" "$model_abbr")") ;;
+    *)           sections+=("$(printf "%s" "$model_abbr")") ;;
+  esac
 fi
 
 # Dir + git branch (combined)
