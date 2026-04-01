@@ -7,16 +7,16 @@ input=$(cat)
 # --- Model (abbreviated: O-4.6, S-4.6, H-4.5, etc.)
 model_raw=$(echo "$input" | jq -r '.model.display_name // ""')
 case "$model_raw" in
-  *"Opus 4.6"*)   model_abbr="O-4.6" ;;
-  *"Opus 4.5"*)   model_abbr="O-4.5" ;;
-  *"Opus 4"*)     model_abbr="O-4" ;;
-  *"Sonnet 4.6"*) model_abbr="S-4.6" ;;
-  *"Sonnet 4.5"*) model_abbr="S-4.5" ;;
-  *"Sonnet 4"*)   model_abbr="S-4" ;;
-  *"Haiku 4.5"*)  model_abbr="H-4.5" ;;
-  *"Haiku"*)      model_abbr="H" ;;
-  "")             model_abbr="" ;;
-  *)              model_abbr=$(echo "$model_raw" | sed 's/Claude //;s/ .*//') ;;
+  *"Opus 4.6"*)   model_abbr="O-4.6"; is_latest=true ;;
+  *"Opus 4.5"*)   model_abbr="O-4.5"; is_latest=false ;;
+  *"Opus 4"*)     model_abbr="O-4"; is_latest=false ;;
+  *"Sonnet 4.6"*) model_abbr="S-4.6"; is_latest=false ;;
+  *"Sonnet 4.5"*) model_abbr="S-4.5"; is_latest=false ;;
+  *"Sonnet 4"*)   model_abbr="S-4"; is_latest=false ;;
+  *"Haiku 4.5"*)  model_abbr="H-4.5"; is_latest=false ;;
+  *"Haiku"*)      model_abbr="H"; is_latest=false ;;
+  "")             model_abbr=""; is_latest=false ;;
+  *)              model_abbr=$(echo "$model_raw" | sed 's/Claude //;s/ .*//'); is_latest=false ;;
 esac
 
 # --- Directory: immediate dir name only
@@ -65,9 +65,15 @@ make_bar() {
 SEP=$(printf " ${DIM}|${RESET} ")
 sections=()
 
-# Model (abbreviated)
+# Model (abbreviated with warning if not Opus 4.6)
 if [ -n "$model_abbr" ]; then
-  sections+=("$(printf "${BLUE}%s${RESET}" "$model_abbr")")
+  if [ "$is_latest" = true ]; then
+    # Opus 4.6: blue, no warning
+    sections+=("$(printf "${BLUE}%s${RESET}" "$model_abbr")")
+  else
+    # Not Opus 4.6: red text with warning icon
+    sections+=("$(printf "${RED}⚠️ %s${RESET}" "$model_abbr")")
+  fi
 fi
 
 # Dir + git branch (combined)
