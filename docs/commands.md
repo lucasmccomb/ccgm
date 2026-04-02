@@ -225,6 +225,150 @@ Scans the current repo's CLAUDE.md for rules that could be promoted to the globa
 
 ---
 
+## Utility commands
+
+Installed by the **commands-utility** module.
+
+---
+
+### /cgr
+
+**Clear conversation, checkout default branch, and rebase on latest origin.**
+
+Resets the working context to a clean state - useful when starting a new task or after completing a feature.
+
+**What happens**:
+1. Clears the current conversation context
+2. Checks out the default branch (main or master)
+3. Rebases on `origin/main` to sync with the latest remote state
+
+**Usage**:
+```
+/cgr
+```
+
+---
+
+### /cws-submit
+
+**Guided Chrome Web Store submission walkthrough.**
+
+Walks through the process of packaging and submitting a Chrome extension to the Chrome Web Store step by step.
+
+**What happens**:
+1. Checks extension manifest and required assets
+2. Guides through packaging the extension zip
+3. Walks through the Chrome Web Store Developer Dashboard submission form
+4. Covers privacy policy, screenshots, and store listing requirements
+5. Handles common submission errors
+
+**Usage**:
+```
+/cws-submit
+```
+
+---
+
+### /dotsync
+
+**Sync local Claude Code config changes back to the CCGM repo.**
+
+When you've customized files in `~/.claude/` directly, this command syncs those changes back to your local CCGM clone, keeping CCGM as the source of truth.
+
+**What happens**:
+1. Identifies which CCGM-managed files have been modified locally
+2. Diffs the changes
+3. Copies modified files back into the appropriate `modules/` subdirectories
+4. Prompts to commit the changes
+
+**Usage**:
+```
+/dotsync
+```
+
+---
+
+### /user-test
+
+**Browser-based user testing simulation.**
+
+Simulates a user testing session using Chrome automation tools to test a web application as a real user would.
+
+**What happens**:
+1. Opens the specified URL in Chrome
+2. Performs a scripted or exploratory user journey
+3. Checks for console errors and network failures
+4. Takes screenshots at key steps
+5. Reports usability issues and errors found
+
+**Usage**:
+```
+/user-test
+/user-test https://localhost:5173
+/user-test "test the checkout flow"
+```
+
+---
+
+## Research and debugging commands
+
+Installed by the **deep-research** module.
+
+---
+
+### /deepresearch
+
+**Deep multi-channel research across 15+ platforms.**
+
+Spawns parallel research agents to gather comprehensive information from web search, GitHub, Reddit, Twitter/X, YouTube, and other platforms via Agent Reach integration.
+
+**Research channels**:
+- Web search (Exa)
+- GitHub (repos, issues, discussions)
+- Reddit (subreddits, threads)
+- Twitter/X
+- YouTube
+- Hacker News, LinkedIn, ProductHunt, and more
+
+**What happens**:
+1. Breaks the research question into parallel sub-queries
+2. Spawns agents per channel via Agent Reach
+3. Aggregates and deduplicates findings
+4. Synthesizes into a structured report with sources
+
+**Usage**:
+```
+/deepresearch "how do teams handle multi-agent coordination in Claude Code"
+/deepresearch  # Will ask for the research topic interactively
+```
+
+---
+
+### /debug
+
+**Structured root-cause debugging with Opus.**
+
+Enforces a disciplined debugging workflow instead of ad-hoc guessing. Runs on Opus for deep root-cause analysis.
+
+**Debugging phases**:
+1. **Reproduce**: Confirm the bug can be reliably reproduced
+2. **Hypothesize**: Form ranked theories about the root cause
+3. **Instrument**: Add logging or breakpoints to test hypotheses
+4. **Diagnose**: Identify the exact root cause with evidence
+5. **Fix**: Implement the minimal fix for the root cause (not symptoms)
+6. **Verify**: Confirm the fix and check for regressions
+
+This command is also invoked automatically by the `systematic-debugging` module's routing rule when you ask Claude to fix a bug or debug an error.
+
+**Usage**:
+```
+/debug TypeError: Cannot read property 'userId' of undefined in AuthContext.tsx line 42
+/debug "the login form submits but users don't get redirected"
+/debug  # Will ask for the problem description interactively
+```
+
+---
+
 ## Brand commands
 
 Installed by the **brand-naming** module.

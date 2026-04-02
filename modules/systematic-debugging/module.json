@@ -6,7 +6,8 @@
   "scope": ["global", "project"],
   "dependencies": [],
   "files": {
-    "rules/systematic-debugging.md": { "target": "rules/systematic-debugging.md", "type": "rule", "template": false }
+    "rules/systematic-debugging.md": { "target": "rules/systematic-debugging.md", "type": "rule", "template": false },
+    "rules/debugging.md": { "target": "rules/debugging.md", "type": "rule", "template": false }
   },
   "tags": ["debugging", "root-cause", "methodology", "troubleshooting"],
   "configPrompts": []

@@ -17,7 +17,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 8 hooks. The **session-logging** module installs 1 additional hook.
+The **hooks** module installs 9 hooks. The **session-logging** module installs 1 additional hook.
 
 ---
 
@@ -175,6 +175,25 @@ All tracking CSV writes happen in this hook, after commands succeed. This is the
 **Concurrency model**: Uses git commit + `pull --rebase` + push for the tracking CSV. Different-row edits auto-resolve during rebase since each agent modifies only its own rows.
 
 Only activates in multi-clone repos. Skips tracking for commits to the log repo itself.
+
+---
+
+### check-migration-timestamps.py
+
+**Type**: PreToolUse
+**Module**: hooks
+**Can block**: Yes
+
+Validates Supabase migration file timestamps before a commit is created, preventing duplicate timestamp issues that break `supabase db push`.
+
+**What it checks**:
+1. Scans `supabase/migrations/*.sql` files for the numeric timestamp prefix
+2. Detects any duplicate prefixes (two files sharing the same timestamp)
+3. Blocks the commit and reports which files have conflicting timestamps
+
+**Why this matters**: Duplicate migration timestamps cause `supabase db push` to get confused - the CLI cannot distinguish the files and one gets permanently stuck as "local only." Catching this before commit prevents hard-to-debug migration state issues.
+
+**Resolution**: When a duplicate is detected, rename one file to a unique timestamp (increment by 1 second) before committing.
 
 ---
 

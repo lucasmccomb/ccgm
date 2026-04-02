@@ -1,0 +1,16 @@
+{
+  "name": "commands-utility",
+  "displayName": "Utility Commands",
+  "description": "Miscellaneous utility commands: /cgr (clear conversation + checkout default branch + rebase), /cws-submit (Chrome Web Store submission walkthrough), /dotsync (CCGM reverse-sync), /user-test (browser-based user testing simulation).",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "commands/cgr.md": { "target": "commands/cgr.md", "type": "command", "template": false },
+    "commands/cws-submit.md": { "target": "commands/cws-submit.md", "type": "command", "template": false },
+    "commands/dotsync.md": { "target": "commands/dotsync.md", "type": "command", "template": false },
+    "commands/user-test.md": { "target": "commands/user-test.md", "type": "command", "template": false }
+  },
+  "tags": ["commands", "utility", "git", "browser", "testing"],
+  "configPrompts": []
+}
