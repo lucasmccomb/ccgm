@@ -1,19 +1,26 @@
 ---
 description: Push branch and create a pull request that closes an issue
-allowed-tools: Bash, Read, Glob, Grep
+allowed-tools: Agent
 ---
 
 # /pr - Push Branch and Create Pull Request
 
+Use the Agent tool to execute this entire workflow on a cheaper model:
+
+- **model**: haiku
+- **description**: push and create PR
+
+Pass the agent all workflow instructions below. Include the received arguments: `$ARGUMENTS`
+
+After the agent completes, relay its final report to the user exactly as received.
+
+---
+
+## Workflow Instructions
+
 Push the current branch to the remote and create a PR that closes the associated issue.
 
-## Input
-
-```
-$ARGUMENTS
-```
-
-## Instructions
+Arguments: $ARGUMENTS
 
 ### 1. Pre-Flight Checks
 

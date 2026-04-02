@@ -1,24 +1,31 @@
 ---
 description: Check progress on a running or completed xplan
-allowed-tools: Bash, Read, Glob, Grep
+allowed-tools: Agent
 argument-hint: [plan-name]
 ---
 
 # xplan-status - Plan Progress Dashboard
 
+Use the Agent tool to execute this workflow on a cheaper model:
+
+- **model**: haiku
+- **description**: xplan status check
+
+Pass the agent all workflow instructions below. Include the received arguments: `$ARGUMENTS`
+
+After the agent completes, relay its dashboard output to the user exactly as received.
+
+---
+
+## Workflow Instructions
+
 Check the status of a running or completed `/xplan` execution.
 
-## Input
-
-```
-$ARGUMENTS
-```
-
-## Instructions
+Arguments: $ARGUMENTS
 
 ### 1. Find the Plan
 
-If a plan name was provided in `$ARGUMENTS`, look for it directly:
+If a plan name was provided in the arguments, look for it directly:
 ```bash
 ls ~/code/plans/{plan-name}/
 ```
@@ -28,7 +35,7 @@ If no plan name was provided, list all plans and show the most recently modified
 ls -lt ~/code/plans/ | head -20
 ```
 
-If multiple plans exist and none was specified, use AskUserQuestion to ask which plan to check.
+If multiple plans exist and none was specified, ask which plan to check.
 
 ### 2. Read Progress File
 

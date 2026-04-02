@@ -73,6 +73,28 @@ def pattern_matches_command(pattern: str, command: str) -> bool:
     # Exact match or prefix match
     return command.startswith(pattern)
 
+def check_smart_rules(command: str) -> tuple:
+    """
+    Context-aware rules for commands that are safe in some forms but dangerous in others.
+    These run BEFORE the settings.json deny/allow patterns.
+
+    Returns: (decision, reason) or (None, None) to fall through to pattern matching.
+    """
+    # git reset --hard: allow when targeting a remote ref, block otherwise
+    # Safe: git reset --hard origin/main, git reset --hard origin/development
+    # Dangerous: git reset --hard (bare), git reset --hard HEAD~3, git reset --hard <local-ref>
+    reset_match = re.search(r'\bgit\s+reset\s+--hard\b', command)
+    if reset_match:
+        if re.search(r'\bgit\s+reset\s+--hard\s+origin/', command):
+            return ("allow", "git reset --hard to remote ref (safe)")
+        # Also allow git -C <path> reset --hard origin/
+        if re.search(r'\bgit\s+-C\s+\S+\s+reset\s+--hard\s+origin/', command):
+            return ("allow", "git reset --hard to remote ref in subdir (safe)")
+        return ("deny", "git reset --hard without remote ref is blocked. Use 'git reset --hard origin/<branch>' to reset to a remote ref, or 'git pull --ff-only' to sync.")
+
+    return (None, None)
+
+
 def check_command(command: str, allow_patterns: list, deny_patterns: list) -> tuple:
     """
     Check if a command should be allowed or denied.
@@ -80,6 +102,11 @@ def check_command(command: str, allow_patterns: list, deny_patterns: list) -> tu
     Returns: (decision, reason)
         decision: "allow", "deny", or None (let default system handle)
     """
+    # Smart context-aware rules run first (before pattern matching)
+    decision, reason = check_smart_rules(command)
+    if decision:
+        return (decision, reason)
+
     # Check deny patterns first (deny takes priority)
     for pattern in deny_patterns:
         if pattern_matches_command(pattern, command):

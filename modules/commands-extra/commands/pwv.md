@@ -1,8 +1,26 @@
+---
+description: Playwright Visual Verification
+allowed-tools: Agent
+---
+
 # /pwv - Playwright Visual Verification
+
+Use the Agent tool to execute this workflow on a cheaper model:
+
+- **model**: sonnet
+- **description**: playwright visual verify
+
+Pass the agent all workflow instructions below. Include the received arguments: `$ARGUMENTS`
+
+After the agent completes, relay its verification report to the user exactly as received.
+
+---
+
+## Workflow Instructions
 
 Launch a Playwright browser session to visually verify UI changes with screenshots and interaction testing.
 
-## Workflow
+Arguments: $ARGUMENTS
 
 ### 1. Determine What to Verify
 - Ask the user what URL/page to verify (or infer from recent changes)

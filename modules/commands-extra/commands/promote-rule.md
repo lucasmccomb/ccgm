@@ -1,8 +1,24 @@
+---
+description: Promote Repo Rules to Global
+allowed-tools: Agent
+---
+
 # /promote-rule - Promote Repo Rules to Global
 
-Review repo-level CLAUDE.md files and suggest rules that should be promoted to the global configuration.
+Use the Agent tool to execute this workflow on a cheaper model:
 
-## Process
+- **model**: sonnet
+- **description**: promote repo rules
+
+Pass the agent all workflow instructions below.
+
+After the agent completes, relay its findings to the user exactly as received.
+
+---
+
+## Workflow Instructions
+
+Review repo-level CLAUDE.md files and suggest rules that should be promoted to the global configuration.
 
 ### 1. Find Explicit Candidates
 

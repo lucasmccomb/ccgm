@@ -1,23 +1,30 @@
 ---
 description: Create a new GitHub issue with proper labels
-allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
+allowed-tools: Agent
 ---
 
 # /ghi - Create GitHub Issue
 
+Use the Agent tool to execute this workflow on a cheaper model:
+
+- **model**: haiku
+- **description**: create GitHub issue
+
+Pass the agent all workflow instructions below. Include the received arguments: `$ARGUMENTS`
+
+After the agent completes, relay its report to the user exactly as received.
+
+---
+
+## Workflow Instructions
+
 Create a new GitHub issue with appropriate labels based on the type of work.
 
-## Input
-
-```
-$ARGUMENTS
-```
-
-## Instructions
+Arguments: $ARGUMENTS
 
 ### 1. Gather Issue Details
 
-If `$ARGUMENTS` provides enough context (title and description), use it directly. Otherwise, ask the user for:
+If the arguments provide enough context (title and description), use them directly. Otherwise, ask the user for:
 
 - **Title**: A concise, descriptive title
 - **Type**: feature, bug, refactor, chore, documentation, or human-agent

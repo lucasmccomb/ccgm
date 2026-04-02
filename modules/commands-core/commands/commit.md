@@ -1,19 +1,26 @@
 ---
 description: Stage all changes and commit with conventional format
-allowed-tools: Bash, Read, Glob, Grep
+allowed-tools: Agent
 ---
 
 # /commit - Stage and Commit Changes
 
+Use the Agent tool to execute this entire workflow on a cheaper model:
+
+- **model**: haiku
+- **description**: commit workflow
+
+Pass the agent all workflow instructions below. Include the received arguments: `$ARGUMENTS`
+
+After the agent completes, relay its final report to the user exactly as received.
+
+---
+
+## Workflow Instructions
+
 Stage all current changes and create a commit with conventional format.
 
-## Input
-
-```
-$ARGUMENTS
-```
-
-## Instructions
+Arguments: $ARGUMENTS
 
 ### 1. Verify There Are Changes to Commit
 
@@ -48,7 +55,7 @@ BRANCH=$(git branch --show-current)
 ISSUE_NUM=$(echo "$BRANCH" | grep -oE '^[0-9]+')
 ```
 
-If no issue number is found in the branch name and `$ARGUMENTS` contains an issue number, use that instead. If neither source has an issue number, proceed without one.
+If no issue number is found in the branch name and the arguments contain an issue number, use that instead. If neither source has an issue number, proceed without one.
 
 ### 4. Run Verification
 
@@ -99,7 +106,7 @@ Rules for the commit message:
 - Use imperative mood ("Add feature" not "Added feature")
 - Be specific about what changed
 - Do not include any AI attribution or co-author trailers
-- If `$ARGUMENTS` contains a specific message, use it (but still prepend the issue number)
+- If the arguments contain a specific message, use it (but still prepend the issue number)
 
 ### 7. Confirm Success
 

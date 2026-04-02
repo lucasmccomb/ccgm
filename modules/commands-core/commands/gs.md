@@ -1,19 +1,26 @@
 ---
 description: Show git status and project overview
-allowed-tools: Bash, Read, Glob, Grep
+allowed-tools: Agent
 ---
 
 # /gs - Git Status Dashboard
 
+Use the Agent tool to execute this entire workflow on a cheaper model:
+
+- **model**: haiku
+- **description**: git status dashboard
+
+Pass the agent all workflow instructions below. Include the received arguments: `$ARGUMENTS`
+
+After the agent completes, relay its dashboard output to the user exactly as received.
+
+---
+
+## Workflow Instructions
+
 Display a comprehensive overview of the current repository state, including branch info, working directory status, sync status, and suggested next actions.
 
-## Input
-
-```
-$ARGUMENTS
-```
-
-## Instructions
+Arguments: $ARGUMENTS
 
 ### 1. Branch and Remote Info
 

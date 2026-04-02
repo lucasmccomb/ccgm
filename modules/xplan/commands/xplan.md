@@ -14,6 +14,21 @@ A comprehensive framework that deeply researches concepts, builds a contextual m
 
 ---
 
+## Sub-Agent Model Optimization
+
+To conserve usage, specify cheaper models when spawning sub-agents via the Agent/Task tool:
+
+| Phase | Sub-Agent | Model |
+|-------|-----------|-------|
+| Phase 1 | Research agents (via /deepresearch) | sonnet |
+| Phase 2 | Naming agent | sonnet |
+| Phase 4 | Review agents (security, architecture, business) | sonnet |
+| Phase 7 | Execution agents (epic implementation) | sonnet |
+
+The orchestrator (this session) remains on the current model for planning, synthesis, and architecture decisions.
+
+---
+
 ## CRITICAL: Interactive Prompts Are Mandatory
 
 **This skill REQUIRES user interaction to function.** xplan is an interactive framework - the user chose to run `/xplan` precisely because they want the guided research/plan/review/walkthrough experience. Skipping prompts defeats the purpose.
@@ -91,7 +106,7 @@ If an existing repo path was given:
 
 ### 1.0 Research Configuration
 
-Before spawning agents, ask the user what kind of research they want using AskUserQuestion. Present a **preset** question first, then optionally drill into individual agents.
+Before spawning the research agent, ask the user what kind of research they want using AskUserQuestion. Present a **preset** question first, then optionally drill into individual agents.
 
 **Preset question** (single-select):
 
@@ -99,98 +114,45 @@ Before spawning agents, ask the user what kind of research they want using AskUs
 
 | Option | Agents Spawned | Best For |
 |--------|---------------|----------|
-| **Full (Recommended)** | All 4 core + complexity-based extras | New products, unfamiliar domains |
+| **Full (Recommended)** | All 7 research agents + internet channels | New products, unfamiliar domains |
 | **Technical Only** | Technical Architecture + Data & Infrastructure | Adding features to existing projects, technical spikes |
 | **Market & Product** | Domain & Problem Space + Competitive Landscape + Monetization | Validating a product idea, market analysis |
 | **Lite** | Domain & Problem Space + Technical Architecture | Quick planning, well-understood domains |
 | **Custom** | User picks individual agents | Full control |
 
-If the user selects **Custom**, follow up with a multi-select AskUserQuestion:
+### 1.1 Delegate to /deepresearch
 
-> "Which research agents should I spawn?"
+Spawn a single Task agent that executes the `/deepresearch` skill with the concept, depth selection, plan directory, and repo (if provided).
 
-Options (multiSelect: true):
-1. **Domain & Problem Space** - Core problem domain, users, pain points, existing solutions, market gaps
-2. **Technical Architecture** - Best technical approaches, scalability, data modeling, performance
-3. **Competitive Landscape** - Existing products, feature matrices, pricing, user complaints, differentiation
-4. **Adjacent Domains** - Related fields, lessons from adjacent industries, integrations, regulatory/compliance
-5. **UX/Design Patterns** - UI/UX conventions, innovative interaction patterns
-6. **Data & Infrastructure** - Storage patterns, API design, infrastructure requirements
-7. **Monetization & Business** - Pricing strategies, conversion funnels, business models
+The Task agent's prompt should be:
 
-**Note**: If `--repo` was provided, the **Codebase Analysis Agent** is always included regardless of selection (it analyzes the existing repo, not the problem space).
-
-### 1.1 Spawn Research Agents
-
-Based on the user's selection in 1.0, launch the chosen research agents in parallel using the Task tool. Each agent targets a different facet.
-
-**Available research agents (spawn only those selected):**
-
-1. **Domain & Problem Space Agent** - Research the core problem domain. What does this space look like? Who are the users? What are their pain points? What existing solutions exist? What do they get right and wrong? What market gaps exist?
-
-2. **Technical Architecture Agent** - Research the best technical approaches for this type of system. What architectures work best? What are the scalability concerns? What are the data modeling challenges? What are the performance considerations? Research specific technical challenges unique to this domain.
-
-3. **Competitive Landscape Agent** - Deep dive on existing products, apps, and tools in this space. Feature matrices. Pricing models. User reviews and complaints. What is missing from the market? What would make this product stand out?
-
-4. **Adjacent Domains Agent** - What related fields, technologies, or concepts should inform the design? What lessons from adjacent industries apply? What integrations would users expect? What regulatory or compliance considerations exist?
-
-5. **UX/Design Patterns Agent** - Research UI/UX patterns for this type of application. What conventions do users expect? What innovative approaches exist?
-
-6. **Data & Infrastructure Agent** - Research data storage patterns, API design approaches, and infrastructure requirements specific to this problem
-
-7. **Monetization & Business Model Agent** - Research pricing strategies, conversion funnels, and business models that work in this space
-
-If `--repo` was provided, always also spawn:
-- **Codebase Analysis Agent** - Deep dive into the existing repo's architecture, patterns, tech debt, test coverage, and current state
-
-### 1.2 Synthesize Research
-
-Once all research agents return:
-1. Synthesize findings into a **contextual model** - a mental framework for how to think about this problem and its solution
-2. Identify key insights that should drive architectural and product decisions
-3. Flag risks, unknowns, and areas that need user input
-4. Document everything in `research.md`
-
-### 1.3 Write research.md
-
-Create `~/code/plans/{concept-name}/research.md` with:
-
-```markdown
-# Research: {Concept Name}
-
-## Table of Contents
-
-## Executive Summary
-[2-3 paragraph synthesis of all research findings]
-
-## Contextual Model
-[The mental framework for thinking about this problem and solution]
-[Key principles that should guide every decision]
-
-## Problem Space
-[Domain analysis, user pain points, jobs-to-be-done]
-
-## Competitive Landscape
-[Existing solutions, feature gaps, differentiation opportunities]
-
-## Technical Landscape
-[Architecture patterns, technology options, scalability considerations]
-
-## Adjacent Domains & Integrations
-[Related fields, expected integrations, compliance/regulatory]
-
-## UX & Design Patterns
-[User expectations, UI conventions, innovative approaches]
-
-## Key Insights
-[Numbered list of the most important findings that should drive decisions]
-
-## Risks & Unknowns
-[Identified risks with severity and mitigation strategies]
-
-## Sources
-[Links and references from research]
 ```
+Read the file ~/code/claude-dotfiles/commands/deepresearch.md and follow its instructions exactly.
+
+Topic: {concept from Phase 0}
+Arguments: --depth {user's selection from 1.0} --plan-dir ~/code/plans/{concept-name} {--repo REPO_PATH if provided}
+
+Execute the full /deepresearch workflow: parse arguments, spawn parallel research agents with Agent Reach internet access, synthesize findings, and write research.md to the plan directory.
+```
+
+**Important**: Pass the depth selection from 1.0 via the `--depth` flag so /deepresearch skips its own interactive question (prevents double-prompting).
+
+### 1.2 Verify Research Output
+
+After the Task agent completes, verify the output:
+
+```bash
+ls -la ~/code/plans/{concept-name}/research.md
+```
+
+If research.md does not exist, the research agent failed. Re-spawn it or ask the user how to proceed.
+
+Read the research.md and confirm it contains:
+- Executive Summary
+- Key Insights (with real data, not just LLM knowledge)
+- Sources section with actual URLs (Agent Reach should have populated this)
+
+If the Sources section is empty, the research agents did not use internet channels. Note this but proceed.
 
 ---
 
@@ -680,7 +642,7 @@ If the user confirmed execution in Phase 6.5:
    ```bash
    python3 ~/.claude/lib/agent_tracking.py init {project-name}
    ```
-   This creates `~/code/{log-repo-name}/{project-name}/tracking.csv`. Agent claims are registered automatically by the PostToolUse hook when agents create branches.
+   This creates `~/code/lem-agent-logs/{project-name}/tracking.csv`. Agent claims are registered automatically by the PostToolUse hook when agents create branches.
 
 5. **Create GitHub issues** for every epic and sub-task:
    - One issue per agent-epic with full scope description and acceptance criteria
@@ -723,8 +685,9 @@ Spawn Task agents in parallel (one per epic in the wave, assigned to different c
 Each agent:
 - Creates a feature branch (`git checkout -b {issue}-{desc} origin/main`) which auto-registers the claim in tracking.csv via the PostToolUse hook
 - Implements the work with tests
+- **Verifies the work actually functions** - not just that it compiles and unit tests pass, but that the real behavior works end-to-end. Use whatever method fits: curl against the live API, browser automation, database queries, or manual verification. Unit tests with mocks prove the code is internally consistent; they do not prove the feature works. The agent must confirm the feature works before declaring completion.
 - Creates a PR
-- Reports completion
+- Reports completion, including what verification was performed and the results
 
 #### 7.3.3 Monitor & Report
 Monitor agent progress and report status updates to user.
@@ -769,7 +732,7 @@ Update the progress table and proceed to next wave.
 After each wave:
 - Pull latest main into all clones
 - Run full test suite
-- Verify no regressions
+- **Verify the deployed application works** - after merging, confirm the deploy succeeds and test the actual running application. Use curl, browser automation, or whatever tool is appropriate to confirm that the features from this wave function correctly in the real environment. Do not rely solely on CI passing.
 - Fix any integration issues before proceeding
 
 ### 7.5 Continue Until Complete
@@ -991,6 +954,7 @@ Mark progress.md as COMPLETE with final statistics and link to retro.md.
 ### Quality Over Speed
 - Every piece of code has tests
 - Every PR passes CI before merge
+- **Every feature is verified to actually work before it ships** - type checks, lint, and unit tests passing is the bare minimum, not the finish line. If you built something, prove it works by running it. Mocked tests only prove internal consistency; they say nothing about whether the real system functions. Use the real API, the real database, the real UI. If you cannot demonstrate that the feature works end-to-end, it is not done.
 - Security, architecture, and business logic reviews are mandatory
 - Post-execution verification is mandatory
 

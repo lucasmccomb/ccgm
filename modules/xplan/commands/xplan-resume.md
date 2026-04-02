@@ -8,6 +8,12 @@ argument-hint: <plan-name>
 
 Resume a previously interrupted `/xplan` execution from its last checkpoint.
 
+## Sub-Agent Model Optimization
+
+When spawning execution agents to resume epic work, set model to **sonnet** in the Agent tool call. The orchestrator remains on the current model for coordination and decision-making.
+
+---
+
 ## Input
 
 ```

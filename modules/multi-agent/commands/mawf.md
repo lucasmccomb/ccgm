@@ -1,11 +1,17 @@
 ---
 description: Multi-Agent Workflow - take unstructured feedback, split into issues, spin up parallel agents
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, AskUserQuestion
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, AskUserQuestion, WebSearch
 ---
 
 # /mawf - Multi-Agent Workflow
 
 Takes unstructured feedback, feature requests, or bug reports, splits them into discrete GitHub issues, and spins up parallel agents to implement them.
+
+## Sub-Agent Model Optimization
+
+When spawning execution agents to implement issues in Phase 5, set model to **sonnet** in the Agent/Task tool call. Coding and implementation tasks work well on Sonnet. The orchestrator remains on the current model for issue parsing and agent coordination.
+
+---
 
 ## Input
 
@@ -49,6 +55,30 @@ Does this look right? Should I adjust anything before creating these?
 ```
 
 Wait for user confirmation before proceeding.
+
+### Phase 2.5: Optional Context Research (Agent Reach)
+
+When feedback references external issues, competitors, or community discussions, verify and enrich with real data before creating issues. This step is **optional** and should only run when feedback explicitly references external context. Skip entirely for purely internal feedback.
+
+- **User references a competitor or product**: Search for it to add context to the issue description
+  ```bash
+  WebSearch "{product name} {feature mentioned}"
+  ```
+
+- **User references a bug others have reported**: Verify on GitHub or Reddit
+  ```bash
+  gh search issues "{error message or bug description}" --limit 5
+  ```
+  ```bash
+  curl -s "https://www.reddit.com/search.json?q={error or issue}&limit=3" -H "User-Agent: agent-reach/1.0" | jq '.data.children[].data | {title, url, score}'
+  ```
+
+- **User references a library or tool**: Check its current status
+  ```bash
+  gh repo view {owner}/{repo} --json isArchived,stargazerCount,pushedAt 2>/dev/null
+  ```
+
+Fold any findings into the relevant issue descriptions in Phase 3 (e.g., link to upstream issues, note competitor approaches, confirm library viability). Do not create separate issues for research findings.
 
 ### Phase 3: Create GitHub Issues
 

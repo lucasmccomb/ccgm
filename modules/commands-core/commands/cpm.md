@@ -1,19 +1,26 @@
 ---
 description: One-shot commit, create PR, and merge workflow
-allowed-tools: Bash, Read, Glob, Grep
+allowed-tools: Agent
 ---
 
 # /cpm - Commit, PR, and Merge
 
+Use the Agent tool to execute this entire workflow on a cheaper model:
+
+- **model**: haiku
+- **description**: cpm git workflow
+
+Pass the agent all workflow instructions below. Include the received arguments: `$ARGUMENTS`
+
+After the agent completes, relay its final report to the user exactly as received.
+
+---
+
+## Workflow Instructions
+
 A one-shot workflow that commits current changes, creates a PR, and merges it. Designed for repos where you merge your own PRs (solo developer or self-merge workflow).
 
-## Input
-
-```
-$ARGUMENTS
-```
-
-## Instructions
+Arguments: $ARGUMENTS
 
 ### 1. Pre-Flight Checks
 
@@ -38,7 +45,7 @@ BRANCH=$(git branch --show-current)
 ISSUE_NUM=$(echo "$BRANCH" | grep -oE '^[0-9]+')
 ```
 
-If `$ARGUMENTS` contains an issue number, prefer that. If neither source has one, proceed without it.
+If arguments contain an issue number, prefer that. If neither source has one, proceed without it.
 
 ### 3. Run Verification
 
@@ -71,7 +78,7 @@ Rules:
 - Imperative mood
 - Under 72 characters
 - No AI attribution
-- If `$ARGUMENTS` has a message, use it (prepend issue number)
+- If arguments include a message, use it (prepend issue number)
 
 ### 5. Rebase on Main
 

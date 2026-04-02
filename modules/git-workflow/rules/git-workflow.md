@@ -36,6 +36,7 @@ This also applies to:
 ```bash
 # MANDATORY: Always sync first
 git fetch origin
+# Safe: resets to remote ref (auto-approved by hook)
 git reset --hard origin/main
 ```
 
@@ -64,14 +65,25 @@ git log --oneline | head -5  # Confirm you have latest commits
 
 ---
 
+# NEVER Stash - Commit Instead
+
+**Do not use `git stash`.** Stashing is an anti-pattern that leads to lost work and confusing state.
+
+- When switching context or branches, **commit your changes first** (even as a WIP commit)
+- If you need to move changes to a different branch, commit them where you are, then cherry-pick or rebase
+- The only acceptable use of stash is a true emergency where committing is impossible (this almost never happens)
+
+**Why**: Stashed changes are invisible, easy to forget, and create confusion when popping across different branch states. Commits are visible, trackable, and reversible.
+
+---
+
 # Post-Merge: Return to Main
 
 **After a PR is merged**, unless there's a specific reason not to (e.g., continuing work on the same branch), return to a clean state on main:
 
 ```bash
-git fetch origin
 git checkout main
-git reset --hard origin/main
+git pull origin main --ff-only
 ```
 
 This ensures the working directory reflects the latest merged state and avoids stale branch confusion.

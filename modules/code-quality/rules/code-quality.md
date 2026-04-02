@@ -133,17 +133,14 @@ Write tests for:
 
 ## Build Verification
 
-**IMPORTANT**: After making code changes, run verification and fix any issues before completing work.
+**Do NOT run lint, type-check, tests, or build after every code change.** Only run the full verification suite **immediately before pushing** (pre-push). Running builds mid-development wastes time and tokens.
 
-All checks must pass. Fix errors immediately - don't leave broken code.
-
-- **Never** leave failing tests, type errors, or lint errors
-- **Never** mark work as complete until all checks pass
+- **Never** leave failing tests, type errors, or lint errors in pushed code
 - **Update** documentation if requirements or architecture change
 
 ### Pre-Push Verification (CRITICAL)
 
-**Before pushing code, run ALL the same checks that CI runs.** This prevents wasting CI minutes on failures that could be caught locally.
+**Before pushing code, run ALL the same checks that CI runs.** This is the ONLY time to run the full verification suite. Do not run it earlier.
 
 #### Check for Pre-Push Hook
 Many projects have a `.husky/pre-push` hook that runs automatically. If present, it will block the push if checks fail.

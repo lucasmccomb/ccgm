@@ -1,9 +1,20 @@
 ---
 description: Create a workspace-based multi-agent directory structure for a repo
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
+allowed-tools: Agent
 ---
 
 # /workspace-setup - Workspace Multi-Agent Setup
+
+Use the Agent tool to execute this workflow on a cheaper model:
+
+- **model**: haiku
+- **description**: workspace setup
+
+Pass the agent all workflow instructions below. Include the received arguments: `$ARGUMENTS`
+
+After the agent completes, relay its report to the user exactly as received.
+
+---
 
 Creates a workspace-based directory structure for parallel multi-agent development with full isolation between workspaces.
 
@@ -256,7 +267,7 @@ Each sub-agent should:
 
 ### Issue Tracking
 
-- Claims are registered automatically in `{log-repo-name}/{repo}/tracking.csv` by the PostToolUse hook when a branch is created
+- Claims are registered automatically in `lem-agent-logs/{repo}/tracking.csv` by the PostToolUse hook when a branch is created
 - Check tracking state: `python3 ~/.claude/lib/agent_tracking.py list --repo {repo}`
 - Each clone claims issues independently via branch creation
 
@@ -317,7 +328,7 @@ Structure:
   {repo}-w2/
     ...
 
-Issue Tracking: ~/code/{log-repo-name}/{repo}/tracking.csv (auto-updated by hooks)
+Issue Tracking: ~/code/lem-agent-logs/{repo}/tracking.csv (auto-updated by hooks)
 
 Usage:
   Point a coordinator agent at a workspace directory (e.g., ~/code/{repo}-workspaces/{repo}-w0/)
