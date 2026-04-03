@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 25 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 27 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -78,7 +78,7 @@ Base `settings.json` with 800+ pre-configured tool permission entries.
 
 Python hooks that automate and enforce development workflows.
 
-**Installs**: 8 hook scripts, 1 Python library, settings.json fragment
+**Installs**: 9 hook scripts, 1 Python library, settings.json fragment
 
 This module installs the most hooks of any module. See [Hooks Reference](hooks.md) for detailed documentation of each hook.
 
@@ -94,6 +94,7 @@ This module installs the most hooks of any module. See [Hooks Reference](hooks.m
 | `port-check.py` | PreToolUse:Bash | Warns about dev server port conflicts |
 | `agent-tracking-pre.py` | PreToolUse:Bash | Warns when claiming already-claimed issues |
 | `agent-tracking-post.py` | PostToolUse:Bash | Records issue claims, status transitions in tracking CSV |
+| `check-migration-timestamps.py` | PreToolUse | Validates Supabase migration file timestamps for duplicates before commit |
 
 **Config prompts**: Protected branches (custom list), auto update check (yes/no)
 
@@ -159,7 +160,46 @@ Research tools for naming products, companies, or projects.
 | `/brand` | Full naming pipeline with word exploration, generation, and multi-source verification |
 | `/brand-check` | Deep verification of a single name across domains, trademarks, app stores, and social |
 
+Commands use a sub-agent model for parallel word exploration and verification phases, optimized for throughput across the multi-source checks.
+
 **Config prompts**: Whether to add the Instant Domain Search MCP server to `mcp.json`
+
+**Dependencies**: None
+
+---
+
+### commands-utility
+
+Miscellaneous utility commands for common workflow tasks.
+
+**Installs**: 4 command files
+
+| Command | Description |
+|---------|-------------|
+| `/cgr` | Clear conversation, checkout default branch, and rebase on latest origin |
+| `/cws-submit` | Guided walkthrough for submitting a Chrome extension to the Chrome Web Store |
+| `/dotsync` | Sync local Claude Code config changes back to the CCGM repo as the source of truth |
+| `/user-test` | Browser-based user testing simulation using Chrome automation tools |
+
+**Dependencies**: None
+
+---
+
+### deep-research
+
+Multi-channel research and structured debugging commands powered by specialized agents.
+
+**Installs**: 2 command files
+
+| Command | Description |
+|---------|-------------|
+| `/deepresearch` | Deep multi-channel research across 15+ platforms using Agent Reach and web search |
+| `/debug` | Structured root-cause debugging with Opus - reproduce, hypothesize, instrument, diagnose, fix, verify |
+
+**What it does**: Provides two high-powered research and investigation commands:
+
+- **/deepresearch**: Spawns parallel research agents across web search, GitHub, Reddit, Twitter/X, YouTube, and other platforms via the Agent Reach integration. Produces a structured report with findings, sources, and synthesis.
+- **/debug**: Enforces a disciplined debugging workflow (reproduce → hypothesize → instrument → diagnose → fix → verify) using Opus for deep root-cause analysis. Invoked automatically by the `systematic-debugging` module's routing rule.
 
 **Dependencies**: None
 
@@ -309,7 +349,7 @@ Reusable development patterns and methodologies.
 
 Code standards, testing requirements, error handling, security practices, and build verification.
 
-**Installs**: `rules/code-quality.md`
+**Installs**: `rules/code-quality.md`, `rules/change-philosophy.md`
 
 **What it does**: A comprehensive code quality ruleset covering:
 
@@ -321,6 +361,8 @@ Code standards, testing requirements, error handling, security practices, and bu
 - **Security**: Input sanitization, upload validation, no committed secrets, RLS
 - **Build verification**: Pre-push only (not after every change), CI parity
 - **Living documents**: When and how to update README.md and project-story.md after merges
+
+The `change-philosophy.md` rule establishes an elegant integration design philosophy: prefer additive, composable changes over rewrites; respect existing patterns; make the smallest change that achieves the goal.
 
 **Dependencies**: None
 
@@ -388,7 +430,7 @@ Principles for building distinctive, production-grade web interfaces.
 
 Structured 4-phase root cause investigation methodology.
 
-**Installs**: `rules/systematic-debugging.md`
+**Installs**: `rules/systematic-debugging.md`, `rules/debugging.md`
 
 **What it does**: Prevents scattered debugging by enforcing a systematic process:
 
@@ -398,6 +440,8 @@ Structured 4-phase root cause investigation methodology.
 4. **Implement**: Fix the root cause (not symptoms), verify the fix, check for regressions
 
 Also includes a "three-strike rule": if you try three approaches without progress, step back and reassess your understanding of the problem.
+
+The `debugging.md` rule routes bug fix and debugging requests to the `/debug` skill (from the deep-research module) for structured Opus-powered root-cause analysis, rather than ad-hoc investigation.
 
 **Dependencies**: None
 
@@ -523,7 +567,7 @@ Patterns for using shadcn/ui components in React projects.
 
 Tailwind CSS v4 design system patterns.
 
-**Installs**: `rules/tailwind.md`
+**Installs**: `rules/tailwind.md`, `rules/frontend-css.md`
 
 **What it does**: Guides Tailwind v4 usage (CSS-first configuration, not the deprecated `tailwind.config.ts`):
 
@@ -534,5 +578,7 @@ Tailwind CSS v4 design system patterns.
 - **Dark mode**: `@custom-variant dark (&:where(.dark, .dark *))` pattern
 - **Responsive**: Mobile-first with `sm:`, `md:`, `lg:` breakpoints
 - **v3 to v4 migration**: Mapping table for changed utility names
+
+The `frontend-css.md` rule covers the Tailwind v4 `cursor: pointer` gotcha - v4's preflight no longer sets cursor styles on `<button>` elements. Includes the correct `@layer base` pattern to add at project start.
 
 **Dependencies**: None

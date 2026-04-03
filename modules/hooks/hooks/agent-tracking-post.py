@@ -31,7 +31,21 @@ import sys
 # Import tracking module
 sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
 
-LOG_REPO_DIR = os.path.expanduser("~/code/lem-agent-logs")
+
+def _find_log_repo():
+    """Find the agent log repo directory."""
+    env = os.environ.get("CLAUDE_LOG_REPO")
+    if env and os.path.isdir(env):
+        return env
+    code_dir = os.path.expanduser("~/code")
+    if os.path.isdir(code_dir):
+        for entry in sorted(os.listdir(code_dir)):
+            if entry.endswith("agent-logs") and os.path.isdir(os.path.join(code_dir, entry)):
+                return os.path.join(code_dir, entry)
+    return os.path.expanduser("~/code/agent-logs")
+
+
+LOG_REPO_DIR = _find_log_repo()
 
 
 def is_multi_clone_repo(cwd=None):

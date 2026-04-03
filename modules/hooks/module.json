@@ -51,6 +51,11 @@
       "type": "lib",
       "template": false
     },
+    "hooks/check-migration-timestamps.py": {
+      "target": "hooks/check-migration-timestamps.py",
+      "type": "hook",
+      "template": false
+    },
     "settings.partial.json": {
       "target": "settings.json",
       "type": "config",

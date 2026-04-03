@@ -642,7 +642,7 @@ If the user confirmed execution in Phase 6.5:
    ```bash
    python3 ~/.claude/lib/agent_tracking.py init {project-name}
    ```
-   This creates `~/code/lem-agent-logs/{project-name}/tracking.csv`. Agent claims are registered automatically by the PostToolUse hook when agents create branches.
+   This creates `~/code/{log-repo-name}/{project-name}/tracking.csv`. Agent claims are registered automatically by the PostToolUse hook when agents create branches.
 
 5. **Create GitHub issues** for every epic and sub-task:
    - One issue per agent-epic with full scope description and acceptance criteria

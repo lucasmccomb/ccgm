@@ -1,0 +1,14 @@
+{
+  "name": "deep-research",
+  "displayName": "Deep Research & Debugging",
+  "description": "/deepresearch (multi-channel research across 15+ platforms using parallel agents) and /debug (structured root-cause debugging with Opus delegation).",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "commands/deepresearch.md": { "target": "commands/deepresearch.md", "type": "command", "template": false },
+    "commands/debug.md": { "target": "commands/debug.md", "type": "command", "template": false }
+  },
+  "tags": ["commands", "research", "debugging", "web-search"],
+  "configPrompts": []
+}

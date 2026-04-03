@@ -107,7 +107,7 @@ PORT_OFFSET=6
 3. **Create a branch** - the PostToolUse hook on `git checkout -b {N}-*` auto-registers the claim in the tracking CSV. No manual steps needed:
    ```bash
    git checkout -b {number}-{description} origin/main
-   # Hook automatically writes to ~/code/lem-agent-logs/{repo}/tracking.csv
+   # Hook automatically writes to ~/code/{log-repo-name}/{repo}/tracking.csv
    ```
 
 ### Coordinator Role
@@ -233,7 +233,7 @@ cd "$CLONE_DIR"
 3. **Create a branch** - the PostToolUse hook on `git checkout -b {N}-*` auto-registers the claim in the tracking CSV. No manual steps needed:
    ```bash
    git checkout -b {number}-{description} origin/main
-   # Hook automatically writes to ~/code/lem-agent-logs/{repo}/tracking.csv
+   # Hook automatically writes to ~/code/{log-repo-name}/{repo}/tracking.csv
    ```
 
 ---
@@ -276,7 +276,7 @@ Issue ownership and status are tracked via a single CSV file per repo, replacing
 ### Tracking File Location
 
 ```
-~/code/lem-agent-logs/{repo}/tracking.csv
+~/code/{log-repo-name}/{repo}/tracking.csv
 ```
 
 ### CSV Schema
@@ -328,7 +328,7 @@ Agents do not need to manually update tracking. Just use standard git/gh command
 Multiple agents may update tracking.csv simultaneously. The tracking library uses standard git flow for concurrency:
 
 ```bash
-cd ~/code/lem-agent-logs && git add -A && git commit -m "{agent-id}: tracking update" && git pull --rebase && git push
+cd ~/code/{log-repo-name} && git add -A && git commit -m "{agent-id}: tracking update" && git pull --rebase && git push
 ```
 
 ### Manual Tracking Commands

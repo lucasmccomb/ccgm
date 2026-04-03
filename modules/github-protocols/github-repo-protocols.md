@@ -66,7 +66,7 @@ gh label create "human-agent" --color "f9d0c4" --description "Requires manual hu
 
 **Agent labels** (historical, no longer maintained):
 
-Agent labels (`agent-wX-cY`, `agent-N`) may exist from prior use but are **no longer used for coordination**. The tracking CSV at `~/code/lem-agent-logs/{repo}/tracking.csv` is the source of truth for issue claiming and agent assignment. Claude Code hooks auto-update tracking on branch creation, commits, PR creation, PR merge, and issue close.
+Agent labels (`agent-wX-cY`, `agent-N`) may exist from prior use but are **no longer used for coordination**. The tracking CSV at `~/code/{log-repo-name}/{repo}/tracking.csv` is the source of truth for issue claiming and agent assignment. Claude Code hooks auto-update tracking on branch creation, commits, PR creation, PR merge, and issue close.
 
 Total: 14 base labels (agent labels are not part of the standard set).
 
@@ -447,7 +447,7 @@ Complete step-by-step workflow for implementing a GitHub issue.
 
 ### 2. Claim the Issue
 
-Tracking is automatic via Claude Code hooks. When you create a branch with `git checkout -b {N}-description`, the PostToolUse hook auto-registers the claim in `~/code/lem-agent-logs/{repo}/tracking.csv`. No manual label management is needed.
+Tracking is automatic via Claude Code hooks. When you create a branch with `git checkout -b {N}-description`, the PostToolUse hook auto-registers the claim in `~/code/{log-repo-name}/{repo}/tracking.csv`. No manual label management is needed.
 
 - **UPDATE SESSION LOG** - Log that work is starting
 
@@ -586,7 +586,7 @@ When choosing issues to work on:
 
 **Multi-agent repos only:**
 - **Skip** issues claimed by a different agent in tracking.csv
-- The tracking CSV at `~/code/lem-agent-logs/{repo}/tracking.csv` is the source of truth for all agent coordination
+- The tracking CSV at `~/code/{log-repo-name}/{repo}/tracking.csv` is the source of truth for all agent coordination
 
 ### Discovering New Work
 

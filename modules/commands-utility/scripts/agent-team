@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# agent-team: Launch N Claude Code agents in tmux panes for a workspace or repo
+#
+# Usage:
+#   agent-team <repo-name> [clone-count]
+#   agent-team <repo-name> --workspace <workspace-num> [clone-count]
+#
+# Examples:
+#   agent-team darkly-suite 4          # Launch 4 agents for darkly-suite-repos clones
+#   agent-team provendoro --workspace 1 3  # Launch 3 agents in provendoro workspace 1
+#   agent-team openslide-ai            # Launch all available clones (auto-detect)
+#
+# The script creates a tmux session named after the repo, with one pane per agent.
+# Each pane is titled with the agent identity and starts Claude Code in that clone dir.
+
+set -euo pipefail
+
+REPO=""
+WORKSPACE=""
+CLONE_COUNT=""
+BASE_DIR="$HOME/code"
+
+usage() {
+  echo "Usage: agent-team <repo-name> [--workspace N] [clone-count]"
+  echo ""
+  echo "  repo-name       Name of the repo (e.g., darkly-suite, provendoro)"
+  echo "  --workspace N   Use workspace model (workspace number)"
+  echo "  clone-count     Number of clones to launch (default: auto-detect)"
+  echo ""
+  echo "Examples:"
+  echo "  agent-team darkly-suite 4"
+  echo "  agent-team provendoro --workspace 1 3"
+  exit 1
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --workspace|-w)
+      WORKSPACE="$2"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      ;;
+    *)
+      if [ -z "$REPO" ]; then
+        REPO="$1"
+      elif [ -z "$CLONE_COUNT" ]; then
+        CLONE_COUNT="$1"
+      fi
+      shift
+      ;;
+  esac
+done
+
+[ -z "$REPO" ] && usage
+
+# Determine clone directories
+CLONE_DIRS=()
+
+if [ -n "$WORKSPACE" ]; then
+  # Workspace model: {repo}-workspaces/{repo}-wN/{repo}-wN-cM/
+  WS_DIR="$BASE_DIR/${REPO}-workspaces/${REPO}-w${WORKSPACE}"
+  if [ ! -d "$WS_DIR" ]; then
+    echo "Error: Workspace directory not found: $WS_DIR"
+    exit 1
+  fi
+  for d in "$WS_DIR"/${REPO}-w${WORKSPACE}-c*/; do
+    [ -d "$d" ] && CLONE_DIRS+=("$d")
+  done
+else
+  # Flat clone model: {repo}-repos/{repo}-N/
+  REPOS_DIR="$BASE_DIR/${REPO}-repos"
+  if [ ! -d "$REPOS_DIR" ]; then
+    echo "Error: Repos directory not found: $REPOS_DIR"
+    exit 1
+  fi
+  for d in "$REPOS_DIR"/${REPO}-*/; do
+    [ -d "$d" ] && CLONE_DIRS+=("$d")
+  done
+fi
+
+if [ ${#CLONE_DIRS[@]} -eq 0 ]; then
+  echo "Error: No clone directories found"
+  exit 1
+fi
+
+# Apply clone count limit if specified
+if [ -n "$CLONE_COUNT" ] && [ "$CLONE_COUNT" -lt ${#CLONE_DIRS[@]} ]; then
+  CLONE_DIRS=("${CLONE_DIRS[@]:0:$CLONE_COUNT}")
+fi
+
+NUM_CLONES=${#CLONE_DIRS[@]}
+
+# Session name
+if [ -n "$WORKSPACE" ]; then
+  SESSION="${REPO}-w${WORKSPACE}"
+else
+  SESSION="${REPO}"
+fi
+
+echo "Launching $NUM_CLONES agents for $SESSION..."
+
+# Kill existing session if present
+tmux kill-session -t "$SESSION" 2>/dev/null || true
+
+# Create session with first clone
+FIRST_DIR="${CLONE_DIRS[0]}"
+FIRST_NAME=$(basename "$FIRST_DIR")
+tmux new-session -d -s "$SESSION" -c "$FIRST_DIR" -n "agents"
+
+# Set pane title for first pane
+tmux select-pane -t "$SESSION:1.1" -T "$FIRST_NAME"
+
+# Create remaining panes
+for ((i=1; i<NUM_CLONES; i++)); do
+  CLONE_DIR="${CLONE_DIRS[$i]}"
+  CLONE_NAME=$(basename "$CLONE_DIR")
+  tmux split-window -t "$SESSION:1" -c "$CLONE_DIR"
+  tmux select-pane -T "$CLONE_NAME"
+done
+
+# Tile panes evenly
+tmux select-layout -t "$SESSION:1" tiled
+
+# Launch Claude Code in each pane
+for ((i=0; i<NUM_CLONES; i++)); do
+  PANE_NUM=$((i + 1))
+  tmux send-keys -t "$SESSION:1.${PANE_NUM}" "claude" Enter
+done
+
+echo "Session '$SESSION' created with $NUM_CLONES agents."
+echo "Attach with: tmux attach -t $SESSION"
+echo ""
+echo "Shortcuts inside tmux:"
+echo "  Alt+Arrow  - Navigate panes"
+echo "  Alt+z      - Zoom/unzoom pane"
+echo "  Alt+b      - Broadcast to all panes"
+echo "  Alt+=      - Re-tile panes evenly"
+echo "  Alt+x      - Kill current pane"

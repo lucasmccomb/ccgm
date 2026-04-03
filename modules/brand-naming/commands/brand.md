@@ -8,6 +8,20 @@ argument-hint: <concept description> [--tlds ai,io,com,life] [--output <path>]
 
 A comprehensive naming research system that explores word spaces, generates creative name candidates, and validates availability across domains, trademarks, app stores, and social media.
 
+## Sub-Agent Model Optimization
+
+When spawning sub-agents, use cheaper models to conserve usage:
+
+| Phase | Sub-Agent | Model |
+|-------|-----------|-------|
+| Phase 1 | Word exploration agents (Datamuse, ConceptNet, Thesaurus, Philosophical) | haiku |
+| Phase 3 | Domain availability checking | haiku |
+| Phase 4-5 | Trademark, app store, social checks | haiku |
+
+The orchestrator remains on the current model for name generation (Phase 2) and scoring/synthesis (Phase 6), which require creative judgment.
+
+---
+
 ## Input
 
 ```
@@ -23,23 +37,24 @@ $ARGUMENTS
 Extract from `$ARGUMENTS`:
 - **Concept description**: What the product/brand is about. Can be a sentence, paragraph, or set of keywords.
 - **`--tlds <list>`**: (Optional) Comma-separated TLDs to check. Default: `ai,io,com,life,work`
-- **`--output <path>`**: (Optional) Where to write the final report. Default: current directory as `brand-research-{timestamp}.md`
+- **`--output <path>`**: (Optional) Where to write the final report. Default: `~/code/docs/brand-research/brand-research-{descriptive-slug}.md`
 - If no arguments provided, use AskUserQuestion to ask what the user wants to name.
 
 ### 0.2 Gather Preferences
 
-Use AskUserQuestion to ask (skip if concept description is very detailed):
+Use AskUserQuestion to ask (skip if concept description is very detailed). Structure the call exactly as follows - every option MUST have both `label` and `description` fields, and each question must have 2-4 options:
 
-1. **Naming style preference** (can select multiple):
-   - Modern/tech (lifebldr, Flickr style)
-   - Philosophical/classical (prosoche, entelechia)
-   - Abstract/invented (telara, kairara)
-   - Descriptive compound (lifealign, dailycraft)
-   - Single real word (flint, cadence, meridian)
+**Question 1** - Naming style (multiSelect: true, header: "Style"):
+- label: "Modern/tech", description: "Vowel-dropped or abbreviated words (lifebldr, Flickr, Grindr style)"
+- label: "Classical/invented", description: "Philosophical, neo-Latin, or invented words rooted in etymology (prosoche, telara)"
+- label: "Compound", description: "Two real words combined into a brand (lifealign, dailycraft, deepwork)"
+- label: "Single word", description: "One real English word as the brand (flint, cadence, meridian)"
 
-2. **Any words or themes to include or avoid?**
-
-3. **Primary TLD preference** (which TLD matters most for the final pick?)
+**Question 2** - TLD preference (multiSelect: false, header: "TLD"):
+- label: ".com", description: "Most recognizable and trusted, but hardest to find available"
+- label: ".ai", description: "Strong for AI/tech products, growing recognition"
+- label: ".io", description: "Popular with developers and tech startups"
+- label: "No preference", description: "Optimize for the best available name regardless of TLD"
 
 ### 0.3 Set Up Output
 
@@ -184,6 +199,8 @@ Write the full candidate list to `$WORK_DIR/candidates.txt` (one per line, no TL
 
 ## Phase 3: Domain Availability Check
 
+**CRITICAL: DNS alone is NOT sufficient to determine domain availability.** Many domains are registered but parked without DNS records (no A record). A domain with no DNS response can still be registered and locked down. The ONLY reliable check is whois registration lookup.
+
 ### 3.1 Check via Instant Domain Search MCP
 
 If the `instant-domain-search` MCP tools are available, use them:
@@ -191,25 +208,53 @@ If the `instant-domain-search` MCP tools are available, use them:
 1. **`search_domains`** - Pass candidate names to get bulk availability across TLDs
 2. **`check_domain_availability`** - Verify top candidates definitively
 
-### 3.2 Fallback: DNS + Whois
+### 3.2 Two-Step: DNS Pre-Filter + Whois Verification (MANDATORY)
 
-If MCP tools are unavailable, fall back to the DNS + whois approach:
+If MCP tools are unavailable, use a two-step process. Both steps are required.
+
+**Step 1: DNS pre-filter (fast, parallel, but unreliable)**
+
+Use DNS to quickly eliminate domains that are definitely taken (have active A records). Domains with no A record are NOT confirmed available - they move to Step 2.
 
 ```bash
-# Quick DNS pre-filter (parallel)
 dig +short "$NAME.$TLD" A 2>/dev/null
-
-# Whois verification for no-DNS results
-whois -h whois.verisign-grs.com "$NAME.com"     # .com
-whois -h whois.nic.io "$NAME.io"                 # .io
-whois -h whois.nic.ai "$NAME.ai"                 # .ai
-whois -h whois.nic.work "$NAME.work"             # .work
-# .life - DNS only (whois server unreliable)
 ```
 
-Run checks in parallel batches of 20 to avoid rate limiting.
+- Has A record = **definitely taken** (skip whois)
+- No A record = **unknown** (MUST verify with whois)
 
-Write results to `$WORK_DIR/domain-results.tsv` with format: `name\ttld\tstatus`.
+**Step 2: Whois verification (MANDATORY for all DNS-clear results)**
+
+Every name that passes the DNS pre-filter MUST be verified via whois before being reported as "available." This is non-negotiable - parked/reserved domains without DNS records are extremely common, especially for short names (4-6 chars).
+
+```bash
+# .com - check Verisign registry directly
+whois -h whois.verisign-grs.com "$NAME.com"
+# If "No match" = truly available. If "Domain Name:" appears = registered.
+
+# .io
+whois -h whois.nic.io "$NAME.io"
+
+# .market
+whois -h whois.nic.market "$NAME.market"
+
+# .app
+whois -h whois.nic.google "$NAME.app"
+
+# .co
+whois -h whois.nic.co "$NAME.co"
+```
+
+**Interpreting whois results:**
+- Response contains `"Domain Name: NAME.TLD"` = **REGISTERED** (not available)
+- Response contains `"No match"` or no domain entry = **AVAILABLE**
+- Timeout or error = **UNKNOWN** (retry or flag as unverified)
+
+Run whois checks in parallel batches of 10-15 to avoid rate limiting (whois servers are slower than DNS).
+
+**Reporting:** Only mark a domain as "avail" if whois confirms it is not registered. Mark DNS-only results as "unverified" and flag them for the user.
+
+Write results to `$WORK_DIR/domain-results.tsv` with format: `name\ttld\tstatus\tmethod` (method = "whois" or "dns-only").
 
 ---
 
@@ -228,6 +273,11 @@ curl -s "https://markerapi.com/api/v2/trademarks/trademark/TERM/username/USERNAM
 If no Marker API credentials, use WebSearch:
 ```
 WebSearch: "CANDIDATE NAME" site:tsdr.uspto.gov OR site:tmsearch.uspto.gov
+```
+
+### Agent Reach: Deep Brand Collision Check
+```bash
+mcporter call 'exa.web_search_exa(query: "CANDIDATE brand company startup app", numResults: 5)'
 ```
 
 For each candidate, note:
@@ -269,6 +319,39 @@ curl -s -o /dev/null -w "%{http_code}" "https://github.com/CANDIDATE"
 # Instagram - use WebSearch
 # Reddit
 curl -s -o /dev/null -w "%{http_code}" "https://www.reddit.com/user/CANDIDATE"
+```
+
+### Agent Reach: Direct GitHub Search
+```bash
+gh search repos "CANDIDATE" --limit 5
+```
+
+### Agent Reach: Direct Twitter Search
+```bash
+bird search "CANDIDATE" -n 5
+# Fallback if bird not configured: mcporter call 'exa.web_search_exa(query: "site:twitter.com CANDIDATE", numResults: 3)'
+```
+
+### Agent Reach: Direct Reddit Search
+```bash
+curl -s "https://www.reddit.com/search.json?q=CANDIDATE&limit=5" -H "User-Agent: agent-reach/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:300], subreddit, score}'
+```
+
+### Agent Reach: Direct YouTube Search
+```bash
+~/.agent-reach-venv/bin/yt-dlp --dump-json "ytsearch3:CANDIDATE" 2>/dev/null | jq '[.[] | {title, channel, view_count, webpage_url}]'
+```
+
+### Brand Sentiment (Agent Reach)
+
+Search Reddit and Twitter for existing associations with the name:
+```bash
+curl -s "https://www.reddit.com/search.json?q=CANDIDATE&sort=top&limit=5" -H "User-Agent: agent-reach/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:200], score}'
+```
+Look for: negative associations, controversial usage, strong existing brands using the name.
+```bash
+# If bird is configured:
+bird search "CANDIDATE" -n 10
 ```
 
 Or if FindME CLI is installed:

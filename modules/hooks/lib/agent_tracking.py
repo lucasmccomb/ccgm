@@ -5,7 +5,7 @@ Multi-agent issue tracking system.
 Provides structured issue lifecycle tracking via a single CSV file per repo
 in the agent log repository. Replaces the label-based claiming system.
 
-Storage: ~/code/lem-agent-logs/{repo}/tracking.csv
+Storage: ~/code/{log-repo}/{repo}/tracking.csv
 Format: CSV with fields: issue,agent,status,branch,pr,epic,title,claimed_at,updated_at
 Concurrency: Standard git flow (commit, pull --rebase, push). Different-row
 edits auto-resolve via rebase.
@@ -46,7 +46,21 @@ ACTIVE_STATUSES = {"claimed", "in-progress", "pr-created", "blocked"}
 TERMINAL_STATUSES = {"merged", "closed", "released"}
 ALL_STATUSES = ACTIVE_STATUSES | TERMINAL_STATUSES
 
-LOG_REPO_DIR = os.path.expanduser("~/code/lem-agent-logs")
+
+def _find_log_repo():
+    """Find the agent log repo directory."""
+    env = os.environ.get("CLAUDE_LOG_REPO")
+    if env and os.path.isdir(env):
+        return env
+    code_dir = os.path.expanduser("~/code")
+    if os.path.isdir(code_dir):
+        for entry in sorted(os.listdir(code_dir)):
+            if entry.endswith("agent-logs") and os.path.isdir(os.path.join(code_dir, entry)):
+                return os.path.join(code_dir, entry)
+    return os.path.expanduser("~/code/agent-logs")
+
+
+LOG_REPO_DIR = _find_log_repo()
 
 # ---------------------------------------------------------------------------
 # Agent identity helpers

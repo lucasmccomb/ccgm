@@ -1,10 +1,21 @@
 ---
 description: Deep verification of a single brand name - domains, trademarks, app stores, social handles
-allowed-tools: Bash, Read, Write, Agent, WebSearch, WebFetch, AskUserQuestion
+allowed-tools: Agent
 argument-hint: <name> [--tlds ai,io,com,life,work]
 ---
 
 # /brand-check - Single Name Deep Verification
+
+Use the Agent tool to execute this workflow on a cheaper model:
+
+- **model**: sonnet
+- **description**: brand name verification
+
+Pass the agent all workflow instructions below. Include the received arguments: `$ARGUMENTS`
+
+After the agent completes, relay its report to the user exactly as received.
+
+---
 
 Run comprehensive availability checks on a single brand name candidate across domains, trademarks, app stores, and social media platforms.
 
@@ -186,6 +197,41 @@ Interpret HTTP codes:
 - 301/302 = taken (redirect to profile)
 - 429 = rate limited (note as "unknown")
 
+### Agent Reach: Direct Twitter Search
+
+```bash
+bird search "NAME" -n 5
+bird search "from:NAME OR @NAME" -n 5
+# Fallback if bird CLI unavailable:
+# mcporter call 'exa.web_search_exa(query: "site:twitter.com NAME", numResults: 3)'
+```
+
+Check for active accounts, brands, or influencers using the name.
+
+### Agent Reach: Direct Reddit Search
+
+```bash
+curl -s "https://www.reddit.com/search.json?q=NAME&limit=5" -H "User-Agent: agent-reach/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:300], subreddit, score}'
+```
+
+Look for subreddits, communities, or products with the name.
+
+### Agent Reach: Direct YouTube Search
+
+```bash
+~/.agent-reach-venv/bin/yt-dlp --dump-json "ytsearch3:NAME" 2>/dev/null | jq '[.[] | {title, channel, view_count, webpage_url}]'
+```
+
+Check for channels or prominent content using the name.
+
+### Agent Reach: Direct GitHub Search
+
+```bash
+gh search repos "NAME" --limit 5
+```
+
+Check for repos, orgs, or notable projects using the name (supplements the URL probe above).
+
 ---
 
 ## Phase 5: Existing Business Check
@@ -197,6 +243,14 @@ WebSearch: "NAME" company OR startup OR app -site:github.com
 ```
 
 Is there an existing company, product, or notable entity using this name?
+
+### Agent Reach: Deep Web Presence Check
+
+```bash
+mcporter call 'exa.web_search_exa(query: "NAME company startup app product", numResults: 5)'
+```
+
+Exa provides semantic search results that surface companies, products, and startups that may not rank highly in traditional search. Compare with WebSearch results above for completeness.
 
 ### 5.2 Business Registration (if Cobalt Intelligence credentials available)
 
