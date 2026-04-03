@@ -200,7 +200,7 @@ Pull the latest log repo and check the tracking CSV for the current repo:
 
 ```bash
 # Pull latest log repo
-cd ~/code/lem-agent-logs && git pull --rebase 2>/dev/null
+cd ~/code/{log-repo-name} && git pull --rebase 2>/dev/null
 ```
 
 Display active claims, stale claims, and unclaimed issues:

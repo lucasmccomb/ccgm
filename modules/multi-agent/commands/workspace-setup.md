@@ -267,7 +267,7 @@ Each sub-agent should:
 
 ### Issue Tracking
 
-- Claims are registered automatically in `lem-agent-logs/{repo}/tracking.csv` by the PostToolUse hook when a branch is created
+- Claims are registered automatically in `{log-repo-name}/{repo}/tracking.csv` by the PostToolUse hook when a branch is created
 - Check tracking state: `python3 ~/.claude/lib/agent_tracking.py list --repo {repo}`
 - Each clone claims issues independently via branch creation
 
@@ -328,7 +328,7 @@ Structure:
   {repo}-w2/
     ...
 
-Issue Tracking: ~/code/lem-agent-logs/{repo}/tracking.csv (auto-updated by hooks)
+Issue Tracking: ~/code/{log-repo-name}/{repo}/tracking.csv (auto-updated by hooks)
 
 Usage:
   Point a coordinator agent at a workspace directory (e.g., ~/code/{repo}-workspaces/{repo}-w0/)

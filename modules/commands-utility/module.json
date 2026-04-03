@@ -1,7 +1,7 @@
 {
   "name": "commands-utility",
   "displayName": "Utility Commands",
-  "description": "Miscellaneous utility commands: /cgr (clear conversation + checkout default branch + rebase), /cws-submit (Chrome Web Store submission walkthrough), /dotsync (CCGM reverse-sync), /user-test (browser-based user testing simulation).",
+  "description": "Utility commands and scripts: /cgr, /cws-submit, /dotsync (CCGM reverse-sync), /user-test, statusline, agent-team launcher, ccgm-sync script.",
   "category": "commands",
   "scope": ["global"],
   "dependencies": [],
@@ -9,8 +9,11 @@
     "commands/cgr.md": { "target": "commands/cgr.md", "type": "command", "template": false },
     "commands/cws-submit.md": { "target": "commands/cws-submit.md", "type": "command", "template": false },
     "commands/dotsync.md": { "target": "commands/dotsync.md", "type": "command", "template": false },
-    "commands/user-test.md": { "target": "commands/user-test.md", "type": "command", "template": false }
+    "commands/user-test.md": { "target": "commands/user-test.md", "type": "command", "template": false },
+    "statusline-command.sh": { "target": "statusline-command.sh", "type": "script", "template": false },
+    "scripts/ccgm-sync.sh": { "target": "scripts/ccgm-sync.sh", "type": "script", "template": false },
+    "scripts/agent-team": { "target": "scripts/agent-team", "type": "script", "template": false }
   },
-  "tags": ["commands", "utility", "git", "browser", "testing"],
+  "tags": ["commands", "utility", "git", "browser", "testing", "statusline", "tmux"],
   "configPrompts": []
 }

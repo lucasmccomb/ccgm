@@ -46,12 +46,20 @@ echo ""
 
 # Run the check
 # grep returns exit 0 if matches found (bad), 1 if no matches (good)
+# Exclude README.md from username check (it contains the actual repo clone URL)
 matches=""
 set +e
 matches=$(grep -rlE "$PATTERN" \
   --include="*.md" --include="*.json" --include="*.py" --include="*.sh" --include="*.yml" \
-  "${existing_targets[@]}" 2>/dev/null)
-grep_exit=$?
+  "${existing_targets[@]}" 2>/dev/null | grep -v "README.md$" || true)
+
+# Also check README.md separately with a pattern that excludes the repo URL
+readme_pattern='/Users/lem|lem-personal|lem-agent-logs|hyhaowdndehadgcwjxtw|hwoxbllmdqvavxthrlql|eluketronic\.app\.n8n\.cloud|lem-mbp|100\.113\.180\.79|iphone171'
+readme_matches=$(grep -lE "$readme_pattern" "$REPO_ROOT/README.md" 2>/dev/null || true)
+if [ -n "$readme_matches" ]; then
+  matches="${matches:+$matches
+}$readme_matches"
+fi
 set -e
 
 if [ -n "$matches" ]; then
