@@ -97,3 +97,11 @@ bash tests/test-installer.sh
 ## Branch Workflow
 
 Feature branches from main. PRs with squash merge.
+
+## Post-Merge: Always Run /docupdate
+
+**After every PR merge to this repo**, run `/docupdate` before moving on. This keeps module counts, phase lists, command references, and feature descriptions in sync with the actual codebase.
+
+This also applies after running `/dotsync` - if files changed, docupdate catches any documentation drift introduced by the sync.
+
+This is non-negotiable for this repo because the docs describe the modules themselves. A new module without updated counts or a changed command without updated descriptions silently misleads users.

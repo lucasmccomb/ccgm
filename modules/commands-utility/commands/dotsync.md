@@ -47,3 +47,9 @@ Tell the user:
 - Which files are unmanaged (not tracked by any CCGM module)
 - Whether changes were committed and pushed
 - The current sync status
+
+### 4. Run /docupdate (if files changed)
+
+If any files were synced back to CCGM (step 2 made changes), run `/docupdate` to catch any documentation drift introduced by those changes.
+
+This ensures module counts, command references, and feature descriptions in README, docs/, and module READMEs stay accurate after every sync.
