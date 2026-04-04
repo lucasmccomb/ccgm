@@ -1,32 +1,28 @@
 # Deep Research & Debugging
 
-Provides two powerful slash commands: `/deepresearch` for comprehensive local-first research and `/debug` for structured root-cause debugging with Opus delegation.
+Provides two powerful slash commands: `/deepresearch` for comprehensive multi-channel research and `/debug` for structured root-cause debugging with Opus delegation.
 
 ## Commands
 
 ### `/deepresearch <topic>`
 
-Runs a local research pipeline that combines self-hosted search with local LLM fact extraction and Anthropic API synthesis. Produces a comprehensive `research.md`.
+Spawns parallel research agents across 15+ internet channels: Reddit, GitHub, YouTube, Exa semantic search, web search, RSS, and Twitter. Produces a comprehensive `research.md` with confidence-rated findings.
 
-**Pipeline:**
-1. **Ollama** (qwen2.5:72b) generates diverse search queries from the topic
-2. **SearXNG** (self-hosted Docker) runs parallel web searches across Google, Bing, and DuckDuckGo
-3. **Ollama** extracts factual claims from each batch of search results
-4. **Anthropic API** (claude-sonnet-4-6) synthesizes all facts into structured research.md
-
-**Depth presets:** Full (7 queries, ~8 min), Standard (5 queries, ~6 min), Lite (3 queries, ~4 min)
+**Depth presets:** Full (all 7 agents), Technical Only, Market & Product, Lite, Custom
 
 **Key features:**
-- SSRF protection (blocks RFC 1918 / loopback URLs from search results)
-- HTML stripping and prompt injection mitigation on all web content
-- Graceful degradation (continues with model knowledge if SearXNG returns no results)
-- Structured progress output on stderr
+- Query decomposition into targeted sub-questions before spawning agents
+- Multi-round iterative research (broad -> focused -> validation)
+- Cross-session continuity via `--extend` flag
+- Full verification pass for high-stakes claims (Full depth)
+- Sub-agents run on Sonnet; orchestrator runs on current model
 
 **Usage:**
 ```
 /deepresearch "dark mode browser extensions"
-/deepresearch "food commerce platform" --depth full
-/deepresearch "habit tracking apps" --output ~/code/docs/research/habits.md
+/deepresearch "food commerce platform" --depth market
+/deepresearch "habit tracking apps" --output ~/code/docs/research/
+/deepresearch "my topic" --extend ~/code/docs/research/prior/research.md
 ```
 
 ### `/debug <problem description>`
@@ -46,71 +42,23 @@ Delegates to an Opus 4.6 agent for deep root-cause analysis. Follows a strict 7-
 /debug tests/auth.test.ts::test_login_flow fails intermittently on CI
 ```
 
-## Prerequisites
-
-`/deepresearch` requires local infrastructure. `/debug` has no prerequisites beyond Opus model access.
-
-### 1. SearXNG (self-hosted search engine)
-
-```bash
-# Run SearXNG in Docker (one-time setup)
-docker run -d --name searxng -p 8888:8080 \
-  -e SEARXNG_SECRET=$(openssl rand -hex 32) \
-  searxng/searxng:latest
-
-# Start after reboot
-docker start searxng
-```
-
-Verify: `curl -s http://localhost:8888/ | head -1` should return HTML.
-
-### 2. Ollama (local LLM)
-
-```bash
-# Install Ollama
-brew install ollama
-
-# Start the service
-brew services start ollama
-
-# Pull the model (one-time, ~40GB download)
-ollama pull qwen2.5:72b
-```
-
-Verify: `ollama list` should show `qwen2.5:72b`.
-
-### 3. Python virtual environment
-
-```bash
-# Create venv
-python3 -m venv ~/.research-tools-venv
-
-# Install packages
-~/.research-tools-venv/bin/pip install httpx ollama anthropic
-```
-
-### 4. Anthropic API key
-
-Export `ANTHROPIC_API_KEY` in your shell profile:
-
-```bash
-echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.zshrc
-```
-
 ## Manual Installation
+
+Copy the command files to your Claude commands directory:
 
 ```bash
 cp commands/deepresearch.md ~/.claude/commands/deepresearch.md
 cp commands/debug.md ~/.claude/commands/debug.md
-mkdir -p ~/.claude/bin
-cp bin/deepresearch-cli.py ~/.claude/bin/deepresearch-cli.py
-chmod +x ~/.claude/bin/deepresearch-cli.py
 ```
+
+## Local Pipeline Upgrade
+
+For higher-quality, faster, and cheaper research, you can replace the agent-based `/deepresearch` with a local pipeline that uses **Ollama** + **SearXNG** + **Anthropic API**. This requires additional setup (Docker, Ollama, Python venv) but eliminates the need for parallel subagents.
+
+See **[deepresearch-local](https://github.com/lucasmccomb/deepresearch-local)** for installation instructions.
 
 ## Dependencies
 
-- **Docker** - for running SearXNG container
-- **Ollama** - for local LLM inference (qwen2.5:72b)
-- **Python 3** - for the research CLI script
-- **Anthropic API key** - for final synthesis step
+- `mcporter` (optional, for Exa semantic search in `/deepresearch`) - install via npm: `npm install -g mcporter`
+- `yt-dlp` (optional, for YouTube metadata in `/deepresearch`) - install via brew: `brew install yt-dlp`
 - Opus model access (for `/debug` delegation)
