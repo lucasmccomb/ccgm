@@ -12,6 +12,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 - [Requirements](#requirements)
 - [Install](#install)
 - [Module Catalog](#module-catalog)
+  - [Companion module: /deepresearch](#companion-module-deepresearch)
 - [Customization](#customization)
 - [Manual Installation](#manual-installation)
 - [Utilities](#utilities)
@@ -121,7 +122,7 @@ For a quick install with a preset:
 | **commands-extra** | commands | /audit (codebase audit), /pwv (Playwright verify), /walkthrough, /promote-rule | - |
 | **commands-utility** | commands | /cws-submit (Chrome Web Store walkthrough), /ccgm-sync (sync config to CCGM + lem-deepresearch), /user-test (browser user testing) | - |
 | **documentation** | commands | /docupdate (comprehensive documentation audit: README, TOC, onboarding, packages, module coverage) | - |
-| **debugging** | commands | /debug (structured root-cause debugging with Opus). For /deepresearch, see [lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch) | - |
+| **debugging** | commands | /debug (structured root-cause debugging with Opus) | - |
 | **brand-naming** | commands | /brand (full naming pipeline with word exploration, domain/trademark/app store checks) and /brand-check (single-name deep verification) | - |
 | **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
 | **session-logging** | workflow | Structured agent session logging with mandatory triggers and startup command | - |
@@ -142,6 +143,24 @@ For a quick install with a preset:
 | **mcp-development** | tech-specific | Building MCP servers: project structure, tool design, error handling, testing, evaluation patterns | - |
 | **shadcn** | tech-specific | shadcn/ui patterns: composition, semantic theming tokens, form architecture, accessibility | - |
 | **tailwind** | tech-specific | Tailwind CSS v4 design system: CSS-first config, design tokens, CVA variants, dark mode, responsive grids | - |
+
+### Companion module: /deepresearch
+
+The `/deepresearch` command is a powerful research pipeline that lives in its own repo: **[lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch)**. It runs a local-first research stack that produces comprehensive, source-backed research documents on any topic.
+
+**How it works:** Ollama (qwen2.5:72b) generates search queries and extracts facts, SearXNG (self-hosted Docker) runs parallel web searches across Google/Bing/DuckDuckGo, and a single Anthropic API call (Sonnet) synthesizes everything into a structured research.md.
+
+**Why it's separate:** It requires local infrastructure (Docker, Ollama with a ~40GB model, a Python venv) that not every CCGM user will want. But if you use `/xplan`, you need this - xplan delegates its research phase to `/deepresearch`.
+
+**Install:**
+
+```bash
+git clone https://github.com/lucasmccomb/lem-deepresearch.git
+cd lem-deepresearch
+./install.sh
+```
+
+The installer sets up SearXNG, Ollama, the Python environment, and copies the command files into `~/.claude/`. See the [lem-deepresearch README](https://github.com/lucasmccomb/lem-deepresearch) for manual setup and troubleshooting.
 
 ## Customization
 
