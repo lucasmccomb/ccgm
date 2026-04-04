@@ -172,13 +172,12 @@ Commands use a sub-agent model for parallel word exploration and verification ph
 
 Miscellaneous utility commands for common workflow tasks.
 
-**Installs**: 4 command files
+**Installs**: 3 command files
 
 | Command | Description |
 |---------|-------------|
-| `/cgr` | Clear conversation, checkout default branch, and rebase on latest origin |
 | `/cws-submit` | Guided walkthrough for submitting a Chrome extension to the Chrome Web Store |
-| `/ccgm-sync` | Sync local Claude Code config changes back to the CCGM repo as the source of truth |
+| `/ccgm-sync` | Sync local Claude Code config changes back to CCGM and lem-deepresearch repos |
 | `/user-test` | Browser-based user testing simulation using Chrome automation tools |
 
 **Dependencies**: None

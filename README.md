@@ -119,7 +119,7 @@ For a quick install with a preset:
 | **hooks** | core | Python hooks: issue-first workflow, commit format, branch protection, auto-approval for safe ops | settings |
 | **commands-core** | commands | /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue) | - |
 | **commands-extra** | commands | /audit (codebase audit), /pwv (Playwright verify), /walkthrough, /promote-rule | - |
-| **commands-utility** | commands | /cgr (clear + checkout + rebase), /cws-submit (Chrome Web Store walkthrough), /ccgm-sync (sync config to CCGM), /user-test (browser user testing) | - |
+| **commands-utility** | commands | /cws-submit (Chrome Web Store walkthrough), /ccgm-sync (sync config to CCGM + lem-deepresearch), /user-test (browser user testing) | - |
 | **documentation** | commands | /docupdate (comprehensive documentation audit: README, TOC, onboarding, packages, module coverage) | - |
 | **debugging** | commands | /debug (structured root-cause debugging with Opus). For /deepresearch, see [lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch) | - |
 | **brand-naming** | commands | /brand (full naming pipeline with word exploration, domain/trademark/app store checks) and /brand-check (single-name deep verification) | - |
