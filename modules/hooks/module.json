@@ -51,6 +51,11 @@
       "type": "lib",
       "template": false
     },
+    "lib/agent_sessions.py": {
+      "target": "lib/agent_sessions.py",
+      "type": "lib",
+      "template": false
+    },
     "hooks/check-migration-timestamps.py": {
       "target": "hooks/check-migration-timestamps.py",
       "type": "hook",
