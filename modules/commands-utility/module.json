@@ -1,13 +1,12 @@
 {
   "name": "commands-utility",
   "displayName": "Utility Commands",
-  "description": "Utility commands and scripts: /cgr, /cws-submit, /ccgm-sync (reverse-sync local config to CCGM + lem-deepresearch), /user-test, statusline, agent-team launcher.",
+  "description": "Utility commands and scripts: /cws-submit, /ccgm-sync (reverse-sync local config to CCGM + lem-deepresearch), /user-test, statusline, agent-team launcher.",
   "category": "commands",
   "scope": ["global"],
   "dependencies": [],
   "files": {
-    "commands/cgr.md": { "target": "commands/cgr.md", "type": "command", "template": false },
-    "commands/cws-submit.md": { "target": "commands/cws-submit.md", "type": "command", "template": false },
+"commands/cws-submit.md": { "target": "commands/cws-submit.md", "type": "command", "template": false },
     "commands/ccgm-sync.md": { "target": "commands/ccgm-sync.md", "type": "command", "template": false },
     "commands/user-test.md": { "target": "commands/user-test.md", "type": "command", "template": false },
     "statusline-command.sh": { "target": "statusline-command.sh", "type": "script", "template": false },

@@ -4,16 +4,6 @@ Miscellaneous utility commands for common Claude Code workflows.
 
 ## Commands
 
-### `/cgr` - Clear + Git Rebase
-
-Delegates to a Haiku agent to clear the conversation and reset to the default branch with latest origin. Detects default branch automatically (main/master).
-
-```
-/cgr
-```
-
-After completing, the conversation resets to a fresh state.
-
 ### `/cws-submit` - Chrome Web Store Submission
 
 Step-by-step walkthrough for submitting a Chrome extension to the Chrome Web Store. Uses walkthrough mode (one step at a time, waits for confirmation).
@@ -52,7 +42,6 @@ Produces `docs/user-test-problems.md` and `docs/user-test-solutions.md` in the p
 ## Manual Installation
 
 ```bash
-cp commands/cgr.md ~/.claude/commands/cgr.md
 cp commands/cws-submit.md ~/.claude/commands/cws-submit.md
 cp commands/ccgm-sync.md ~/.claude/commands/ccgm-sync.md
 cp commands/user-test.md ~/.claude/commands/user-test.md

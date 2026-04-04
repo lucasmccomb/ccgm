@@ -231,24 +231,6 @@ Installed by the **commands-utility** module.
 
 ---
 
-### /cgr
-
-**Clear conversation, checkout default branch, and rebase on latest origin.**
-
-Resets the working context to a clean state - useful when starting a new task or after completing a feature.
-
-**What happens**:
-1. Clears the current conversation context
-2. Checks out the default branch (main or master)
-3. Rebases on `origin/main` to sync with the latest remote state
-
-**Usage**:
-```
-/cgr
-```
-
----
-
 ### /cws-submit
 
 **Guided Chrome Web Store submission walkthrough.**
