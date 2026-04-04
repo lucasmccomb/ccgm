@@ -1,0 +1,31 @@
+{
+  "name": "remote-server",
+  "displayName": "Remote Server",
+  "description": "SSH access to a remote server. Adds /remote command for health checks and remote command execution. Delegates to Haiku.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "commands/onremote.md": { "target": "commands/onremote.md", "type": "command", "template": true },
+    "rules/remote-server.md": { "target": "rules/remote-server.md", "type": "rule", "template": false },
+    "settings.partial.json": { "target": "settings.json", "type": "config", "merge": true, "template": false }
+  },
+  "tags": ["ssh", "remote", "server", "infrastructure"],
+  "configPrompts": [
+    {
+      "key": "__REMOTE_HOST__",
+      "prompt": "Remote server hostname or IP address (e.g. 192.168.1.100 or server.tailscale.ts.net)?",
+      "default": ""
+    },
+    {
+      "key": "__REMOTE_USER__",
+      "prompt": "SSH username on the remote server?",
+      "default": ""
+    },
+    {
+      "key": "__REMOTE_ALIAS__",
+      "prompt": "Short name for this server (used in status output, e.g. 'home-server')?",
+      "default": "remote-server"
+    }
+  ]
+}
