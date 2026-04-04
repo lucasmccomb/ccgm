@@ -1,19 +1,24 @@
 ---
 description: Session startup - check logs, git status, open issues, and orient
-allowed-tools: Bash, Read, Glob, Grep
+allowed-tools: Agent
 ---
 
 # /startup - Session Startup
 
+Use the Agent tool to execute this entire workflow on a cheaper model:
+
+- **model**: haiku
+- **description**: session startup
+
+Pass the agent all workflow instructions below.
+
+After the agent completes, relay its session summary dashboard to the user exactly as received. Then wait for the user's next instruction.
+
+---
+
+## Workflow Instructions
+
 Initialize a new session by checking logs, git status, open issues, and establishing context.
-
-## Input
-
-```
-$ARGUMENTS
-```
-
-## Instructions
 
 ### 1. Derive Agent Identity
 
