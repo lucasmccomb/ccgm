@@ -130,6 +130,39 @@ Determine how to allocate agents based on:
    fi
    ```
 
+**1b. Check for occupied clones**
+
+After discovering clone directories, check which have active sessions:
+
+```bash
+python3 ~/.claude/lib/agent_sessions.py 2>/dev/null | python3 -c "
+import json, sys
+sessions = json.load(sys.stdin)
+for s in sessions:
+    if s.get('cwd'):
+        print(s['cwd'])
+" 2>/dev/null
+```
+
+Compare the output CWDs against the clone directories. Any clone directory that matches an active session CWD is **occupied** and should be excluded from assignment unless the user explicitly overrides.
+
+In the execution plan presentation, mark occupied clones clearly:
+```
+Wave 1 (parallel):
+  agent-w0-c0 (habitpro-ai-w0-c0): #42 - Add dark mode toggle
+  agent-w0-c1 (habitpro-ai-w0-c1): #43 - Fix login redirect
+  agent-w0-c2 (habitpro-ai-w0-c2): [OCCUPIED - PID 78859, up 2h, branch: 166-api-native] - SKIPPED
+  agent-w0-c3 (habitpro-ai-w0-c3): #44 - Update onboarding flow
+```
+
+If all available clones are occupied, report this and ask the user:
+> "All clones in this workspace are occupied by active sessions. Would you like to:
+> 1. Wait for sessions to finish before proceeding
+> 2. Proceed anyway (risk of conflict)
+> 3. Cancel"
+
+If agent_sessions.py is not available, skip this check and proceed normally.
+
 2. **Issue dependencies**: Group into waves
    - **Wave 1**: Issues with no dependencies (can run in parallel)
    - **Wave 2**: Issues that depend on Wave 1 issues
