@@ -1,12 +1,12 @@
 # remote-server
 
-SSH access to a configured remote server. Adds a `/remote` command for health checks and remote command execution. All operations delegate to Haiku to minimize token usage.
+SSH access to a configured remote server. Adds a `/onremote` command for health checks and remote command execution. All operations delegate to Haiku to minimize token usage.
 
 ## What It Installs
 
 | File | Purpose |
 |------|---------|
-| `~/.claude/commands/remote.md` | `/remote` slash command |
+| `~/.claude/commands/onremote.md` | `/onremote` slash command |
 | `~/.claude/rules/remote-server.md` | Tells Claude when/how to use the remote |
 | `~/.claude/settings.json` | Adds `ssh`, `scp`, `rsync` to the allow list |
 
@@ -22,17 +22,17 @@ ssh-copy-id -i ~/.ssh/id_ed25519.pub user@remote-host
 ## Usage
 
 ```bash
-/remote              # Health check: uptime, disk, active processes
-/remote "command"    # Run a command on the remote server
+/onremote              # Health check: uptime, disk, active processes
+/onremote "command"    # Run a command on the remote server
 ```
 
 Examples:
 
 ```bash
-/remote "tail -n 50 ~/logs/app.log"
-/remote "df -h"
-/remote "ps aux | grep myapp"
-/remote "brew services restart myservice"
+/onremote "tail -n 50 ~/logs/app.log"
+/onremote "df -h"
+/onremote "ps aux | grep myapp"
+/onremote "brew services restart myservice"
 ```
 
 ## Manual Installation
@@ -40,7 +40,7 @@ Examples:
 If not using the CCGM installer, copy the files and substitute your values:
 
 ```bash
-# In commands/remote.md and rules/remote-server.md, replace:
+# In commands/onremote.md and rules/remote-server.md, replace:
 # __REMOTE_HOST__  → your server's IP or hostname
 # __REMOTE_USER__  → your SSH username
 # __REMOTE_ALIAS__ → a friendly name for the server

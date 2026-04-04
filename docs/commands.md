@@ -311,9 +311,9 @@ Simulates a user testing session using Chrome automation tools to test a web app
 
 ---
 
-## Research and debugging commands
+## Documentation commands
 
-Installed by the **debugging** module. For `/deepresearch`, see [lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch).
+Installed by the **documentation** module.
 
 ---
 
@@ -344,30 +344,9 @@ Installed by the **documentation** module.
 
 ---
 
-### /deepresearch
+## Debugging commands
 
-**Deep multi-channel research across 15+ platforms.**
-
-Spawns parallel research agents to gather comprehensive information from web search, GitHub, Reddit, YouTube, and other platforms using standalone tools (curl, gh, mcporter, yt-dlp, WebSearch).
-
-**Research channels**:
-- Web search (Exa via mcporter, WebSearch)
-- GitHub (repos, issues, discussions via gh CLI)
-- Reddit (JSON API via curl)
-- YouTube (metadata via yt-dlp)
-- Any web page (Jina Reader via curl)
-
-**What happens**:
-1. Breaks the research question into parallel sub-queries
-2. Spawns agents per channel using standalone CLI tools
-3. Aggregates and deduplicates findings
-4. Synthesizes into a structured report with sources
-
-**Usage**:
-```
-/deepresearch "how do teams handle multi-agent coordination in Claude Code"
-/deepresearch  # Will ask for the research topic interactively
-```
+Installed by the **debugging** module. For `/deepresearch`, see [lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch) (standalone repo, installed separately).
 
 ---
 
@@ -611,3 +590,39 @@ Faster alternative to `/startup` - initializes session logging without the full 
 ```
 
 **Installed by**: session-logging module
+
+---
+
+## Remote server commands
+
+Installed by the **remote-server** module.
+
+---
+
+### /onremote
+
+**Run a task on a remote server by describing it in natural language.**
+
+Delegates to a Haiku agent to minimize token usage. Interprets natural language input, determines the appropriate SSH commands, runs them on the configured remote server, and reports results in plain language.
+
+**Modes**:
+- **No arguments** - health check: shows uptime, disk usage, and active processes
+- **With arguments** - task mode: interprets intent and runs appropriate SSH commands
+
+**What happens**:
+1. Delegates to Haiku agent
+2. Interprets the natural language task description
+3. Determines SSH commands needed to accomplish it
+4. Runs commands via `ssh user@host "..."`
+5. Reports what was done and what the result was
+
+**Usage**:
+```
+/onremote                                       # Health check
+/onremote "check if myapp is running"
+/onremote "how much disk space is left"
+/onremote "show the last 50 lines of the app log"
+/onremote "restart the myservice process"
+```
+
+**Installed by**: remote-server module
