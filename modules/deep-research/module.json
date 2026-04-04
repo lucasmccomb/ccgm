@@ -1,14 +1,15 @@
 {
   "name": "deep-research",
   "displayName": "Deep Research & Debugging",
-  "description": "/deepresearch (multi-channel research using parallel agents) and /debug (structured root-cause debugging with Opus delegation).",
+  "description": "/deepresearch (local Ollama + SearXNG research pipeline with Sonnet synthesis) and /debug (structured root-cause debugging with Opus delegation).",
   "category": "commands",
   "scope": ["global"],
   "dependencies": [],
   "files": {
-    "commands/deepresearch.md": { "target": "commands/deepresearch.md", "type": "command", "template": false },
-    "commands/debug.md": { "target": "commands/debug.md", "type": "command", "template": false }
+    "commands/deepresearch.md": { "target": "commands/deepresearch.md", "type": "command", "template": true },
+    "commands/debug.md": { "target": "commands/debug.md", "type": "command", "template": false },
+    "bin/deepresearch-cli.py": { "target": "bin/deepresearch-cli.py", "type": "bin", "template": false }
   },
-  "tags": ["commands", "research", "debugging", "web-search"],
+  "tags": ["commands", "research", "debugging", "ollama", "searxng", "local"],
   "configPrompts": []
 }
