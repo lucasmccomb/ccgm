@@ -59,6 +59,22 @@ def warn(message):
     print(json.dumps(output))
 
 
+def check_live_session_in_cwd():
+    """Check if another live Claude session is running in this working directory."""
+    try:
+        sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
+        from agent_sessions import get_active_sessions
+        my_cwd = os.getcwd()
+        sessions = get_active_sessions(exclude_cwd=my_cwd)
+        # Check if any session is in the same directory
+        for s in sessions:
+            if s.get("cwd") and os.path.realpath(s["cwd"]) == os.path.realpath(my_cwd):
+                return s
+    except Exception:
+        pass
+    return None
+
+
 def main():
     try:
         data = json.load(sys.stdin)
@@ -80,8 +96,20 @@ def main():
         sys.exit(0)
 
     # Only intercept git checkout -b
-    if not re.match(r"git\s+checkout\s+-b\s+\d+-", command):
+    if not re.match(r"git\s+checkout\s+-b\s+", command):
         sys.exit(0)
+
+    # Check for live session in current directory (highest priority warning)
+    live_session = check_live_session_in_cwd()
+    if live_session:
+        pid = live_session.get("pid", "?")
+        uptime = live_session.get("uptime", "?")
+        branch = live_session.get("branch") or "unknown branch"
+        warn(
+            f"A live Claude session (PID {pid}, up {uptime}) is already running in this directory "
+            f"on branch '{branch}'. Creating a new branch here may conflict with that session's work. "
+            f"Consider using a different clone directory."
+        )
 
     issue_num = extract_issue_from_branch(command)
     if not issue_num:
