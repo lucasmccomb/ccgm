@@ -1,29 +1,20 @@
-# Deep Research & Debugging
+# Debugging
 
-Provides two powerful slash commands: `/deepresearch` for comprehensive multi-channel research and `/debug` for structured root-cause debugging with Opus delegation.
+Provides `/debug` for structured root-cause debugging with Opus delegation.
+
+## `/deepresearch` - Installed Separately
+
+The `/deepresearch` command is available as a standalone install from **[deepresearch-local](https://github.com/lucasmccomb/deepresearch-local)**. It uses a local Ollama + SearXNG + Sonnet pipeline for comprehensive research.
+
+If you use `/xplan`, you need `/deepresearch` installed - xplan delegates its research phase to it.
+
+```bash
+git clone https://github.com/lucasmccomb/deepresearch-local.git
+cd deepresearch-local
+./install.sh
+```
 
 ## Commands
-
-### `/deepresearch <topic>`
-
-Spawns parallel research agents across 15+ internet channels: Reddit, GitHub, YouTube, Exa semantic search, web search, RSS, and Twitter. Produces a comprehensive `research.md` with confidence-rated findings.
-
-**Depth presets:** Full (all 7 agents), Technical Only, Market & Product, Lite, Custom
-
-**Key features:**
-- Query decomposition into targeted sub-questions before spawning agents
-- Multi-round iterative research (broad -> focused -> validation)
-- Cross-session continuity via `--extend` flag
-- Full verification pass for high-stakes claims (Full depth)
-- Sub-agents run on Sonnet; orchestrator runs on current model
-
-**Usage:**
-```
-/deepresearch "dark mode browser extensions"
-/deepresearch "food commerce platform" --depth market
-/deepresearch "habit tracking apps" --output ~/code/docs/research/
-/deepresearch "my topic" --extend ~/code/docs/research/prior/research.md
-```
 
 ### `/debug <problem description>`
 
@@ -44,21 +35,10 @@ Delegates to an Opus 4.6 agent for deep root-cause analysis. Follows a strict 7-
 
 ## Manual Installation
 
-Copy the command files to your Claude commands directory:
-
 ```bash
-cp commands/deepresearch.md ~/.claude/commands/deepresearch.md
 cp commands/debug.md ~/.claude/commands/debug.md
 ```
 
-## Local Pipeline Upgrade
-
-For higher-quality, faster, and cheaper research, you can replace the agent-based `/deepresearch` with a local pipeline that uses **Ollama** + **SearXNG** + **Anthropic API**. This requires additional setup (Docker, Ollama, Python venv) but eliminates the need for parallel subagents.
-
-See **[deepresearch-local](https://github.com/lucasmccomb/deepresearch-local)** for installation instructions.
-
 ## Dependencies
 
-- `mcporter` (optional, for Exa semantic search in `/deepresearch`) - install via npm: `npm install -g mcporter`
-- `yt-dlp` (optional, for YouTube metadata in `/deepresearch`) - install via brew: `brew install yt-dlp`
 - Opus model access (for `/debug` delegation)
