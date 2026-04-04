@@ -316,6 +316,33 @@ Installed by the **deep-research** module.
 
 ---
 
+### /docupdate
+
+**Comprehensive documentation audit and update.**
+
+Spawns parallel audit agents to find every gap between your documentation and actual codebase state, then applies targeted fixes.
+
+**What it audits**:
+- README accuracy (packages, features, commands, setup steps, versions)
+- Table of contents vs actual headings in every doc file
+- Onboarding/setup flow vs actual prerequisites, env vars, and scripts
+- Package/dependency lists vs what is actually installed
+- Module and feature coverage vs what exists in source
+
+**Usage**:
+```
+/docupdate                    # Full audit and fix
+/docupdate --scope toc        # TOC only
+/docupdate --scope readme     # README only
+/docupdate --dry-run          # Report gaps without making changes
+```
+
+**Works in**: Any project type (npm, Cargo, Python, Ruby, Go, monorepo).
+
+Installed by the **documentation** module.
+
+---
+
 ### /deepresearch
 
 **Deep multi-channel research across 15+ platforms.**

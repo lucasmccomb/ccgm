@@ -185,6 +185,22 @@ Miscellaneous utility commands for common workflow tasks.
 
 ---
 
+### documentation
+
+Comprehensive documentation audit and update command.
+
+**Installs**: 1 command file
+
+| Command | Description |
+|---------|-------------|
+| `/docupdate` | Audit and update README, TOC, onboarding flow, package lists, and module coverage against actual codebase state |
+
+**What it does**: Spawns parallel audit agents to check all documentation against the real codebase, then applies targeted fixes. Checks packages listed vs installed, TOC entries vs actual headings, setup steps vs actual requirements, and module docs vs source. Works in any project type.
+
+**Dependencies**: None
+
+---
+
 ### deep-research
 
 Multi-channel research and structured debugging commands powered by specialized agents.

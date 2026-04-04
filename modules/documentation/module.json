@@ -1,0 +1,13 @@
+{
+  "name": "documentation",
+  "displayName": "Documentation Update",
+  "description": "/docupdate - comprehensive documentation audit and update. Checks README, TOC, onboarding flows, package lists, and module coverage against actual codebase state.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "commands/docupdate.md": { "target": "commands/docupdate.md", "type": "command", "template": false }
+  },
+  "tags": ["commands", "documentation", "maintenance"],
+  "configPrompts": []
+}
