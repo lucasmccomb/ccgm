@@ -93,7 +93,7 @@ For a quick install with a preset:
 | **minimal** | autonomy, git-workflow | Getting started |
 | **standard** | autonomy, git-workflow, hooks, settings, commands-core, commands-utility | Most users |
 | **full** | All 28 modules | Power users |
-| **team** | standard + github-protocols, code-quality | Teams |
+| **team** | autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification | Teams |
 
 ### Other install options
 
@@ -160,7 +160,7 @@ Config files use placeholders that are expanded during installation:
 | `__USERNAME__` | GitHub username | hooks |
 | `__CODE_DIR__` | Code workspace directory | settings |
 | `__LOG_REPO__` | Agent log repo name | session-logging |
-| `__TIMEZONE__` | Your timezone | session-logging |
+| `__TIMEZONE__` | Your timezone | - |
 | `__DEFAULT_MODE__` | Permission mode (ask/dontAsk) | settings |
 
 ## Manual Installation
@@ -230,7 +230,7 @@ The `docs/` directory contains comprehensive documentation:
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Module Catalog](docs/modules.md) | Detailed reference for all 28 modules |
-| [Commands Reference](docs/commands.md) | All 24 slash commands with usage examples |
+| [Commands Reference](docs/commands.md) | All 25 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 10 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |
