@@ -9,6 +9,7 @@
     "rules/session-logging.md": { "target": "rules/session-logging.md", "type": "rule", "template": false },
     "log-system.md": { "target": "log-system.md", "type": "doc", "template": false },
     "commands/startup.md": { "target": "commands/startup.md", "type": "command", "template": false },
+    "commands/log-init.md": { "target": "commands/log-init.md", "type": "command", "template": false },
     "hooks/auto-startup.py": { "target": "hooks/auto-startup.py", "type": "hook", "template": false },
     "settings.partial.json": { "target": "settings.json", "type": "config", "merge": true, "template": false }
   },
