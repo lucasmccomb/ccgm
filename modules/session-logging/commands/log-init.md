@@ -109,15 +109,32 @@ git branch --show-current
 
 ### 5. Output Status
 
-Print exactly one line:
+Check for sibling sessions in the same repo (other live Claude CLI sessions):
+
+```bash
+python3 ~/.claude/lib/agent_sessions.py --repo "$REPO_NAME" --exclude-cwd "$PWD" --text 2>/dev/null
+```
+
+If the command is unavailable or returns nothing, skip silently.
+
+Print the log line, then optionally a sessions line if siblings exist:
 
 ```
 Log: {agent-id} @ {log-file-path} [new | existing]
+Sessions: {agent-id} (branch: {branch}, up {uptime}) | ...
 ```
 
-Example:
+The Sessions line is only shown when at least one sibling session exists. Format each sibling compactly: `{agent_id or pid} (branch: {branch}, up {uptime})`. If agent_id is unknown, use `pid:{pid}`.
+
+Example with siblings:
 ```
 Log: agent-0 @ ~/code/{log-repo-name}/my-repo/20260404/agent-0.md [new]
+Sessions: agent-w0-c1 (branch: 44-feature, up 45m) | agent-w0-c3 (branch: main, up 2h)
+```
+
+Example without siblings (single line, unchanged):
+```
+Log: agent-0 @ ~/code/{log-repo-name}/my-repo/20260404/agent-0.md [existing]
 ```
 
 That is all. No dashboard, no recommendations, no issue list.
