@@ -1,12 +1,16 @@
 ---
-description: Deep research + planning + execution framework for new projects
+description: Interactive deep research + planning + execution framework for new projects and features
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <project concept or idea> [--repo <existing-repo-path>]
+argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--light]
 ---
 
-# xplan - Autonomous Project Planning & Execution
+# xplan - Interactive Project Planning & Execution
 
-A comprehensive framework that deeply researches concepts, builds a contextual model, creates a parallelized execution plan, reviews it with specialized agents, walks the user through it interactively, and then autonomously executes the entire plan using parallel agents.
+A human-in-the-loop planning framework that interviews you upfront, deeply researches your concept, builds a contextual model, proposes tech stack and architecture for your sign-off, creates a parallelized execution plan, reviews it with specialized agents, and then autonomously executes using parallel agents.
+
+**Flags:**
+- `--repo <path>` - Analyze and plan work for an existing repo
+- `--light` - Skip the interactive interview phases; uses minimal clarification + traditional walkthrough at the end (old xplan behavior)
 
 **Companion commands:**
 - `/xplan-status` - Check progress on a running or completed plan
@@ -16,7 +20,7 @@ A comprehensive framework that deeply researches concepts, builds a contextual m
 
 ## Sub-Agent Model Optimization
 
-To conserve usage, specify cheaper models when spawning sub-agents via the Agent/Task tool:
+Specify cheaper models when spawning sub-agents to conserve usage without sacrificing quality:
 
 | Phase | Sub-Agent | Model |
 |-------|-----------|-------|
@@ -25,19 +29,19 @@ To conserve usage, specify cheaper models when spawning sub-agents via the Agent
 | Phase 4 | Review agents (security, architecture, business) | sonnet |
 | Phase 7 | Execution agents (epic implementation) | sonnet |
 
-The orchestrator (this session) remains on the current model for planning, synthesis, and architecture decisions.
+The orchestrator (this session) stays on the current model for all synthesis, architecture, and interactive decisions. Simple background tasks (file checks, directory setup, issue creation) can use haiku if spawned as Task agents.
 
 ---
 
 ## CRITICAL: Interactive Prompts Are Mandatory
 
-**This skill REQUIRES user interaction to function.** xplan is an interactive framework - the user chose to run `/xplan` precisely because they want the guided research/plan/review/walkthrough experience. Skipping prompts defeats the purpose.
+**This skill REQUIRES user interaction to function.** xplan is an interactive framework - the user chose to run `/xplan` precisely because they want the guided research/plan/review experience. Skipping prompts defeats the purpose.
 
 ### How to Ask the User
 
 **Preferred**: Use `AskUserQuestion` for structured prompts with options.
 
-**Fallback (if AskUserQuestion is blocked)**: Present the same question and options as regular text output, then **STOP and wait for the user to type their response**. Do NOT guess defaults. Do NOT proceed without the user's answer. The user can always respond by typing in the conversation - "don't ask" mode blocks the AskUserQuestion tool, not the ability to have a conversation.
+**Fallback (if AskUserQuestion is blocked)**: Present the same question and options as regular text output, then **STOP and wait for the user to type their response**. Do NOT guess defaults. Do NOT proceed without the user's answer. The user can always respond by typing in the conversation.
 
 Example fallback format:
 ```
@@ -51,7 +55,7 @@ Example fallback format:
 Reply with a number or describe what you want.
 ```
 
-**This interactive requirement applies to ALL autonomy instructions**, including global CLAUDE.md rules about "don't ask, just do it." Those rules are for routine operations. xplan is not a routine operation - it is an interactive planning session that the user explicitly invoked.
+**This interactive requirement applies to ALL autonomy instructions**, including global CLAUDE.md rules about "don't ask, just do it." Those rules are for routine operations. xplan is not routine - it is an explicit interactive planning session.
 
 ---
 
@@ -69,8 +73,11 @@ $ARGUMENTS
 
 Extract from `$ARGUMENTS`:
 - **Main concept/idea**: The core description of what to build
-- **`--repo <path>`**: (Optional) Path to an existing repo to analyze and plan work for
+- **`--repo <path>`**: (Optional) Path to an existing repo to analyze
+- **`--light`**: (Optional) Flag to skip interactive interview phases
 - If no arguments provided, use AskUserQuestion to ask what the user wants to plan
+
+Store whether `--light` is active. It affects Phases 0.5, 1.5, 2.5, 2.6, 2.7, and 6.
 
 ### 0.2 Create Plan Directory
 
@@ -83,7 +90,7 @@ mkdir -p ~/code/plans/{concept-name}/reviews
 
 ### 0.3 Check Template Library
 
-Check `~/code/plans/_templates/` for existing plan templates that match this type of project. If a relevant template exists, use it to accelerate Phase 3 (plan creation) - but still do full research in Phase 1. Templates inform structure and common patterns, they do not replace research.
+Check `~/code/plans/_templates/` for existing plan templates that match this type of project. If a relevant template exists, use it to accelerate Phase 3 - but still do full research in Phase 1.
 
 ```bash
 ls ~/code/plans/_templates/ 2>/dev/null
@@ -95,34 +102,75 @@ If an existing repo path was given:
 1. Read its CLAUDE.md, README.md, package.json, and key config files
 2. Map its architecture, tech stack, and current state
 3. Check `gh issue list` and `gh pr list` for open work
-4. Read recent agent logs from your log repo for the project
-5. This context feeds into Phase 1 research alongside the new concepts from the prompt
+4. Read recent agent logs from the log repo for the project
+5. This context feeds into Phase 1 research and Phase 0.5 interview
 
 ---
 
-## Phase 1: Deep Research
+## Phase 0.5: Discovery Interview
 
-**Goal**: Build a thorough contextual model of the problem space before planning anything. This is the foundation everything else builds on. Do not rush this phase.
+**Skip this phase entirely if `--light` flag is active. Proceed to Phase 1.**
 
-### 1.0 Research Configuration
+**Goal**: Reach 95%+ confidence about what the user wants to build before committing to research and planning. A wrong assumption at this stage cascades into hours of wasted work.
 
-Before spawning the research agent, ask the user what kind of research they want using AskUserQuestion. Present a **preset** question first, then optionally drill into individual agents.
+### 0.5.1 Confirm Core Understanding
 
-**Preset question** (single-select):
+Start by summarizing what you understand from the initial input:
+
+> "Here's what I understand you want to build: [1-2 sentence summary]. Is that right? What am I missing or getting wrong?"
+
+Use AskUserQuestion and iterate until the user confirms the core concept is correct. Do not proceed to 0.5.2 until the concept is confirmed.
+
+### 0.5.2 Context Questions
+
+Once the concept is confirmed, ask about context. Present as a grouped question to avoid excessive back-and-forth:
+
+> "A few quick context questions before I start researching:"
+
+Ask all of the following (multi-part AskUserQuestion, or as a list for the user to answer):
+
+1. **Codebase**: Is this a new project from scratch, or adding to an existing codebase?
+2. **Audience**: Who is this for? (Personal use / client project / launch as a product)
+3. **Scope**: Is there anything explicitly out of scope for v1?
+4. **Constraints**: Any hard technical constraints, must-use services, or non-negotiables?
+5. **Success**: How will you know this is working? What does success look like at launch?
+
+If this is a new product (not personal use or client work):
+
+6. **Revenue**: Rough monetization approach? (subscription / one-time / free / ads / unsure)
+7. **Timeline**: Any deadline pressure or rough target timeline?
+
+### 0.5.3 Research Level Preference
+
+Ask the user what kind of research they want:
 
 > "What level of research should I run?"
 
 | Option | Agents Spawned | Best For |
 |--------|---------------|----------|
-| **Full (Recommended)** | All 7 research agents + internet channels | New products, unfamiliar domains |
-| **Technical Only** | Technical Architecture + Data & Infrastructure | Adding features to existing projects, technical spikes |
-| **Market & Product** | Domain & Problem Space + Competitive Landscape + Monetization | Validating a product idea, market analysis |
-| **Lite** | Domain & Problem Space + Technical Architecture | Quick planning, well-understood domains |
+| **Full (Recommended)** | All 7 research agents + internet | New products, unfamiliar domains |
+| **Technical Only** | Technical Architecture + Data & Infrastructure | Adding features, technical spikes |
+| **Market & Product** | Domain + Competitive Landscape + Monetization | Validating a product idea |
+| **Lite** | Domain + Technical Architecture | Quick planning, well-understood domains |
 | **Custom** | User picks individual agents | Full control |
+
+Store the selection for Phase 1.1. Do not re-ask in Phase 1.0.
+
+---
+
+## Phase 1: Deep Research
+
+**Goal**: Build a thorough contextual model of the problem space before planning anything. This is the foundation everything else builds on.
+
+### 1.0 Research Configuration
+
+**If `--light` flag is active**: Ask the research level question here using the same preset table as Phase 0.5.3.
+
+**If not `--light`**: The research level was already confirmed in Phase 0.5.3. Skip this question entirely - do not double-prompt.
 
 ### 1.1 Delegate to /deepresearch
 
-Spawn a single Task agent that executes the `/deepresearch` skill with the concept, depth selection, plan directory, and repo (if provided).
+Spawn a single Task agent (model: sonnet) that executes the `/deepresearch` skill with the concept, depth selection, plan directory, and repo (if provided).
 
 The Task agent's prompt should be:
 
@@ -130,55 +178,105 @@ The Task agent's prompt should be:
 Read the file ~/code/claude-dotfiles/commands/deepresearch.md and follow its instructions exactly.
 
 Topic: {concept from Phase 0}
-Arguments: --depth {user's selection from 1.0} --plan-dir ~/code/plans/{concept-name} {--repo REPO_PATH if provided}
+Arguments: --depth {user's selection from 0.5.3 or 1.0} --plan-dir ~/code/plans/{concept-name} {--repo REPO_PATH if provided}
 
 Execute the full /deepresearch workflow: parse arguments, spawn parallel research agents with internet access, synthesize findings, and write research.md to the plan directory.
 ```
 
-**Important**: Pass the depth selection from 1.0 via the `--depth` flag so /deepresearch skips its own interactive question (prevents double-prompting).
-
 ### 1.2 Verify Research Output
 
-After the Task agent completes, verify the output:
+After the Task agent completes:
 
 ```bash
 ls -la ~/code/plans/{concept-name}/research.md
 ```
 
-If research.md does not exist, the research agent failed. Re-spawn it or ask the user how to proceed.
+If research.md does not exist, re-spawn the research agent or ask the user how to proceed.
 
-Read the research.md and confirm it contains:
+Confirm research.md contains:
 - Executive Summary
 - Key Insights (with real data, not just LLM knowledge)
-- Sources section with actual URLs (research agents should have populated this)
+- Sources section with actual URLs
 
-If the Sources section is empty, the research agents did not use internet channels. Note this but proceed.
+If the Sources section is empty, note this but proceed.
+
+---
+
+## Phase 1.5: Research Review & Idea Refinement
+
+**Skip this phase entirely if `--light` flag is active. Proceed to Phase 2.**
+
+**Goal**: Present research findings to the user and catch any concept changes before committing to planning. This is the "kill or refine" checkpoint.
+
+### 1.5.1 Present Research Summary
+
+Summarize the key findings from research.md into a digestible briefing:
+- Executive summary (2-3 sentences)
+- Top 3-5 insights that directly affect the plan
+- Notable surprises or things that differed from the initial assumption
+- Identified risks or unknowns worth flagging
+
+### 1.5.2 Business Viability Assessment (New Products Only)
+
+**Only run this if the project is being built as a product (not personal use or client work).**
+
+Based on research findings, provide a frank business viability assessment:
+
+**Competitive Landscape:**
+- Who are the main competitors?
+- What gaps or underserved niches exist?
+- Is there a clear differentiator available for this concept?
+
+**Opportunity Signal:**
+- `Strong` - Identified gap, growing market, no dominant solution
+- `Moderate` - Competitive but differentiation is viable
+- `Weak` - Crowded market, strong incumbents, unclear differentiation
+- `Unclear` - Insufficient data to assess
+
+**Recommendation**: Give a direct recommendation - proceed as planned, adjust the concept to target a specific niche, or flag a pivot opportunity worth considering.
+
+Then ask:
+
+> "Based on these research findings, do you want to:
+> 1. Proceed as planned
+> 2. Adjust the concept (describe what you'd change)
+> 3. Pivot to a different angle based on the gap identified
+> 4. Discuss further before deciding"
+
+Update the plan direction based on the response. If the concept changes significantly, note what changed in decisions.md.
+
+### 1.5.3 Idea Refinement Gate
+
+After presenting findings (and business viability if applicable), ask:
+
+> "Any changes to what we're building based on these findings, or are we good to move into planning?"
+
+Wait for explicit confirmation before proceeding to Phase 2.
 
 ---
 
 ## Phase 2: Naming Ideation (Optional)
 
-After research is complete, ask the user:
+After research is confirmed, ask:
 
-> "Research is complete. Before I start planning, would you like me to spin up an agent to brainstorm project names and check domain availability? This agent will generate name ideas based on the research and verify .com, .io, .ai, .pro, and .work domain availability."
+> "Before I start planning, would you like me to spin up an agent to brainstorm project names and check domain availability? This generates name ideas based on the research and verifies .com, .io, .ai, .pro, and .work availability."
 
 If yes:
 
 ### 2.1 Spawn Naming Agent
 
-Launch a Task agent that:
-1. Generates 15-25 name candidates based on the research and concept
+Launch a Task agent (model: sonnet) that:
+1. Generates 15-25 name candidates based on research and concept
 2. Considers: memorability, brandability, brevity, relevance, uniqueness
 3. Checks for conflicts with existing apps/products (web search)
-4. Checks domain availability for each name across: `.com`, `.io`, `.ai`, `.pro`, `.work`
-   - Use `dig` or web search to verify domain availability
+4. Checks domain availability across: `.com`, `.io`, `.ai`, `.pro`, `.work`
 5. Checks npm package name availability (if relevant)
 6. Checks GitHub org/repo name availability
 7. Ranks names by overall viability
 
 ### 2.2 Write naming.md
 
-Save results to `~/code/plans/{concept-name}/naming.md` with a ranked table:
+Save results to `~/code/plans/{concept-name}/naming.md`:
 
 ```markdown
 # Name Ideation: {Concept}
@@ -190,7 +288,175 @@ Save results to `~/code/plans/{concept-name}/naming.md` with a ranked table:
 
 ### 2.3 Present to User
 
-Show the top 5 names and ask the user to pick one (or provide their own). The chosen name becomes the project name used throughout the plan.
+Show the top 5 names and ask the user to pick one (or provide their own). The chosen name becomes the project name throughout the plan.
+
+---
+
+## Phase 2.5: Tech Stack Proposal & Sign-off
+
+**Skip this phase entirely if `--light` flag is active. Tech stack is decided internally in Phase 3.1.**
+
+**Goal**: Propose the full tech stack with justifications and get user sign-off before writing the plan.
+
+### 2.5.1 Gather Existing Patterns
+
+Scan active projects in ~/code to identify the established package ecosystem:
+
+```bash
+# Sample a few active projects for their dependency patterns
+cat ~/code/provendoro-repos/provendoro-0/package.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(list({**d.get('dependencies',{}), **d.get('devDependencies',{})}.keys()))" 2>/dev/null | head -5
+ls ~/code/openslide-ai-repos/openslide-ai-0/packages/ 2>/dev/null
+```
+
+Use findings to identify the standard ecosystem (Drizzle, Hono, Better Auth, Zustand, TanStack Query, Vitest, zod, etc.) and apply appropriate defaults.
+
+### 2.5.2 Propose Tech Stack
+
+Present a full tech stack proposal with justifications. Apply these defaults unless research indicates a strong reason for alternatives:
+
+**Hard defaults** (always use unless actively contradicted):
+- **Hosting/Infra**: Cloudflare (Pages, Workers, D1/KV/R2, DNS)
+- **Frontend**: React + Vite
+- **Styling**: Tailwind v4 + shadcn/ui
+- **Email**: Resend
+- **Auth**: Google OAuth (architected to add providers later)
+- **E2E Testing**: Playwright
+- **CI/CD**: GitHub Actions
+- **Language**: TypeScript throughout
+- **Package manager**: pnpm
+
+**Context-dependent** (choose based on what's being built):
+- **Database**: CF D1 (SQLite/edge) or Supabase (managed Postgres)
+- **ORM**: Drizzle (CF D1/SQLite) or Prisma (PostgreSQL)
+- **API layer**: Hono (CF Workers) or tRPC (full-stack type safety)
+- **Auth library**: Better Auth (if CF D1) or Supabase Auth (if Supabase)
+- **State**: Zustand (client) + TanStack Query (server)
+- **Validation**: zod
+- **Monorepo**: pnpm workspaces (if multiple apps/packages)
+- **AI integration**: Provider SDKs directly (`@anthropic-ai/sdk`, `openai`, `@google/generative-ai`)
+
+**Banned** (never suggest, no exceptions):
+- Anything from Vercel's ecosystem: `ai`, `@ai-sdk/*`, `next`, `@next/*`, `@vercel/*`, `v0`, `turbo`, `turborepo`, `swr`
+- Next.js (use Vite + React Router, Remix, or Astro instead)
+
+Present as a table:
+
+```
+## Proposed Tech Stack
+
+| Layer | Choice | Justification |
+|-------|--------|---------------|
+| Hosting | Cloudflare Pages/Workers | ... |
+| Frontend | React + Vite | ... |
+| Styling | Tailwind v4 + shadcn/ui | ... |
+| Database | CF D1 / Supabase | ... |
+| ORM | Drizzle | ... |
+| API | Hono | ... |
+| Auth | Better Auth + Google OAuth | ... |
+| Email | Resend | ... |
+| State | Zustand + TanStack Query | ... |
+| Testing | Vitest + Playwright | ... |
+| CI/CD | GitHub Actions | ... |
+```
+
+Then ask: "Does this stack look right? Any changes you'd like to make?"
+
+### 2.5.3 Iterate Until Approved
+
+Handle any changes the user requests. For each change, note the tradeoff briefly (e.g., "switching from D1 to Supabase adds managed Postgres but removes the CF-native advantage"). Update and re-confirm.
+
+Record all stack decisions in `~/code/plans/{concept-name}/decisions.md`.
+
+Once approved, store the approved stack - it is the canonical stack for Phase 3.
+
+---
+
+## Phase 2.6: High-Level Plan Proposal & Sign-off
+
+**Skip this phase entirely if `--light` flag is active. Proceed to Phase 3.**
+
+**Goal**: Propose the overall scope and rough epic structure before writing the full plan. Catch scope misalignment early, not after hours of detailed planning.
+
+### 2.6.1 Propose Scope & Epic Structure
+
+Present a high-level proposal:
+
+**V1 Scope:**
+- Core feature set (what's IN v1)
+- Explicit non-goals (what's OUT of v1)
+- Any scope decisions driven by research findings
+
+**Rough Epic Structure** (names only, no full specs):
+```
+Wave 1 (Foundation):
+- Epic 1: Project scaffold, CI/CD, shared config
+- Epic 2: Database schema + migrations
+- ...
+
+Wave 2 (Core Features - Parallel):
+- Epic 3: [Feature A]
+- Epic 4: [Feature B]
+- ...
+
+Wave 3 (Integration + Polish):
+- Epic N: [Integration work]
+
+Human-Epics:
+- [Service setups, API keys, DNS config]
+```
+
+Also indicate: "I'm planning [N] parallel agents across [N] waves. With the [workspace/clone] setup from Phase 2.7, up to [N] agents can run simultaneously."
+
+### 2.6.2 Sign-off Gate
+
+Ask:
+
+> "Does this scope and breakdown feel right? What's missing, what should be cut, or what should move to v2?"
+
+Iterate until the user gives explicit sign-off. Update the plan direction accordingly before proceeding to Phase 3.
+
+---
+
+## Phase 2.7: Multi-Agent Setup
+
+**Skip this phase entirely if `--light` flag is active. Use the default 4-clone flat model.**
+
+**Goal**: Decide how parallel agent execution will be structured before creating the plan.
+
+### 2.7.1 New Codebase
+
+If this is a new project (no `--repo`):
+
+> "For execution, I'll create multiple clones so agents can work in parallel. How do you want to set this up?
+>
+> 1. **Workspace model** (recommended for large plans) - multiple isolated workspaces, each with 3-4 clones. Best for big projects with many epics.
+> 2. **Flat clone model** (simpler) - 4 sibling clones. Best for smaller projects or plans with 8 or fewer agent-epics.
+> 3. **Single clone** - No parallelism. Best for very small features or prototypes."
+
+Use the answer to configure Phase 7.1.
+
+### 2.7.2 Existing Codebase (if --repo provided)
+
+First, check if the codebase already has a multi-clone or workspace setup:
+
+```bash
+ls ~/code/{project}-workspaces/ 2>/dev/null && echo "workspace model exists"
+ls ~/code/{project}-repos/ 2>/dev/null && echo "flat clone model exists"
+```
+
+**If it already has a workspace/clone setup**: Ask which clone to use as the base, or whether to create new clones for this work.
+
+**If no multi-clone setup exists**: Assess whether the planned scope warrants parallelism (yes if 4+ agent-epics). If yes:
+
+> "This codebase doesn't have a multi-clone setup yet. Given the scope of this work ([N] agent-epics), it would benefit from parallel agents. Want me to:
+>
+> 1. Set up the flat clone model for this work
+> 2. Migrate to the workspace model for full parallelism
+> 3. Work in the existing single clone (no parallelism)"
+
+If option 2 is chosen, add workspace migration as a prerequisite step in the plan.
+
+**If small scope (3 or fewer agent-epics)**: Skip parallelism and work in the existing clone.
 
 ---
 
@@ -198,33 +464,24 @@ Show the top 5 names and ask the user to pick one (or provide their own). The ch
 
 **Goal**: Create a comprehensive, parallelized execution plan divided into agent-epics.
 
-### 3.1 Tech Stack Selection
+### 3.1 Tech Stack Documentation
 
-Select the optimal tech stack based on:
-- **Research findings** from Phase 1 (what the problem actually demands)
-- **Best tool for each job** - do NOT default to familiar tools. Evaluate options objectively.
-- **Performance requirements** identified in research
-- **Scale requirements** identified in research
-- **Template patterns** from Phase 0.3 (if a matching template was found)
+**If interactive mode (not --light)**: The tech stack was already approved in Phase 2.5. Use the approved stack as the basis for architecture and epic design. Do not re-propose it.
 
-**Hard constraints** (unless a competitor has a clear, documented advantage):
-- **Cloud**: Cloudflare (Pages, Workers, D1/KV/R2, DNS, domain registration) - keep everything tightly coupled on CF
-- **Email**: Resend
-- **Auth**: Google OAuth initially, architected for adding more providers later
-- **E2E Testing**: Playwright
-- **CI/CD**: GitHub Actions
+**If --light mode**: Select the optimal tech stack based on research findings and the hard defaults defined in Phase 2.5.2. Document reasoning in decisions.md.
 
-**Banned** (never use, no exceptions):
-- **Vercel (entire ecosystem)** - No Vercel services, hosting, platform, or any package under the Vercel/AI SDK umbrella. This includes: `ai`, `@ai-sdk/*`, `next`, `@next/*`, `@vercel/*`, `v0`, `turbo`, `turborepo`, `swr`. Nothing with Vercel's name on it.
-- **Next.js** - No Next.js. For React apps, prefer Vite + React Router (or equivalent). For SSR needs, consider Astro, Remix, or Cloudflare Workers with a React renderer.
-- **AI SDK alternatives** - For LLM integration, use provider SDKs directly: `@anthropic-ai/sdk`, `openai`, `@google/generative-ai`. Build streaming UI hooks manually or use a non-Vercel abstraction layer.
-
-For everything else (language, framework, database, state management, etc.), choose based purely on what is best for this specific problem. Document the reasoning for each choice.
+Hard constraints apply in both modes:
+- **Cloudflare** for hosting/infra
+- **Resend** for email
+- **Google OAuth** for auth
+- **Playwright** for E2E testing
+- **GitHub Actions** for CI/CD
+- **Never Vercel or Next.js**
 
 ### 3.2 Architecture Design
 
-Design the system architecture including:
-- Component diagram (described in text/ASCII)
+Design the system architecture:
+- Component diagram (text/ASCII)
 - Data model overview
 - API design approach
 - Authentication & authorization flow
@@ -233,66 +490,58 @@ Design the system architecture including:
 
 ### 3.3 Define Agent-Epics
 
-Break the plan into **agent-epics**: large, isolated chunks of work that a single agent can complete autonomously.
+Break the plan into **agent-epics**: large, isolated chunks of work a single agent can complete autonomously.
 
-**Sizing principle**: The constraint is **scope isolation**, not time. An agent can work for hours on a well-scoped epic. What matters is:
+**Sizing principle**: The constraint is **scope isolation**, not time. What matters:
+- **Isolation** - Clear boundaries, minimal file overlap with concurrent epics
+- **Testability** - Output can be independently verified; produces working, tested code
+- **Merge safety** - Changes won't conflict with concurrent agents
+- **Context coherence** - Focused enough that the agent won't lose critical context
 
-- **Isolation** - Does this epic have clear boundaries? Can the agent work without stepping on other agents' files?
-- **Testability** - Can the output be independently verified? Does the epic produce working, tested code on its own?
-- **Merge safety** - Will this epic's changes conflict with concurrent agents? If so, it needs to be sequenced, not parallelized.
-- **Context coherence** - Is the scope focused enough that the agent will not lose critical context during long execution? A sprawling epic touching 15 unrelated files is worse than a focused one touching 30 related files.
+Split when: spanning unrelated subsystems, context would be scattered, changes conflict with concurrent work, or mixing infrastructure with feature work.
 
-Split an epic into multiple when:
-- It spans multiple unrelated subsystems
-- It requires context from too many disparate parts of the codebase
-- Its changes would conflict with another concurrent epic
-- It mixes infrastructure work with feature work
+Do NOT split just because work is large. A 3-hour focused epic is better than three 1-hour epics with artificial seams.
 
-Do NOT split just because the work is large. A 3-hour epic that is focused, isolated, and testable is better than three 1-hour epics with artificial seams between them.
-
-Rules for agent-epics:
-- Each epic is **isolated** - minimal file overlap with other concurrent epics
-- Each epic results in **working, tested code**
-- Epics include their own tests (unit + integration)
-- Define clear **inputs** (what must exist before this epic starts) and **outputs** (what exists when complete)
-- Identify **dependency order** - which epics can run in parallel vs. which must be sequential
+Rules:
+- Each epic results in **working, tested code** (unit + integration tests included)
+- Define clear **inputs** (what must exist) and **outputs** (what results)
+- Identify **dependency order** - parallel vs. sequential
 
 Epic categories:
-- **Foundation epics**: Repo setup, CI/CD, shared types, config - these run first
-- **Parallel epics**: Independent feature work that can run simultaneously
-- **Integration epics**: Work that connects parallel streams - runs after its dependencies
-- **Testing epics**: E2E test suites, load testing, etc.
-- **Human-epics**: Work requiring human intervention (API key setup, service signups, DNS config)
+- **Foundation epics**: Repo setup, CI/CD, shared types, config - run first
+- **Parallel epics**: Independent feature work running simultaneously
+- **Integration epics**: Connecting parallel streams - run after dependencies
+- **Testing epics**: E2E test suites, load testing
+- **Human-epics**: Work requiring human intervention
 
 ### 3.4 Define Human-Epics
 
-Identify ALL work that requires human intervention. For each:
-- Exact step-by-step instructions (walkthrough-style)
-- When it needs to happen relative to agent-epics (what it blocks)
+For each human-epic:
+- Exact step-by-step instructions
+- When it needs to happen (what it blocks)
 - Whether it can be done in parallel with agent execution
 - Links to relevant dashboards/services
 
-**Minimize human-epics**. For each one, ask: "Can this be done via CLI/API instead?" If yes, make it an agent-epic with the CLI/API approach. Only create human-epics for things that genuinely require browser-based human action (OAuth app creation in Google Console, payment provider setup, etc.).
+**Minimize human-epics.** For each, ask: "Can this be done via CLI/API instead?" Only create human-epics for things that genuinely require browser-based human action (OAuth app setup in Google Console, payment provider setup, etc.).
 
 ### 3.5 Define Prerequisites
 
-Before execution begins, identify everything needed:
+Before execution begins:
 - API keys and credentials the user must provide
 - CLI tools that must be installed
 - Services that must be signed up for
 - DNS/domain configuration
+- Multi-clone or workspace setup (from Phase 2.7)
 - Any other blockers
-
-These are presented to the user during the walkthrough so they can prepare.
 
 ### 3.6 Execution Strategy
 
 Define:
 - **Wave 1**: Foundation epics (sequential, must complete first)
-- **Wave 2+**: Parallel epic groups with their dependency constraints
-- **Agent allocation**: How many agents to run in parallel for each wave
+- **Wave 2+**: Parallel epic groups with dependency constraints
+- **Agent allocation**: How many agents per wave (based on Phase 2.7 decision)
 - **Integration points**: Where parallel streams merge
-- **Verification gates**: Checkpoints where all work is verified before proceeding
+- **Verification gates**: Checkpoints before proceeding
 
 ### 3.7 Create decisions.md
 
@@ -306,115 +555,76 @@ Create `~/code/plans/{concept-name}/decisions.md`:
 | 1 | ... | ... | ... | ... |
 ```
 
-Document every significant technical and product decision made during planning.
+Include all stack decisions from Phase 2.5 and scope decisions from Phase 2.6.
 
 ---
 
 ## Phase 4: Plan Review
 
-**MANDATORY**: Before presenting the plan to the user, run review agents. The user chooses which reviews to run.
+**MANDATORY**: Before finalizing the plan, run review agents.
 
 ### 4.0 Review Configuration
 
-Ask the user what level of review they want using AskUserQuestion. Present a **preset** question first, then optionally drill into individual reviewers.
-
-**Preset question** (single-select):
-
-> "What level of plan review should I run?"
+Ask the user what level of review they want:
 
 | Option | Reviewers Spawned | Best For |
 |--------|------------------|----------|
 | **Full (Recommended)** | Security + Architecture + Business Logic | New products, anything user-facing |
 | **Technical Only** | Security + Architecture | Internal tools, technical features |
 | **Architecture Only** | Architecture | Small features, well-understood domains |
-| **Security Only** | Security | When you just want a security gut-check |
-| **Skip Review** | None | Iterating fast on a known pattern (plan goes straight to walkthrough) |
+| **Security Only** | Security | Quick security gut-check |
+| **Skip Review** | None | Iterating fast on a known pattern |
 | **Custom** | User picks individual reviewers | Full control |
 
-If the user selects **Custom**, follow up with a multi-select AskUserQuestion:
-
-> "Which review agents should I spawn?"
-
-Options (multiSelect: true):
+If **Custom**, follow up with multi-select:
 1. **Security** - Auth flow vulnerabilities, data exposure, OWASP Top 10, secrets management, RLS/access control
 2. **Architecture** - Scalability, over/under-engineering, tech stack optimization, data model, single points of failure
 3. **Business Logic** - Alignment with research, user needs coverage, competitive advantages, epic completeness, edge cases
 
-**Note**: If "Skip Review" is selected, Phase 4.1-4.4 are skipped entirely. The plan proceeds directly to Phase 5 (write plan.md) and then Phase 6 (walkthrough). The walkthrough is still mandatory.
+**Note**: If "Skip Review" is selected, Phases 4.1-4.4 are skipped entirely. Proceed directly to Phase 5.
 
 ### 4.1 Spawn Review Agents
 
-Based on the user's selection in 4.0, launch the chosen review agents in parallel using the Task tool.
+Launch chosen review agents in parallel using the Task tool (model: sonnet).
 
-**Available review agents (spawn only those selected):**
-
-1. **Security Review Agent**
-   - Review the planned architecture for security vulnerabilities
-   - Check auth flow design, data exposure risks, API security
-   - Verify OWASP Top 10 coverage
-   - Check for secrets management approach
-   - Review RLS/access control design
-   - Output: `~/code/plans/{concept-name}/reviews/security.md`
-
-2. **Architecture Review Agent**
-   - Review for scalability, maintainability, and performance
-   - Check for over-engineering or under-engineering
-   - Verify the tech stack choices are optimal
-   - Review data model for normalization and query patterns
-   - Check for single points of failure
-   - Verify cloud services are used appropriately
-   - Output: `~/code/plans/{concept-name}/reviews/architecture.md`
-
-3. **Business Logic Review Agent**
-   - Review the plan against the research findings
-   - Verify all user needs identified in research are addressed
-   - Check that the competitive advantages are preserved in the plan
-   - Verify the epic breakdown covers all features
-   - Look for missing edge cases or user flows
-   - Output: `~/code/plans/{concept-name}/reviews/business-logic.md`
+1. **Security Review Agent** - Output: `~/code/plans/{concept-name}/reviews/security.md`
+2. **Architecture Review Agent** - Output: `~/code/plans/{concept-name}/reviews/architecture.md`
+3. **Business Logic Review Agent** - Output: `~/code/plans/{concept-name}/reviews/business-logic.md`
 
 ### 4.2 Wait for ALL Selected Review Agents to Complete
 
-**HARD GATE - NO EXCEPTIONS** (unless "Skip Review" was selected in 4.0):
+**HARD GATE**: All selected agents MUST be launched in **foreground** (not background). Do NOT proceed until every selected agent has returned.
 
-All selected review agents MUST be launched in **foreground** (not background). Do NOT proceed to Phase 4.3, 5, or 6 until every selected agent has returned. If an agent is slow, wait. Do NOT start writing plan.md. Do NOT start the walkthrough. Do NOT present anything to the user. You are blocked here until all selected agents finish.
+If "Skip Review" was selected, skip to Phase 5.
 
-If "Skip Review" was selected in 4.0, skip to Phase 5.
-
-### 4.3 Verify Reviews Exist (MANDATORY GATE)
-
-Before doing ANYTHING else, verify that all **selected** review files exist:
+### 4.3 Verify Reviews Exist
 
 ```bash
-# MANDATORY - Check only the reviews that were selected in 4.0
-# Adjust this list based on user's selection
 for f in {selected-reviews}; do
   if [ ! -f ~/code/plans/{concept-name}/reviews/$f ]; then
-    echo "BLOCKED: $f missing - review agent did not complete"
+    echo "BLOCKED: $f missing"
   fi
 done
 ```
 
-If ANY selected file is missing, you are **BLOCKED**. Do NOT proceed. Wait for the missing agent or re-spawn it.
-
-If "Skip Review" was selected in 4.0, skip to Phase 5.
+If ANY selected file is missing, STOP. Do not proceed.
 
 ### 4.4 Incorporate Review Feedback
 
-Only after 4.3 passes (all selected review files exist), read all review files. For each finding:
+For each finding:
 - **Critical issues**: Must be addressed before presenting plan
 - **Recommendations**: Incorporate if they improve the plan without adding scope
 - **Nice-to-haves**: Note for future consideration
 
-Revise the plan based on critical and recommended findings. The plan is NOT finalized until this revision is complete.
+Revise the plan based on critical and recommended findings.
 
 ---
 
 ## Phase 5: Write plan.md
 
-**Prerequisite**: Phase 4 must be FULLY complete - all selected review files verified to exist (4.3) and feedback incorporated (4.4), OR "Skip Review" was selected in 4.0. If reviews were selected and you have not run the verification check in 4.3, go back and run it now.
+**Prerequisite**: Phase 4 fully complete (or "Skip Review" selected).
 
-Create `~/code/plans/{concept-name}/plan.md` with this structure:
+Create `~/code/plans/{concept-name}/plan.md`:
 
 ```markdown
 # {Project Name} - Execution Plan
@@ -424,10 +634,10 @@ Create `~/code/plans/{concept-name}/plan.md` with this structure:
 ## 1. Overview
 ### 1.1 Vision
 ### 1.2 Key Insights from Research
-### 1.3 Scope
+### 1.3 Scope (v1 in / v1 out)
 
 ## 2. Tech Stack
-[Each choice with rationale]
+[Each choice with rationale - pull from approved stack in Phase 2.5]
 
 ## 3. Architecture
 ### 3.1 System Overview
@@ -438,14 +648,12 @@ Create `~/code/plans/{concept-name}/plan.md` with this structure:
 ### 3.6 Deployment Architecture
 
 ## 4. Prerequisites
-[Everything needed before execution begins]
-[CLI tools, API keys, service signups, DNS config]
+[CLI tools, API keys, service signups, DNS, clone setup]
 
 ## 5. Agent-Epics
 ### Epic 1: {Name}
-- **Scope complexity**: Focused / Broad (with justification if broad)
-- **Dependencies**: None / Epic N
 - **Wave**: 1 / 2 / 3
+- **Dependencies**: None / Epic N
 - **Scope**: [What this epic covers]
 - **Inputs**: [What must exist before starting]
 - **Outputs**: [What exists when complete]
@@ -454,14 +662,11 @@ Create `~/code/plans/{concept-name}/plan.md` with this structure:
 - **Acceptance criteria**: [Checkboxes]
 - **Checkpoint notes**: [Key context to preserve if session compacts]
 
-### Epic 2: {Name}
-...
-
 ## 6. Human-Epics
 ### Human-Epic 1: {Name}
 - **When**: Before Wave N / During Wave N / After Wave N
 - **Blocks**: Epic N, Epic M
-- **Instructions**: [Step-by-step walkthrough]
+- **Instructions**: [Step-by-step]
 
 ## 7. Execution Strategy
 ### 7.1 Wave Breakdown
@@ -477,8 +682,7 @@ Create `~/code/plans/{concept-name}/plan.md` with this structure:
 ### 8.4 Test Coverage Targets
 
 ## 9. Review Findings
-[Include only sections for reviews that were selected in Phase 4.0]
-[If "Skip Review" was selected, note that and omit subsections]
+[Only sections for reviews selected in Phase 4.0]
 ### 9.1 Security Review Summary (if selected)
 ### 9.2 Architecture Review Summary (if selected)
 ### 9.3 Business Logic Review Summary (if selected)
@@ -505,7 +709,7 @@ Create `~/code/plans/{concept-name}/plan.md` with this structure:
 
 ### Phase 5.5: Scope Estimate
 
-Before presenting the plan, generate a scope estimate and add it to plan.md Section 11:
+Add to plan.md Section 11:
 
 ```markdown
 ## 11. Scope Estimate
@@ -531,106 +735,103 @@ Before presenting the plan, generate a scope estimate and add it to plan.md Sect
 ### Human Work Summary
 | Human-Epic | Can Do During Execution? | Blocks |
 |------------|--------------------------|--------|
-| ... | Yes/No | Wave N |
 ```
-
-Present this estimate to the user during the walkthrough so they understand the scope before committing to execution.
 
 ---
 
-## Phase 6: Walkthrough
+## Phase 6: Final Confirmation Gate
 
-**HARD GATE - NON-BYPASSABLE - MANDATORY REGARDLESS OF PERMISSION MODE**
+### 6.0 Mode Split
 
-This phase MUST involve the user interactively. It cannot be skipped, auto-approved, or fast-tracked even if Claude is running with full bypass permissions, auto-approve enabled, or any other autonomy mode. The entire point of xplan is that the user reviews and approves the plan before execution begins. Without explicit human confirmation at each walkthrough step, Phase 7 (Execution) MUST NOT start.
+**If `--light` flag is active**: Run the full interactive walkthrough (sections 6.1-6.4 below) before the final gate (6.5). This is the traditional pre-execution review.
 
-**Before starting the walkthrough, re-verify:**
+**If interactive mode (not --light)**: The user has already reviewed research (Phase 1.5), approved the tech stack (Phase 2.5), approved the high-level scope (Phase 2.6), and confirmed the multi-agent setup (Phase 2.7). Skip sections 6.1-6.4. Go directly to 6.5.
 
-```bash
-# Re-confirm all SELECTED reviews exist and plan.md was written AFTER reviews
-# Only check the review files that were selected in Phase 4.0
-# If "Skip Review" was selected, only verify plan.md exists
-ls -la ~/code/plans/{concept-name}/reviews/{selected-reviews} \
-       ~/code/plans/{concept-name}/plan.md
-```
+---
 
-If any selected review file is missing, STOP. Go back to the incomplete phase. The walkthrough MUST use a plan that incorporates all selected review agents' feedback. If reviews were selected but not completed, the plan is a draft, not a plan. (If "Skip Review" was chosen, only plan.md needs to exist.)
-
-Enter walkthrough mode:
-
-### 6.1 Start with Research
+### 6.1 Research Walkthrough (--light only)
 
 Walk the user through `research.md`:
 - Present the executive summary and contextual model
 - Highlight key insights
 - Discuss risks and unknowns
-- **Use AskUserQuestion** to collect feedback. Do NOT proceed to 6.2 until the user explicitly responds.
+- Use AskUserQuestion to collect feedback before advancing
 - Update research.md with any changes
 
-### 6.2 Walk Through the Plan
+### 6.2 Plan Walkthrough (--light only)
 
-Then walk through `plan.md` section by section:
+Walk through `plan.md` section by section:
 - Present each section one at a time
-- **Use AskUserQuestion after EVERY section** to get the user's feedback or confirmation before advancing
+- Use AskUserQuestion after EVERY section to get feedback or confirmation before advancing
 - Update plan.md in real-time with any changes
-- Pay special attention to:
-  - Tech stack choices (user may have preferences)
-  - Epic breakdown (user may want different granularity)
-  - Scope estimate (does the size feel right?)
-  - Prerequisites (user needs to understand what they will need to provide)
-  - Human-epics (user needs to understand their role)
+- Pay special attention to: tech stack choices, epic breakdown, scope estimate, prerequisites, human-epics
 
-### 6.3 Present Prerequisites
+### 6.3 Present Prerequisites (--light only)
 
-Before asking about execution, clearly present:
-1. Everything the user needs to set up before or during execution
-2. Walkthrough-style instructions for each prerequisite
-3. Which prerequisites block which epics
-4. Which can be done in parallel with agent execution
+Present everything needed before or during execution with walkthrough-style instructions for each item.
 
-### 6.4 Confirm Naming
+### 6.4 Confirm Naming (--light only)
 
 If naming was done in Phase 2, confirm the chosen name. If not done, ask if they want to choose a name now.
 
-### 6.5 Final Walkthrough Gate (MANDATORY)
+---
 
-After completing all walkthrough sections (6.1-6.4), use AskUserQuestion to ask:
+### 6.5 Final Execution Gate (MANDATORY - both modes)
 
-> "Walkthrough complete. I've presented the full research and plan. Do you want to proceed to execution, or revisit any section?"
+**HARD GATE - NON-BYPASSABLE - MANDATORY REGARDLESS OF PERMISSION MODE**
 
-Options: "Proceed to execution" / "Revisit a section" / "Stop here (don't execute)"
+Before asking, re-verify:
 
-**This question is NON-NEGOTIABLE.** Do NOT proceed to Phase 7 without an explicit "Proceed to execution" answer from the user (via AskUserQuestion or typed response). No autonomy setting, permission bypass, or global instruction overrides this gate. If the user selects "Stop here", save the plan state and end gracefully.
+```bash
+ls -la ~/code/plans/{concept-name}/reviews/{selected-reviews} \
+       ~/code/plans/{concept-name}/plan.md
+```
+
+If any selected review file is missing, STOP. Go back to Phase 4.
+
+Use AskUserQuestion to ask:
+
+> "The plan is complete and reviewed. Ready to proceed to execution?
+>
+> **Quick summary:**
+> - [N] agent-epics across [N] waves
+> - Up to [N] parallel agents
+> - [N] human-epics (things you'll need to do)
+>
+> Proceed to execution, revisit something, or stop here?"
+
+Options: "Proceed to execution" / "Revisit a section" / "Stop here (save plan, don't execute)"
+
+**This question is NON-NEGOTIABLE.** Do NOT proceed to Phase 7 without an explicit "Proceed to execution" from the user. No autonomy setting, permission bypass, or global instruction overrides this gate. If the user selects "Stop here", save the plan state and end gracefully.
 
 ---
 
 ## Phase 7: Execution
 
-**PREREQUISITE**: Phase 6.5 must have completed with the user explicitly selecting "Proceed to execution" (via AskUserQuestion or typed response). If Phase 6.5 was not completed, or the user did not explicitly approve execution, STOP and go back to Phase 6.5. Do NOT rely on any implicit approval, auto-approve setting, or permission bypass. The user must have actively chosen to proceed.
-
-If the user confirmed execution in Phase 6.5:
+**PREREQUISITE**: Phase 6.5 must have completed with explicit "Proceed to execution". Do NOT proceed otherwise.
 
 ### 7.1 Pre-Execution Setup
 
 1. **Create GitHub repo** (private):
    ```bash
-   gh repo create {your-username}/{project-name} --private --description "{description}"
+   gh repo create {username}/{project-name} --private --description "{description}"
    ```
 
-2. **Create local clones directory and clones**:
+2. **Create local clones** based on Phase 2.7 decision:
    ```bash
+   # Flat clone model:
    mkdir -p ~/code/{project-name}-repos
-   # Create 4 clones (0-3) for parallel agent work
    for i in 0 1 2 3; do
-     gh repo clone {your-username}/{project-name} ~/code/{project-name}-repos/{project-name}-$i
+     gh repo clone {username}/{project-name} ~/code/{project-name}-repos/{project-name}-$i
    done
+
+   # Workspace model: use /workspace-setup {project-name} instead
    ```
 
 3. **Create CLAUDE.md** in the repo with project-specific instructions
 
-4. **Create GitHub labels** (epic/work labels only - agent coordination uses tracking CSV, not labels):
+4. **Create GitHub labels**:
    ```bash
-   # Epic/work labels
    gh label create "agent-epic" --color "5319E7"
    gh label create "human-epic" --color "B60205"
    gh label create "human-agent" --color "D93F0B"
@@ -638,19 +839,17 @@ If the user confirmed execution in Phase 6.5:
    gh label create "blocked" --color "B60205"
    ```
 
-4b. **Initialize issue tracking**:
+5. **Initialize issue tracking**:
    ```bash
    python3 ~/.claude/lib/agent_tracking.py init {project-name}
    ```
-   This creates `~/code/{log-repo-name}/{project-name}/tracking.csv`. Agent claims are registered automatically by the PostToolUse hook when agents create branches.
 
-5. **Create GitHub issues** for every epic and sub-task:
+6. **Create GitHub issues** for every epic and sub-task:
    - One issue per agent-epic with full scope description and acceptance criteria
    - One issue per human-epic with walkthrough instructions
    - Issues reference their wave and dependencies
-   - Epic issues have the `agent-epic` or `human-epic` label
 
-6. **Initialize progress.md** in the plan directory:
+7. **Initialize progress.md**:
    ```markdown
    # Execution Progress: {Project Name}
 
@@ -660,54 +859,55 @@ If the user confirmed execution in Phase 6.5:
 
    | Epic | Issue | Agent | Clone | Wave | Status | PR | Notes |
    |------|-------|-------|-------|------|--------|----|-------|
-   | ... | ... | ... | ... | ... | pending | - | ... |
 
    ## Checkpoints
-   [Updated automatically during execution - see Phase 7.3.5]
    ```
 
 ### 7.2 Inform User of Human-Epics
 
-Before spinning up agents:
-1. List all human-epics with their instructions
-2. Identify which can be done NOW (while agents work)
-3. Identify which must wait until a specific wave completes
-4. Provide walkthrough-style instructions for immediate human-epics
+Before spinning up agents, list all human-epics with:
+1. Instructions for each
+2. Which can be done NOW (while agents work)
+3. Which must wait until a specific wave completes
 
 ### 7.3 Execute Waves
 
 For each wave:
 
 #### 7.3.1 Spawn Agents
-Spawn Task agents in parallel (one per epic in the wave, assigned to different clones).
+
+Spawn Task agents in parallel (model: sonnet), one per epic, assigned to different clones.
 
 #### 7.3.2 Agent Work Loop
+
 Each agent:
 - Creates a feature branch (`git checkout -b {issue}-{desc} origin/main`) which auto-registers the claim in tracking.csv via the PostToolUse hook
 - Implements the work with tests
-- **Verifies the work actually functions** - not just that it compiles and unit tests pass, but that the real behavior works end-to-end. Use whatever method fits: curl against the live API, browser automation, database queries, or manual verification. Unit tests with mocks prove the code is internally consistent; they do not prove the feature works. The agent must confirm the feature works before declaring completion.
+- **Verifies the work actually functions** end-to-end (not just unit tests passing)
 - Creates a PR
-- Reports completion, including what verification was performed and the results
+- Reports completion with verification evidence
 
 #### 7.3.3 Monitor & Report
+
 Monitor agent progress and report status updates to user.
 
 #### 7.3.4 Wave Completion
-When all agents in a wave complete, verify:
-- All PRs are created and passing CI
-- All tests pass
-- No conflicts between PRs
-Then merge all PRs for the wave.
+
+When all wave agents complete:
+- Verify all PRs are created and passing CI
+- Verify all tests pass, no conflicts between PRs
+- Merge all PRs for the wave
 
 #### 7.3.5 Checkpoint (MANDATORY after each wave)
-After every wave completion, write a checkpoint to `progress.md`:
+
+Write to `progress.md`:
 
 ```markdown
 ## Checkpoint: Wave N Complete - {timestamp}
 ### Completed
-- [List of completed epics with PR numbers]
+- [epics with PR numbers]
 ### Merged to main
-- [Commit SHAs]
+- [commit SHAs]
 ### Next wave
 - Wave N+1: [epic names]
 ### Agent assignments
@@ -718,76 +918,57 @@ After every wave completion, write a checkpoint to `progress.md`:
 - CI status: green/red
 - Open blockers: none / [list]
 ### Resume context
-[Key decisions, patterns established, and gotchas discovered so far
-that a resuming session would need to know]
+[Key decisions, patterns established, and gotchas discovered so far]
 ```
 
-This checkpoint enables `/xplan-resume` to pick up where execution left off if the session is interrupted.
+This checkpoint enables `/xplan-resume` to pick up where execution left off.
 
-#### 7.3.6 Update progress.md
-Update the progress table and proceed to next wave.
+#### 7.3.6 Update progress.md table and proceed to next wave.
 
 ### 7.4 Integration Verification
 
 After each wave:
 - Pull latest main into all clones
 - Run full test suite
-- **Verify the deployed application works** - after merging, confirm the deploy succeeds and test the actual running application. Use curl, browser automation, or whatever tool is appropriate to confirm that the features from this wave function correctly in the real environment. Do not rely solely on CI passing.
-- Fix any integration issues before proceeding
+- **Verify the deployed application works** - confirm deploy succeeds and test the actual running app. Use curl, browser automation, or whatever method fits. Do not rely solely on CI passing.
+- Fix integration issues before proceeding
 
 ### 7.5 Continue Until Complete
 
 **DO NOT STOP** until:
-- All agent-epics are completed and merged
+- All agent-epics completed and merged
 - All tests pass
-- All issues are closed (except human-epic/human-agent issues)
+- All issues closed (except human-epic/human-agent)
 - No uncommitted changes in any clone
 - No open PRs
 - CI is green
-- Deployment is working (if applicable)
+- Deployment working
 
-If blocked by a human-epic:
-1. Create a P0 issue in GitHub with exact instructions
-2. Notify the user with walkthrough-style steps
-3. Continue with any non-blocked work
-4. Return to blocked work once user resolves the blocker
+If blocked by a human-epic: create a P0 issue with exact instructions, notify the user, continue non-blocked work.
 
 ---
 
 ## Phase 8: Post-Execution Verification & Retrospective
 
-When all agents report complete:
-
 ### 8.1 Full Audit
 
-Run comprehensive checks:
 ```bash
-# Check all issues
-gh issue list --state open --repo {your-username}/{project-name}
-
-# Check all PRs
-gh pr list --state open --repo {your-username}/{project-name}
-
-# Check all clones for uncommitted changes
+gh issue list --state open --repo {username}/{project-name}
+gh pr list --state open --repo {username}/{project-name}
 for i in 0 1 2 3; do
   echo "=== Clone $i ==="
   git -C ~/code/{project-name}-repos/{project-name}-$i status
 done
-
-# Run full test suite
 cd ~/code/{project-name}-repos/{project-name}-0
-npm test
-npm run build
+npm test && npm run build
 ```
 
 ### 8.2 Report
 
 Present final status:
-- Total epics completed
-- Total PRs merged
-- Test results
+- Total epics completed / PRs merged / test results
 - Any remaining human-epic issues with instructions
-- Any issues found during verification
+- Any verification issues found
 - Deployment status
 
 ### 8.3 Retrospective
@@ -805,10 +986,10 @@ Generate `~/code/plans/{concept-name}/retro.md`:
 - **Waves executed**: N
 
 ## What Went Well
-[Patterns that worked, epics that were well-scoped, smooth integrations]
+[Patterns that worked, well-scoped epics, smooth integrations]
 
 ## What Agents Struggled With
-[Epics that required rework, merge conflicts, unclear scoping, context loss]
+[Epics requiring rework, merge conflicts, unclear scoping, context loss]
 
 ## Scope Accuracy
 | Metric | Estimated | Actual | Delta |
@@ -824,164 +1005,99 @@ Generate `~/code/plans/{concept-name}/retro.md`:
 [Technical gotchas, tooling issues, patterns to remember for future plans]
 
 ## Recommendations for Similar Projects
-[What to do differently next time for this type of project]
+[What to do differently for this type of project]
 ```
 
 ### 8.4 Save as Template (if applicable)
 
-If this plan type could benefit future projects, ask the user:
+Ask:
 
 > "This plan could serve as a template for future {type} projects. Want me to save a generalized version to the template library?"
 
-If yes:
-```bash
-mkdir -p ~/code/plans/_templates
-```
-
-Create `~/code/plans/_templates/{project-type}.md` with:
-- Generalized version of the plan structure
-- Tech stack recommendations (with rationale patterns, not hardcoded choices)
-- Common epic patterns for this type of project
-- Lessons learned from the retro
-- Typical risks and mitigations
-
-Strip all project-specific details. Keep the structural patterns and decision frameworks.
+If yes, create `~/code/plans/_templates/{project-type}.md` with generalized patterns stripped of project-specific details.
 
 ### 8.5 Generate README.md
 
-**MANDATORY**: After all agent-epics are merged and the audit passes, generate a comprehensive `README.md` in the repo root. This is the final code artifact of plan execution.
+**MANDATORY**: After all agent-epics are merged and the audit passes, generate a comprehensive `README.md` in the repo root. Read all source files, plan.md, research.md, and decisions.md - every claim must reflect the actual codebase.
 
-Read all source files, plan.md, research.md, and decisions.md to produce an accurate README. Do not guess - every claim in the README must reflect the actual codebase.
+Commit on a branch, create a PR, merge it.
 
-Commit the README on a branch, create a PR, merge it.
-
+README structure:
 ```markdown
 # {Project Name}
-
-{One-paragraph statement of purpose - what this project does and why it exists}
+{One-paragraph statement of purpose}
 
 ## Table of Contents
-
 ## Overview
-[Expanded description: what it does, who it is for, key differentiators]
-
 ## Tech Stack
-| Layer | Technology | Rationale |
-|-------|------------|-----------|
-| Frontend | ... | ... |
-| Backend | ... | ... |
-| Database | ... | ... |
-| Auth | ... | ... |
-| Hosting | ... | ... |
-| Email | ... | ... |
-| CI/CD | ... | ... |
-| Testing | ... | ... |
-
 ## Architecture
-### System Overview
-[High-level description of how components fit together]
-
-### Component Diagram
-[ASCII diagram of major components and their relationships]
-
-### Data Model
-[Key entities and relationships]
-
-### API Design
-[API style, key endpoints/routes, auth scheme]
-
 ## Getting Started
 ### Prerequisites
-[Required tools, runtimes, accounts]
-
 ### Installation
-[Step-by-step clone, install, configure]
-
 ### Environment Variables
-| Variable | Required | Description |
-|----------|----------|-------------|
-| ... | ... | ... |
-
 ## Development
-### Running Locally
-[Exact commands to start dev server]
-
-### Project Structure
-[Directory tree with descriptions of key directories]
-
-### Key Patterns
-[Important architectural patterns, conventions, or abstractions used in the codebase]
-
 ## Testing
-### Running Tests
-[Commands for unit, integration, e2e tests]
-
-### Test Structure
-[Where tests live, naming conventions, what is covered]
-
-### E2E Tests
-[Playwright setup, how to run, what flows are covered]
-
 ## Deployment
-[How the app is deployed, CI/CD pipeline, environments]
-
 ## Key Decisions
-[Summary of the most important architectural and product decisions, with rationale.
-Pull from decisions.md but keep it concise - link to decisions.md for full log]
-
 ## Contributing
-[Branch naming, commit format, PR process, code review expectations]
-
 ## License
-[License type]
 ```
 
 ### 8.6 Update Logs and Progress
 
-Update agent log with full session summary.
-
-Mark progress.md as COMPLETE with final statistics and link to retro.md.
+Update agent log with full session summary. Mark progress.md as COMPLETE with final statistics and link to retro.md.
 
 ---
 
 ## Important Principles
 
-### Autonomy First
-- Do as much as possible without human intervention
-- If CLI/API access can replace a human action, use it
-- Only create human-epics for things that genuinely require the user's browser session or credentials you do not have
+### Human-in-the-Loop First
 
-### Quality Over Speed
-- Every piece of code has tests
-- Every PR passes CI before merge
-- **Every feature is verified to actually work before it ships** - type checks, lint, and unit tests passing is the bare minimum, not the finish line. If you built something, prove it works by running it. Mocked tests only prove internal consistency; they say nothing about whether the real system functions. Use the real API, the real database, the real UI. If you cannot demonstrate that the feature works end-to-end, it is not done.
-- Security, architecture, and business logic reviews are mandatory
-- Post-execution verification is mandatory
+In interactive mode, the user is a partner in every major decision: concept clarity, research findings, tech stack, scope, and multi-agent setup. These gates happen BEFORE the expensive work, not after. The goal is to eliminate "I didn't want that" surprises.
+
+### Token Efficiency
+
+Use the right model for each job:
+- Simple background tasks (file checks, directory setup): haiku
+- Research, naming, review agents: sonnet
+- Execution agents: sonnet
+- Orchestrator (synthesis, architecture, interactive decisions): current session model
+
+Keep sub-agent prompts focused and specific. Do not send more context than the agent needs.
 
 ### Parallelism is the Default
+
+Maximize parallel agents based on the setup confirmed in Phase 2.7:
 - Research happens in parallel
 - Reviews happen in parallel
 - Agent-epics within a wave execute in parallel
 - Human-epics that can be done during agent execution should be
 
+### Autonomy First
+
+Do as much as possible without human intervention. Only create human-epics for things that genuinely require the user's browser session or credentials you don't have. CLI/API access replaces human actions wherever possible.
+
+### Quality Over Speed
+
+- Every piece of code has tests
+- Every PR passes CI before merge
+- **Every feature is verified to actually work** end-to-end - unit tests passing is the bare minimum, not the finish line. Mocked tests prove internal consistency; they say nothing about whether the real system functions. Use the real API, the real database, the real UI.
+- Security, architecture, and business logic reviews are mandatory unless explicitly skipped
+
 ### Scope Over Time
-- Epic sizing is about isolation, testability, and merge safety - not clock time
-- A focused 3-hour epic is better than three 1-hour epics with artificial boundaries
-- Split when scopes overlap or context would be lost, not when work is "too big"
+
+Epic sizing is about isolation, testability, and merge safety - not clock time. A focused 3-hour epic is better than three 1-hour epics with artificial seams.
 
 ### Plans are Living Documents
-- plan.md is updated during walkthrough based on user feedback
+
+- plan.md is updated during interactive phases based on user feedback
 - progress.md is updated during execution with checkpoints after every wave
 - decisions.md is updated whenever a significant decision is made
 
 ### Complete Execution
-- Plans execute until ALL completable work is done
-- No stopping halfway through
-- No leaving broken or half-finished work
-- Every session ends with a clean state
+
+Plans execute until ALL completable work is done. No stopping halfway. No leaving broken or half-finished work. Every session ends with a clean state.
 
 ### Resumability
-- Checkpoints are written after every wave (Phase 7.3.5)
-- Progress file tracks exact state for `/xplan-resume`
-- Each checkpoint captures enough context to resume without re-reading the entire codebase
-- Use `/xplan-status` to check on running or completed plans
+
+Checkpoints are written after every wave. Progress file tracks exact state for `/xplan-resume`. Each checkpoint captures enough context to resume without re-reading the entire codebase.
