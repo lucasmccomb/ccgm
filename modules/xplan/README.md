@@ -38,6 +38,21 @@ Companion commands:
 ## Dependencies
 
 - **multi-agent**: Required for parallel agent execution during research, review, and implementation phases
+- **[lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch)** (companion install): xplan's Phase 1 delegates research to the `/deepresearch` command, which is not part of CCGM - it lives in a standalone repo with its own installer
+
+### /deepresearch - required for research phase
+
+xplan's research phase (Phase 1) spawns an agent that runs `/deepresearch` to produce a comprehensive research.md. Without it, xplan cannot complete its research step.
+
+`/deepresearch` uses a local pipeline - Ollama (qwen2.5:72b) for query generation and fact extraction, SearXNG (self-hosted Docker) for web search, and a single Anthropic API call (Sonnet) for synthesis. It requires Docker, Ollama (~40GB model), and a Python venv, which the installer handles.
+
+```bash
+git clone https://github.com/lucasmccomb/lem-deepresearch.git
+cd lem-deepresearch
+./install.sh
+```
+
+See the [lem-deepresearch README](https://github.com/lucasmccomb/lem-deepresearch) for manual setup, prerequisites, and troubleshooting.
 
 ## Manual Installation
 
