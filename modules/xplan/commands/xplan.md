@@ -41,6 +41,28 @@ The orchestrator (this session) stays on the current model for all synthesis, ar
 
 **Preferred**: Use `AskUserQuestion` for structured prompts with options.
 
+**CRITICAL: `AskUserQuestion` parameter format** - The `questions` parameter MUST be a JSON array of objects, never a string. Each object requires `question` (string), `header` (string, max 12 chars), `options` (array of `{label, description}` objects, 2-4 items), and `multiSelect` (boolean). Example:
+
+```json
+{
+  "questions": [
+    {
+      "question": "What level of research should I run?",
+      "header": "Research",
+      "options": [
+        {"label": "Full (Recommended)", "description": "All research agents in parallel"},
+        {"label": "Technical Only", "description": "Technical Architecture + Data & Infrastructure"},
+        {"label": "Lite", "description": "Domain + Technical Architecture only"},
+        {"label": "Custom", "description": "Pick individual research agents"}
+      ],
+      "multiSelect": false
+    }
+  ]
+}
+```
+
+When the pseudo-code below shows `question:` / `options:` blocks, always translate them into this structured format. Never pass a raw string to `questions`.
+
 **Fallback (if AskUserQuestion is blocked)**: Present the same question and options as regular text output, then **STOP and wait for the user to type their response**. Do NOT guess defaults. Do NOT proceed without the user's answer. The user can always respond by typing in the conversation.
 
 Example fallback format:
