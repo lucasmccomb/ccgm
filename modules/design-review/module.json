@@ -1,0 +1,13 @@
+{
+  "name": "design-review",
+  "displayName": "Design Review",
+  "description": "/design-review - visual design review for web pages. Screenshots at 3 viewports, 6 parallel analysis passes: spacing, typography, responsive, visual hierarchy, accessibility, component consistency. Scored report with optional auto-fix.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "skills/design-review/SKILL.md": { "target": "skills/design-review/SKILL.md", "type": "skill", "template": false }
+  },
+  "tags": ["commands", "design", "css", "accessibility", "frontend", "review"],
+  "configPrompts": []
+}

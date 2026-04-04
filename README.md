@@ -93,7 +93,7 @@ For a quick install with a preset:
 |--------|---------|----------|
 | **minimal** | autonomy, git-workflow | Getting started |
 | **standard** | autonomy, git-workflow, hooks, settings, commands-core, commands-utility | Most users |
-| **full** | All 29 modules | Power users |
+| **full** | All 32 modules | Power users |
 | **team** | autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification | Teams |
 
 ### Other install options
@@ -124,6 +124,9 @@ For a quick install with a preset:
 | **documentation** | commands | /docupdate (comprehensive documentation audit: README, TOC, onboarding, packages, module coverage) | - |
 | **debugging** | commands | /debug (structured root-cause debugging with Opus) | - |
 | **brand-naming** | commands | /brand (full naming pipeline with word exploration, domain/trademark/app store checks) and /brand-check (single-name deep verification) | - |
+| **editorial-critique** | commands | /editorial-critique - 8-pass editorial review of long-form writing: prose craft, AI-tell detection, argument, conciseness, accuracy, structure, impact, grammar. Scored report with auto-fix | - |
+| **design-review** | commands | /design-review - 6-pass visual design review: spacing, typography, responsive, hierarchy, accessibility, consistency. Screenshots + CSS analysis with auto-fix | - |
+| **ideate** | commands | /ideate - structured ideation framework: Socratic interview to refine ideas to 95% clarity, then hand off to /deepresearch or /xplan | - |
 | **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
 | **session-logging** | workflow | Structured agent session logging with mandatory triggers and startup command | - |
 | **multi-agent** | workflow | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | session-logging |
@@ -249,7 +252,7 @@ The `docs/` directory contains comprehensive documentation:
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 29 modules |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 32 modules |
 | [Commands Reference](docs/commands.md) | All 25 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 10 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |

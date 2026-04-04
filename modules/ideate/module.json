@@ -1,0 +1,13 @@
+{
+  "name": "ideate",
+  "displayName": "Ideation",
+  "description": "/ideate - structured ideation framework. Interviews you to refine a loose idea into a concrete concept using Socratic questioning, confidence tracking, and progressive refinement. Delegates to /deepresearch for validation and /xplan for planning.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "skills/ideate/SKILL.md": { "target": "skills/ideate/SKILL.md", "type": "skill", "template": false }
+  },
+  "tags": ["commands", "ideation", "brainstorming", "planning", "interview"],
+  "configPrompts": []
+}
