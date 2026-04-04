@@ -247,12 +247,12 @@ Spawn a single Task agent (model: sonnet) that executes the `/deepresearch` skil
 The Task agent's prompt should be:
 
 ```
-Read the file ~/code/claude-dotfiles/commands/deepresearch.md and follow its instructions exactly.
+Read the file ~/.claude/commands/deepresearch.md and follow its instructions exactly.
 
 Topic: {concept from Phase 0}
 Arguments: --depth {user's selection from 0.5.3 or 1.0} --plan-dir ~/code/plans/{concept-name} {--repo REPO_PATH if provided}
 
-Execute the full /deepresearch workflow: parse arguments, spawn parallel research agents with internet access, synthesize findings, and write research.md to the plan directory.
+Execute the full /deepresearch workflow: parse arguments, run the research pipeline, and write research.md to the plan directory.
 ```
 
 ### 1.2 Verify Research Output

@@ -51,6 +51,12 @@ cp commands/deepresearch.md ~/.claude/commands/deepresearch.md
 cp commands/debug.md ~/.claude/commands/debug.md
 ```
 
+## Local Pipeline Upgrade
+
+For higher-quality, faster, and cheaper research, you can replace the agent-based `/deepresearch` with a local pipeline that uses **Ollama** + **SearXNG** + **Anthropic API**. This requires additional setup (Docker, Ollama, Python venv) but eliminates the need for parallel subagents.
+
+See **[deepresearch-local](https://github.com/lucasmccomb/deepresearch-local)** for installation instructions.
+
 ## Dependencies
 
 - `mcporter` (optional, for Exa semantic search in `/deepresearch`) - install via npm: `npm install -g mcporter`

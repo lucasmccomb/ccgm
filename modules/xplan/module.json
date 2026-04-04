@@ -4,7 +4,7 @@
   "description": "Deep research + planning + execution framework. Spawns parallel research/review agents, creates comprehensive plans, and executes via parallel agent waves.",
   "category": "workflow",
   "scope": ["global"],
-  "dependencies": ["multi-agent"],
+  "dependencies": ["multi-agent", "deep-research"],
   "files": {
     "commands/xplan.md": { "target": "commands/xplan.md", "type": "command", "template": false },
     "commands/xplan-status.md": { "target": "commands/xplan-status.md", "type": "command", "template": false },
