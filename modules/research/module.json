@@ -1,0 +1,13 @@
+{
+  "name": "research",
+  "displayName": "Research",
+  "description": "/research - multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, and Reddit. Zero external dependencies. For deeper research with a local pipeline, see lem-deepresearch.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "commands/research.md": { "target": "commands/research.md", "type": "command", "template": false }
+  },
+  "tags": ["commands", "research", "web-search"],
+  "configPrompts": []
+}
