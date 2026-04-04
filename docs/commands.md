@@ -312,7 +312,7 @@ Simulates a user testing session using Chrome automation tools to test a web app
 
 ## Research and debugging commands
 
-Installed by the **deep-research** module.
+Installed by the **debugging** module. For `/deepresearch`, see [deepresearch-local](https://github.com/lucasmccomb/deepresearch-local).
 
 ---
 

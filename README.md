@@ -121,7 +121,7 @@ For a quick install with a preset:
 | **commands-extra** | commands | /audit (codebase audit), /pwv (Playwright verify), /walkthrough, /promote-rule | - |
 | **commands-utility** | commands | /cgr (clear + checkout + rebase), /cws-submit (Chrome Web Store walkthrough), /dotsync (sync config to CCGM), /user-test (browser user testing) | - |
 | **documentation** | commands | /docupdate (comprehensive documentation audit: README, TOC, onboarding, packages, module coverage) | - |
-| **deep-research** | commands | /deepresearch (multi-channel research across 15+ platforms) and /debug (structured root-cause debugging with Opus) | - |
+| **debugging** | commands | /debug (structured root-cause debugging with Opus). For /deepresearch, see [deepresearch-local](https://github.com/lucasmccomb/deepresearch-local) | - |
 | **brand-naming** | commands | /brand (full naming pipeline with word exploration, domain/trademark/app store checks) and /brand-check (single-name deep verification) | - |
 | **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
 | **session-logging** | workflow | Structured agent session logging with mandatory triggers and startup command | - |
