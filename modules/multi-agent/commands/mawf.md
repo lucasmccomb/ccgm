@@ -56,7 +56,7 @@ Does this look right? Should I adjust anything before creating these?
 
 Wait for user confirmation before proceeding.
 
-### Phase 2.5: Optional Context Research (Agent Reach)
+### Phase 2.5: Optional Context Research
 
 When feedback references external issues, competitors, or community discussions, verify and enrich with real data before creating issues. This step is **optional** and should only run when feedback explicitly references external context. Skip entirely for purely internal feedback.
 
@@ -70,7 +70,7 @@ When feedback references external issues, competitors, or community discussions,
   gh search issues "{error message or bug description}" --limit 5
   ```
   ```bash
-  curl -s "https://www.reddit.com/search.json?q={error or issue}&limit=3" -H "User-Agent: agent-reach/1.0" | jq '.data.children[].data | {title, url, score}'
+  curl -s "https://www.reddit.com/search.json?q={error or issue}&limit=3" -H "User-Agent: research-agent/1.0" | jq '.data.children[].data | {title, url, score}'
   ```
 
 - **User references a library or tool**: Check its current status

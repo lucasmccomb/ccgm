@@ -275,7 +275,7 @@ If no Marker API credentials, use WebSearch:
 WebSearch: "CANDIDATE NAME" site:tsdr.uspto.gov OR site:tmsearch.uspto.gov
 ```
 
-### Agent Reach: Deep Brand Collision Check
+### Deep Brand Collision Check (Exa)
 ```bash
 mcporter call 'exa.web_search_exa(query: "CANDIDATE brand company startup app", numResults: 5)'
 ```
@@ -321,38 +321,33 @@ curl -s -o /dev/null -w "%{http_code}" "https://github.com/CANDIDATE"
 curl -s -o /dev/null -w "%{http_code}" "https://www.reddit.com/user/CANDIDATE"
 ```
 
-### Agent Reach: Direct GitHub Search
+### GitHub Search
 ```bash
 gh search repos "CANDIDATE" --limit 5
 ```
 
-### Agent Reach: Direct Twitter Search
+### Twitter/X Search
 ```bash
-bird search "CANDIDATE" -n 5
-# Fallback if bird not configured: mcporter call 'exa.web_search_exa(query: "site:twitter.com CANDIDATE", numResults: 3)'
+WebSearch: "CANDIDATE" site:twitter.com OR site:x.com
 ```
 
-### Agent Reach: Direct Reddit Search
+### Reddit Search
 ```bash
-curl -s "https://www.reddit.com/search.json?q=CANDIDATE&limit=5" -H "User-Agent: agent-reach/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:300], subreddit, score}'
+curl -s "https://www.reddit.com/search.json?q=CANDIDATE&limit=5" -H "User-Agent: research-agent/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:300], subreddit, score}'
 ```
 
-### Agent Reach: Direct YouTube Search
+### YouTube Search
 ```bash
-~/.agent-reach-venv/bin/yt-dlp --dump-json "ytsearch3:CANDIDATE" 2>/dev/null | jq '[.[] | {title, channel, view_count, webpage_url}]'
+yt-dlp --dump-json "ytsearch3:CANDIDATE" 2>/dev/null | jq '[.[] | {title, channel, view_count, webpage_url}]'
 ```
 
-### Brand Sentiment (Agent Reach)
+### Brand Sentiment
 
-Search Reddit and Twitter for existing associations with the name:
+Search Reddit for existing associations with the name:
 ```bash
-curl -s "https://www.reddit.com/search.json?q=CANDIDATE&sort=top&limit=5" -H "User-Agent: agent-reach/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:200], score}'
+curl -s "https://www.reddit.com/search.json?q=CANDIDATE&sort=top&limit=5" -H "User-Agent: research-agent/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:200], score}'
 ```
 Look for: negative associations, controversial usage, strong existing brands using the name.
-```bash
-# If bird is configured:
-bird search "CANDIDATE" -n 10
-```
 
 Or if FindME CLI is installed:
 ```bash

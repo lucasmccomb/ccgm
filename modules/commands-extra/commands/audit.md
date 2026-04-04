@@ -16,14 +16,14 @@ When spawning audit category agents in Phase 3, set model to **sonnet** in the A
 ## Audit Categories
 
 1. **Security** - Secrets in code, exposed API keys, missing input sanitization, SQL injection risks, XSS vulnerabilities, insecure dependencies
-   **Optional: Internet-powered vulnerability checks (Agent Reach)**
+   **Optional: Internet-powered vulnerability checks**
    For each dependency in package.json or lock file, agents can check:
    - CVE databases: `WebSearch: "{package}@{version} vulnerability CVE security advisory"`
    - GitHub Security Advisories: `gh api graphql -f query='{ securityVulnerabilities(first:5, package:"{package}") { nodes { advisory { summary severity } } } }'`
    - Known vulnerabilities: `WebFetch` on `https://registry.npmjs.org/-/npm/v1/security/advisories?package={package}`
    These checks are supplementary - the audit works without internet access too.
 2. **Dependencies** - Outdated packages, unused dependencies, duplicate packages, missing lock files, version conflicts
-   **Optional: Internet-powered deprecation checks (Agent Reach)**
+   **Optional: Internet-powered deprecation checks**
    For key dependencies, agents can verify maintenance status:
    - Check if repo is archived: `gh repo view {owner}/{package} --json isArchived 2>/dev/null`
    - Check for deprecation notices: `WebSearch: "{package} deprecated alternative migration"`
