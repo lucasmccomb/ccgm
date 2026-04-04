@@ -115,44 +115,94 @@ If an existing repo path was given:
 
 ### 0.5.1 Confirm Core Understanding
 
-Start by summarizing what you understand from the initial input:
+Summarize what you understand from the initial input, then use AskUserQuestion:
 
-> "Here's what I understand you want to build: [1-2 sentence summary]. Is that right? What am I missing or getting wrong?"
+```
+question: "Here's what I understand you want to build: [1-2 sentence summary]. Does this capture what you have in mind?"
+options:
+  - "Yes, that's right - proceed"
+  - "Close, but let me clarify..."
+  - "Not quite - here's what I actually want..."
+```
 
-Use AskUserQuestion and iterate until the user confirms the core concept is correct. Do not proceed to 0.5.2 until the concept is confirmed.
+If the user selects a clarifying option, ask a focused follow-up free-text question, then re-confirm. Repeat until you hit 95% confidence. Do not proceed to 0.5.2 until confirmed.
 
 ### 0.5.2 Context Questions
 
-Once the concept is confirmed, ask about context. Present as a grouped question to avoid excessive back-and-forth:
+Ask each of the following as a separate AskUserQuestion call with options. Do NOT dump them all as a numbered list - ask them one at a time as interactive prompts.
 
-> "A few quick context questions before I start researching:"
+**Q1 - Codebase type:**
+```
+question: "Is this a new project from scratch or adding to an existing codebase?"
+options:
+  - "New project from scratch"
+  - "Adding to an existing codebase"
+```
 
-Ask all of the following (multi-part AskUserQuestion, or as a list for the user to answer):
+**Q2 - Audience:**
+```
+question: "Who is this for?"
+options:
+  - "Personal use"
+  - "Client project"
+  - "Launch as a product"
+```
 
-1. **Codebase**: Is this a new project from scratch, or adding to an existing codebase?
-2. **Audience**: Who is this for? (Personal use / client project / launch as a product)
-3. **Scope**: Is there anything explicitly out of scope for v1?
-4. **Constraints**: Any hard technical constraints, must-use services, or non-negotiables?
-5. **Success**: How will you know this is working? What does success look like at launch?
+**Q3 - V1 scope constraints:**
+```
+question: "Is anything explicitly out of scope for v1?"
+options:
+  - "Nothing specific - let the plan decide"
+  - "Yes, I have specific exclusions (I'll describe)"
+```
 
-If this is a new product (not personal use or client work):
+**Q4 - Technical constraints:**
+```
+question: "Any hard technical constraints or must-use services?"
+options:
+  - "No constraints - use best-fit choices"
+  - "Yes, I have specific requirements (I'll describe)"
+```
 
-6. **Revenue**: Rough monetization approach? (subscription / one-time / free / ads / unsure)
-7. **Timeline**: Any deadline pressure or rough target timeline?
+**Q5 - Success criteria (free text):**
+```
+question: "How will you know this is working? What does success look like at launch?"
+```
+(No options - this is open-ended. Wait for a typed response.)
+
+**If Q2 was "Launch as a product", also ask:**
+
+**Q6 - Revenue model:**
+```
+question: "What's the rough monetization approach?"
+options:
+  - "Subscription (monthly/annual)"
+  - "One-time purchase"
+  - "Freemium (free tier + paid)"
+  - "Completely free / open source"
+  - "Not sure yet - figure it out later"
+```
+
+**Q7 - Timeline:**
+```
+question: "Any deadline pressure or target timeline?"
+options:
+  - "No hard deadline"
+  - "Soft target in mind (I'll specify)"
+  - "Hard deadline (I'll specify)"
+```
 
 ### 0.5.3 Research Level Preference
 
-Ask the user what kind of research they want:
-
-> "What level of research should I run?"
-
-| Option | Agents Spawned | Best For |
-|--------|---------------|----------|
-| **Full (Recommended)** | All 7 research agents + internet | New products, unfamiliar domains |
-| **Technical Only** | Technical Architecture + Data & Infrastructure | Adding features, technical spikes |
-| **Market & Product** | Domain + Competitive Landscape + Monetization | Validating a product idea |
-| **Lite** | Domain + Technical Architecture | Quick planning, well-understood domains |
-| **Custom** | User picks individual agents | Full control |
+```
+question: "What level of research should I run?"
+options:
+  - "Full (Recommended) - all 7 agents + internet search [best for new products / unfamiliar domains]"
+  - "Technical Only - architecture + data infrastructure [best for adding features / technical spikes]"
+  - "Market & Product - competitive landscape + monetization [best for validating an idea]"
+  - "Lite - domain overview + technical architecture [quick planning / well-understood domains]"
+  - "Custom - I'll pick individual agents"
+```
 
 Store the selection for Phase 1.1. Do not re-ask in Phase 1.0.
 
@@ -235,21 +285,29 @@ Based on research findings, provide a frank business viability assessment:
 
 **Recommendation**: Give a direct recommendation - proceed as planned, adjust the concept to target a specific niche, or flag a pivot opportunity worth considering.
 
-Then ask:
+Then use AskUserQuestion:
 
-> "Based on these research findings, do you want to:
-> 1. Proceed as planned
-> 2. Adjust the concept (describe what you'd change)
-> 3. Pivot to a different angle based on the gap identified
-> 4. Discuss further before deciding"
+```
+question: "Based on these research findings, how do you want to proceed?"
+options:
+  - "Proceed as planned"
+  - "Adjust the concept - let me describe what I'd change"
+  - "Pivot to a different angle based on the gap you identified"
+  - "Discuss further before deciding"
+```
 
 Update the plan direction based on the response. If the concept changes significantly, note what changed in decisions.md.
 
 ### 1.5.3 Idea Refinement Gate
 
-After presenting findings (and business viability if applicable), ask:
+After presenting findings (and business viability if applicable), use AskUserQuestion:
 
-> "Any changes to what we're building based on these findings, or are we good to move into planning?"
+```
+question: "Any changes to what we're building based on these findings?"
+options:
+  - "No changes - looks good, move into planning"
+  - "Yes, I have changes (I'll describe)"
+```
 
 Wait for explicit confirmation before proceeding to Phase 2.
 
@@ -257,11 +315,17 @@ Wait for explicit confirmation before proceeding to Phase 2.
 
 ## Phase 2: Naming Ideation (Optional)
 
-After research is confirmed, ask:
+After research is confirmed, use AskUserQuestion:
 
-> "Before I start planning, would you like me to spin up an agent to brainstorm project names and check domain availability? This generates name ideas based on the research and verifies .com, .io, .ai, .pro, and .work availability."
+```
+question: "Before I start planning, would you like me to brainstorm project names and check domain availability?"
+options:
+  - "Yes - spin up a naming agent (.com/.io/.ai/.pro/.work checks)"
+  - "No - skip naming, proceed to planning"
+  - "I already have a name in mind (I'll provide it)"
+```
 
-If yes:
+If yes or "I already have a name":
 
 ### 2.1 Spawn Naming Agent
 
@@ -359,11 +423,18 @@ Present as a table:
 | CI/CD | GitHub Actions | ... |
 ```
 
-Then ask: "Does this stack look right? Any changes you'd like to make?"
+Then use AskUserQuestion:
+
+```
+question: "Does this tech stack look right?"
+options:
+  - "Looks good - approved, proceed to planning"
+  - "I have changes (I'll describe)"
+```
 
 ### 2.5.3 Iterate Until Approved
 
-Handle any changes the user requests. For each change, note the tradeoff briefly (e.g., "switching from D1 to Supabase adds managed Postgres but removes the CF-native advantage"). Update and re-confirm.
+If the user has changes, apply them. For each change, note the tradeoff briefly (e.g., "switching from D1 to Supabase adds managed Postgres but removes the CF-native advantage"). Re-present the updated table and re-confirm with the same AskUserQuestion options until "Looks good" is selected.
 
 Record all stack decisions in `~/code/plans/{concept-name}/decisions.md`.
 
@@ -409,11 +480,18 @@ Also indicate: "I'm planning [N] parallel agents across [N] waves. With the [wor
 
 ### 2.6.2 Sign-off Gate
 
-Ask:
+Use AskUserQuestion:
 
-> "Does this scope and breakdown feel right? What's missing, what should be cut, or what should move to v2?"
+```
+question: "Does this scope and epic breakdown feel right?"
+options:
+  - "Looks right - approved, write the full plan"
+  - "Something's missing (I'll describe)"
+  - "Something should be cut or moved to v2 (I'll describe)"
+  - "I want to discuss before deciding"
+```
 
-Iterate until the user gives explicit sign-off. Update the plan direction accordingly before proceeding to Phase 3.
+Iterate until the user selects "Looks right". Update the plan direction accordingly before proceeding to Phase 3.
 
 ---
 
@@ -425,13 +503,15 @@ Iterate until the user gives explicit sign-off. Update the plan direction accord
 
 ### 2.7.1 New Codebase
 
-If this is a new project (no `--repo`):
+If this is a new project (no `--repo`), use AskUserQuestion:
 
-> "For execution, I'll create multiple clones so agents can work in parallel. How do you want to set this up?
->
-> 1. **Workspace model** (recommended for large plans) - multiple isolated workspaces, each with 3-4 clones. Best for big projects with many epics.
-> 2. **Flat clone model** (simpler) - 4 sibling clones. Best for smaller projects or plans with 8 or fewer agent-epics.
-> 3. **Single clone** - No parallelism. Best for very small features or prototypes."
+```
+question: "How do you want to set up parallel agent execution?"
+options:
+  - "Workspace model (recommended for large plans) - isolated workspaces, each with 3-4 clones"
+  - "Flat clone model (simpler) - 4 sibling clones, best for ≤8 agent-epics"
+  - "Single clone - no parallelism, best for small features or prototypes"
+```
 
 Use the answer to configure Phase 7.1.
 
@@ -446,15 +526,17 @@ ls ~/code/{project}-repos/ 2>/dev/null && echo "flat clone model exists"
 
 **If it already has a workspace/clone setup**: Ask which clone to use as the base, or whether to create new clones for this work.
 
-**If no multi-clone setup exists**: Assess whether the planned scope warrants parallelism (yes if 4+ agent-epics). If yes:
+**If no multi-clone setup exists**: Assess whether the planned scope warrants parallelism (yes if 4+ agent-epics). If yes, use AskUserQuestion:
 
-> "This codebase doesn't have a multi-clone setup yet. Given the scope of this work ([N] agent-epics), it would benefit from parallel agents. Want me to:
->
-> 1. Set up the flat clone model for this work
-> 2. Migrate to the workspace model for full parallelism
-> 3. Work in the existing single clone (no parallelism)"
+```
+question: "This codebase doesn't have a multi-clone setup yet. Given the scope ([N] agent-epics), it would benefit from parallel agents. How do you want to proceed?"
+options:
+  - "Set up flat clone model for this work (~/code/{project}-repos/)"
+  - "Migrate to workspace model for full parallelism (~/code/{project}-workspaces/)"
+  - "Work in the existing single clone (no parallelism)"
+```
 
-If option 2 is chosen, add workspace migration as a prerequisite step in the plan.
+If "workspace model" is chosen, add workspace migration as a prerequisite step in the plan.
 
 **If small scope (3 or fewer agent-epics)**: Skip parallelism and work in the existing clone.
 
@@ -565,21 +647,28 @@ Include all stack decisions from Phase 2.5 and scope decisions from Phase 2.6.
 
 ### 4.0 Review Configuration
 
-Ask the user what level of review they want:
+Use AskUserQuestion:
 
-| Option | Reviewers Spawned | Best For |
-|--------|------------------|----------|
-| **Full (Recommended)** | Security + Architecture + Business Logic | New products, anything user-facing |
-| **Technical Only** | Security + Architecture | Internal tools, technical features |
-| **Architecture Only** | Architecture | Small features, well-understood domains |
-| **Security Only** | Security | Quick security gut-check |
-| **Skip Review** | None | Iterating fast on a known pattern |
-| **Custom** | User picks individual reviewers | Full control |
+```
+question: "What level of plan review should I run before writing the full plan?"
+options:
+  - "Full (Recommended) - Security + Architecture + Business Logic [new products / user-facing]"
+  - "Technical Only - Security + Architecture [internal tools / technical features]"
+  - "Architecture Only [small features / well-understood domains]"
+  - "Security Only [quick security gut-check]"
+  - "Skip Review - proceed directly to plan [iterating fast on a known pattern]"
+  - "Custom - I'll pick individual reviewers"
+```
 
-If **Custom**, follow up with multi-select:
-1. **Security** - Auth flow vulnerabilities, data exposure, OWASP Top 10, secrets management, RLS/access control
-2. **Architecture** - Scalability, over/under-engineering, tech stack optimization, data model, single points of failure
-3. **Business Logic** - Alignment with research, user needs coverage, competitive advantages, epic completeness, edge cases
+If **Custom**, follow up with a multi-select AskUserQuestion:
+
+```
+question: "Which review agents should I spawn? (select all that apply)"
+options:
+  - "Security - auth vulnerabilities, data exposure, OWASP Top 10, RLS/access control"
+  - "Architecture - scalability, tech stack optimization, data model, single points of failure"
+  - "Business Logic - alignment with research, user needs, epic completeness, edge cases"
+```
 
 **Note**: If "Skip Review" is selected, Phases 4.1-4.4 are skipped entirely. Proceed directly to Phase 5.
 
@@ -789,18 +878,15 @@ ls -la ~/code/plans/{concept-name}/reviews/{selected-reviews} \
 
 If any selected review file is missing, STOP. Go back to Phase 4.
 
-Use AskUserQuestion to ask:
+Use AskUserQuestion:
 
-> "The plan is complete and reviewed. Ready to proceed to execution?
->
-> **Quick summary:**
-> - [N] agent-epics across [N] waves
-> - Up to [N] parallel agents
-> - [N] human-epics (things you'll need to do)
->
-> Proceed to execution, revisit something, or stop here?"
-
-Options: "Proceed to execution" / "Revisit a section" / "Stop here (save plan, don't execute)"
+```
+question: "Plan complete and reviewed. Ready to proceed?\n\nQuick summary:\n- [N] agent-epics across [N] waves\n- Up to [N] parallel agents\n- [N] human-epics (things you'll need to do)"
+options:
+  - "Proceed to execution"
+  - "Revisit a section (I'll specify which)"
+  - "Stop here - save plan, don't execute yet"
+```
 
 **This question is NON-NEGOTIABLE.** Do NOT proceed to Phase 7 without an explicit "Proceed to execution" from the user. No autonomy setting, permission bypass, or global instruction overrides this gate. If the user selects "Stop here", save the plan state and end gracefully.
 
