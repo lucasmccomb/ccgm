@@ -1,19 +1,27 @@
 # xplan
 
-Deep research + planning + execution framework for new projects. Spawns parallel research agents, creates comprehensive plans with review, walks the user through interactively, and executes via parallel agent waves.
+Interactive deep research + planning + execution framework for new projects. Interviews you upfront, researches deeply, proposes tech stack and scope for your sign-off, creates a parallelized execution plan with peer review, and executes via parallel agents.
 
 ## What This Module Does
 
-xplan is a comprehensive 8-phase framework for taking a project idea from concept to working code:
+xplan is a human-in-the-loop planning framework with mandatory confirmation gates throughout:
 
-1. **Parse Input & Setup** - Create plan directory, check templates, analyze existing repos
-2. **Deep Research** - Spawn 4-7 parallel research agents covering domain, technical, competitive, UX, data, and business facets
-3. **Naming Ideation** - (Optional) Brainstorm names with domain availability checks
-4. **Plan Review** - Spawn security, architecture, and business logic review agents
-5. **Write Plan** - Comprehensive plan.md with epics, waves, and execution strategy
-6. **Walkthrough** - Interactive section-by-section walkthrough with the user (mandatory)
-7. **Execution** - Create repo, issues, and spawn parallel agents per wave
-8. **Verification & Retrospective** - Full audit, retro, optional template generation
+- **Phase 0** - Parse input, create plan directory
+- **Phase 0.5** - Discovery interview: confirm core concept, choose research depth
+- **Phase 1** - Deep research via parallel agents (configurable preset: Full / Technical Only / Market & Product / Lite / Custom)
+- **Phase 1.5** - Research review with business viability assessment; confirm to proceed
+- **Phase 2** - Naming ideation (optional, with domain availability checks)
+- **Phase 2.5** - Tech stack sign-off: propose stack, get approval
+- **Phase 2.6** - Scope sign-off: approve epic structure and wave breakdown
+- **Phase 2.7** - Multi-agent setup review
+- **Phase 3** - Create parallelized plan with epics and dependency waves
+- **Phase 4** - Peer review by security, architecture, and business logic agents
+- **Phase 5** - Write comprehensive plan.md
+- **Phase 6** - Final confirmation gate before execution
+- **Phase 7** - Create repo, issues, and spawn parallel agents per wave
+- **Phase 8** - Verification, audit, retrospective, optional template generation
+
+**`--light` flag**: Skips Phases 0.5, 1.5, 2.5, 2.6, and 2.7. Uses minimal clarification + traditional section-by-section walkthrough instead of the interview-driven flow. Equivalent to old xplan behavior.
 
 Companion commands:
 - **/xplan-status** - Check progress on a running or completed plan
@@ -55,4 +63,4 @@ Optional: Create a templates directory for reusable plan patterns:
 mkdir -p ~/code/plans/_templates
 ```
 
-After installation, invoke with `/xplan <project concept or idea>` or `/xplan <idea> --repo <existing-repo-path>`.
+After installation, invoke with `/xplan <project concept or idea>`, `/xplan <idea> --repo <existing-repo-path>`, or `/xplan <idea> --light` to skip interactive interview phases.

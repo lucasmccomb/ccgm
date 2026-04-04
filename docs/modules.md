@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 27 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 28 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -297,16 +297,21 @@ Deep research, planning, and execution framework for complex projects.
 
 **Installs**: 3 command files
 
-**What it does**: An 8-phase framework for tackling large projects:
+**What it does**: An interactive, human-in-the-loop planning framework:
 
-1. **Parse input** and create plan directory
-2. **Deep research** via parallel specialized agents (market research, technical analysis, competitive review, user research)
-3. **Build contextual model** from research findings
-4. **Create parallelized execution plan** with epics and dependency waves
-5. **Peer review** by specialized agents (architecture, security, UX, feasibility)
-6. **Interactive walkthrough** with the user for feedback and decisions
-7. **Autonomous execution** via parallel agents in separate clones
-8. **Completion audit** and retrospective
+- **Phase 0** - Parse input, create plan directory
+- **Phase 0.5** - Discovery interview: confirm concept, choose research depth
+- **Phase 1** - Deep research via parallel agents (Full / Technical Only / Market & Product / Lite / Custom presets)
+- **Phase 1.5** - Research review with business viability assessment; confirm to proceed
+- **Phase 2** - Naming ideation (optional)
+- **Phase 2.5/2.6/2.7** - Tech stack sign-off, scope sign-off, multi-agent setup review
+- **Phase 3** - Plan creation with parallelized epics and dependency waves
+- **Phase 4** - Peer review by security, architecture, and business logic agents
+- **Phase 5-6** - Write plan.md, final confirmation gate
+- **Phase 7** - Execute via parallel agents in separate clones
+- **Phase 8** - Verification, audit, and retrospective
+
+Use `--light` to skip the interview phases and use a traditional walkthrough instead.
 
 Commands installed:
 

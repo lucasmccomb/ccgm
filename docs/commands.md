@@ -453,25 +453,35 @@ Installed by the **xplan**, **multi-agent**, and **session-logging** modules.
 
 ### /xplan
 
-**Deep research, planning, and execution framework.**
+**Interactive deep research, planning, and execution framework.**
 
-An 8-phase autonomous framework for tackling complex projects, from initial research through implementation.
+A human-in-the-loop planning framework that interviews you upfront, researches your concept deeply, proposes tech stack and architecture for your sign-off, creates a parallelized execution plan, reviews it with specialized agents, and executes via parallel agents.
 
-**Phases**:
-1. **Parse input** - understand the project, create plan directory
-2. **Deep research** - spawn parallel research agents (configurable preset: Full, Technical Only, Lite, Custom)
-3. **Build model** - synthesize research into a contextual understanding
-4. **Create plan** - design parallelized execution plan with epics and dependency waves
-5. **Peer review** - specialized agents review for architecture, security, UX, and feasibility
-6. **Interactive walkthrough** - present plan to user for feedback and decisions
-7. **Execute** - spawn parallel agents for each wave of work
-8. **Complete** - audit results, run retrospective
+**Phases** (interactive mode):
+- **Phase 0** - Parse input, create plan directory
+- **Phase 0.5** - Discovery interview: confirm core concept, choose research depth (Full / Technical Only / Market & Product / Lite / Custom)
+- **Phase 1** - Deep research via parallel specialized agents
+- **Phase 1.5** - Research review: business viability assessment, confirm to proceed
+- **Phase 2** - Naming ideation (optional)
+- **Phase 2.5** - Tech stack sign-off: propose stack, get approval
+- **Phase 2.6** - Scope sign-off: approve epic structure
+- **Phase 2.7** - Multi-agent setup review
+- **Phase 3** - Plan creation with parallelized epics and dependency waves
+- **Phase 4** - Peer review by security, architecture, and business logic agents
+- **Phase 5** - Write plan.md
+- **Phase 6** - Final confirmation gate before execution
+- **Phase 7** - Execute via parallel agents in separate clones
+- **Phase 8** - Verification, audit, and retrospective
 
-This command explicitly overrides autonomy rules - all phases require user confirmation before proceeding.
+**Flags**:
+- `--repo <path>` - Analyze and plan work for an existing repo
+- `--light` - Skip interactive interview phases (Phases 0.5, 1.5, 2.5, 2.6, 2.7); uses minimal clarification + traditional walkthrough instead
 
 **Usage**:
 ```
 /xplan "Build a SaaS dashboard with auth, billing, and analytics"
+/xplan "Add dark mode to my app" --repo ~/code/myapp
+/xplan "Build a CLI tool" --light
 /xplan  # Will ask for project description interactively
 ```
 
