@@ -127,7 +127,7 @@ For a quick install with a preset:
 | **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
 | **session-logging** | workflow | Structured agent session logging with mandatory triggers and startup command | - |
 | **multi-agent** | workflow | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | session-logging |
-| **xplan** | workflow | Interactive planning framework: discovery interview, deep research, tech stack sign-off, peer review, parallel agent execution | multi-agent |
+| **xplan** | workflow | Interactive planning framework: discovery interview, deep research, tech stack sign-off, peer review, parallel agent execution. Requires [/deepresearch](#companion-module-deepresearch) | multi-agent |
 | **remote-server** | workflow | SSH access to a configured remote server with /onremote command for health checks and remote task execution | - |
 | **self-improving** | workflow | Meta-learning: extract experience from tasks, identify patterns, update memory, improve across sessions | - |
 | **subagent-patterns** | workflow | Subagent dispatch: task decomposition, spec-driven delegation, two-stage review, parallel coordination | - |
