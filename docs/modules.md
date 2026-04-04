@@ -201,21 +201,19 @@ Comprehensive documentation audit and update command.
 
 ---
 
-### deep-research
+### debugging
 
-Multi-channel research and structured debugging commands powered by specialized agents.
+Structured root-cause debugging with Opus delegation.
 
-**Installs**: 2 command files
+**Installs**: 1 command file
 
 | Command | Description |
 |---------|-------------|
-| `/deepresearch` | Deep multi-channel research using parallel agents and web search |
 | `/debug` | Structured root-cause debugging with Opus - reproduce, hypothesize, instrument, diagnose, fix, verify |
 
-**What it does**: Provides two high-powered research and investigation commands:
+**What it does**: Enforces a disciplined debugging workflow (reproduce, hypothesize, instrument, diagnose, fix, verify) using Opus for deep root-cause analysis. Invoked automatically by the `systematic-debugging` module's routing rule.
 
-- **/deepresearch**: Spawns parallel research agents across web search, GitHub, Reddit, YouTube, and other platforms. Produces a structured report with findings, sources, and synthesis.
-- **/debug**: Enforces a disciplined debugging workflow (reproduce → hypothesize → instrument → diagnose → fix → verify) using Opus for deep root-cause analysis. Invoked automatically by the `systematic-debugging` module's routing rule.
+For `/deepresearch`, see [deepresearch-local](https://github.com/lucasmccomb/deepresearch-local) (installed separately).
 
 **Dependencies**: None
 
@@ -462,7 +460,7 @@ Structured 4-phase root cause investigation methodology.
 
 Also includes a "three-strike rule": if you try three approaches without progress, step back and reassess your understanding of the problem.
 
-The `debugging.md` rule routes bug fix and debugging requests to the `/debug` skill (from the deep-research module) for structured Opus-powered root-cause analysis, rather than ad-hoc investigation.
+The `debugging.md` rule routes bug fix and debugging requests to the `/debug` skill (from the debugging module) for structured Opus-powered root-cause analysis, rather than ad-hoc investigation.
 
 **Dependencies**: None
 
