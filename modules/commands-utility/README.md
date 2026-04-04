@@ -27,15 +27,15 @@ Handles: extension identification, prerequisites check, store assets preparation
 
 Note: Reads `docs/cws-submission-process.md` in the repo for step-by-step instructions.
 
-### `/dotsync` - Sync Local Config to CCGM
+### `/ccgm-sync` - Sync Local Config to CCGM + lem-deepresearch
 
-Delegates to a Haiku agent to reverse-sync local `~/.claude/` changes back to the CCGM repo. Shows a dry run first, then applies changes.
+Delegates to a Haiku agent to reverse-sync local `~/.claude/` changes back to source repos. Syncs CCGM-managed files to the CCGM repo and deepresearch files to the lem-deepresearch repo. Shows a dry run first, then applies changes.
 
 ```
-/dotsync
+/ccgm-sync
 ```
 
-Reads CCGM root from `~/.claude/.ccgm-manifest.json`.
+Reads CCGM root from `~/.claude/.ccgm-manifest.json`. Checks `~/code/lem-deepresearch` for deepresearch sync.
 
 ### `/user-test` - Browser-Based User Testing
 
@@ -54,6 +54,6 @@ Produces `docs/user-test-problems.md` and `docs/user-test-solutions.md` in the p
 ```bash
 cp commands/cgr.md ~/.claude/commands/cgr.md
 cp commands/cws-submit.md ~/.claude/commands/cws-submit.md
-cp commands/dotsync.md ~/.claude/commands/dotsync.md
+cp commands/ccgm-sync.md ~/.claude/commands/ccgm-sync.md
 cp commands/user-test.md ~/.claude/commands/user-test.md
 ```

@@ -178,7 +178,7 @@ Miscellaneous utility commands for common workflow tasks.
 |---------|-------------|
 | `/cgr` | Clear conversation, checkout default branch, and rebase on latest origin |
 | `/cws-submit` | Guided walkthrough for submitting a Chrome extension to the Chrome Web Store |
-| `/dotsync` | Sync local Claude Code config changes back to the CCGM repo as the source of truth |
+| `/ccgm-sync` | Sync local Claude Code config changes back to the CCGM repo as the source of truth |
 | `/user-test` | Browser-based user testing simulation using Chrome automation tools |
 
 **Dependencies**: None
@@ -213,7 +213,7 @@ Structured root-cause debugging with Opus delegation.
 
 **What it does**: Enforces a disciplined debugging workflow (reproduce, hypothesize, instrument, diagnose, fix, verify) using Opus for deep root-cause analysis. Invoked automatically by the `systematic-debugging` module's routing rule.
 
-For `/deepresearch`, see [deepresearch-local](https://github.com/lucasmccomb/deepresearch-local) (installed separately).
+For `/deepresearch`, see [lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch) (installed separately).
 
 **Dependencies**: None
 
