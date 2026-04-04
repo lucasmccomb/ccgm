@@ -1,10 +1,10 @@
 # Remote Server Access
 
-A remote server is configured for SSH access. Use the `/remote` command or direct `ssh` via the Bash tool to run operations on it.
+A remote server is configured for SSH access. Use the `/onremote` command or direct `ssh` via the Bash tool to run operations on it.
 
 ## Connection
 
-The remote host and credentials are baked into `~/.claude/commands/remote.md` at install time. Use SSH via Bash:
+The remote host and credentials are baked into `~/.claude/commands/onremote.md` at install time. Use SSH via Bash:
 
 ```bash
 ssh {remote-user}@{remote-host} "command"
@@ -22,7 +22,7 @@ For file transfers use `scp` or `rsync`.
 
 ## Rules
 
-- Use `/remote` for status checks and single commands
+- Use `/onremote` for status checks and single commands
 - Never start interactive sessions (`ssh -t` with a shell) - output-only commands only
 - Do not run destructive operations (rm, shutdown, kill -9) without explicit user confirmation
 - For multi-step operations, chain commands with `&&` in a single SSH call rather than multiple round-trips

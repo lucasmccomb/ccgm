@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 28 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 29 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -320,6 +320,28 @@ Commands installed:
 | `/xplan-resume` | Resume an interrupted plan execution |
 
 **Dependencies**: multi-agent (which depends on session-logging)
+
+---
+
+### remote-server
+
+SSH access to a configured remote server.
+
+**Installs**: `commands/onremote.md`, `rules/remote-server.md`, settings.json fragment
+
+**What it does**: Enables Claude to run commands and health checks on a remote server over SSH:
+
+- **`/onremote`**: Natural-language task runner - describe what you want to do, Claude figures out the SSH commands
+- **Health check mode**: When invoked with no arguments, shows uptime, disk usage, and active processes
+- **Task mode**: Interprets natural language, runs appropriate SSH commands, reports results
+- **Delegation**: All operations delegate to Haiku to minimize token usage
+- **Settings**: Adds `ssh`, `scp`, `rsync` to the tool allow list
+
+**Config prompts**: Remote hostname, SSH username, server alias
+
+**Template variables**: `__REMOTE_HOST__`, `__REMOTE_USER__`, `__REMOTE_ALIAS__`
+
+**Dependencies**: None
 
 ---
 

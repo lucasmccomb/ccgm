@@ -21,7 +21,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 28 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 29 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 
@@ -92,7 +92,7 @@ For a quick install with a preset:
 |--------|---------|----------|
 | **minimal** | autonomy, git-workflow | Getting started |
 | **standard** | autonomy, git-workflow, hooks, settings, commands-core, commands-utility | Most users |
-| **full** | All 28 modules | Power users |
+| **full** | All 29 modules | Power users |
 | **team** | autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification | Teams |
 
 ### Other install options
@@ -127,6 +127,7 @@ For a quick install with a preset:
 | **session-logging** | workflow | Structured agent session logging with mandatory triggers and startup command | - |
 | **multi-agent** | workflow | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | session-logging |
 | **xplan** | workflow | Interactive planning framework: discovery interview, deep research, tech stack sign-off, peer review, parallel agent execution | multi-agent |
+| **remote-server** | workflow | SSH access to a configured remote server with /onremote command for health checks and remote task execution | - |
 | **self-improving** | workflow | Meta-learning: extract experience from tasks, identify patterns, update memory, improve across sessions | - |
 | **subagent-patterns** | workflow | Subagent dispatch: task decomposition, spec-driven delegation, two-stage review, parallel coordination | - |
 | **code-quality** | patterns | Code standards, testing requirements, error handling, security, build verification | - |
@@ -229,7 +230,7 @@ The `docs/` directory contains comprehensive documentation:
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 28 modules |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 29 modules |
 | [Commands Reference](docs/commands.md) | All 25 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 10 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |

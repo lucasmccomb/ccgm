@@ -1,7 +1,7 @@
 {
   "name": "remote-server",
   "displayName": "Remote Server",
-  "description": "SSH access to a remote server. Adds /remote command for health checks and remote command execution. Delegates to Haiku.",
+  "description": "SSH access to a remote server. Adds /onremote command for health checks and remote command execution. Delegates to Haiku.",
   "category": "workflow",
   "scope": ["global"],
   "dependencies": [],
