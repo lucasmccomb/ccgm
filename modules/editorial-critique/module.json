@@ -1,0 +1,13 @@
+{
+  "name": "editorial-critique",
+  "displayName": "Editorial Critique",
+  "description": "/editorial-critique - deep editorial review of long-form writing. 8 parallel analysis passes: prose craft, AI-tell detection, argument architecture, conciseness, data verification, structure, impact, grammar. Scored report with optional auto-fix.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "skills/editorial-critique/SKILL.md": { "target": "skills/editorial-critique/SKILL.md", "type": "skill", "template": false }
+  },
+  "tags": ["commands", "writing", "editing", "prose", "review"],
+  "configPrompts": []
+}
