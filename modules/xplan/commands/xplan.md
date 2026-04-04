@@ -132,7 +132,7 @@ Read the file ~/code/claude-dotfiles/commands/deepresearch.md and follow its ins
 Topic: {concept from Phase 0}
 Arguments: --depth {user's selection from 1.0} --plan-dir ~/code/plans/{concept-name} {--repo REPO_PATH if provided}
 
-Execute the full /deepresearch workflow: parse arguments, spawn parallel research agents with Agent Reach internet access, synthesize findings, and write research.md to the plan directory.
+Execute the full /deepresearch workflow: parse arguments, spawn parallel research agents with internet access, synthesize findings, and write research.md to the plan directory.
 ```
 
 **Important**: Pass the depth selection from 1.0 via the `--depth` flag so /deepresearch skips its own interactive question (prevents double-prompting).
@@ -150,7 +150,7 @@ If research.md does not exist, the research agent failed. Re-spawn it or ask the
 Read the research.md and confirm it contains:
 - Executive Summary
 - Key Insights (with real data, not just LLM knowledge)
-- Sources section with actual URLs (Agent Reach should have populated this)
+- Sources section with actual URLs (research agents should have populated this)
 
 If the Sources section is empty, the research agents did not use internet channels. Note this but proceed.
 

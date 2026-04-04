@@ -197,34 +197,31 @@ Interpret HTTP codes:
 - 301/302 = taken (redirect to profile)
 - 429 = rate limited (note as "unknown")
 
-### Agent Reach: Direct Twitter Search
+### Twitter/X Search
 
 ```bash
-bird search "NAME" -n 5
-bird search "from:NAME OR @NAME" -n 5
-# Fallback if bird CLI unavailable:
-# mcporter call 'exa.web_search_exa(query: "site:twitter.com NAME", numResults: 3)'
+WebSearch: "NAME" site:twitter.com OR site:x.com
 ```
 
 Check for active accounts, brands, or influencers using the name.
 
-### Agent Reach: Direct Reddit Search
+### Reddit Search
 
 ```bash
-curl -s "https://www.reddit.com/search.json?q=NAME&limit=5" -H "User-Agent: agent-reach/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:300], subreddit, score}'
+curl -s "https://www.reddit.com/search.json?q=NAME&limit=5" -H "User-Agent: research-agent/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:300], subreddit, score}'
 ```
 
 Look for subreddits, communities, or products with the name.
 
-### Agent Reach: Direct YouTube Search
+### YouTube Search
 
 ```bash
-~/.agent-reach-venv/bin/yt-dlp --dump-json "ytsearch3:NAME" 2>/dev/null | jq '[.[] | {title, channel, view_count, webpage_url}]'
+yt-dlp --dump-json "ytsearch3:NAME" 2>/dev/null | jq '[.[] | {title, channel, view_count, webpage_url}]'
 ```
 
 Check for channels or prominent content using the name.
 
-### Agent Reach: Direct GitHub Search
+### GitHub Search
 
 ```bash
 gh search repos "NAME" --limit 5
@@ -244,7 +241,7 @@ WebSearch: "NAME" company OR startup OR app -site:github.com
 
 Is there an existing company, product, or notable entity using this name?
 
-### Agent Reach: Deep Web Presence Check
+### Deep Web Presence Check (Exa)
 
 ```bash
 mcporter call 'exa.web_search_exa(query: "NAME company startup app product", numResults: 5)'

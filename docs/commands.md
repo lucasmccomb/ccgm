@@ -320,19 +320,18 @@ Installed by the **deep-research** module.
 
 **Deep multi-channel research across 15+ platforms.**
 
-Spawns parallel research agents to gather comprehensive information from web search, GitHub, Reddit, Twitter/X, YouTube, and other platforms via Agent Reach integration.
+Spawns parallel research agents to gather comprehensive information from web search, GitHub, Reddit, YouTube, and other platforms using standalone tools (curl, gh, mcporter, yt-dlp, WebSearch).
 
 **Research channels**:
-- Web search (Exa)
-- GitHub (repos, issues, discussions)
-- Reddit (subreddits, threads)
-- Twitter/X
-- YouTube
-- Hacker News, LinkedIn, ProductHunt, and more
+- Web search (Exa via mcporter, WebSearch)
+- GitHub (repos, issues, discussions via gh CLI)
+- Reddit (JSON API via curl)
+- YouTube (metadata via yt-dlp)
+- Any web page (Jina Reader via curl)
 
 **What happens**:
 1. Breaks the research question into parallel sub-queries
-2. Spawns agents per channel via Agent Reach
+2. Spawns agents per channel using standalone CLI tools
 3. Aggregates and deduplicates findings
 4. Synthesizes into a structured report with sources
 

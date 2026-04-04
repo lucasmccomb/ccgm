@@ -193,12 +193,12 @@ Multi-channel research and structured debugging commands powered by specialized 
 
 | Command | Description |
 |---------|-------------|
-| `/deepresearch` | Deep multi-channel research across 15+ platforms using Agent Reach and web search |
+| `/deepresearch` | Deep multi-channel research using parallel agents and web search |
 | `/debug` | Structured root-cause debugging with Opus - reproduce, hypothesize, instrument, diagnose, fix, verify |
 
 **What it does**: Provides two high-powered research and investigation commands:
 
-- **/deepresearch**: Spawns parallel research agents across web search, GitHub, Reddit, Twitter/X, YouTube, and other platforms via the Agent Reach integration. Produces a structured report with findings, sources, and synthesis.
+- **/deepresearch**: Spawns parallel research agents across web search, GitHub, Reddit, YouTube, and other platforms. Produces a structured report with findings, sources, and synthesis.
 - **/debug**: Enforces a disciplined debugging workflow (reproduce → hypothesize → instrument → diagnose → fix → verify) using Opus for deep root-cause analysis. Invoked automatically by the `systematic-debugging` module's routing rule.
 
 **Dependencies**: None

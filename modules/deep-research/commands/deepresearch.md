@@ -1,12 +1,12 @@
 ---
-description: Deep multi-channel research using Agent Reach + web search across 15+ platforms
+description: Deep multi-channel research using web search across multiple platforms
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, WebSearch, WebFetch, AskUserQuestion
 argument-hint: <topic> [--depth full|technical|market|lite|custom] [--output <path>] [--repo <path>] [--plan-dir <path>] [--extend <prior-research-path>]
 ---
 
 # /deepresearch - Deep Multi-Channel Research
 
-A standalone research skill that spawns parallel agents to research a topic across the internet using Agent Reach channels (Reddit, GitHub, YouTube, Exa, web, RSS, Twitter) alongside WebSearch/WebFetch. Produces a comprehensive research.md.
+A standalone research skill that spawns parallel agents to research a topic across the internet using multiple channels (Reddit, GitHub, YouTube, Exa, web, RSS) alongside WebSearch/WebFetch. Produces a comprehensive research.md.
 
 **Can be used:**
 - Standalone: `/deepresearch "dark mode browser extensions"` - writes to `~/code/docs/research/`
@@ -130,12 +130,12 @@ Pass these targeted sub-questions to each agent instead of (or alongside) the br
 Launch the selected research agents in **parallel** using the Task tool. Each agent gets:
 1. The topic/concept to research
 2. Its targeted sub-questions from Phase 1.5
-3. The Agent Reach Quick Reference (below)
+3. The Internet Research Tools reference (below)
 4. Output size rules
 5. Depth-appropriate channel intensity guidance
 6. Prior research context (if `--extend` was provided)
 
-### Agent Reach Quick Reference
+### Internet Research Tools Reference
 
 Include this reference block in EVERY research agent's Task prompt:
 
@@ -168,8 +168,8 @@ Best for: reading specific URLs, article content
 Fallback: WebFetch
 
 **Reddit (community sentiment, user discussions)**
-curl -s "https://www.reddit.com/search.json?q=QUERY&limit=5" -H "User-Agent: agent-reach/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:500], url, score, num_comments}'
-curl -s "https://www.reddit.com/r/SUBREDDIT/hot.json?limit=5" -H "User-Agent: agent-reach/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:500], url, score}'
+curl -s "https://www.reddit.com/search.json?q=QUERY&limit=5" -H "User-Agent: research-agent/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:500], url, score, num_comments}'
+curl -s "https://www.reddit.com/r/SUBREDDIT/hot.json?limit=5" -H "User-Agent: research-agent/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:500], url, score}'
 Fallback: mcporter call 'exa.web_search_exa(query: "site:reddit.com QUERY")'
 
 **GitHub (code, repos, issues)**
@@ -178,17 +178,13 @@ gh search code "QUERY" --language LANG --limit 10
 gh repo view OWNER/REPO
 Fallback: WebSearch "site:github.com QUERY"
 
-**YouTube (video transcripts, tutorials) - MUST filter output**
-~/.agent-reach-venv/bin/yt-dlp --dump-json "ytsearch3:QUERY" 2>/dev/null | jq '[.[] | {title, description: .description[:300], duration, view_count, webpage_url}]'
+**YouTube (video metadata, tutorials) - MUST filter output**
+yt-dlp --dump-json "ytsearch3:QUERY" 2>/dev/null | jq '[.[] | {title, description: .description[:300], duration, view_count, webpage_url}]'
 Fallback: WebSearch "site:youtube.com QUERY"
-
-**Twitter/X (real-time discussions, developer sentiment) - if configured**
-bird search "QUERY" -n 10
-bird read URL_OR_ID
-Fallback: mcporter call 'exa.web_search_exa(query: "site:twitter.com QUERY")'
+SECURITY: Never use --cookies-from-browser flag (accesses macOS keychain to decrypt all browser cookies)
 
 **RSS Feeds**
-~/.agent-reach-venv/bin/python3 -c "
+python3 -c "
 import feedparser
 feed = feedparser.parse('FEED_URL')
 for e in feed.entries[:5]:
@@ -274,7 +270,6 @@ Channels to prioritize:
 - Reddit for user reviews and complaints (search r/SaaS, relevant subreddits)
 - Exa for deep-web competitive intelligence
 - GitHub for open-source alternatives (stars, activity, issues)
-- Twitter/bird for brand sentiment and user discussions
 
 ---
 
@@ -343,7 +338,6 @@ Channels to prioritize:
 - WebSearch for pricing pages and business model articles
 - Reddit (r/SaaS, r/startups, r/Entrepreneur) for pricing discussions
 - Exa for deep business analysis content
-- Twitter/bird for pricing sentiment
 
 ---
 
@@ -356,7 +350,7 @@ Analyze the existing repo at `{REPO_PATH}`. Deep dive into:
 - Test coverage and testing patterns
 - Current state (open issues, recent PRs, active branches)
 
-This agent does NOT use Agent Reach channels. It uses: Read, Glob, Grep, Bash (for git commands, gh CLI).
+This agent does NOT use internet channels. It uses: Read, Glob, Grep, Bash (for git commands, gh CLI).
 
 ---
 
