@@ -93,7 +93,7 @@ For a quick install with a preset:
 |--------|---------|----------|
 | **minimal** | autonomy, git-workflow | Getting started |
 | **standard** | autonomy, git-workflow, hooks, settings, commands-core, commands-utility | Most users |
-| **full** | All 32 modules | Power users |
+| **full** | All 33 modules | Power users |
 | **team** | autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification | Teams |
 
 ### Other install options
@@ -127,6 +127,7 @@ For a quick install with a preset:
 | **editorial-critique** | commands | /editorial-critique - 8-pass editorial review of long-form writing: prose craft, AI-tell detection, argument, conciseness, accuracy, structure, impact, grammar. Scored report with auto-fix | - |
 | **design-review** | commands | /design-review - 6-pass visual design review: spacing, typography, responsive, hierarchy, accessibility, consistency. Screenshots + CSS analysis with auto-fix | - |
 | **ideate** | commands | /ideate - structured ideation framework: Socratic interview to refine ideas to 95% clarity, then hand off to /deepresearch or /xplan | - |
+| **research** | commands | /research - multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, Reddit. Zero dependencies.* | - |
 | **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
 | **session-logging** | workflow | Structured agent session logging with mandatory triggers and startup command | - |
 | **multi-agent** | workflow | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | session-logging |
@@ -147,13 +148,15 @@ For a quick install with a preset:
 | **shadcn** | tech-specific | shadcn/ui patterns: composition, semantic theming tokens, form architecture, accessibility | - |
 | **tailwind** | tech-specific | Tailwind CSS v4 design system: CSS-first config, design tokens, CVA variants, dark mode, responsive grids | - |
 
+*\* `/research` works out of the box with no setup. For higher-quality results, install [/deepresearch](#companion-module-deepresearch) - a local pipeline that's faster, cheaper, and more reliable, but requires additional infrastructure.*
+
 ### Companion module: /deepresearch
 
-The `/deepresearch` command is a powerful research pipeline that lives in its own repo: **[lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch)**. It runs a local-first research stack that produces comprehensive, source-backed research documents on any topic.
+The `/deepresearch` command is a more powerful research pipeline that lives in its own repo: **[lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch)**. It replaces `/research`'s parallel subagent approach with a local-first pipeline that produces higher-quality, source-backed research documents.
 
 **How it works:** Ollama (qwen2.5:72b) generates search queries and extracts facts, SearXNG (self-hosted Docker) runs parallel web searches across Google/Bing/DuckDuckGo, and a single Anthropic API call (Sonnet) synthesizes everything into a structured research.md.
 
-**Why it's separate:** It requires local infrastructure (Docker, Ollama with a ~40GB model, a Python venv) that not every CCGM user will want. But if you use `/xplan`, you need this - xplan delegates its research phase to `/deepresearch`.
+**Why it's separate:** It requires local infrastructure (Docker, Ollama with a ~40GB model, a Python venv) that not every CCGM user will want. But if you use `/xplan`, you'll want this - xplan delegates its research phase to `/deepresearch`.
 
 **Install:**
 
@@ -252,7 +255,7 @@ The `docs/` directory contains comprehensive documentation:
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 32 modules |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 33 modules |
 | [Commands Reference](docs/commands.md) | All 25 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 10 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
