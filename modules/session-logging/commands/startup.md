@@ -82,6 +82,37 @@ Read other agents' files to check for:
 - Branches they created
 - Blockers or decisions that affect your work
 
+### 2.5 Live Session Discovery
+
+Call agent_sessions.py to get all currently running Claude CLI sessions on this machine:
+
+```bash
+python3 ~/.claude/lib/agent_sessions.py --text 2>/dev/null
+```
+
+Display as part of the session dashboard under "Live Sessions". If the `--exclude-cwd` flag is needed to exclude the current session, use:
+
+```bash
+python3 ~/.claude/lib/agent_sessions.py --text --exclude-cwd "$PWD" 2>/dev/null
+```
+
+Cross-reference with tracking.csv claims to annotate status:
+- If a live session exists in a directory matching a tracked issue: mark as **(LIVE)**
+- If a tracked issue has no live session: mark as **(IDLE - session may have ended)**
+
+Example output section in the dashboard:
+```
+Live Sessions:
+  PID 78859 | habitpro-ai | branch: 166-api-native | up: 1d 0h (ttys007)  <- LIVE
+  PID 6994  | lem-work    | branch: main            | up: 2d 18h (ttys011)
+
+Tracked Claims:
+  agent-w0-c0: #166 (habitpro-ai) [LIVE - PID 78859]
+  agent-0:     #43  (lem-work)    [IDLE - no active session]
+```
+
+If agent_sessions.py is not found or fails, skip this step silently.
+
 ### 3. Freshness Check
 
 If the log repo has uncommitted changes older than 1 hour, auto-commit and push:
@@ -126,6 +157,17 @@ cancelled, including the `mkdir -p`. Always run log directory creation as its ow
 separate step, not grouped with any git commands.
 
 ### 5. Git Status Check & Sync
+
+**Repo scope check**: First verify you are in a git repository:
+```bash
+git rev-parse --is-inside-work-tree 2>/dev/null || echo "NOT_A_GIT_REPO"
+```
+
+If NOT in a git repo:
+- Skip ALL git operations in this step (fetch, pull, branch check, log)
+- Note in the dashboard: "Running from non-repo directory - git operations skipped"
+- Do NOT navigate to other directories to find git repos
+- Continue to Step 6 (Open Pull Requests) using the system-wide context from tracking.csv
 
 **CRITICAL: Never use `git reset --hard`** - This command is blocked by the
 auto-approve hook (deny pattern: `git reset --hard:*`). Using it will cause the
@@ -345,15 +387,17 @@ last_checked: {TODAY}
 
 Based on the gathered state, recommend what to do:
 
+**STOP after presenting the dashboard.** Do not continue work, navigate to other directories, or execute tasks autonomously. Present the findings and wait for the user's explicit instruction.
+
 | State | Recommendation |
 |-------|---------------|
-| PR open from previous session | Check CI status and merge if green |
-| In-progress issue from previous session | Continue working on it |
-| Uncommitted changes | Review and commit (do NOT stash) |
+| PR open from previous session | Report PR URL and CI status. Await instruction. |
+| In-progress issue from previous session | Report issue number and branch. Await instruction. Do NOT start working. |
+| Uncommitted changes | Report what's uncommitted. Await instruction. |
 | Behind base branch | Sync with `git pull origin {branch} --ff-only` or `git rebase origin/{branch}` |
-| No active work | Pick next available issue |
-| All issues done | Ask what to work on next |
-| Claude Code update available | Update first, then proceed |
+| No active work | Report available issues. Await instruction. |
+| All issues done | Report completion. Ask what to work on next. |
+| Claude Code update available | Update first, then proceed. |
 
 **Sync safety reminder**: Never use `git reset --hard` to sync branches. Use
 `git pull --ff-only` for clean fast-forwards, or `git rebase` when the branch has diverged.
