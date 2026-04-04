@@ -19,7 +19,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 27 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 28 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 
@@ -90,7 +90,7 @@ For a quick install with a preset:
 |--------|---------|----------|
 | **minimal** | autonomy, git-workflow | Getting started |
 | **standard** | autonomy, git-workflow, hooks, settings, commands-core, commands-utility | Most users |
-| **full** | All 27 modules | Power users |
+| **full** | All 28 modules | Power users |
 | **team** | standard + github-protocols, code-quality | Teams |
 
 ### Other install options
@@ -118,6 +118,7 @@ For a quick install with a preset:
 | **commands-core** | commands | /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue) | - |
 | **commands-extra** | commands | /audit (codebase audit), /pwv (Playwright verify), /walkthrough, /promote-rule | - |
 | **commands-utility** | commands | /cgr (clear + checkout + rebase), /cws-submit (Chrome Web Store walkthrough), /dotsync (sync config to CCGM), /user-test (browser user testing) | - |
+| **documentation** | commands | /docupdate (comprehensive documentation audit: README, TOC, onboarding, packages, module coverage) | - |
 | **deep-research** | commands | /deepresearch (multi-channel research across 15+ platforms) and /debug (structured root-cause debugging with Opus) | - |
 | **brand-naming** | commands | /brand (full naming pipeline with word exploration, domain/trademark/app store checks) and /brand-check (single-name deep verification) | - |
 | **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
@@ -226,8 +227,8 @@ The `docs/` directory contains comprehensive documentation:
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 27 modules |
-| [Commands Reference](docs/commands.md) | All 23 slash commands with usage examples |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 28 modules |
+| [Commands Reference](docs/commands.md) | All 24 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 10 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |

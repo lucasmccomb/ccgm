@@ -53,5 +53,6 @@ cp commands/debug.md ~/.claude/commands/debug.md
 
 ## Dependencies
 
-- Agent Reach (recommended for `/deepresearch`) - provides `mcporter` CLI for Exa, Reddit, GitHub, YouTube, Twitter channels
+- `mcporter` (optional, for Exa semantic search in `/deepresearch`) - install via npm: `npm install -g mcporter`
+- `yt-dlp` (optional, for YouTube metadata in `/deepresearch`) - install via brew: `brew install yt-dlp`
 - Opus model access (for `/debug` delegation)
