@@ -868,41 +868,93 @@ main() {
   fi
 
   # ===========================================================
-  # Step 14: Shell alias
+  # Step 14: Shell aliases
   # ===========================================================
-  ui_header "Shell Alias"
+  ui_header "Shell Aliases"
 
+  # Resolve rc file - prompt user if shell is unrecognized
   local rc_file=""
   case "$shell_type" in
     zsh)  rc_file="$HOME/.zshrc" ;;
     bash) rc_file="$HOME/.bashrc" ;;
+    *)
+      ui_info "Unrecognized shell: $shell_type"
+      echo ""
+      echo "Which shell config file should aliases be added to?"
+      echo "  1) ~/.zshrc"
+      echo "  2) ~/.bashrc"
+      echo "  3) Skip alias setup"
+      local shell_choice
+      read -rp "Choice [1-3]: " shell_choice
+      case "$shell_choice" in
+        1) rc_file="$HOME/.zshrc" ;;
+        2) rc_file="$HOME/.bashrc" ;;
+        *) rc_file="" ;;
+      esac
+      ;;
   esac
 
-  local alias_installed=false
-  if [ -n "$rc_file" ]; then
-    local alias_name="ccgm"
-    local alias_cmd='claude /startup'
+  # Explain both aliases before prompting
+  echo ""
+  ui_info "CCGM provides two shell aliases for launching Claude Code:"
+  echo ""
+  echo "  ccgm   Quick session start   claude /log-init --dangerously-skip-permissions"
+  echo "         Initializes your session log in ~1 second. Run this every time"
+  echo "         you open a new Claude Code session in a repo."
+  echo ""
+  echo "  ccgms  Full startup           claude /startup --dangerously-skip-permissions"
+  echo "         Full session orientation: git status, open issues, live agent"
+  echo "         dashboard, Claude Code release check. Use when starting work"
+  echo "         after time away or in a new repo."
+  echo ""
 
-    ui_info "You can add a shell alias to launch Claude Code with the /startup command."
-    ui_info "  alias ${alias_name}=\"${alias_cmd}\""
+  local alias_ccgm_installed=false
+  local alias_ccgms_installed=false
+
+  if [ -n "$rc_file" ]; then
+    # --- ccgm alias ---
+    local ccgm_cmd='claude /log-init --dangerously-skip-permissions'
+    if [ -f "$rc_file" ] && grep -qF 'alias ccgm=' "$rc_file" 2>/dev/null; then
+      ui_info "Alias 'ccgm' already exists in ${rc_file} - skipping"
+    elif ui_confirm "Add 'ccgm' (quick log-init) alias to ${rc_file}?"; then
+      echo "" >> "$rc_file"
+      echo "# CCGM - quick session log init" >> "$rc_file"
+      echo "alias ccgm=\"${ccgm_cmd}\"" >> "$rc_file"
+      ui_success "ccgm alias added"
+      alias_ccgm_installed=true
+    else
+      ui_info "Skipped. Add manually: alias ccgm=\"${ccgm_cmd}\""
+    fi
+
     echo ""
 
-    if [ -f "$rc_file" ] && grep -qF "alias ${alias_name}=" "$rc_file" 2>/dev/null; then
-      ui_info "Alias '${alias_name}' already exists in ${rc_file} - skipping"
-    elif ui_confirm "Add '${alias_name}' alias to ${rc_file}?"; then
-      echo "" >> "$rc_file"
-      echo "# CCGM - launch Claude Code with startup command" >> "$rc_file"
-      echo "alias ${alias_name}=\"${alias_cmd}\"" >> "$rc_file"
-      ui_success "Alias added to ${rc_file}"
-      ui_info "Run 'source ${rc_file}' or open a new terminal to use it"
-      alias_installed=true
+    # --- ccgms alias ---
+    local ccgms_cmd='claude /startup --dangerously-skip-permissions'
+    if [ -f "$rc_file" ] && grep -qF 'alias ccgms=' "$rc_file" 2>/dev/null; then
+      ui_info "Alias 'ccgms' already exists in ${rc_file} - skipping"
+    elif ui_confirm "Add 'ccgms' (full startup) alias to ${rc_file}?"; then
+      # Add comment only if ccgm wasn't just added (avoid duplicate comment)
+      if [ "$alias_ccgm_installed" = false ]; then
+        echo "" >> "$rc_file"
+        echo "# CCGM - full session startup" >> "$rc_file"
+      fi
+      echo "alias ccgms=\"${ccgms_cmd}\"" >> "$rc_file"
+      ui_success "ccgms alias added"
+      alias_ccgms_installed=true
     else
-      ui_info "Skipped - you can add it manually later:"
-      echo "  echo 'alias ${alias_name}=\"${alias_cmd}\"' >> ${rc_file}"
+      ui_info "Skipped. Add manually: alias ccgms=\"${ccgms_cmd}\""
+    fi
+
+    if [ "$alias_ccgm_installed" = true ] || [ "$alias_ccgms_installed" = true ]; then
+      echo ""
+      ui_info "Run 'source ${rc_file}' or open a new terminal to use the aliases"
     fi
   else
-    ui_info "Unrecognized shell ($shell_type) - skipping alias setup"
-    ui_info "You can manually add: alias ccgm=\"claude /startup\""
+    ui_info "Skipping alias setup."
+    echo ""
+    echo "Add manually to your shell config:"
+    echo "  alias ccgm=\"claude /log-init --dangerously-skip-permissions\""
+    echo "  alias ccgms=\"claude /startup --dangerously-skip-permissions\""
   fi
 
   # ===========================================================
@@ -925,8 +977,8 @@ main() {
 
   ui_info "Next steps:"
   local step=1
-  if [ "$alias_installed" = true ]; then
-    echo "  ${step}. Run 'source ${rc_file}' then type '${alias_name}' to start Claude Code"
+  if [ "$alias_ccgm_installed" = true ] || [ "$alias_ccgms_installed" = true ]; then
+    echo "  ${step}. Run 'source ${rc_file}' to activate the new aliases"
     step=$((step + 1))
   else
     echo "  ${step}. Open a new Claude Code session to pick up the new config"
@@ -943,8 +995,11 @@ main() {
   fi
   echo ""
   ui_info "Useful commands:"
-  if [ "$alias_installed" = true ]; then
-    echo "  ${alias_name}            Launch Claude Code with /startup"
+  if [ "$alias_ccgm_installed" = true ]; then
+    echo "  ccgm             Quick session start (log init only)"
+  fi
+  if [ "$alias_ccgms_installed" = true ]; then
+    echo "  ccgms            Full startup (git status, issues, agent dashboard)"
   fi
   echo "  ./update.sh      Check for upstream updates"
   echo "  ./uninstall.sh   Remove installed modules"
