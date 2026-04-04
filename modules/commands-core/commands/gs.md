@@ -77,6 +77,23 @@ gh pr list --state open --limit 10 2>/dev/null
 
 If any PRs are from the current branch, highlight them.
 
+### 5.5 Sibling Sessions
+
+Check for other Claude Code sessions working in the same repository:
+
+```bash
+python3 ~/.claude/lib/agent_sessions.py --repo "$(git remote get-url origin 2>/dev/null | xargs basename | sed 's/\.git$//')" --exclude-cwd "$PWD" --text 2>/dev/null
+```
+
+If any sessions are found, include them in the dashboard under "Sibling Sessions". If none found, omit this section entirely to keep the output clean.
+
+Dashboard format when siblings exist:
+```
+Sibling Sessions (same repo):
+  agent-w0-c2 | branch: 44-update-onboarding | up: 3h (ttys003)
+  agent-w0-c3 | branch: 45-fix-payments      | up: 45m (ttys009)
+```
+
 ### 6. Uncommitted Changes Summary
 
 If there are uncommitted changes, provide a brief summary:
@@ -120,6 +137,10 @@ Recent Commits:
 
 Open PRs:
   #{number} {title} ({branch})
+  ...
+
+Sibling Sessions (same repo):   <- only if siblings exist
+  {agent_id} | branch: {branch} | up: {uptime} ({tty})
   ...
 
 Changes:
