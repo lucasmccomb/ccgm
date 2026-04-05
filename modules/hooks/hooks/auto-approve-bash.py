@@ -8,10 +8,12 @@ This hook exists because Claude Code's built-in permission system has bugs:
 
 This hook properly implements the allow/deny logic that settings.json SHOULD provide.
 """
+from __future__ import annotations
+
 import json
-import sys
 import os
 import re
+import sys
 from pathlib import Path
 
 # Settings file locations in precedence order (highest first)
@@ -20,10 +22,10 @@ SETTINGS_FILES = [
     # Add project-level settings if needed
 ]
 
-def load_settings():
+def load_settings() -> tuple[list[str], list[str]]:
     """Load and merge settings from all settings files."""
-    allow_patterns = []
-    deny_patterns = []
+    allow_patterns: list[str] = []
+    deny_patterns: list[str] = []
 
     for settings_file in SETTINGS_FILES:
         if settings_file.exists():
@@ -73,7 +75,7 @@ def pattern_matches_command(pattern: str, command: str) -> bool:
     # Exact match or prefix match
     return command.startswith(pattern)
 
-def check_smart_rules(command: str) -> tuple:
+def check_smart_rules(command: str) -> tuple[str | None, str | None]:
     """
     Context-aware rules for commands that are safe in some forms but dangerous in others.
     These run BEFORE the settings.json deny/allow patterns.
@@ -95,7 +97,7 @@ def check_smart_rules(command: str) -> tuple:
     return (None, None)
 
 
-def check_command(command: str, allow_patterns: list, deny_patterns: list) -> tuple:
+def check_command(command: str, allow_patterns: list[str], deny_patterns: list[str]) -> tuple[str | None, str | None]:
     """
     Check if a command should be allowed or denied.
 
@@ -121,7 +123,7 @@ def check_command(command: str, allow_patterns: list, deny_patterns: list) -> tu
     # Return None to not output anything and exit 0
     return (None, None)
 
-def main():
+def main() -> None:
     try:
         input_data = json.load(sys.stdin)
     except json.JSONDecodeError:

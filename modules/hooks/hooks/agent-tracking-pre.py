@@ -10,6 +10,8 @@ Intercepts:
 - git checkout -b {N}-* : Warn if issue N is already claimed
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -19,12 +21,12 @@ import sys
 sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
 
 
-def is_multi_clone_repo():
+def is_multi_clone_repo() -> bool:
     """Check if current directory has .env.clone (multi-clone repo)."""
     return os.path.isfile(os.path.join(os.getcwd(), ".env.clone"))
 
 
-def get_repo_name():
+def get_repo_name() -> str | None:
     """Get repo name from git remote."""
     import subprocess
     try:
@@ -40,7 +42,7 @@ def get_repo_name():
     return None
 
 
-def extract_issue_from_branch(command):
+def extract_issue_from_branch(command: str) -> str | None:
     """Extract issue number from git checkout -b {N}-* command."""
     match = re.search(r"git\s+checkout\s+-b\s+(\d+)-", command)
     if match:
@@ -48,7 +50,7 @@ def extract_issue_from_branch(command):
     return None
 
 
-def warn(message):
+def warn(message: str) -> None:
     """Emit a warning (advisory, does not block)."""
     output = {
         "hookSpecificOutput": {
@@ -59,7 +61,7 @@ def warn(message):
     print(json.dumps(output))
 
 
-def check_live_session_in_cwd():
+def check_live_session_in_cwd() -> dict | None:
     """Check if another live Claude session is running in this working directory."""
     try:
         from agent_sessions import get_active_sessions
@@ -74,7 +76,7 @@ def check_live_session_in_cwd():
     return None
 
 
-def main():
+def main() -> None:
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError:

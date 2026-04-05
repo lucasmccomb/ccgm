@@ -11,11 +11,13 @@ specific fields. The hook's logic is simple (read stdin, print reminder)
 so field names don't affect behavior.
 """
 
+from __future__ import annotations
+
 import json
 import sys
 
 
-def main():
+def main() -> None:
     # Read stdin (required by hook contract)
     try:
         json.load(sys.stdin)

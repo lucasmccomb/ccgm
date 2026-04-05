@@ -8,6 +8,8 @@ to stderr. Uses a daily flag file to avoid repeated checks.
 
 Can be disabled by setting CCGM_AUTO_UPDATE_CHECK=false in ~/.claude/.ccgm.env
 """
+from __future__ import annotations
+
 import json
 import os
 import subprocess
@@ -21,7 +23,7 @@ ENV_FILE = Path.home() / ".claude" / ".ccgm.env"
 FLAG_DIR = Path(tempfile.gettempdir())
 
 
-def is_enabled():
+def is_enabled() -> bool:
     """Check if auto-update check is enabled in .ccgm.env."""
     if not ENV_FILE.exists():
         return False
@@ -37,7 +39,7 @@ def is_enabled():
     return False
 
 
-def already_checked_today():
+def already_checked_today() -> bool:
     """Check if we already ran the update check today."""
     flag_file = FLAG_DIR / f".ccgm-update-check-{date.today().isoformat()}"
     if flag_file.exists():
@@ -55,7 +57,7 @@ def already_checked_today():
     return False
 
 
-def get_ccgm_root():
+def get_ccgm_root() -> str | None:
     """Read the CCGM clone path from the manifest."""
     if not MANIFEST_FILE.exists():
         return None
@@ -67,7 +69,7 @@ def get_ccgm_root():
         return None
 
 
-def check_for_updates(ccgm_root):
+def check_for_updates(ccgm_root: str) -> int:
     """Fetch remote and count new commits on main."""
     try:
         # Fetch latest (quiet, fast)
@@ -93,7 +95,7 @@ def check_for_updates(ccgm_root):
     return 0
 
 
-def main():
+def main() -> None:
     # Read stdin (required by hook contract) but we don't use it
     try:
         json.load(sys.stdin)

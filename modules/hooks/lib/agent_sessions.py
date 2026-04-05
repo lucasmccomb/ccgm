@@ -17,6 +17,8 @@ Usage as CLI:
     python3 agent_sessions.py --repo habitpro-ai  # Filter by repo
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -29,7 +31,7 @@ from pathlib import Path
 # Core discovery
 # ---------------------------------------------------------------------------
 
-def _run(cmd, cwd=None, timeout=5):
+def _run(cmd: list[str], cwd: str | None = None, timeout: int = 5) -> str:
     """Run a command, return stdout or empty string on failure."""
     try:
         result = subprocess.run(
@@ -44,7 +46,7 @@ def _run(cmd, cwd=None, timeout=5):
         return ""
 
 
-def _get_claude_pids():
+def _get_claude_pids() -> list[tuple[int, str, str]]:
     """
     Return list of (pid, tty, etime) for running claude CLI processes.
 
@@ -52,7 +54,7 @@ def _get_claude_pids():
     Matches only the bare 'claude' command or 'claude /startup' etc.
     """
     ps_out = _run(["ps", "-eo", "pid,tty,etime,command"])
-    pids = []
+    pids: list[tuple[int, str, str]] = []
     for line in ps_out.splitlines():
         # Match lines where the command is exactly 'claude' (with optional args)
         # Exclude: Claude.app, Claude Helper, grep, python running this script
@@ -68,7 +70,7 @@ def _get_claude_pids():
     return pids
 
 
-def _get_cwd(pid):
+def _get_cwd(pid: int) -> str | None:
     """Get the current working directory of a process via lsof."""
     out = _run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"], timeout=5)
     for line in out.splitlines():
@@ -79,7 +81,7 @@ def _get_cwd(pid):
     return None
 
 
-def _get_git_context(cwd):
+def _get_git_context(cwd: str) -> tuple[str | None, str | None]:
     """Return (repo_name, branch) for a directory, or (None, None)."""
     branch = _run(["git", "-C", cwd, "branch", "--show-current"])
     if not branch:
@@ -92,7 +94,7 @@ def _get_git_context(cwd):
     return repo, branch
 
 
-def _get_agent_id(cwd):
+def _get_agent_id(cwd: str) -> str | None:
     """
     Derive agent identity from .env.clone or directory name pattern.
 
@@ -121,7 +123,7 @@ def _get_agent_id(cwd):
     return None
 
 
-def get_active_sessions(repo_filter=None, exclude_cwd=None):
+def get_active_sessions(repo_filter: str | None = None, exclude_cwd: str | None = None) -> list[dict]:
     """
     Return list of active Claude Code CLI sessions on this machine.
 
@@ -142,7 +144,7 @@ def get_active_sessions(repo_filter=None, exclude_cwd=None):
             "agent_id": str,    # Derived agent ID (or None)
         }
     """
-    sessions = []
+    sessions: list[dict] = []
     my_cwd = os.path.realpath(exclude_cwd) if exclude_cwd else None
 
     for pid, tty, etime in _get_claude_pids():
@@ -177,7 +179,7 @@ def get_active_sessions(repo_filter=None, exclude_cwd=None):
 # Formatting helpers
 # ---------------------------------------------------------------------------
 
-def format_sessions_text(sessions, header=True):
+def format_sessions_text(sessions: list[dict], header: bool = True) -> str:
     """Format sessions as a human-readable table for dashboard display."""
     if not sessions:
         return "  (none)"
@@ -204,7 +206,7 @@ def format_sessions_text(sessions, header=True):
     return "\n".join(lines)
 
 
-def sessions_by_repo(sessions):
+def sessions_by_repo(sessions: list[dict]) -> dict[str, list[dict]]:
     """Group sessions by repo name. Returns {repo: [sessions]}."""
     grouped = {}
     for s in sessions:
@@ -217,7 +219,7 @@ def sessions_by_repo(sessions):
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-def main():
+def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(

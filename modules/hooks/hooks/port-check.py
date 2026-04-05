@@ -16,6 +16,8 @@ OUTPUT: Prints a status message to stderr for the agent to see.
 Does NOT block - only warns. The agent should act on the warning.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -44,7 +46,7 @@ PORT_FLAG_PATTERN = re.compile(r'--port[=\s]+(\d+)')
 PORT_EXPR_PATTERN = re.compile(r'--port\s+\$\(\(([^)]+)\)\)')
 
 
-def load_registry():
+def load_registry() -> dict | None:
     """Load port registry."""
     try:
         with open(REGISTRY_PATH) as f:
@@ -53,7 +55,7 @@ def load_registry():
         return None
 
 
-def get_repo_name():
+def get_repo_name() -> str | None:
     """Derive repo name from git remote."""
     try:
         result = subprocess.run(
@@ -71,9 +73,9 @@ def get_repo_name():
     return None
 
 
-def get_env_clone():
+def get_env_clone() -> dict[str, str]:
     """Read .env.clone from current directory."""
-    env_clone = {}
+    env_clone: dict[str, str] = {}
     env_path = Path.cwd() / ".env.clone"
     if env_path.exists():
         try:
@@ -88,7 +90,7 @@ def get_env_clone():
     return env_clone
 
 
-def get_port_offset(env_clone):
+def get_port_offset(env_clone: dict[str, str]) -> int:
     """Get port offset from .env.clone."""
     if "PORT_OFFSET" in env_clone:
         try:
@@ -114,7 +116,7 @@ def get_port_offset(env_clone):
     return 0
 
 
-def check_port_in_use(port):
+def check_port_in_use(port: int) -> tuple[str, str] | None:
     """Check if a port is in use. Returns (pid, process_name) or None."""
     try:
         result = subprocess.run(
@@ -135,7 +137,7 @@ def check_port_in_use(port):
     return None
 
 
-def is_dev_server_command(command):
+def is_dev_server_command(command: str) -> bool:
     """Check if command launches a dev server."""
     for pattern in DEV_SERVER_PATTERNS:
         if re.search(pattern, command, re.IGNORECASE):
@@ -143,7 +145,7 @@ def is_dev_server_command(command):
     return False
 
 
-def extract_port_from_command(command):
+def extract_port_from_command(command: str) -> int | None:
     """Try to extract a hardcoded port from the command."""
     match = PORT_FLAG_PATTERN.search(command)
     if match:
@@ -151,7 +153,7 @@ def extract_port_from_command(command):
     return None
 
 
-def determine_service_type(command):
+def determine_service_type(command: str) -> str:
     """Determine if this is a frontend or backend service."""
     cmd_lower = command.lower()
     if "wrangler" in cmd_lower:
@@ -164,7 +166,7 @@ def determine_service_type(command):
     return "frontend"
 
 
-def main():
+def main() -> None:
     try:
         tool_input = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, EOFError, ValueError):

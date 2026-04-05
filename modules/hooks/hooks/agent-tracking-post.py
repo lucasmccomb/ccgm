@@ -22,6 +22,8 @@ PostToolUse input schema (verified empirically):
 }
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -32,7 +34,7 @@ import sys
 sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
 
 
-def _find_log_repo():
+def _find_log_repo() -> str:
     """Find the agent log repo directory."""
     env = os.environ.get("CLAUDE_LOG_REPO")
     if env and os.path.isdir(env):
@@ -48,13 +50,13 @@ def _find_log_repo():
 LOG_REPO_DIR = _find_log_repo()
 
 
-def is_multi_clone_repo(cwd=None):
+def is_multi_clone_repo(cwd: str | None = None) -> bool:
     """Check if directory has .env.clone (multi-clone repo)."""
     wd = cwd or os.getcwd()
     return os.path.isfile(os.path.join(wd, ".env.clone"))
 
 
-def is_log_repo(cwd=None):
+def is_log_repo(cwd: str | None = None) -> bool:
     """Check if we're in the log repo (skip heartbeats for log commits)."""
     wd = cwd or os.getcwd()
     try:
@@ -63,7 +65,7 @@ def is_log_repo(cwd=None):
         return False
 
 
-def get_repo_name(cwd=None):
+def get_repo_name(cwd: str | None = None) -> str | None:
     """Get repo name from git remote."""
     wd = cwd or os.getcwd()
     try:
@@ -79,7 +81,7 @@ def get_repo_name(cwd=None):
     return None
 
 
-def extract_issue_from_branch_cmd(command):
+def extract_issue_from_branch_cmd(command: str) -> str | None:
     """Extract issue number from git checkout -b {N}-* command."""
     match = re.search(r"git\s+checkout\s+-b\s+(\d+)-", command)
     if match:
@@ -87,7 +89,7 @@ def extract_issue_from_branch_cmd(command):
     return None
 
 
-def extract_issue_from_commit_msg(command):
+def extract_issue_from_commit_msg(command: str) -> str | None:
     """Extract issue number from git commit -m '#N: ...' command."""
     match = re.search(r'-m\s+["\']?#(\d+):', command)
     if match:
@@ -95,7 +97,7 @@ def extract_issue_from_commit_msg(command):
     return None
 
 
-def extract_branch_name(command):
+def extract_branch_name(command: str) -> str | None:
     """Extract branch name from git checkout -b command."""
     match = re.search(r"git\s+checkout\s+-b\s+(\S+)", command)
     if match:
@@ -103,7 +105,7 @@ def extract_branch_name(command):
     return None
 
 
-def extract_pr_number(stdout):
+def extract_pr_number(stdout: str) -> str | None:
     """Extract PR number from gh pr create output."""
     # gh pr create outputs a URL like https://github.com/user/repo/pull/123
     match = re.search(r"/pull/(\d+)", stdout)
@@ -112,7 +114,7 @@ def extract_pr_number(stdout):
     return None
 
 
-def get_issue_title(issue_num, cwd=None):
+def get_issue_title(issue_num: str, cwd: str | None = None) -> str:
     """Fetch issue title from GitHub (best-effort)."""
     try:
         result = subprocess.run(
@@ -127,7 +129,7 @@ def get_issue_title(issue_num, cwd=None):
     return ""
 
 
-def get_current_branch(cwd=None):
+def get_current_branch(cwd: str | None = None) -> str | None:
     """Get current git branch name."""
     try:
         result = subprocess.run(
@@ -142,7 +144,7 @@ def get_current_branch(cwd=None):
     return None
 
 
-def extract_issue_from_branch_name(branch):
+def extract_issue_from_branch_name(branch: str | None) -> str | None:
     """Extract issue number from branch name like 42-fix-auth."""
     if branch:
         match = re.match(r"^(\d+)-", branch)
@@ -151,7 +153,7 @@ def extract_issue_from_branch_name(branch):
     return None
 
 
-def main():
+def main() -> None:
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError:
