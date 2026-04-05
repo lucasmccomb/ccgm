@@ -85,7 +85,10 @@ def _get_git_context(cwd):
     if not branch:
         return None, None
     remote_url = _run(["git", "-C", cwd, "remote", "get-url", "origin"])
-    repo = os.path.basename(remote_url).removesuffix(".git") if remote_url else None
+    repo_name = os.path.basename(remote_url) if remote_url else None
+    if repo_name and repo_name.endswith(".git"):
+        repo_name = repo_name[:-4]
+    repo = repo_name
     return repo, branch
 
 

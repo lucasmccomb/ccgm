@@ -73,7 +73,7 @@ def get_repo_name(cwd=None):
         )
         if result.returncode == 0:
             name = os.path.basename(result.stdout.strip())
-            return name.removesuffix(".git")
+            return name[:-4] if name.endswith(".git") else name
     except Exception:
         pass
     return None
