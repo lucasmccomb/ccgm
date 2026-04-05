@@ -107,6 +107,21 @@ To get current branch:
 git branch --show-current
 ```
 
+### 4.5 Identity Context (Lightweight)
+
+If a soul.md file exists, read it briefly for tone grounding:
+
+```bash
+SOUL_FILE="$HOME/.claude/rules/soul.md"
+if [ -f "$SOUL_FILE" ]; then
+  echo "identity:soul"
+fi
+```
+
+If the file exists, read it using the Read tool. This primes the session with the AI's personality and communication style. If it does not exist, skip silently.
+
+Do NOT read human-context.md here - log-init is meant to be fast and minimal. The full `/startup` command reads both files.
+
 ### 5. Output Status
 
 Check for sibling sessions in the same repo (other live Claude CLI sessions):

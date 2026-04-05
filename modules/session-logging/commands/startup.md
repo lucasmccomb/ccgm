@@ -287,6 +287,33 @@ else
 fi
 ```
 
+### 8.5 Identity Context
+
+Check for soul.md and human-context.md identity files. If present, read them to prime the session with personality and user context.
+
+```bash
+SOUL_FILE="$HOME/.claude/rules/soul.md"
+CONTEXT_FILE="$HOME/.claude/rules/human-context.md"
+
+IDENTITY_STATUS=""
+if [ -f "$SOUL_FILE" ] && [ -f "$CONTEXT_FILE" ]; then
+  IDENTITY_STATUS="soul.md + human-context.md loaded"
+elif [ -f "$SOUL_FILE" ]; then
+  IDENTITY_STATUS="soul.md loaded (no human-context.md)"
+elif [ -f "$CONTEXT_FILE" ]; then
+  IDENTITY_STATUS="human-context.md loaded (no soul.md)"
+else
+  IDENTITY_STATUS="not configured"
+fi
+echo "Identity: $IDENTITY_STATUS"
+```
+
+If either file exists, read it using the Read tool. These files define:
+- **soul.md** - AI personality, philosophy, reasoning principles, communication style
+- **human-context.md** - User identity, goals, domain knowledge, working preferences
+
+If neither file exists, skip silently. Do not suggest installing them.
+
 ### 9. Present Session Summary
 
 Display a concise dashboard:
@@ -296,6 +323,7 @@ Session: {agent-id} - {repo-name} - {date}
 Branch: {current-branch}
 Status: {clean/dirty}
 Sync: {N ahead, N behind main}
+Identity: {soul.md + human-context.md loaded | not configured}
 
 Previous Session:
   {Summary of last log entry or "No previous session found"}
