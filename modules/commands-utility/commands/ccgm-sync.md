@@ -25,6 +25,21 @@ Reverse-sync local `~/.claude/` changes back to source repos:
 **CCGM root**: Read from `~/.claude/.ccgm-manifest.json` -> `ccgmRoot` field.
 **lem-deepresearch root**: `~/code/lem-deepresearch` (if it exists).
 
+### 0. Broken Symlink Check
+
+Check for broken symlinks in `~/.claude/`. These happen when modules are renamed or removed while the install is in link mode.
+
+```bash
+find ~/.claude/commands ~/.claude/rules ~/.claude/hooks ~/.claude/bin ~/.claude/skills -type l ! -exec test -e {} \; -print 2>/dev/null
+```
+
+If any broken symlinks are found:
+1. List each one with its dead target (`ls -la` on each)
+2. Report them to the user
+3. For each broken symlink, check if the target file moved to a new location in the CCGM repo (e.g., module was renamed). If found, fix the symlink to point to the new location. If not found, remove the broken symlink and note it.
+
+Continue with the rest of the sync after resolving broken symlinks.
+
 ### 1. CCGM Sync - Run Dry First (Preview Changes)
 
 ```bash
@@ -103,6 +118,7 @@ If `~/code/lem-deepresearch` does not exist, skip this step silently (the user m
 ### 4. Report Results
 
 Tell the user:
+- Which broken symlinks were found and fixed (if any)
 - Which CCGM module files were updated (if any)
 - Which deepresearch files were updated (if any)
 - Which files are unmanaged (not tracked by any CCGM module)
