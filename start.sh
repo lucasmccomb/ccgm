@@ -612,6 +612,38 @@ main() {
     fi
   done
 
+  # --- Identity module: follow-up personalization prompts ---
+  local personalize_identity
+  personalize_identity=$(_get_module_config "identity__personalizeIdentity" "no")
+  if [ "$personalize_identity" = "yes" ]; then
+    ui_info "Answer as much or as little as you like. Press Enter to skip any question."
+    echo ""
+
+    local id_role id_expertise id_communication id_building id_values
+
+    id_role=$(ui_input "Professional role (e.g., Senior full-stack engineer, Data scientist)" "")
+    [ -n "$id_role" ] && ui_success "Set: $id_role" || ui_success "Skipped"
+
+    id_expertise=$(ui_input "Technical expertise (e.g., TypeScript, React, Python, AWS)" "")
+    [ -n "$id_expertise" ] && ui_success "Set: $id_expertise" || ui_success "Skipped"
+
+    id_communication=$(ui_choose "Communication preference" "Concise and direct" "Detailed explanations" "Balanced")
+    ui_success "Set: $id_communication"
+
+    id_building=$(ui_input "What are you building? (e.g., A SaaS product for project management)" "")
+    [ -n "$id_building" ] && ui_success "Set: $id_building" || ui_success "Skipped"
+
+    id_values=$(ui_choose "What do you value most in code?" "Simplicity and readability" "Performance and optimization" "Comprehensive test coverage" "All of the above")
+    ui_success "Set: $id_values"
+
+    _set_module_config "identity__role" "$id_role"
+    _set_module_config "identity__expertise" "$id_expertise"
+    _set_module_config "identity__communication" "$id_communication"
+    _set_module_config "identity__building" "$id_building"
+    _set_module_config "identity__values" "$id_values"
+    echo ""
+  fi
+
   # ===========================================================
   # Step 8: Preview files
   # ===========================================================
@@ -814,6 +846,194 @@ main() {
 
     INSTALLED_FILES+=("$target")
   done
+
+  # --- Identity module: generate personalized files or print reminder ---
+  local _identity_installed=false
+  for mod in "${RESOLVED_MODULES[@]}"; do
+    [ "$mod" = "identity" ] && _identity_installed=true
+  done
+
+  if [ "$_identity_installed" = true ]; then
+    if [ "$personalize_identity" = "yes" ]; then
+      local id_role id_expertise id_communication id_building id_values
+      id_role=$(_get_module_config "identity__role" "")
+      id_expertise=$(_get_module_config "identity__expertise" "")
+      id_communication=$(_get_module_config "identity__communication" "Balanced")
+      id_building=$(_get_module_config "identity__building" "")
+      id_values=$(_get_module_config "identity__values" "All of the above")
+
+      # Determine target directory
+      local id_target_dir=""
+      [ "$install_global" = true ] && id_target_dir="$global_dir"
+      [ -z "$id_target_dir" ] && [ "$install_project" = true ] && id_target_dir="$project_dir"
+
+      if [ -n "$id_target_dir" ]; then
+        # --- Generate soul.md ---
+        local soul_file="${id_target_dir}/rules/soul.md"
+        {
+          echo "# Soul"
+          echo ""
+
+          # Identity section
+          echo "## Identity"
+          echo ""
+          if [ -n "$id_role" ]; then
+            echo "You are a senior engineering partner, not an assistant. We work together as equals with complementary strengths."
+          else
+            cat <<'TMPL'
+<!-- Who is this AI collaborator? What is the relationship model?
+     Example: "You are a senior engineering partner, not an assistant." -->
+TMPL
+          fi
+          echo ""
+
+          # Communication Style section
+          echo "## Communication Style"
+          echo ""
+          case "$id_communication" in
+            "Concise and direct")
+              echo "Lead with the answer or action, not the reasoning. Skip filler, preamble, and unnecessary transitions. One sentence beats three. Show the diff, not the explanation."
+              ;;
+            "Detailed explanations")
+              echo "Explain your reasoning and trade-offs. Include context for decisions so I can learn and verify your approach. Be thorough but organized."
+              ;;
+            "Balanced")
+              echo "Be direct but include enough context for me to follow your reasoning. Skip filler, but explain non-obvious decisions."
+              ;;
+          esac
+          echo ""
+
+          # Reasoning Principles section
+          echo "## Reasoning Principles"
+          echo ""
+          echo "Understand before acting. Read the error, check assumptions, try a focused fix. Don't retry identical actions or abandon viable approaches after a single failure."
+          echo ""
+          echo "Evidence before claims. Never assert that something works, passes, or is fixed without fresh proof."
+          echo ""
+          echo "Simplest viable approach first. Don't over-engineer or design for hypothetical future requirements."
+          echo ""
+
+          # Core Values section
+          echo "## Core Values"
+          echo ""
+          case "$id_values" in
+            "Simplicity and readability")
+              echo "Simplicity over cleverness. Readability over brevity. Code should be obvious to the next person who reads it."
+              ;;
+            "Performance and optimization")
+              echo "Performance matters. Profile before optimizing, but don't leave known bottlenecks on the table. Ship fast code that stays fast."
+              ;;
+            "Comprehensive test coverage")
+              echo "Every piece of code has tests. Every bug fix starts with a failing test. Every claim has evidence. No exceptions."
+              ;;
+            "All of the above")
+              echo "Correctness over speed. Simplicity over cleverness. Shipping over perfecting. Every piece of code has tests."
+              ;;
+          esac
+          echo ""
+
+          # Boundaries section
+          echo "## Boundaries"
+          echo ""
+          echo "Defer on ambiguous product decisions where multiple valid directions exist and my preference matters. Make decisions yourself for routine technical choices."
+          echo ""
+          echo "Never guess at credentials or API keys. Ask once, then proceed."
+          echo ""
+          echo "Confirm before destructive actions on shared systems."
+        } > "$soul_file"
+        ui_success "Generated personalized: $soul_file"
+
+        # --- Generate human-context.md ---
+        local hc_file="${id_target_dir}/rules/human-context.md"
+        {
+          echo "# Human Context"
+          echo ""
+
+          # Who I Am section
+          echo "## Who I Am"
+          echo ""
+          if [ -n "$id_role" ] || [ -n "$id_expertise" ]; then
+            [ -n "$id_role" ] && echo "$id_role."
+            [ -n "$id_expertise" ] && echo "Technical expertise: $id_expertise."
+          else
+            cat <<'TMPL'
+<!-- Your professional identity and technical background.
+     Example: "Full-stack engineer, 8 years experience, deep in TypeScript/React." -->
+TMPL
+          fi
+          echo ""
+
+          # What I'm Building section
+          echo "## What I'm Building"
+          echo ""
+          if [ -n "$id_building" ]; then
+            echo "$id_building"
+          else
+            cat <<'TMPL'
+<!-- Your current projects, their purpose, and how they connect.
+     Example: "Building a SaaS product for X. Also maintaining an open-source tool for Y." -->
+TMPL
+          fi
+          echo ""
+
+          # How I Work section
+          echo "## How I Work"
+          echo ""
+          case "$id_communication" in
+            "Concise and direct")
+              echo "I prefer terse communication. Show me the diff, not the explanation. Don't summarize what you just did - I can read the output."
+              ;;
+            "Detailed explanations")
+              echo "I appreciate thorough explanations of trade-offs and reasoning. Walk me through your approach so I can verify and learn."
+              ;;
+            "Balanced")
+              echo "Be direct but explain non-obvious decisions. I read diffs but appreciate context for architectural choices."
+              ;;
+          esac
+          echo ""
+
+          # What I Value section
+          echo "## What I Value"
+          echo ""
+          case "$id_values" in
+            "Simplicity and readability")
+              echo "Clean, readable code that communicates intent. Fewer abstractions, obvious naming, minimal dependencies."
+              ;;
+            "Performance and optimization")
+              echo "Fast, efficient code. Measure before optimizing, but don't accept slow as the default."
+              ;;
+            "Comprehensive test coverage")
+              echo "Test coverage is non-negotiable. Every feature has tests, every bug fix starts with a failing test."
+              ;;
+            "All of the above")
+              echo "Quality that compounds. Every PR should make the codebase more intentional, not more accidental. Tests are non-negotiable."
+              ;;
+          esac
+          echo ""
+
+          # Where I'm Going section
+          echo "## Where I'm Going"
+          echo ""
+          cat <<'TMPL'
+<!-- Your longer-horizon goals and how current work serves them.
+     Example: "Building toward independent consulting. Current projects are portfolio pieces." -->
+TMPL
+        } > "$hc_file"
+        ui_success "Generated personalized: $hc_file"
+      fi
+    else
+      # Remind user to edit the template files later
+      local id_target_dir=""
+      [ "$install_global" = true ] && id_target_dir="$global_dir"
+      [ -z "$id_target_dir" ] && [ "$install_project" = true ] && id_target_dir="$project_dir"
+      if [ -n "$id_target_dir" ]; then
+        echo ""
+        ui_info "Identity files installed as templates. Edit them to personalize:"
+        echo "  ${id_target_dir}/rules/soul.md"
+        echo "  ${id_target_dir}/rules/human-context.md"
+      fi
+    fi
+  fi
 
   # ===========================================================
   # Step 12: Write manifest

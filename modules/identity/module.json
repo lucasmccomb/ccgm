@@ -18,5 +18,12 @@
     }
   },
   "tags": ["identity", "personality", "context", "soul"],
-  "configPrompts": []
+  "configPrompts": [
+    {
+      "key": "personalizeIdentity",
+      "prompt": "Would you like to personalize your identity files now?",
+      "default": "no",
+      "options": ["yes", "no"]
+    }
+  ]
 }
