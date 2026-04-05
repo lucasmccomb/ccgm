@@ -346,18 +346,19 @@ SSH access to a configured remote server.
 
 ### self-improving
 
-Meta-learning patterns for improving across sessions.
+Meta-learning system with automated reflection triggers, commands, and hooks.
 
-**Installs**: `rules/self-improving.md`
+**Installs**: `rules/self-improving.md`, `commands/reflect.md`, `commands/consolidate.md`, `hooks/reflection-trigger.py`, `hooks/precompact-reflection.py`, `settings.partial.json`
 
-**What it does**: Instructs Claude to reflect on completed tasks and extract reusable lessons:
+**What it does**: Combines rules, commands, and hooks to create an active self-improvement loop:
 
-- **Reflection loop**: After completing work, extract observations, distill into rules, write to memory, consolidate periodically
-- **What to capture**: Non-obvious decisions, surprising root causes, patterns that worked, user preferences
-- **What to skip**: Obvious patterns, one-time fixes, already-documented conventions
-- **Confidence levels**: High (save immediately), medium (note for confirmation), low (watch for patterns)
+- **Prescriptive triggers**: Reflection fires at specific moments (after PR merge, after 3+ debugging attempts, before context compaction, after user corrections)
+- **Reflection checklist**: Mechanical checklist walked at each trigger point to identify patterns worth capturing
+- **Commands**: `/reflect` (inline structured reflection) and `/consolidate` (memory maintenance via subagent)
+- **Hooks**: PostToolUse hook injects reflection reminder after `gh pr merge` and `gh issue close`; PreCompact hook reminds agent to capture patterns before context compression
+- **Cross-module integration**: Works with session-logging (trigger #8), systematic-debugging (three-strike capture), and common-mistakes (living document)
 
-**Dependencies**: None
+**Dependencies**: None (soft references to session-logging, systematic-debugging, common-mistakes)
 
 ---
 

@@ -407,6 +407,60 @@ Performs thorough availability checking for one or more specific names.
 
 ---
 
+## Self-improving commands
+
+Installed by the **self-improving** module.
+
+---
+
+### /reflect
+
+**Run the structured reflection checklist inline.**
+
+Walks through the self-improving reflection loop within the current session (not delegated to a subagent, so full session context is preserved).
+
+**What happens**:
+1. Recalls what happened in the current session (tasks, debugging, corrections)
+2. Reads `git log --oneline -10` to ground in recent commits
+3. Walks the reflection checklist: task summary, surprises, reusable patterns, common mistakes, user preferences, tool gotchas
+4. Writes patterns to appropriate memory files (feedback, user, project types)
+5. Reports what was captured (or "nothing notable to capture")
+
+**Usage**:
+```
+/reflect
+```
+
+**When to use**: After completing a feature, after a debugging session, when prompted by the PostToolUse hook, or before context compaction.
+
+**Installed by**: self-improving module
+
+---
+
+### /consolidate
+
+**Review and maintain memory files.**
+
+Delegates to a Sonnet agent that reads all memory files, identifies duplicates, contradictions, and stale entries, and cleans them up.
+
+**What happens**:
+1. Reads MEMORY.md index and all referenced memory files
+2. Identifies: duplicates, contradictions, stale entries, too-specific or too-vague entries
+3. Updates or removes problematic entries
+4. Updates MEMORY.md index if files were added/removed
+5. Reports: files reviewed, updated, removed, unchanged
+
+**Usage**:
+```
+/consolidate
+```
+
+**When to use**: Periodically (every few weeks) or when memory files feel cluttered.
+
+**Installed by**: self-improving module
+
+---
+
 ## Workflow commands
 
 Installed by the **xplan**, **multi-agent**, and **session-logging** modules.

@@ -33,6 +33,7 @@ Do NOT skip this phase. Do NOT guess at the root cause.
 2. **Implement the single fix** addressing the root cause
 3. **Verify the test passes** and all existing tests still pass
 4. **Document the root cause** in the commit message
+5. **Extract the pattern** - If the bug took more than 2 attempts to diagnose, or if the root cause was surprising, write the pattern to a feedback memory file. Focus on what would help identify this class of bug faster next time.
 
 ## Red Flags
 
@@ -52,3 +53,10 @@ After three failed fix attempts on the same issue, stop fixing and start questio
 - Do I need to re-read the docs or source code for the system involved?
 
 Escalate to the user if the root cause remains unclear after three attempts.
+
+After resolving a three-strike situation (whether by finding the root cause or escalating), capture the debugging pattern to memory:
+- What was the misleading assumption?
+- What was the actual root cause?
+- What diagnostic step would have found it faster?
+
+This prevents repeating the same debugging dead-ends in future sessions.
