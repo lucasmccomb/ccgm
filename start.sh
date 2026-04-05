@@ -80,6 +80,28 @@ write_manifest() {
         echo -n "    \"$mod\""
       done
       echo ""
+      echo "  ],"
+      echo "  \"files\": ["
+      first=true
+      local file
+      if [ ${#INSTALLED_FILES[@]} -gt 0 ]; then
+        for file in "${INSTALLED_FILES[@]}"; do
+          if [ "$first" = true ]; then first=false; else echo ","; fi
+          echo -n "    \"$file\""
+        done
+      fi
+      echo ""
+      echo "  ],"
+      echo "  \"backups\": ["
+      first=true
+      local backup
+      if [ ${#BACKUP_DIRS[@]} -gt 0 ]; then
+        for backup in "${BACKUP_DIRS[@]}"; do
+          if [ "$first" = true ]; then first=false; else echo ","; fi
+          echo -n "    \"$backup\""
+        done
+      fi
+      echo ""
       echo "  ]"
       echo "}"
     } > "$manifest_file"

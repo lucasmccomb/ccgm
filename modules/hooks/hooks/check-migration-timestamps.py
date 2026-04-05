@@ -26,6 +26,10 @@ def main():
     except (json.JSONDecodeError, EOFError):
         return
 
+    # Only handle Bash commands
+    if data.get("tool_name", "") != "Bash":
+        return
+
     command = data.get("tool_input", {}).get("command", "")
 
     # Only check git commit commands

@@ -165,7 +165,11 @@ def determine_service_type(command):
 
 
 def main():
-    tool_input = json.loads(sys.stdin.read())
+    try:
+        tool_input = json.loads(sys.stdin.read())
+    except (json.JSONDecodeError, EOFError, ValueError):
+        return  # Silently allow on invalid input
+
     command = tool_input.get("command", "")
 
     # Only care about dev server commands
