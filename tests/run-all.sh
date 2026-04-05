@@ -11,9 +11,9 @@ for test_script in "$SCRIPT_DIR"/test-*.sh; do
   echo ""
   echo "=== Running $name ==="
   if bash "$test_script"; then
-    ((PASS++))
+    PASS=$((PASS + 1))
   else
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
     FAILED_TESTS+=("$name")
   fi
 done
