@@ -4,7 +4,7 @@ CCGM hooks are Python scripts that Claude Code executes at specific points in it
 
 ## How hooks work
 
-Claude Code supports four hook types:
+Claude Code supports these hook types:
 
 | Hook type | When it fires | Can block? |
 |-----------|---------------|------------|
@@ -12,12 +12,13 @@ Claude Code supports four hook types:
 | **PostToolUse** | After a tool call completes | No - advisory only |
 | **UserPromptSubmit** | When the user submits a message | No - can inject context |
 | **SessionStart** | When a new session begins | No - can inject context |
+| **PreCompact** | Before context compaction | No - can inject context |
 
 Hooks are registered in `settings.json` under the `hooks` key. Each hook specifies its type, an optional matcher (e.g., `Bash` to only fire on Bash tool calls), and the command to run.
 
 ## Installed hooks
 
-The **hooks** module installs 9 hooks. The **session-logging** module installs 1 additional hook.
+The **hooks** module installs 9 hooks. The **session-logging** module installs 1 additional hook. The **self-improving** module installs 2 additional hooks.
 
 ---
 
@@ -211,6 +212,40 @@ Triggers the `/startup` command at the beginning of each new session.
 3. Claude Code picks up this output and Claude executes the `/startup` command
 
 **Configuration**: Enabled/disabled via `CCGM_AUTO_STARTUP` in `~/.claude/.ccgm.env`.
+
+---
+
+### reflection-trigger.py
+
+**Type**: PostToolUse:Bash
+**Module**: self-improving
+**Can block**: No
+
+Injects a reflection reminder into Claude's context after significant git events.
+
+**Detects**:
+- `gh pr merge` - reminds Claude to run the post-merge reflection checklist
+- `gh issue close` - reminds Claude to check for reusable patterns
+
+**Does not fire**: On regular commits, in the log repo, or on non-git commands.
+
+**Output**: XML-tagged instruction (e.g., `<reflection-trigger>PR merged. Run the post-merge reflection...</reflection-trigger>`) that Claude picks up as a context injection.
+
+---
+
+### precompact-reflection.py
+
+**Type**: PreCompact
+**Module**: self-improving
+**Can block**: No
+
+Reminds Claude to capture unwritten patterns before context compaction compresses the session.
+
+**When it fires**: Before context compression begins. By the time PostCompact fires, session context is already compressed and learnings may be lost.
+
+**Output**: `<precompact-reflection>` instruction prompting Claude to run the reflection checklist or invoke `/reflect`.
+
+---
 
 ## Agent tracking library
 
