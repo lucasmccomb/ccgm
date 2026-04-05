@@ -46,6 +46,18 @@ expand_templates() {
   code_dir_val="${code_dir_val:-$HOME/code}"
   default_mode_val="${default_mode_val:-ask}"
 
+  # Escape sed-special characters in replacement values to prevent injection
+  # Pipe (|) is our delimiter, ampersand (&) references the match, backslash (\) is escape
+  _escape_sed_replacement() {
+    printf '%s' "$1" | sed 's/[|&\\]/\\&/g'
+  }
+  home_val="$(_escape_sed_replacement "$home_val")"
+  username_val="$(_escape_sed_replacement "$username_val")"
+  code_dir_val="$(_escape_sed_replacement "$code_dir_val")"
+  log_repo_val="$(_escape_sed_replacement "$log_repo_val")"
+  timezone_val="$(_escape_sed_replacement "$timezone_val")"
+  default_mode_val="$(_escape_sed_replacement "$default_mode_val")"
+
   # Perform replacements using sed
   # Use a different delimiter (|) in case paths contain /
   local sed_cmd="sed"

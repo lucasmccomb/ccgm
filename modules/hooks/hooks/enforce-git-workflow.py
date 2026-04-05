@@ -183,6 +183,10 @@ def check_commit(command, branch):
 
     # Emergency bypass
     if os.environ.get("ALLOW_MAIN_COMMIT") == "1":
+        print(
+            "WARNING: ALLOW_MAIN_COMMIT bypass active - skipping all branch protections",
+            file=sys.stderr,
+        )
         return
 
     # Rule 1: No commits on protected branches
@@ -220,6 +224,10 @@ def check_push(command, branch):
 
     # Emergency bypass
     if os.environ.get("ALLOW_MAIN_COMMIT") == "1":
+        print(
+            "WARNING: ALLOW_MAIN_COMMIT bypass active - skipping all branch protections",
+            file=sys.stderr,
+        )
         return
 
     # Only block pushes when on a protected branch
