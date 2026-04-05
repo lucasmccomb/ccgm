@@ -15,7 +15,7 @@ expand_templates() {
   fi
 
   # Load env values
-  local home_val username_val code_dir_val log_repo_val timezone_val default_mode_val
+  local home_val="" username_val="" code_dir_val="" log_repo_val="" timezone_val="" default_mode_val=""
 
   if [ -f "$env_file" ]; then
     # Read all values in a single pass instead of 6 separate grep calls
