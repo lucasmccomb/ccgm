@@ -2,21 +2,6 @@
 # CCGM - Template expansion
 # Replaces __PLACEHOLDER__ variables with values from .ccgm.env
 
-# --- Load environment values ---
-# Usage: load_env "/path/to/.ccgm.env"
-# Sets global variables for template expansion
-load_env() {
-  local env_file="$1"
-  if [ ! -f "$env_file" ]; then
-    echo "WARNING: env file not found: $env_file" >&2
-    return 1
-  fi
-
-  # Source the env file (it uses KEY=value format)
-  # shellcheck disable=SC1090
-  source "$env_file"
-}
-
 # --- Expand templates in a single file ---
 # Usage: expand_templates "/path/to/file" "/path/to/.ccgm.env"
 # Modifies the file in-place
@@ -33,12 +18,17 @@ expand_templates() {
   local home_val username_val code_dir_val log_repo_val timezone_val default_mode_val
 
   if [ -f "$env_file" ]; then
-    home_val=$(grep '^CCGM_HOME=' "$env_file" | cut -d= -f2- || true)
-    username_val=$(grep '^CCGM_USERNAME=' "$env_file" | cut -d= -f2- || true)
-    code_dir_val=$(grep '^CCGM_CODE_DIR=' "$env_file" | cut -d= -f2- || true)
-    log_repo_val=$(grep '^CCGM_LOG_REPO=' "$env_file" | cut -d= -f2- || true)
-    timezone_val=$(grep '^CCGM_TIMEZONE=' "$env_file" | cut -d= -f2- || true)
-    default_mode_val=$(grep '^CCGM_DEFAULT_MODE=' "$env_file" | cut -d= -f2- || true)
+    # Read all values in a single pass instead of 6 separate grep calls
+    while IFS='=' read -r key value; do
+      case "$key" in
+        CCGM_HOME) home_val="$value" ;;
+        CCGM_USERNAME) username_val="$value" ;;
+        CCGM_CODE_DIR) code_dir_val="$value" ;;
+        CCGM_LOG_REPO) log_repo_val="$value" ;;
+        CCGM_TIMEZONE) timezone_val="$value" ;;
+        CCGM_DEFAULT_MODE) default_mode_val="$value" ;;
+      esac
+    done < "$env_file"
   fi
 
   # Use sensible defaults for unset values

@@ -41,11 +41,14 @@ main() {
   # Step 3: Read manifest
   local installed_at preset scope module_count file_count
   if [ "$has_jq" = true ]; then
-    installed_at=$(jq -r '.installedAt // "unknown"' "$manifest")
-    preset=$(jq -r '.preset // "custom"' "$manifest")
-    scope=$(jq -r '.scope // "global"' "$manifest")
-    module_count=$(jq -r '.modules | length' "$manifest")
-    file_count=$(jq -r 'if .files then (.files | length) else 0 end' "$manifest" 2>/dev/null || echo "0")
+    # Read all scalar values in a single jq call instead of 5 separate invocations
+    eval "$(jq -r '
+      "installed_at=\(.installedAt // "unknown")",
+      "preset=\(.preset // "custom")",
+      "scope=\(.scope // "global")",
+      "module_count=\(.modules | length)",
+      "file_count=\(if .files then (.files | length) else 0 end)"
+    ' "$manifest")"
 
     ui_info "Installation details:"
     ui_info "  Installed: $installed_at"
@@ -134,9 +137,8 @@ main() {
     fi
   done
 
-  # Also check project-level
+  # Also check project-level (scope already read from manifest in Step 3)
   if [ "$has_jq" = true ]; then
-    scope=$(jq -r '.scope // ""' "$manifest" 2>/dev/null || true)
     if [ "$scope" = "project" ] || [ "$scope" = "both" ]; then
       local project_meta
       project_meta="$(pwd)/.claude/.ccgm-manifest.json"
@@ -178,6 +180,28 @@ main() {
     echo ""
     ui_info "Previous backups available in ~/.claude/backups/"
     ui_info "To restore manually: cp -r <backup_dir>/* ~/.claude/"
+  fi
+
+  # Step 8: Remove shell aliases
+  ui_header "Shell Aliases"
+
+  local rc_files=("$HOME/.zshrc" "$HOME/.bashrc")
+  local rc alias_removed=false
+  for rc in "${rc_files[@]}"; do
+    if [ -f "$rc" ] && grep -qE 'alias ccgm(s)?=' "$rc" 2>/dev/null; then
+      # Remove alias lines and their CCGM comment lines
+      sed -i '' '/^# CCGM - .*session.*$/d' "$rc"
+      sed -i '' '/^alias ccgm=/d' "$rc"
+      sed -i '' '/^alias ccgms=/d' "$rc"
+      ui_success "Removed CCGM aliases from $rc"
+      alias_removed=true
+    fi
+  done
+
+  if [ "$alias_removed" = false ]; then
+    ui_info "No CCGM aliases found in shell configs"
+  else
+    ui_info "Run 'source ~/.zshrc' or open a new terminal to apply changes"
   fi
 
   # Done
