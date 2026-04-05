@@ -1,0 +1,22 @@
+{
+  "name": "identity",
+  "displayName": "Identity & Context",
+  "description": "Two foundational context files that give Claude Code a persistent identity: soul.md (AI personality and philosophy) and human-context.md (who you are, your goals, and how you work).",
+  "category": "core",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "rules/soul.md": {
+      "target": "rules/soul.md",
+      "type": "rule",
+      "template": false
+    },
+    "rules/human-context.md": {
+      "target": "rules/human-context.md",
+      "type": "rule",
+      "template": false
+    }
+  },
+  "tags": ["identity", "personality", "context", "soul"],
+  "configPrompts": []
+}
