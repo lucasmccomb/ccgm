@@ -8,8 +8,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-# Add lib to path
-sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
+# Add lib to path (relative to this test file's location in the module)
+_TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+_LIB_DIR = os.path.join(_TEST_DIR, '..', 'lib')
+sys.path.insert(0, os.path.abspath(_LIB_DIR))
 import agent_tracking
 
 
