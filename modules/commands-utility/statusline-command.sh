@@ -1,20 +1,8 @@
 #!/usr/bin/env bash
 # Claude Code status line script
-# Displays: model | session | directory branch | LOC | context usage | cost | 5h & 7d rate limits
+# Displays: model | directory branch | context usage | 5h & 7d rate limits
 
 input=$(cat)
-
-# --- Session ID (first 8 chars) and session name
-session_id=$(echo "$input" | jq -r '.session_id // ""')
-session_name=$(echo "$input" | jq -r '.session_name // ""')
-session_id_short="${session_id:0:8}"
-
-# --- LOC tracking
-lines_added=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
-lines_removed=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
-
-# --- Cost tracking
-total_cost=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
 
 # --- Model (abbreviated: O-4.6, S-4.6, H-4.5, etc.) with tier indicators
 model_raw=$(echo "$input" | jq -r '.model.display_name // ""')
@@ -97,32 +85,12 @@ if [ -n "$model_abbr" ]; then
   esac
 fi
 
-# Session: name or truncated ID
-if [ -n "$session_name" ]; then
-  sections+=("$(printf "${DIM}%s${RESET}" "$session_name")")
-elif [ -n "$session_id_short" ]; then
-  sections+=("$(printf "${DIM}%s${RESET}" "$session_id_short")")
-fi
-
 # Dir + git branch (combined)
 dir_part="$(printf "${CYAN}%s${RESET}" "$cwd_display")"
 if [ -n "$git_branch" ]; then
   dir_part="${dir_part} $(printf "${YELLOW}%s${RESET}" "$git_branch")"
 fi
 sections+=("$dir_part")
-
-# LOC tracking (+added / -removed)
-if [ "$lines_added" -gt 0 ] || [ "$lines_removed" -gt 0 ]; then
-  loc_part=""
-  if [ "$lines_added" -gt 0 ]; then
-    loc_part="$(printf "${GREEN}+%s${RESET}" "$lines_added")"
-  fi
-  if [ "$lines_removed" -gt 0 ]; then
-    [ -n "$loc_part" ] && loc_part="${loc_part} "
-    loc_part="${loc_part}$(printf "${RED}-%s${RESET}" "$lines_removed")"
-  fi
-  sections+=("$loc_part")
-fi
 
 # Context used (100 - remaining)
 if [ -n "$remaining" ]; then
@@ -136,12 +104,6 @@ if [ -n "$remaining" ]; then
     ctx_color="$RED"
   fi
   sections+=("$(printf "${ctx_color}ctx:${used_int}%%${RESET}")")
-fi
-
-# Session cost
-if [ -n "$total_cost" ] && [ "$total_cost" != "0" ]; then
-  cost_formatted=$(printf '$%.2f' "$total_cost")
-  sections+=("$(printf "${DIM}%s${RESET}" "$cost_formatted")")
 fi
 
 # 5-hour rate limit with bar and reset countdown

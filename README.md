@@ -209,7 +209,7 @@ cp modules/commands-core/commands/*.md ~/.claude/commands/
 
 ### statusline.sh - Claude Code Session Monitor
 
-Display live session metrics at the bottom of your Claude Code terminal. Shows model, session, directory, git branch, LOC changes, context usage, cost, and rate limits with reset countdowns.
+Display live session metrics at the bottom of your Claude Code terminal. Shows model, directory, git branch, context usage, and rate limits with reset countdowns.
 
 **Usage:**
 
@@ -239,16 +239,13 @@ Or manually add to `~/.claude/settings.json`:
 **Display Example:**
 
 ```
-🧠 O-4.6 | my-session | code main | +42 -7 | ctx:8% | $1.23 | 5h:62% ███░░ 2h26m | 7d:79% ████░ 3d8h
+🧠 O-4.6 | code main | ctx:8% | 5h:62% ███░░ 2h26m | 7d:79% ████░ 3d8h
 ```
 
 **Features:**
 - Model with tier emoji (🧠 Opus, 🐢 Sonnet, ⚠️ Haiku) and abbreviation (O-4.6, S-4.6, H-4.5, etc.)
-- Session name or truncated session ID
 - Current directory and git branch
-- Lines of code added/removed (+N green, -N red)
 - Context window usage (0-100%)
-- Session cost in USD
 - 5-hour rate limit with bar and reset countdown
 - 7-day rate limit with bar and reset countdown
 - Color-coded by usage: green <60%, yellow <85%, red 85%+
