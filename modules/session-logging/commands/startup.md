@@ -314,6 +314,18 @@ If either file exists, read it using the Read tool. These files define:
 
 If neither file exists, skip silently. Do not suggest installing them.
 
+### 8.6 Orphaned Process Check
+
+Check for orphaned test worker processes (vitest, jest) that may be consuming resources:
+
+```bash
+python3 ~/.claude/hooks/orphan-process-check.py 2>/dev/null
+```
+
+If the script outputs a warning, include it in the session dashboard. The warning includes PIDs and a kill command the user can approve.
+
+If the script is not found or produces no output, skip silently.
+
 ### 9. Present Session Summary
 
 Display a concise dashboard:
