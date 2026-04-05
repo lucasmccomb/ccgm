@@ -218,3 +218,25 @@ Key reminders:
 1. **Immediate fix**: Deploy via CLI (`wrangler pages deploy`) to get current code live
 2. **Permanent fix**: Either connect to GitHub in the CF dashboard, or add CI-based deploy step
 3. **Tell the user** so they can connect Git integration in the dashboard (requires browser session)
+
+---
+
+## Adding New Mistakes
+
+This document is a living record, not a frozen list. When the self-improving reflection loop identifies a pattern that:
+
+1. Caused significant wasted time (30+ minutes of wrong approach)
+2. Is likely to recur across projects (not one-off)
+3. Has a clear "Problem / Rule" structure
+
+Add it as a new numbered entry following the existing format:
+
+### N. {Short Problem Title}
+
+**Problem**: What went wrong and why it was hard to catch.
+
+**Rule**: The concrete behavior change that prevents recurrence.
+
+After adding an entry, run `/ccgm-sync` to preserve it in the CCGM repo. Local additions not synced back may be overwritten on module reinstall.
+
+Patterns that are project-specific or unlikely to recur belong in memory files instead (feedback type), not in this shared document.

@@ -1,13 +1,18 @@
 {
   "name": "self-improving",
   "displayName": "Self-Improving Agent",
-  "description": "Meta-learning patterns: extract experience from tasks, identify reusable patterns, update memory files, and systematically improve across sessions.",
+  "description": "Meta-learning system: automated reflection triggers, pattern extraction, memory management commands, and hooks that fire at key moments (PR merge, context compaction, debugging failures).",
   "category": "workflow",
   "scope": ["global"],
   "dependencies": [],
   "files": {
-    "rules/self-improving.md": { "target": "rules/self-improving.md", "type": "rule", "template": false }
+    "rules/self-improving.md": { "target": "rules/self-improving.md", "type": "rule", "template": false },
+    "commands/reflect.md": { "target": "commands/reflect.md", "type": "command", "template": false },
+    "commands/consolidate.md": { "target": "commands/consolidate.md", "type": "command", "template": false },
+    "hooks/reflection-trigger.py": { "target": "hooks/reflection-trigger.py", "type": "hook", "template": false },
+    "hooks/precompact-reflection.py": { "target": "hooks/precompact-reflection.py", "type": "hook", "template": false },
+    "settings.partial.json": { "target": "settings.json", "type": "config", "template": false, "merge": true }
   },
-  "tags": ["meta-learning", "reflection", "improvement", "memory"],
+  "tags": ["meta-learning", "reflection", "improvement", "memory", "hooks"],
   "configPrompts": []
 }
