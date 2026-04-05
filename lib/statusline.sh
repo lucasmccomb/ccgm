@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
 # Claude Code status line script
-# Displays: model | directory branch | context usage | 5h & 7d rate limits with reset countdown
+# Displays: model | session | directory branch | LOC | context usage | cost | 5h & 7d rate limits
 
 input=$(cat)
+
+# --- Session ID (first 8 chars) and session name
+session_id=$(echo "$input" | jq -r '.session_id // ""')
+session_name=$(echo "$input" | jq -r '.session_name // ""')
+session_id_short="${session_id:0:8}"
+
+# --- LOC tracking
+lines_added=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
+lines_removed=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
+
+# --- Cost tracking
+total_cost=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
 
 # --- Model (abbreviated: O-4.6, S-4.6, H-4.5, etc.) with tier indicators
 model_raw=$(echo "$input" | jq -r '.model.display_name // ""')
@@ -37,6 +49,7 @@ remaining=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty
 five_hour=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
 five_hour_resets=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
 weekly=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
+weekly_resets=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
 
 # --- ANSI color codes
 RESET='\033[0m'
@@ -69,11 +82,26 @@ sections=()
 # Model with tier indicators
 if [ -n "$model_abbr" ]; then
   case "$model_tier" in
-    opus-best)   sections+=("$(printf "${BLUE}🧠 %s${RESET}" "$model_abbr")") ;;
-    sonnet)      sections+=("$(printf "${ORANGE}🐢 %s${RESET}" "$model_abbr")") ;;
-    haiku)       sections+=("$(printf "${RED}⚠️ %s${RESET}" "$model_abbr")") ;;
-    *)           sections+=("$(printf "%s" "$model_abbr")") ;;
+    opus-best)
+      sections+=("$(printf "${BLUE}🧠 %s${RESET}" "$model_abbr")")
+      ;;
+    sonnet)
+      sections+=("$(printf "${ORANGE}🐢 %s${RESET}" "$model_abbr")")
+      ;;
+    haiku)
+      sections+=("$(printf "${RED}⚠️ %s${RESET}" "$model_abbr")")
+      ;;
+    *)
+      sections+=("$(printf "%s" "$model_abbr")")
+      ;;
   esac
+fi
+
+# Session: name or truncated ID
+if [ -n "$session_name" ]; then
+  sections+=("$(printf "${DIM}%s${RESET}" "$session_name")")
+elif [ -n "$session_id_short" ]; then
+  sections+=("$(printf "${DIM}%s${RESET}" "$session_id_short")")
 fi
 
 # Dir + git branch (combined)
@@ -82,6 +110,19 @@ if [ -n "$git_branch" ]; then
   dir_part="${dir_part} $(printf "${YELLOW}%s${RESET}" "$git_branch")"
 fi
 sections+=("$dir_part")
+
+# LOC tracking (+added / -removed)
+if [ "$lines_added" -gt 0 ] || [ "$lines_removed" -gt 0 ]; then
+  loc_part=""
+  if [ "$lines_added" -gt 0 ]; then
+    loc_part="$(printf "${GREEN}+%s${RESET}" "$lines_added")"
+  fi
+  if [ "$lines_removed" -gt 0 ]; then
+    [ -n "$loc_part" ] && loc_part="${loc_part} "
+    loc_part="${loc_part}$(printf "${RED}-%s${RESET}" "$lines_removed")"
+  fi
+  sections+=("$loc_part")
+fi
 
 # Context used (100 - remaining)
 if [ -n "$remaining" ]; then
@@ -95,6 +136,12 @@ if [ -n "$remaining" ]; then
     ctx_color="$RED"
   fi
   sections+=("$(printf "${ctx_color}ctx:${used_int}%%${RESET}")")
+fi
+
+# Session cost
+if [ -n "$total_cost" ] && [ "$total_cost" != "0" ]; then
+  cost_formatted=$(printf '$%.2f' "$total_cost")
+  sections+=("$(printf "${DIM}%s${RESET}" "$cost_formatted")")
 fi
 
 # 5-hour rate limit with bar and reset countdown
@@ -124,7 +171,7 @@ if [ -n "$five_hour" ]; then
   sections+=("$five_part")
 fi
 
-# 7-day rate limit with bar
+# 7-day rate limit with bar and reset countdown
 if [ -n "$weekly" ]; then
   weekly_int=$(printf '%.0f' "$weekly")
   if [ "$weekly_int" -lt 60 ]; then
@@ -134,7 +181,22 @@ if [ -n "$weekly" ]; then
   else
     wk_color="$RED"
   fi
-  sections+=("$(printf "${wk_color}7d:${weekly_int}%%${RESET} ")$(make_bar "$weekly_int" "$wk_color")")
+  wk_part="$(printf "${wk_color}7d:${weekly_int}%%${RESET} ")$(make_bar "$weekly_int" "$wk_color")"
+  if [ -n "$weekly_resets" ]; then
+    now=$(date +%s)
+    diff=$(( weekly_resets - now ))
+    if [ "$diff" -gt 0 ]; then
+      days=$(( diff / 86400 ))
+      hours=$(( (diff % 86400) / 3600 ))
+      if [ "$days" -gt 0 ]; then
+        wk_part="${wk_part} $(printf "${DIM}${days}d${hours}h${RESET}")"
+      else
+        mins=$(( (diff % 3600) / 60 ))
+        wk_part="${wk_part} $(printf "${DIM}${hours}h${mins}m${RESET}")"
+      fi
+    fi
+  fi
+  sections+=("$wk_part")
 fi
 
 # Join sections with pipe separator
