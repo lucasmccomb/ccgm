@@ -1,0 +1,17 @@
+{
+  "name": "global-claude-md",
+  "displayName": "Global CLAUDE.md",
+  "description": "Slim global CLAUDE.md that serves as the root configuration reference. Points to rules, commands, hooks, and settings without duplicating their content.",
+  "category": "core",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "CLAUDE.md": {
+      "target": "CLAUDE.md",
+      "type": "doc",
+      "template": false
+    }
+  },
+  "tags": ["core", "config", "claude-md"],
+  "configPrompts": []
+}
