@@ -62,7 +62,6 @@ def warn(message):
 def check_live_session_in_cwd():
     """Check if another live Claude session is running in this working directory."""
     try:
-        sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
         from agent_sessions import get_active_sessions
         my_cwd = os.getcwd()
         sessions = get_active_sessions(exclude_cwd=my_cwd)
