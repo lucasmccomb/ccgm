@@ -22,7 +22,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 29 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 34 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 
@@ -92,8 +92,8 @@ For a quick install with a preset:
 | Preset | Modules | Best For |
 |--------|---------|----------|
 | **minimal** | autonomy, git-workflow | Getting started |
-| **standard** | autonomy, git-workflow, hooks, settings, commands-core, commands-utility | Most users |
-| **full** | All 33 modules | Power users |
+| **standard** | autonomy, identity, git-workflow, hooks, settings, commands-core, commands-utility | Most users |
+| **full** | All 34 modules | Power users |
 | **team** | autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification | Teams |
 
 ### Other install options
@@ -115,6 +115,7 @@ For a quick install with a preset:
 | Module | Category | Description | Dependencies |
 |--------|----------|-------------|--------------|
 | **autonomy** | core | Claude as a fully autonomous engineer - executes tasks end-to-end without unnecessary questions | - |
+| **identity** | core | Two foundational context files: soul.md (AI personality and philosophy) and human-context.md (who you are, your goals, how you work) | - |
 | **git-workflow** | core | Git rules: sync before history changes, rebase by default, post-merge cleanup, no AI attribution | - |
 | **settings** | core | Base settings.json with 800+ tool permissions, deny list, plugin config. Defaults to safe 'ask' mode | - |
 | **hooks** | core | Python hooks: issue-first workflow, commit format, branch protection, auto-approval for safe ops | settings |
@@ -255,7 +256,7 @@ The `docs/` directory contains comprehensive documentation:
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 33 modules |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 34 modules |
 | [Commands Reference](docs/commands.md) | All 25 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 10 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
