@@ -61,6 +61,11 @@
       "type": "hook",
       "template": false
     },
+    "hooks/orphan-process-check.py": {
+      "target": "hooks/orphan-process-check.py",
+      "type": "hook",
+      "template": false
+    },
     "settings.partial.json": {
       "target": "settings.json",
       "type": "config",
