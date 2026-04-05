@@ -17,7 +17,19 @@ A module installs one or more of these file types:
 
 ## Category: core
 
-These modules form the foundation. The **standard** preset includes all four.
+These modules form the foundation. The **standard** preset includes all of them.
+
+---
+
+### global-claude-md
+
+Slim global CLAUDE.md that serves as the root configuration reference.
+
+**Installs**: `CLAUDE.md` (global)
+
+**What it does**: Creates a lightweight `~/.claude/CLAUDE.md` that points Claude to all installed rules, commands, hooks, and settings without duplicating their content. This is the first file Claude reads at session start and serves as the entry point to the entire configuration.
+
+**Dependencies**: None
 
 ---
 
@@ -54,6 +66,25 @@ Git conventions covering sync safety, branching strategy, commit attribution, an
 
 ---
 
+### identity
+
+Two foundational context files that give Claude Code a persistent identity.
+
+**Installs**: `rules/soul.md`, `rules/human-context.md`
+
+**What it does**: Provides two context files generated during installation based on your answers:
+
+- **soul.md** - Defines Claude's AI personality, reasoning principles, communication style, core values, and boundaries. Establishes the engineering partner relationship.
+- **human-context.md** - Captures who you are, what you're building, how you work, and where you're going. Helps Claude tailor its behavior to your experience level, priorities, and preferences.
+
+Both files are generated from your answers during the identity interview in the installer. They are marked as templates to prevent personal data from leaking into the CCGM repo.
+
+**Config prompts**: Role, experience, current projects, working style, goals
+
+**Dependencies**: None
+
+---
+
 ### settings
 
 Base `settings.json` with 800+ pre-configured tool permission entries.
@@ -78,7 +109,7 @@ Base `settings.json` with 800+ pre-configured tool permission entries.
 
 Python hooks that automate and enforce development workflows.
 
-**Installs**: 9 hook scripts, 1 Python library, settings.json fragment
+**Installs**: 9 hook scripts, 2 Python libraries, settings.json fragment
 
 This module installs the most hooks of any module. See [Hooks Reference](hooks.md) for detailed documentation of each hook.
 
@@ -195,6 +226,72 @@ Comprehensive documentation audit and update command.
 | `/docupdate` | Audit and update README, TOC, onboarding flow, package lists, and module coverage against actual codebase state |
 
 **What it does**: Spawns parallel audit agents to check all documentation against the real codebase, then applies targeted fixes. Checks packages listed vs installed, TOC entries vs actual headings, setup steps vs actual requirements, and module docs vs source. Works in any project type.
+
+**Dependencies**: None
+
+---
+
+### editorial-critique
+
+Deep editorial review of long-form writing.
+
+**Installs**: 1 skill file
+
+| Command | Description |
+|---------|-------------|
+| `/editorial-critique` | 8-pass editorial review: prose craft, AI-tell detection, argument architecture, conciseness, data verification, structure, impact, grammar |
+
+**What it does**: Spawns 8 parallel analysis agents that each evaluate writing from a different angle. Produces a scored report with specific line-level feedback. Optionally applies auto-fixes for mechanical issues (grammar, conciseness, AI tells).
+
+**Dependencies**: None
+
+---
+
+### design-review
+
+Visual design review for web pages.
+
+**Installs**: 1 skill file
+
+| Command | Description |
+|---------|-------------|
+| `/design-review` | 6-pass visual design review: spacing, typography, responsive, visual hierarchy, accessibility, component consistency |
+
+**What it does**: Takes screenshots at 3 viewports (mobile, tablet, desktop), then runs 6 parallel analysis passes. Produces a scored report with specific CSS/layout recommendations. Optionally applies auto-fixes.
+
+**Dependencies**: None
+
+---
+
+### ideate
+
+Structured ideation framework.
+
+**Installs**: 1 skill file
+
+| Command | Description |
+|---------|-------------|
+| `/ideate` | Socratic interview to refine a loose idea into a concrete concept at 95% clarity |
+
+**What it does**: Uses progressive Socratic questioning with confidence tracking to help you refine a loose idea into a well-defined concept. Once the idea reaches sufficient clarity, it can hand off to `/deepresearch` for validation or `/xplan` for planning and execution.
+
+**Dependencies**: None
+
+---
+
+### research
+
+Multi-channel research using parallel agents.
+
+**Installs**: 1 command file
+
+| Command | Description |
+|---------|-------------|
+| `/research` | Parallel multi-channel research with WebSearch, WebFetch, GitHub, and Reddit |
+
+**What it does**: Spawns up to 7 parallel research agents that each investigate a topic from a different angle (domain, technical, competitive, adjacent, UX, infrastructure, monetization). Decomposes topics into targeted sub-questions, runs iterative multi-round searches, and synthesizes into a structured research.md. Zero external dependencies.
+
+For higher-quality results, install [/deepresearch](https://github.com/lucasmccomb/lem-deepresearch) - a local pipeline that's faster, cheaper, and more reliable.
 
 **Dependencies**: None
 

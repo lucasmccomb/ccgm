@@ -4,7 +4,7 @@ Python hooks that enforce git workflow rules: issue-first workflow, commit messa
 
 ## What It Does
 
-This module installs four Python hooks and a settings partial:
+This module installs nine Python hooks, two Python libraries, and a settings partial:
 
 | Hook | Event | Purpose |
 |------|-------|---------|
@@ -12,8 +12,15 @@ This module installs four Python hooks and a settings partial:
 | `enforce-issue-workflow.py` | UserPromptSubmit | Injects a workflow reminder when Claude detects a work request (create issue first, create branch, then implement) |
 | `auto-approve-bash.py` | PreToolUse (Bash) | Reads allow/deny patterns from settings.json and auto-approves matching Bash commands |
 | `auto-approve-file-ops.py` | PreToolUse (Read/Edit/Write) | Reads path patterns from settings.json and auto-approves file operations on allowed paths |
+| `ccgm-update-check.py` | PreToolUse | Daily check for CCGM upstream updates |
+| `port-check.py` | PreToolUse (Bash) | Warns about dev server port conflicts in multi-clone setups |
+| `agent-tracking-pre.py` | PreToolUse (Bash) | Warns when claiming an issue already claimed by another agent |
+| `agent-tracking-post.py` | PostToolUse (Bash) | Records issue claims and status transitions in tracking CSV |
+| `check-migration-timestamps.py` | PreToolUse | Validates Supabase migration file timestamps for duplicates before commit |
 
 The `settings.partial.json` wires these hooks into your `~/.claude/settings.json`.
+
+**Libraries**: `lib/agent_tracking.py` (tracking CSV operations), `lib/agent_sessions.py` (live session detection)
 
 ## Dependencies
 
@@ -69,4 +76,11 @@ The default protected branches are: main, master, production, prod, staging, sta
 | `hooks/enforce-issue-workflow.py` | Issue-first workflow reminder injection |
 | `hooks/auto-approve-bash.py` | Bash command auto-approval based on settings.json patterns |
 | `hooks/auto-approve-file-ops.py` | File operation auto-approval based on settings.json path patterns |
+| `hooks/ccgm-update-check.py` | Daily CCGM update check |
+| `hooks/port-check.py` | Dev server port conflict detection |
+| `hooks/agent-tracking-pre.py` | Pre-execution issue claim warning |
+| `hooks/agent-tracking-post.py` | Post-execution tracking CSV updates |
+| `hooks/check-migration-timestamps.py` | Supabase migration timestamp validation |
+| `lib/agent_tracking.py` | Python library for tracking CSV operations |
+| `lib/agent_sessions.py` | Python library for live session detection |
 | `settings.partial.json` | Hook wiring configuration to merge into settings.json |

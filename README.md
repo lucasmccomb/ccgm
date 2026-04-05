@@ -44,7 +44,7 @@ CCGM places files into `~/.claude/` (global) or `.claude/` (project-level):
 - bash 4+ or zsh
 - git
 
-The installer checks for Claude Code, additional tools (jq, Python 3, gh CLI, gum), and offers to install any that are missing.
+The installer checks for Claude Code, additional tools (jq, Python 3, gh CLI), and offers to install any that are missing.
 
 ## Install
 
