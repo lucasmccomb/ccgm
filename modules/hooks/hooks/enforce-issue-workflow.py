@@ -9,10 +9,12 @@ Always active - no external files needed. Coordination injection is
 conditional on .claude/logs/ existing in the current working directory.
 """
 
+from __future__ import annotations
+
 import json
 import os
-import sys
 import re
+import sys
 
 
 def is_work_request(prompt: str) -> bool:
@@ -105,7 +107,7 @@ Do NOT skip this workflow. The user has explicitly requested strict adherence.
 """
 
 
-def main():
+def main() -> None:
     try:
         input_data = json.load(sys.stdin)
     except json.JSONDecodeError:

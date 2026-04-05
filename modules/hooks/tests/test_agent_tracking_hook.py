@@ -8,24 +8,21 @@ import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
-# Add hooks and lib to path
-sys.path.insert(0, os.path.expanduser("~/.claude/hooks"))
-sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
+# Add hooks and lib to path (relative to this test file's location in the module)
+_TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+_HOOKS_DIR = os.path.join(_TEST_DIR, '..', 'hooks')
+_LIB_DIR = os.path.join(_TEST_DIR, '..', 'lib')
+sys.path.insert(0, os.path.abspath(_HOOKS_DIR))
+sys.path.insert(0, os.path.abspath(_LIB_DIR))
 
 
 class TestPreHookPatterns(unittest.TestCase):
     """Test PreToolUse hook command pattern matching."""
 
-    def setUp(self):
-        # Import the module fresh
-        import importlib
-        # We need to test the functions directly
-        sys.path.insert(0, os.path.expanduser("~/.claude/hooks"))
-
     def test_extract_issue_from_branch(self):
         from importlib.machinery import SourceFileLoader
-        pre = SourceFileLoader("pre", os.path.expanduser(
-            "~/.claude/hooks/agent-tracking-pre.py")).load_module()
+        pre = SourceFileLoader("pre", os.path.join(
+            os.path.abspath(_HOOKS_DIR), "agent-tracking-pre.py")).load_module()
 
         self.assertEqual(pre.extract_issue_from_branch("git checkout -b 42-fix-auth origin/main"), "42")
         self.assertEqual(pre.extract_issue_from_branch("git checkout -b 123-add-tests"), "123")
@@ -38,8 +35,8 @@ class TestPostHookPatterns(unittest.TestCase):
 
     def setUp(self):
         from importlib.machinery import SourceFileLoader
-        self.post = SourceFileLoader("post", os.path.expanduser(
-            "~/.claude/hooks/agent-tracking-post.py")).load_module()
+        self.post = SourceFileLoader("post", os.path.join(
+            os.path.abspath(_HOOKS_DIR), "agent-tracking-post.py")).load_module()
 
     def test_extract_issue_from_branch_cmd(self):
         self.assertEqual(
@@ -105,8 +102,8 @@ class TestPostHookCommands(unittest.TestCase):
 
     def setUp(self):
         from importlib.machinery import SourceFileLoader
-        self.post = SourceFileLoader("post", os.path.expanduser(
-            "~/.claude/hooks/agent-tracking-post.py")).load_module()
+        self.post = SourceFileLoader("post", os.path.join(
+            os.path.abspath(_HOOKS_DIR), "agent-tracking-post.py")).load_module()
 
     def test_checkout_pattern_matches(self):
         import re

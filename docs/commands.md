@@ -326,6 +326,41 @@ Installed by the **documentation** module.
 
 ---
 
+## Research commands
+
+Installed by the **research** module.
+
+---
+
+### /research
+
+**Multi-channel research using parallel agents.**
+
+Spawns up to 7 parallel research agents that each investigate a topic from a different angle (domain, technical, competitive, adjacent, UX, infrastructure, monetization). Decomposes the topic into targeted sub-questions, runs iterative multi-round searches, and synthesizes everything into a structured research.md.
+
+**Depth presets**: Full (all 7 agents), Technical Only, Market & Product, Lite, Custom
+
+**Key features**:
+- Query decomposition into targeted sub-questions before spawning agents
+- Multi-round iterative research (broad, focused, validation)
+- Cross-session continuity via `--extend` flag
+- Verification pass for high-stakes claims (Full depth)
+- Sub-agents run on Sonnet; orchestrator runs on current model
+
+**Usage**:
+```
+/research "dark mode browser extensions"
+/research "food commerce platform" --depth market
+/research "habit tracking apps" --output ~/docs/research/
+/research "my topic" --extend ~/docs/research/prior/research.md
+```
+
+For higher-quality results, install [/deepresearch](https://github.com/lucasmccomb/lem-deepresearch) - a local pipeline that's faster, cheaper, and more reliable.
+
+**Installed by**: research module
+
+---
+
 ## Debugging commands
 
 Installed by the **debugging** module. For `/deepresearch`, see [lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch) (standalone repo, installed separately).

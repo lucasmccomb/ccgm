@@ -80,6 +80,28 @@ write_manifest() {
         echo -n "    \"$mod\""
       done
       echo ""
+      echo "  ],"
+      echo "  \"files\": ["
+      first=true
+      local file
+      if [ ${#INSTALLED_FILES[@]} -gt 0 ]; then
+        for file in "${INSTALLED_FILES[@]}"; do
+          if [ "$first" = true ]; then first=false; else echo ","; fi
+          echo -n "    \"$file\""
+        done
+      fi
+      echo ""
+      echo "  ],"
+      echo "  \"backups\": ["
+      first=true
+      local backup
+      if [ ${#BACKUP_DIRS[@]} -gt 0 ]; then
+        for backup in "${BACKUP_DIRS[@]}"; do
+          if [ "$first" = true ]; then first=false; else echo ","; fi
+          echo -n "    \"$backup\""
+        done
+      fi
+      echo ""
       echo "  ]"
       echo "}"
     } > "$manifest_file"
@@ -230,6 +252,20 @@ main() {
 
   # Optional but recommended
   _check_prereq "gh" "false" "GitHub CLI for issue/PR commands" || true
+
+  # Version checks for key tools (warnings only, not blockers)
+  if command -v jq &>/dev/null; then
+    jq_version=$(jq --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    if [ -n "$jq_version" ] && [ "$(printf '%s\n' "1.6" "$jq_version" | sort -V | head -1)" != "1.6" ]; then
+      ui_warn "jq version $jq_version found, 1.6+ recommended"
+    fi
+  fi
+  if command -v python3 &>/dev/null; then
+    py_version=$(python3 -c "import sys; print('{}.{}'.format(sys.version_info.major, sys.version_info.minor))" 2>/dev/null)
+    if [ -n "$py_version" ] && [ "$(printf '%s\n' "3.6" "$py_version" | sort -V | head -1)" != "3.6" ]; then
+      ui_warn "Python $py_version found, 3.6+ recommended"
+    fi
+  fi
 
   echo ""
 

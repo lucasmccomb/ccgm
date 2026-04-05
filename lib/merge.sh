@@ -71,8 +71,8 @@ merge_settings() {
             { ($key): deep_merge($a[$key]; $b[$key]) }
           elif (($a[$key] | type) == "array") and
                (($b[$key] | type) == "array") then
-            # For hook event arrays (PreToolUse, etc.), concatenate
-            { ($key): ($a[$key] + $b[$key]) }
+            # For hook event arrays (PreToolUse, etc.), concatenate and deduplicate
+            { ($key): ([$a[$key] + $b[$key] | .[] | tojson] | unique | [.[] | fromjson]) }
           elif $b | has($key) then
             { ($key): $b[$key] }
           else
@@ -88,7 +88,7 @@ merge_settings() {
     deep_merge(.[0]; .[1])
   ' "$target" "$partial" 2>/dev/null)
 
-  if [ $? -ne 0 ] || [ -z "$merged" ]; then
+  if [ -z "$merged" ]; then
     echo "ERROR: Merge failed for $target + $partial" >&2
     return 1
   fi

@@ -16,7 +16,6 @@ CCGM requires:
 Optional but recommended:
 
 - **[GitHub CLI](https://cli.github.com/)** (`gh`) - enables auto-detection of your GitHub username, issue management commands, and PR workflows
-- **[gum](https://github.com/charmbracelet/gum)** - prettier interactive menus (the installer falls back to pure bash if gum is not available)
 
 The installer checks for all prerequisites and offers to install missing tools using your system's package manager (Homebrew on macOS, apt/dnf/pacman on Linux).
 
@@ -25,7 +24,7 @@ The installer checks for all prerequisites and offers to install missing tools u
 ### 1. Clone and run
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/ccgm.git
+git clone https://github.com/lucasmccomb/ccgm.git
 cd ccgm
 ./start.sh
 ```

@@ -12,6 +12,8 @@ Only runs when:
 2. A supabase/migrations/ directory exists in the working directory
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -20,10 +22,14 @@ import sys
 from collections import Counter
 
 
-def main():
+def main() -> None:
     try:
         data = json.load(sys.stdin)
     except (json.JSONDecodeError, EOFError):
+        return
+
+    # Only handle Bash commands
+    if data.get("tool_name", "") != "Bash":
         return
 
     command = data.get("tool_input", {}).get("command", "")

@@ -8,6 +8,8 @@ Claude Code clients (terminal, VS Code, Cursor, desktop app).
 
 Can be disabled by setting CCGM_AUTO_STARTUP=false in ~/.claude/.ccgm.env
 """
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path
@@ -15,7 +17,7 @@ from pathlib import Path
 ENV_FILE = Path.home() / ".claude" / ".ccgm.env"
 
 
-def is_enabled():
+def is_enabled() -> bool:
     """Check if auto-startup is enabled in .ccgm.env."""
     if not ENV_FILE.exists():
         return False
@@ -31,7 +33,7 @@ def is_enabled():
     return False
 
 
-def main():
+def main() -> None:
     # Read stdin (required by hook contract)
     try:
         hook_input = json.load(sys.stdin)

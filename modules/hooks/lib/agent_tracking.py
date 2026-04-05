@@ -24,6 +24,8 @@ Usage as import:
     from agent_tracking import claim_issue, check_claim, update_status
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 import io
@@ -47,7 +49,7 @@ TERMINAL_STATUSES = {"merged", "closed", "released"}
 ALL_STATUSES = ACTIVE_STATUSES | TERMINAL_STATUSES
 
 
-def _find_log_repo():
+def _find_log_repo() -> str:
     """Find the agent log repo directory."""
     env = os.environ.get("CLAUDE_LOG_REPO")
     if env and os.path.isdir(env):
@@ -66,7 +68,7 @@ LOG_REPO_DIR = _find_log_repo()
 # Agent identity helpers
 # ---------------------------------------------------------------------------
 
-def get_agent_id(working_dir=None):
+def get_agent_id(working_dir: str | None = None) -> str:
     """Derive agent ID from the working directory or .env.clone."""
     wd = working_dir or os.getcwd()
 
@@ -93,7 +95,7 @@ def get_agent_id(working_dir=None):
     return "agent-0"
 
 
-def get_repo_name(working_dir=None):
+def get_repo_name(working_dir: str | None = None) -> str | None:
     """Derive repo name from git remote origin URL."""
     wd = working_dir or os.getcwd()
     try:
@@ -112,7 +114,7 @@ def get_repo_name(working_dir=None):
     return None
 
 
-def is_multi_clone_repo(working_dir=None):
+def is_multi_clone_repo(working_dir: str | None = None) -> bool:
     """Check if the current directory is a multi-clone repo (has .env.clone)."""
     wd = working_dir or os.getcwd()
     return os.path.isfile(os.path.join(wd, ".env.clone"))
@@ -122,12 +124,12 @@ def is_multi_clone_repo(working_dir=None):
 # CSV helpers
 # ---------------------------------------------------------------------------
 
-def get_tracking_path(repo):
+def get_tracking_path(repo: str) -> str:
     """Return the path to tracking.csv for a repo."""
     return os.path.join(LOG_REPO_DIR, repo, "tracking.csv")
 
 
-def read_tracking(repo):
+def read_tracking(repo: str) -> list[dict[str, str]]:
     """Read tracking.csv and return a list of dicts."""
     path = get_tracking_path(repo)
     if not os.path.isfile(path):
@@ -140,7 +142,7 @@ def read_tracking(repo):
     return rows
 
 
-def write_tracking(repo, rows):
+def write_tracking(repo: str, rows: list[dict[str, str]]) -> None:
     """Write a list of dicts to tracking.csv."""
     path = get_tracking_path(repo)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -151,7 +153,7 @@ def write_tracking(repo, rows):
             writer.writerow(row)
 
 
-def now_iso():
+def now_iso() -> str:
     """Return current local time as ISO 8601 string (minute precision)."""
     return datetime.now().strftime("%Y-%m-%dT%H:%M")
 
@@ -160,7 +162,7 @@ def now_iso():
 # Git operations on the log repo
 # ---------------------------------------------------------------------------
 
-def commit_and_push(agent_id, message):
+def commit_and_push(agent_id: str, message: str) -> bool:
     """Commit tracking changes to the log repo and push.
 
     Uses standard git flow: add, commit, pull --rebase, push.
@@ -194,7 +196,7 @@ def commit_and_push(agent_id, message):
 # Core operations
 # ---------------------------------------------------------------------------
 
-def claim_issue(repo, issue, agent_id=None, title="", epic="", branch=""):
+def claim_issue(repo: str, issue: int | str, agent_id: str | None = None, title: str = "", epic: int | str = "", branch: str = "") -> tuple[bool, str]:
     """Claim an issue. Returns (success: bool, message: str)."""
     agent_id = agent_id or get_agent_id()
     issue = str(issue)
@@ -226,7 +228,7 @@ def claim_issue(repo, issue, agent_id=None, title="", epic="", branch=""):
     return True, f"Claimed issue #{issue}"
 
 
-def update_status(repo, issue, status, agent_id=None, pr=None, branch=None):
+def update_status(repo: str, issue: int | str, status: str, agent_id: str | None = None, pr: int | str | None = None, branch: str | None = None) -> tuple[bool, str]:
     """Update the status of a claimed issue. Returns (success, message)."""
     agent_id = agent_id or get_agent_id()
     issue = str(issue)
@@ -256,7 +258,7 @@ def update_status(repo, issue, status, agent_id=None, pr=None, branch=None):
     return True, f"Updated issue #{issue} to {status}"
 
 
-def update_heartbeat(repo, issue, agent_id=None, throttle_minutes=30):
+def update_heartbeat(repo: str, issue: int | str, agent_id: str | None = None, throttle_minutes: int = 30) -> tuple[bool, str]:
     """Update the heartbeat (updated_at) for an issue, throttled.
 
     Only updates if the current updated_at is older than throttle_minutes.
@@ -286,12 +288,12 @@ def update_heartbeat(repo, issue, agent_id=None, throttle_minutes=30):
     return False, f"No active claim found for issue #{issue}"
 
 
-def release_issue(repo, issue, agent_id=None):
+def release_issue(repo: str, issue: int | str, agent_id: str | None = None) -> tuple[bool, str]:
     """Release a claimed issue. Returns (success, message)."""
     return update_status(repo, issue, "released", agent_id)
 
 
-def check_claim(repo, issue):
+def check_claim(repo: str, issue: int | str) -> tuple[str | None, str | None]:
     """Check if an issue is claimed. Returns (agent_id, status) or (None, None)."""
     issue = str(issue)
     rows = read_tracking(repo)
@@ -301,9 +303,9 @@ def check_claim(repo, issue):
     return None, None
 
 
-def list_claims(repo=None, status=None, agent=None):
+def list_claims(repo: str | None = None, status: str | None = None, agent: str | None = None) -> list[dict[str, str]]:
     """List claims, optionally filtered. Returns list of dicts."""
-    results = []
+    results: list[dict[str, str]] = []
 
     if repo:
         repos = [repo]
@@ -329,7 +331,7 @@ def list_claims(repo=None, status=None, agent=None):
     return results
 
 
-def gc_stale(repo=None, days=1):
+def gc_stale(repo: str | None = None, days: int = 1) -> list[dict]:
     """Find stale claims (active status + old updated_at). Returns list of stale rows."""
     threshold = datetime.now() - timedelta(days=days)
     stale = []
@@ -351,7 +353,7 @@ def gc_stale(repo=None, days=1):
     return stale
 
 
-def import_from_labels(repo, agent_id=None):
+def import_from_labels(repo: str, agent_id: str | None = None) -> tuple[int, str]:
     """Import existing GitHub issues with agent-* labels into tracking.csv.
 
     Scans for open issues with in-progress or agent-* labels and creates
@@ -413,7 +415,7 @@ def import_from_labels(repo, agent_id=None):
         return 0, f"Import failed: {e}"
 
 
-def init_tracking(repo):
+def init_tracking(repo: str) -> tuple[bool, str]:
     """Create tracking.csv with header row for a repo."""
     path = get_tracking_path(repo)
     if os.path.isfile(path):
@@ -431,7 +433,7 @@ def init_tracking(repo):
 # Display helpers
 # ---------------------------------------------------------------------------
 
-def format_claims_table(claims, show_repo=False):
+def format_claims_table(claims: list[dict[str, str]], show_repo: bool = False) -> str:
     """Format claims as a readable table string."""
     if not claims:
         return "  (no claims)"
@@ -464,7 +466,7 @@ def format_claims_table(claims, show_repo=False):
 # CLI
 # ---------------------------------------------------------------------------
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Multi-agent issue tracking",
         prog="agent-tracking",

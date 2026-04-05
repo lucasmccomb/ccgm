@@ -18,7 +18,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 9 hooks. The **session-logging** module installs 1 additional hook. The **self-improving** module installs 2 additional hooks.
+The **hooks** module installs 9 hooks, 2 Python libraries, and a settings partial. The **session-logging** module installs 1 additional hook. The **self-improving** module installs 2 additional hooks. Total: 12 hooks across 3 modules.
 
 ---
 

@@ -259,7 +259,10 @@ resolve_dependencies() {
 
     # Cycle detection
     for v in ${visited[@]+"${visited[@]}"}; do
-      [ "$v" = "$mod" ] && return 0
+      if [ "$v" = "$mod" ]; then
+        echo "WARNING: Circular dependency detected: $mod" >&2
+        return 0
+      fi
     done
     visited+=("$mod")
 
@@ -318,22 +321,5 @@ list_presets() {
       fi
       echo "$name ($count modules)"
     fi
-  done
-}
-
-# --- Filter modules by scope ---
-# Usage: filter_modules_by_scope "global" "mod1" "mod2" ...
-filter_modules_by_scope() {
-  local target_scope="$1"
-  shift
-  local modules=("$@")
-
-  for mod in "${modules[@]}"; do
-    while IFS= read -r scope; do
-      if [ "$scope" = "$target_scope" ]; then
-        echo "$mod"
-        break
-      fi
-    done < <(get_module_scope "$mod")
   done
 }

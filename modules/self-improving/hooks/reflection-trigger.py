@@ -16,13 +16,15 @@ PostToolUse input schema:
 }
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
 import sys
 
 
-def is_log_repo(cwd):
+def is_log_repo(cwd: str) -> bool:
     """Check if we're in an agent log repo (skip reflection for log commits)."""
     code_dir = os.path.expanduser("~/code")
     if os.path.isdir(code_dir):
@@ -37,7 +39,7 @@ def is_log_repo(cwd):
     return False
 
 
-def main():
+def main() -> None:
     try:
         data = json.load(sys.stdin)
     except (json.JSONDecodeError, EOFError):

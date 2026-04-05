@@ -14,6 +14,8 @@ ALLOWS:
 - Not in a git repo → allow all
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -62,7 +64,7 @@ DIRECT_TO_MAIN_REPOS = [
 ]
 
 
-def is_direct_to_main_repo():
+def is_direct_to_main_repo() -> bool:
     """Check if the current repo is allowlisted for direct-to-main workflow."""
     try:
         result = subprocess.run(
@@ -77,12 +79,12 @@ def is_direct_to_main_repo():
     return False
 
 
-def is_protected_branch(branch):
+def is_protected_branch(branch: str) -> bool:
     """Check if a branch name is in the protected list (case-insensitive)."""
     return branch.lower() in PROTECTED_BRANCHES_SET
 
 
-def get_current_branch():
+def get_current_branch() -> str | None:
     """Get current git branch. Returns None if not in a git repo."""
     try:
         result = subprocess.run(
@@ -98,7 +100,7 @@ def get_current_branch():
         return None
 
 
-def extract_commit_message(command):
+def extract_commit_message(command: str) -> str | None:
     """Extract commit message from git commit -m '...' or --message '...'."""
     # Heredoc patterns (e.g. -m "$(cat <<'EOF' ... EOF)") can't be reliably
     # parsed from the raw command string — skip validation and let git handle it.
@@ -126,43 +128,43 @@ def extract_commit_message(command):
     return None
 
 
-def is_commit_command(command):
+def is_commit_command(command: str) -> bool:
     """Check if this is a git commit command."""
     # Match: git commit, git commit -m, git commit --amend, etc.
     # But NOT: git commit-graph, git commit-tree
     return bool(re.match(r"git\s+commit(\s|$)", command))
 
 
-def is_push_command(command):
+def is_push_command(command: str) -> bool:
     """Check if this is a git push command."""
     return bool(re.match(r"(SKIP_CHECKS=\S+\s+)?git\s+push(\s|$)", command))
 
 
-def is_merge_commit(command):
+def is_merge_commit(command: str) -> bool:
     """Check if this is a merge commit (auto-generated message)."""
     return "Merge branch" in command or "Merge pull request" in command
 
 
-def is_amend_without_message(command):
+def is_amend_without_message(command: str) -> bool:
     """Check if this is --amend that preserves existing message."""
     return "--amend" in command and "-m" not in command and "--message" not in command
 
 
-def is_sync_commit(message):
+def is_sync_commit(message: str | None) -> bool:
     """Check if this is a sync/coordination commit (no issue number needed)."""
     if not message:
         return False
     return bool(re.match(r"^sync:", message, re.IGNORECASE))
 
 
-def validate_commit_message_format(message):
+def validate_commit_message_format(message: str | None) -> bool:
     """Check if commit message starts with issue number: '#42: description'."""
     if not message:
         return True  # No message to validate (e.g., heredoc), skip
     return bool(re.match(r"^#\d+:", message))
 
 
-def deny(reason):
+def deny(reason: str) -> None:
     """Return a deny decision."""
     output = {
         "hookSpecificOutput": {
@@ -175,7 +177,7 @@ def deny(reason):
     sys.exit(0)
 
 
-def check_commit(command, branch):
+def check_commit(command: str, branch: str) -> None:
     """Validate git commit commands against workflow rules."""
     # Direct-to-main repos skip all checks
     if is_direct_to_main_repo():
@@ -183,6 +185,10 @@ def check_commit(command, branch):
 
     # Emergency bypass
     if os.environ.get("ALLOW_MAIN_COMMIT") == "1":
+        print(
+            "WARNING: ALLOW_MAIN_COMMIT bypass active - skipping all branch protections",
+            file=sys.stderr,
+        )
         return
 
     # Rule 1: No commits on protected branches
@@ -212,7 +218,7 @@ def check_commit(command, branch):
         )
 
 
-def check_push(command, branch):
+def check_push(command: str, branch: str) -> None:
     """Validate git push commands against workflow rules."""
     # Direct-to-main repos skip all checks
     if is_direct_to_main_repo():
@@ -220,6 +226,10 @@ def check_push(command, branch):
 
     # Emergency bypass
     if os.environ.get("ALLOW_MAIN_COMMIT") == "1":
+        print(
+            "WARNING: ALLOW_MAIN_COMMIT bypass active - skipping all branch protections",
+            file=sys.stderr,
+        )
         return
 
     # Only block pushes when on a protected branch
@@ -283,7 +293,7 @@ def check_push(command, branch):
     )
 
 
-def main():
+def main() -> None:
     try:
         input_data = json.load(sys.stdin)
     except json.JSONDecodeError:

@@ -21,7 +21,6 @@ Checks for required and optional tools:
 | `python3` | Yes | Hook scripts |
 | `jq` | Yes | JSON manipulation for settings merge |
 | `gh` | No | GitHub CLI for auto-detecting username, issue/PR commands |
-| `gum` | No | Prettier interactive menus (falls back to bash) |
 
 If a required tool is missing, the installer detects your package manager (Homebrew, apt, dnf, or pacman) and offers to install it. On macOS without Homebrew, it offers to install Homebrew first.
 
@@ -155,7 +154,7 @@ The installer is split into library files in `lib/`:
 
 | File | Purpose |
 |------|---------|
-| `lib/ui.sh` | Pure-bash ANSI TUI with colored output, menus, and progress indicators. No external dependencies (gum is optional for prettier menus). |
+| `lib/ui.sh` | Pure-bash ANSI TUI with colored output, menus, and progress indicators. No external dependencies. |
 | `lib/modules.sh` | Module discovery (scans `modules/` for `module.json` files), dependency resolution (topological sort), and preset loading. |
 | `lib/template.sh` | Template variable expansion via `sed`. Handles macOS and Linux `sed` differences. |
 | `lib/merge.sh` | Deep JSON merge for `settings.json` using `jq`. Special handling for arrays and hook objects. |

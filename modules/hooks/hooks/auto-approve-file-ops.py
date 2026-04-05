@@ -8,20 +8,22 @@ This hook exists because Claude Code's built-in permission system has bugs:
 
 This hook enforces path-based permissions for file operations.
 """
+from __future__ import annotations
+
 import json
-import sys
 import os
-from pathlib import Path
+import sys
 from fnmatch import fnmatch
+from pathlib import Path
 
 # Settings file location
 SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
 
-def load_path_patterns():
+def load_path_patterns() -> tuple[list[str], list[str], list[str]]:
     """Load Read/Edit/Write path patterns from settings."""
-    read_patterns = []
-    edit_patterns = []
-    write_patterns = []
+    read_patterns: list[str] = []
+    edit_patterns: list[str] = []
+    write_patterns: list[str] = []
 
     if SETTINGS_FILE.exists():
         try:
@@ -64,7 +66,7 @@ def path_matches_pattern(file_path: str, pattern: str) -> bool:
     # Standard glob matching
     return fnmatch(file_path, pattern)
 
-def check_file_path(file_path: str, patterns: list) -> tuple:
+def check_file_path(file_path: str, patterns: list[str]) -> tuple[str | None, str | None]:
     """
     Check if a file path matches any allowed pattern.
 
@@ -78,7 +80,7 @@ def check_file_path(file_path: str, patterns: list) -> tuple:
     # No match - let the default permission system handle it
     return (None, None)
 
-def main():
+def main() -> None:
     try:
         input_data = json.load(sys.stdin)
     except json.JSONDecodeError:
