@@ -9,12 +9,12 @@
     "rules/soul.md": {
       "target": "rules/soul.md",
       "type": "rule",
-      "template": false
+      "template": true
     },
     "rules/human-context.md": {
       "target": "rules/human-context.md",
       "type": "rule",
-      "template": false
+      "template": true
     }
   },
   "tags": ["identity", "personality", "context", "soul"],
