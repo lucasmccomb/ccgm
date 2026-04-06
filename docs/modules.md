@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 37 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 38 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -432,6 +432,31 @@ Commands installed:
 | `/xplan-resume` | Resume an interrupted plan execution |
 
 **Dependencies**: multi-agent (which depends on session-logging)
+
+---
+
+### atdd
+
+Agentic Test-Driven Development - build app code to pass E2E vision specs.
+
+**Installs**: 1 command file, 1 rule file
+
+**What it does**: Provides a spec-driven development workflow where E2E vision specs (Playwright tests) define target behavior and agents iteratively build app code until all specs pass. The `/atdd` command runs a 4-phase workflow:
+
+- **Phase 1 (Orient)**: Read all spec files, establish baseline (X/Y tests passing), create branch
+- **Phase 2 (Red-Green Loop)**: Systematically work through failing tests - read each test, implement the minimum app code to make it pass, commit incrementally
+- **Phase 3 (Verify)**: Run lint, type-check, and unit tests to ensure clean code
+- **Phase 4 (Ship)**: Push and create PR with baseline/final results
+
+The ATDD contract: specs are immutable (never modify test files), mocks define the API contract, UI assertions define the design spec.
+
+Commands installed:
+
+| Command | Description |
+|---------|-------------|
+| `/atdd` | Build app code to pass vision specs in `e2e/tests/{feature}/` |
+
+**Dependencies**: None
 
 ---
 

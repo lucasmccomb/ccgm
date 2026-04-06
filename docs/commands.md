@@ -471,6 +471,38 @@ Clones or reads an external Claude Code configuration repo and identifies patter
 
 ---
 
+## ATDD commands
+
+Installed by the **atdd** module.
+
+---
+
+### /atdd
+
+**Build app code to pass E2E vision specs.**
+
+Reads Playwright vision specs from `e2e/tests/{feature}/`, iteratively builds app code until all tests pass, then ships.
+
+**Phases**:
+1. **Orient** - Read all spec files, establish baseline (X/Y tests passing), create issue and branch
+2. **Red-Green Loop** - Systematically work through failing tests: read test, implement minimum code, re-run, commit incrementally
+3. **Verify** - Run lint, type-check, unit tests
+4. **Ship** - Push and create PR with baseline/final results
+
+**The ATDD contract**: specs are immutable (never modify test files), mocks define the API contract, UI assertions define the design spec.
+
+**Usage**:
+```
+/atdd habits
+/atdd habits --issue 178
+/atdd coaching --issue 180
+/atdd "principles journal" --issue 181
+```
+
+**Installed by**: atdd module
+
+---
+
 ## Test Vision commands
 
 Installed by the **test-vision** module.
