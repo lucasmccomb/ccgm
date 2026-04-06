@@ -1,16 +1,20 @@
 // Package agent provides process lifecycle management for Claude Code agents.
-// manager.go handles config persistence (CRUD). Process management lives in
-// process.go and will be implemented in a later epic.
+// manager.go handles config persistence (CRUD) and runtime process management.
 package agent
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
+	"github.com/lucasmccomb/ccgm/modules/agent-manager/src/internal/config"
 	"github.com/lucasmccomb/ccgm/modules/agent-manager/src/internal/fileutil"
 	"github.com/lucasmccomb/ccgm/modules/agent-manager/src/internal/types"
 )
+
+// ---- Config persistence (CRUD) -----------------------------------------------
 
 // agentsDir returns the path to the agents config directory within dataDir.
 func agentsDir(dataDir string) string {
@@ -99,4 +103,184 @@ func ListAgentConfigs(dataDir string) ([]*types.AgentConfig, error) {
 		configs = append(configs, cfg)
 	}
 	return configs, nil
+}
+
+// ---- Runtime agent management ------------------------------------------------
+
+// AgentEventType describes the kind of lifecycle event that occurred.
+type AgentEventType string
+
+const (
+	EventStarted   AgentEventType = "started"
+	EventStopped   AgentEventType = "stopped"
+	EventCrashed   AgentEventType = "crashed"
+	EventHanging   AgentEventType = "hanging"
+	EventRestarted AgentEventType = "restarted"
+)
+
+// AgentEvent carries a lifecycle notification from the manager to the TUI.
+type AgentEvent struct {
+	AgentID string
+	Type    AgentEventType
+	Details string
+}
+
+// ManagedAgent pairs a persisted AgentConfig with its live runtime state.
+type ManagedAgent struct {
+	Config       types.AgentConfig
+	State        types.AgentState
+	Process      *Process
+	lastOutputAt time.Time // updated by the log collector when output is received
+}
+
+// AgentManager supervises one or more running agent processes. Config CRUD
+// functions at the top of this file operate on disk; the AgentManager tracks
+// the in-memory runtime state of processes it has spawned.
+type AgentManager struct {
+	dataDir  string
+	config   *config.GlobalConfig
+	agents   map[string]*ManagedAgent // ID -> agent
+	mu       sync.RWMutex
+	notifyCh chan AgentEvent // buffered; events for TUI consumption
+}
+
+const eventChannelBuffer = 64
+
+// NewAgentManager constructs an AgentManager. Call ReattachFromState after
+// creation to reconnect to any agents that survived a manager restart.
+func NewAgentManager(dataDir string, cfg *config.GlobalConfig) *AgentManager {
+	return &AgentManager{
+		dataDir:  dataDir,
+		config:   cfg,
+		agents:   make(map[string]*ManagedAgent),
+		notifyCh: make(chan AgentEvent, eventChannelBuffer),
+	}
+}
+
+// Events returns the read-only channel on which lifecycle events are published.
+// The TUI should drain this channel continuously.
+func (m *AgentManager) Events() <-chan AgentEvent {
+	return m.notifyCh
+}
+
+// emit sends an event without blocking. If the channel is full, the event is
+// dropped (prevents deadlock when the TUI is slow).
+func (m *AgentManager) emit(evt AgentEvent) {
+	select {
+	case m.notifyCh <- evt:
+	default:
+	}
+}
+
+// StartAgent validates cfg, spawns the process, registers it, and emits
+// EventStarted. Returns an error if the agent is already running.
+func (m *AgentManager) StartAgent(agentCfg *types.AgentConfig) error {
+	if err := agentCfg.Validate(); err != nil {
+		return fmt.Errorf("start agent: %w", err)
+	}
+
+	m.mu.Lock()
+	if existing, ok := m.agents[agentCfg.ID]; ok {
+		if existing.Process != nil && existing.Process.IsAlive() {
+			m.mu.Unlock()
+			return fmt.Errorf("start agent %q: already running (PID %d)", agentCfg.ID, existing.State.PID)
+		}
+	}
+	m.mu.Unlock()
+
+	proc, err := SpawnProcess(agentCfg)
+	if err != nil {
+		return fmt.Errorf("start agent %q: %w", agentCfg.ID, err)
+	}
+
+	ma := &ManagedAgent{
+		Config:  *agentCfg,
+		Process: proc,
+		State: types.AgentState{
+			Config:    *agentCfg,
+			PID:       proc.PID(),
+			Status:    types.StatusRunning,
+			StartedAt: nowFunc(),
+		},
+	}
+
+	m.mu.Lock()
+	m.agents[agentCfg.ID] = ma
+	m.mu.Unlock()
+
+	m.emit(AgentEvent{AgentID: agentCfg.ID, Type: EventStarted, Details: fmt.Sprintf("PID %d", proc.PID())})
+	return nil
+}
+
+// StopAgent sends SIGTERM (with a 5-second grace period, then SIGKILL) to the
+// agent identified by agentID and emits EventStopped.
+func (m *AgentManager) StopAgent(agentID string) error {
+	m.mu.RLock()
+	ma, ok := m.agents[agentID]
+	m.mu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("stop agent %q: not found", agentID)
+	}
+	if ma.Process == nil {
+		return fmt.Errorf("stop agent %q: no process attached", agentID)
+	}
+
+	const gracePeriod = 5e9 // 5 seconds in nanoseconds
+	if err := ma.Process.Stop(gracePeriod); err != nil {
+		return fmt.Errorf("stop agent %q: %w", agentID, err)
+	}
+
+	m.mu.Lock()
+	ma.State.Status = types.StatusStopped
+	ma.State.ExitCode = ma.Process.ExitCode()
+	m.mu.Unlock()
+
+	m.emit(AgentEvent{AgentID: agentID, Type: EventStopped, Details: fmt.Sprintf("exit code %d", ma.State.ExitCode)})
+	return nil
+}
+
+// KillAgent immediately sends SIGKILL to the agent process group.
+func (m *AgentManager) KillAgent(agentID string) error {
+	m.mu.RLock()
+	ma, ok := m.agents[agentID]
+	m.mu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("kill agent %q: not found", agentID)
+	}
+	if ma.Process == nil {
+		return fmt.Errorf("kill agent %q: no process attached", agentID)
+	}
+
+	if err := ma.Process.Kill(); err != nil {
+		return fmt.Errorf("kill agent %q: %w", agentID, err)
+	}
+
+	m.mu.Lock()
+	ma.State.Status = types.StatusStopped
+	ma.State.ExitCode = ma.Process.ExitCode()
+	m.mu.Unlock()
+
+	m.emit(AgentEvent{AgentID: agentID, Type: EventStopped, Details: "SIGKILL"})
+	return nil
+}
+
+// GetAgent returns the ManagedAgent for agentID, or false if not found.
+func (m *AgentManager) GetAgent(agentID string) (*ManagedAgent, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ma, ok := m.agents[agentID]
+	return ma, ok
+}
+
+// ListAgents returns a snapshot of all registered agents (running or not).
+func (m *AgentManager) ListAgents() []*ManagedAgent {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*ManagedAgent, 0, len(m.agents))
+	for _, ma := range m.agents {
+		out = append(out, ma)
+	}
+	return out
 }
