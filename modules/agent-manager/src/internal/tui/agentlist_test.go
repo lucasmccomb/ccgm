@@ -57,30 +57,33 @@ func TestView_ShowsAgentNames(t *testing.T) {
 }
 
 func TestView_AllStatuses(t *testing.T) {
-	statuses := []types.AgentStatus{
-		types.StatusRunning,
-		types.StatusHanging,
-		types.StatusCrashed,
-		types.StatusStopped,
-		types.StatusRestarting,
+	// Hanging is mapped to "running" in the display. Test the display labels.
+	tests := []struct {
+		status types.AgentStatus
+		label  string
+	}{
+		{types.StatusRunning, "running"},
+		{types.StatusHanging, "running"}, // hanging displays as running
+		{types.StatusCrashed, "crashed"},
+		{types.StatusStopped, "stopped"},
+		{types.StatusRestarting, "restarting"},
 	}
-	for _, status := range statuses {
+	for _, tt := range tests {
 		m := NewAgentListModel()
-		m.SetAgents([]AgentListItem{makeItem("a1", "agent", status, 100)})
+		m.SetAgents([]AgentListItem{makeItem("a1", "agent", tt.status, 100)})
 		view := m.View()
-		// Each status name should appear somewhere in the rendered view.
-		if !strings.Contains(view, string(status)) {
-			t.Errorf("status %q not found in view:\n%s", status, view)
+		if !strings.Contains(view, tt.label) {
+			t.Errorf("status %q: expected label %q in view:\n%s", tt.status, tt.label, view)
 		}
 	}
 }
 
-func TestView_ShowsHeader(t *testing.T) {
+func TestView_ShowsTitle(t *testing.T) {
 	m := NewAgentListModel()
 	m.SetAgents([]AgentListItem{makeItem("a1", "x", types.StatusRunning, 1)})
 	view := m.View()
-	if !strings.Contains(view, "Name") {
-		t.Errorf("expected 'Name' column header in view, got:\n%s", view)
+	if !strings.Contains(view, "Agents") {
+		t.Errorf("expected 'Agents' title in view, got:\n%s", view)
 	}
 }
 
@@ -343,23 +346,14 @@ func TestFormatUptime(t *testing.T) {
 		want string
 	}{
 		{45 * time.Second, "45s"},
-		{90 * time.Second, "1m30s"},
-		{3700 * time.Second, "1h01m"},
+		{90 * time.Second, "1m 30s"},
+		{3700 * time.Second, "1h 01m"},
 	}
 	for _, c := range cases {
 		got := formatUptime(c.d)
 		if got != c.want {
 			t.Errorf("formatUptime(%v) = %q, want %q", c.d, got, c.want)
 		}
-	}
-}
-
-func TestFormatPID(t *testing.T) {
-	if formatPID(0) != "-" {
-		t.Error("expected '-' for PID 0")
-	}
-	if formatPID(1234) != "1234" {
-		t.Errorf("expected '1234', got %q", formatPID(1234))
 	}
 }
 

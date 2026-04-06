@@ -16,7 +16,7 @@ func TestCommandBar_AgentListContext(t *testing.T) {
 	view := m.View()
 
 	// All agent-list hints must appear.
-	for _, want := range []string{"n", "new", "s", "stop", "r", "restart", "x", "kill", "/", "filter", "tab", "logs", "?", "help", "q", "quit"} {
+	for _, want := range []string{"n", "new", "a", "focus", "s", "stop", "r", "restart", "x", "kill", "/", "filter", "?", "help", "q", "quit"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("agent-list view missing %q\nfull view: %q", want, view)
 		}

@@ -89,16 +89,21 @@ func (m *AgentManager) checkAgent(agentID string) {
 	}
 
 	if isAlive {
-		// Process is still running. Check for hang: if no output has arrived
-		// for longer than HangingTimeout, mark it hanging.
-		//
-		// Note: tracking "last output time" requires integrating with the log
-		// collector. As a pragmatic initial implementation we check the wall
-		// clock since start as a proxy when no log collector is wired up. The
-		// TUI Epic will wire up the collector and update lastOutputAt on each
-		// received line.
+		// For tmux-based agents, skip hang detection entirely. We can't
+		// monitor stdout from a tmux pane, so "no output" is meaningless.
+		if ma.TmuxPaneID != "" || ma.TmuxSession != "" {
+			// Ensure status stays "running" (fix any stale "hanging" state).
+			m.mu.Lock()
+			if ma.State.Status == types.StatusHanging {
+				ma.State.Status = types.StatusRunning
+			}
+			m.mu.Unlock()
+			return
+		}
+
+		// Direct-spawn agents: check for hang via output timeout.
 		m.mu.RLock()
-		lastOutput := ma.State.StartedAt // fallback when no collector is wired
+		lastOutput := ma.State.StartedAt
 		if !ma.lastOutputAt.IsZero() {
 			lastOutput = ma.lastOutputAt
 		}
