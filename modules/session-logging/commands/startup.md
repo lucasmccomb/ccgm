@@ -7,7 +7,7 @@ allowed-tools: Agent
 
 Use the Agent tool to execute this workflow on a cheaper model:
 
-- **model**: haiku
+- **model**: sonnet
 - **description**: session startup
 
 Pass the agent all workflow instructions below.
