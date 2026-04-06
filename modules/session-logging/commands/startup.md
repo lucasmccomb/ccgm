@@ -52,17 +52,14 @@ Only if `status:new` in the LOG section:
 
 ### Step 4: Present Dashboard
 
-Format the gathered data for terminal display. Use **bold** for labels, `backticks` for values, and `---` for separators. Do NOT use markdown headers (`#`, `##`, `###`). Omit sections with no content.
+Format the gathered data for terminal display. Use **bold** for labels and `backticks` for values. Do NOT use markdown headers (`#`, `##`, `###`) or horizontal rules (`---`). Omit sections with no content.
 
 Output this exact structure (replace placeholders, keep formatting):
 
 ```
 **{agent_id}** | `{repo}` | {date}
 **Branch:** `{branch}` | **Status:** {clean/dirty} | **Sync:** {ahead_behind or "up to date"}
-
----
-
-**Previous** — {One-line summary from PREV_LOG_TAIL, or "No prior session found"}
+**Previous** - {One-line summary from PREV_LOG_TAIL, or "No prior session found"}
 ```
 
 Then add only sections that have content, each separated by a blank line with a bold label:
@@ -84,10 +81,9 @@ Then add only sections that have content, each separated by a blank line with a 
   {SIBLINGS content, indented}
 ```
 
-End with the recommendation after a separator:
+End with the recommendation after a blank line:
 
 ```
----
 **Next:** {recommended action per table below}
 ```
 
