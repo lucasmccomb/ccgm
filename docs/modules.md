@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 36 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 37 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -432,6 +432,30 @@ Commands installed:
 | `/xplan-resume` | Resume an interrupted plan execution |
 
 **Dependencies**: multi-agent (which depends on session-logging)
+
+---
+
+### test-vision
+
+Vision-driven e2e test suite generation using multi-agent orchestration.
+
+**Installs**: 2 command files
+
+**What it does**: Provides two composable commands for generating comprehensive Playwright e2e test suites:
+
+- **`/test-vision`** - Full repo orchestrator: discovers all features via 7-source checklist + Chrome MCP visual exploration, interviews the user to validate test cases and priorities, generates shared Playwright infrastructure (config, fixtures, auth setup by provider), dispatches parallel `/e2e` agents per feature domain, validates the suite, and generates a CI/CD workflow.
+- **`/e2e`** - Atomic spec generator: generates a single Playwright spec file for a feature, flow, or issue. Works standalone (with its own discovery) or as a building block within `/test-vision`. Supports three-tier assertions for unbuilt features (route loads, structural landmarks, behavioral interactions).
+
+Key design: `/test-vision` composes `/e2e` as its atomic unit. File paths are pre-assigned before dispatch to prevent merge conflicts. Infrastructure is generated before agents are spawned.
+
+Commands installed:
+
+| Command | Description |
+|---------|-------------|
+| `/test-vision` | Full repo e2e test suite generation with parallel agents |
+| `/e2e` | Single-feature Playwright spec generation |
+
+**Dependencies**: browser-automation, multi-agent
 
 ---
 

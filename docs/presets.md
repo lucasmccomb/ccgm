@@ -46,7 +46,7 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **Best for**: Power users who want the complete CCGM experience, including multi-agent coordination, brand research, and tech-specific guides.
 
-**Modules (35)**: All modules.
+**Modules (37)**: All modules.
 
 **What you get**: The full suite. Includes multi-agent workflows, planning frameworks, tech-specific patterns (Cloudflare, Supabase, Tailwind, shadcn, MCP development), and specialized commands.
 
