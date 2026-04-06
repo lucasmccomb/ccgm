@@ -139,4 +139,8 @@ func (m *AgentManager) checkAgent(agentID string) {
 		Type:    EventCrashed,
 		Details: fmt.Sprintf("exit code %d", exitCode),
 	})
+
+	// Invoke the restart engine. HandleCrash emits the terminal bell, writes
+	// the crash tombstone, and schedules a restart if the policy permits it.
+	_ = m.RestartEngine.HandleCrash(agentID) // best-effort; log errors are not fatal
 }
