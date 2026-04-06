@@ -1,11 +1,39 @@
 {
   "name": "cloud-dispatch",
   "displayName": "Cloud Dispatch",
-  "description": "Hetzner Cloud VM orchestration for ephemeral Claude Code agent execution: golden image pipeline, VM lifecycle management, and agent dispatch.",
+  "description": "Delegate Claude Code agent work to Hetzner Cloud VMs. Provides golden image pipeline, VM lifecycle management, secret injection, workspace provisioning, and /dispatch command for one-command multi-agent dispatch.",
   "category": "workflow",
   "scope": ["global"],
   "dependencies": [],
-  "files": {},
-  "tags": ["cloud", "hetzner", "packer", "agents", "infrastructure"],
-  "configPrompts": []
+  "files": {
+    "commands/dispatch.md": { "target": "commands/dispatch.md", "type": "command", "template": false },
+    "commands/dispatch-status.md": { "target": "commands/dispatch-status.md", "type": "command", "template": false },
+    "commands/dispatch-stop.md": { "target": "commands/dispatch-stop.md", "type": "command", "template": false },
+    "commands/vm-manage.md": { "target": "commands/vm-manage.md", "type": "command", "template": false },
+    "rules/cloud-dispatch.md": { "target": "rules/cloud-dispatch.md", "type": "rule", "template": false },
+    "lib/common.sh": { "target": "lib/cloud-dispatch/common.sh", "type": "lib", "template": false },
+    "lib/vm-create.sh": { "target": "lib/cloud-dispatch/vm-create.sh", "type": "lib", "template": false },
+    "lib/vm-destroy.sh": { "target": "lib/cloud-dispatch/vm-destroy.sh", "type": "lib", "template": false },
+    "lib/vm-health.sh": { "target": "lib/cloud-dispatch/vm-health.sh", "type": "lib", "template": false },
+    "lib/vm-ssh.sh": { "target": "lib/cloud-dispatch/vm-ssh.sh", "type": "lib", "template": false },
+    "lib/vm-status.sh": { "target": "lib/cloud-dispatch/vm-status.sh", "type": "lib", "template": false },
+    "lib/secrets-cleanup.sh": { "target": "lib/cloud-dispatch/secrets-cleanup.sh", "type": "lib", "template": false },
+    "lib/secrets-init.sh": { "target": "lib/cloud-dispatch/secrets-init.sh", "type": "lib", "template": false },
+    "lib/secrets-inject-all.sh": { "target": "lib/cloud-dispatch/secrets-inject-all.sh", "type": "lib", "template": false },
+    "lib/secrets-inject.sh": { "target": "lib/cloud-dispatch/secrets-inject.sh", "type": "lib", "template": false },
+    "lib/secrets-rotate.sh": { "target": "lib/cloud-dispatch/secrets-rotate.sh", "type": "lib", "template": false },
+    "lib/workspace-assign.sh": { "target": "lib/cloud-dispatch/workspace-assign.sh", "type": "lib", "template": false },
+    "lib/workspace-cleanup.sh": { "target": "lib/cloud-dispatch/workspace-cleanup.sh", "type": "lib", "template": false },
+    "lib/workspace-collect.sh": { "target": "lib/cloud-dispatch/workspace-collect.sh", "type": "lib", "template": false },
+    "lib/workspace-setup-all.sh": { "target": "lib/cloud-dispatch/workspace-setup-all.sh", "type": "lib", "template": false },
+    "lib/workspace-setup.sh": { "target": "lib/cloud-dispatch/workspace-setup.sh", "type": "lib", "template": false }
+  },
+  "tags": ["cloud", "hetzner", "packer", "agents", "infrastructure", "dispatch"],
+  "configPrompts": [
+    {
+      "key": "hcloudSetup",
+      "prompt": "Set HCLOUD_TOKEN in your shell environment (e.g. export HCLOUD_TOKEN=... in ~/.zshrc). See https://console.hetzner.cloud -> Security -> API Tokens.",
+      "default": ""
+    }
+  ]
 }
