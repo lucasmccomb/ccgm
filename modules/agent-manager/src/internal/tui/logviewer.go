@@ -142,6 +142,11 @@ func (m LogViewerModel) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, titleStr, body, hint)
 }
 
+// AgentID returns the ID of the agent currently being viewed.
+func (m LogViewerModel) AgentID() string {
+	return m.agentID
+}
+
 // SetAgent switches the viewer to display logs for a different agent.
 // Call ClearLogs separately if you want to flush the previous agent's buffer.
 func (m *LogViewerModel) SetAgent(agentID, name string) {

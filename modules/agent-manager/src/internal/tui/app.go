@@ -5,6 +5,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -111,9 +112,29 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ------------------------------------------------------------------
 	// Periodic refresh: snapshot agent states and push to the list.
+	// Also capture tmux pane content for the active log viewer agent.
 	case tickMsg:
 		m.agentList.SetAgents(m.snapshotAgents())
 		cmds = append(cmds, tickCmd())
+
+		// Capture tmux pane for the agent the log viewer is watching.
+		// tmux capture gives a snapshot, so we clear and replace each tick.
+		if m.logViewer.AgentID() != "" {
+			if ma, ok := m.agentManager.GetAgent(m.logViewer.AgentID()); ok && ma.TmuxSession != "" {
+				if content, err := agent.TmuxCapture(ma.TmuxSession); err == nil && content != "" {
+					lines := tmuxContentToLogLines(content)
+					if len(lines) > 0 {
+						m.logViewer.ClearLogs()
+						lv, cmd := m.logViewer.Update(LogLinesMsg{
+							AgentID: m.logViewer.AgentID(),
+							Lines:   lines,
+						})
+						m.logViewer = lv
+						cmds = append(cmds, cmd)
+					}
+				}
+			}
+		}
 
 	// ------------------------------------------------------------------
 	// Agent lifecycle event from manager goroutine.
@@ -235,6 +256,26 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "x":
 			if m.activePanel == PanelAgentList {
 				cmds = append(cmds, m.doKill()...)
+				return m, tea.Batch(cmds...)
+			}
+
+		case "a", "enter":
+			// Attach to the selected agent's tmux session.
+			if m.activePanel == PanelAgentList {
+				if sel, ok := m.agentList.SelectedAgent(); ok {
+					if ma, ok := m.agentManager.GetAgent(sel.ID); ok && ma.TmuxSession != "" {
+						if agent.TmuxIsAlive(ma.TmuxSession) {
+							attachCmd := agent.TmuxAttachCmd(ma.TmuxSession)
+							return m, tea.ExecProcess(attachCmd, func(err error) tea.Msg {
+								if err != nil {
+									return StatusMsg{Text: fmt.Sprintf("attach failed: %v", err), IsError: true}
+								}
+								return StatusMsg{Text: fmt.Sprintf("detached from %s", sel.Name), IsError: false}
+							})
+						}
+						return m, sendStatus(fmt.Sprintf("session %s is not running", ma.TmuxSession), true)
+					}
+				}
 				return m, tea.Batch(cmds...)
 			}
 
@@ -555,4 +596,23 @@ func titleBarStyle(w int) lipgloss.Style {
 // currentTimeStr returns the current wall clock as HH:MM:SS.
 func currentTimeStr() string {
 	return time.Now().Format("15:04:05")
+}
+
+// tmuxContentToLogLines converts tmux capture-pane output to LogDisplayLines.
+// Each call replaces the log viewer content (snapshot, not streaming).
+func tmuxContentToLogLines(content string) []LogDisplayLine {
+	rawLines := strings.Split(content, "\n")
+	var lines []LogDisplayLine
+	for _, l := range rawLines {
+		trimmed := strings.TrimRight(l, " ")
+		if trimmed == "" {
+			continue
+		}
+		lines = append(lines, LogDisplayLine{
+			Text:      trimmed,
+			IsStderr:  false,
+			Timestamp: time.Now(),
+		})
+	}
+	return lines
 }

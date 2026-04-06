@@ -56,7 +56,7 @@ func TestSaveAndLoadRunningState_RoundTrip(t *testing.T) {
 		HealthCheckInterval: 50 * time.Millisecond,
 		HangingTimeout:      5 * time.Second,
 	}
-	m := agent.NewAgentManager(dir, cfg)
+	m := agent.NewAgentManager(dir, cfg); m.DirectSpawn = true
 
 	if err := os.MkdirAll(filepath.Join(dir, "state"), 0700); err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestReattachFromState_AlivePID(t *testing.T) {
 		HealthCheckInterval: 50 * time.Millisecond,
 		HangingTimeout:      5 * time.Second,
 	}
-	m := agent.NewAgentManager(dir, cfg)
+	m := agent.NewAgentManager(dir, cfg); m.DirectSpawn = true
 	if err := m.ReattachFromState(); err != nil {
 		t.Fatalf("ReattachFromState: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestReattachFromState_DeadPID(t *testing.T) {
 		HealthCheckInterval: 50 * time.Millisecond,
 		HangingTimeout:      5 * time.Second,
 	}
-	m := agent.NewAgentManager(dir, cfg)
+	m := agent.NewAgentManager(dir, cfg); m.DirectSpawn = true
 	if err := m.ReattachFromState(); err != nil {
 		t.Fatalf("ReattachFromState: %v", err)
 	}

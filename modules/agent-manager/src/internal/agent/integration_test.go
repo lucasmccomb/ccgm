@@ -23,7 +23,7 @@ func buildIntegrationManager(t *testing.T) (*agent.AgentManager, string) {
 		HealthCheckInterval: 50 * time.Millisecond,
 		HangingTimeout:      0,
 	}
-	mgr := agent.NewAgentManager(dir, cfg)
+	mgr := agent.NewAgentManager(dir, cfg); mgr.DirectSpawn = true
 	// Ensure the history dir is cleaned up to avoid TempDir-cleanup failures.
 	t.Cleanup(func() {
 		os.RemoveAll(filepath.Join(dir, "history"))
