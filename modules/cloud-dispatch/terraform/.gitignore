@@ -1,0 +1,14 @@
+# Terraform state - contains sensitive data and should never be committed
+*.tfstate
+*.tfstate.backup
+
+# Terraform working directory
+.terraform/
+.terraform.lock.hcl
+
+# Variable files - contain secrets (API tokens, IPs, keys)
+terraform.tfvars
+*.auto.tfvars
+
+# Plan output files
+*.tfplan
