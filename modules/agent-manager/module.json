@@ -1,11 +1,14 @@
 {
   "name": "agent-manager",
-  "displayName": "Agent Manager",
-  "description": "Go-based TUI for managing Claude Code agent processes: launch, monitor, restart, and view logs across multi-clone repos.",
+  "displayName": "Agent Manager TUI",
+  "description": "Go-based terminal UI for managing Claude Code agent processes: launch, monitor, stop, restart, and tail logs across multi-clone repos. Installs the ccgm-agents binary and the /agents command.",
   "category": "workflow",
   "scope": ["global"],
-  "dependencies": [],
-  "files": {},
-  "tags": ["agents", "tui", "multi-agent", "process-management"],
+  "dependencies": ["multi-agent"],
+  "files": {
+    "commands/agents.md": { "target": "commands/agents.md", "type": "command", "template": false }
+  },
+  "postInstall": "postInstall.sh",
+  "tags": ["agents", "tui", "multi-agent", "process-management", "monitoring"],
   "configPrompts": []
 }
