@@ -18,7 +18,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 9 hooks, 2 Python libraries, and a settings partial. The **session-logging** module installs 1 additional hook. The **self-improving** module installs 2 additional hooks. Total: 12 hooks across 3 modules.
+The **hooks** module installs 10 hooks, 2 Python libraries, and a settings partial. The **session-logging** module installs 1 additional hook. The **self-improving** module installs 2 additional hooks. Total: 13 hooks across 3 modules.
 
 ---
 
@@ -195,6 +195,24 @@ Validates Supabase migration file timestamps before a commit is created, prevent
 **Why this matters**: Duplicate migration timestamps cause `supabase db push` to get confused - the CLI cannot distinguish the files and one gets permanently stuck as "local only." Catching this before commit prevents hard-to-debug migration state issues.
 
 **Resolution**: When a duplicate is detected, rename one file to a unique timestamp (increment by 1 second) before committing.
+
+---
+
+### orphan-process-check.py
+
+**Type**: SessionStart
+**Module**: hooks
+**Can block**: No (warning only)
+
+Detects orphaned test worker processes (vitest, jest) left behind when a previous Claude Code session exited mid-test-run.
+
+**How it works**:
+1. Scans running processes for node processes with PPID 1 (re-parented to launchd/init)
+2. Filters for test worker patterns: vitest, jest-worker, jest_worker, test-worker
+3. If orphans are found, reports their PIDs and total RAM usage
+4. Suggests a `kill` command to clean them up
+
+**Why this matters**: Orphaned test workers run indefinitely after a session crash, consuming RAM and CPU. They accumulate over time and can slow down the machine. Catching them at session start prevents resource waste.
 
 ---
 

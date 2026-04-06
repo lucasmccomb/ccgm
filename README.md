@@ -22,7 +22,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 35 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 36 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 
@@ -93,7 +93,7 @@ For a quick install with a preset:
 |--------|---------|----------|
 | **minimal** | global-claude-md, autonomy, git-workflow | Getting started |
 | **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, settings, commands-core, commands-utility | Most users |
-| **full** | All 35 modules | Power users |
+| **full** | All 36 modules | Power users |
 | **team** | global-claude-md, autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification | Teams |
 
 ### Other install options
@@ -124,6 +124,7 @@ For a quick install with a preset:
 | **commands-extra** | commands | /audit (codebase audit), /pwv (Playwright verify), /walkthrough, /promote-rule | - |
 | **commands-utility** | commands | /cws-submit (Chrome Web Store walkthrough), /ccgm-sync (sync config to CCGM + lem-deepresearch), /user-test (browser user testing) | - |
 | **documentation** | commands | /docupdate (comprehensive documentation audit: README, TOC, onboarding, packages, module coverage) | - |
+| **copycat** | commands | /copycat (analyze external Claude Code config repos for CCGM improvements) | - |
 | **debugging** | commands | /debug (structured root-cause debugging with Opus) | - |
 | **brand-naming** | commands | /brand (full naming pipeline with word exploration, domain/trademark/app store checks) and /brand-check (single-name deep verification) | - |
 | **editorial-critique** | commands | /editorial-critique - 8-pass editorial review of long-form writing: prose craft, AI-tell detection, argument, conciseness, accuracy, structure, impact, grammar. Scored report with auto-fix | - |
@@ -257,9 +258,9 @@ The `docs/` directory contains comprehensive documentation:
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 35 modules |
-| [Commands Reference](docs/commands.md) | All 27 slash commands with usage examples |
-| [Hooks Reference](docs/hooks.md) | All 12 hooks explained - what they do and when they fire |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 36 modules |
+| [Commands Reference](docs/commands.md) | All 28 slash commands with usage examples |
+| [Hooks Reference](docs/hooks.md) | All 13 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |
 | [Configuration](docs/configuration.md) | Customization, template variables, settings overrides |

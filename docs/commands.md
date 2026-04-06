@@ -442,6 +442,35 @@ Performs thorough availability checking for one or more specific names.
 
 ---
 
+## Copycat commands
+
+Installed by the **copycat** module.
+
+---
+
+### /copycat
+
+**Analyze external Claude Code config repos for CCGM improvements.**
+
+Clones or reads an external Claude Code configuration repo and identifies patterns, rules, commands, and techniques worth incorporating into CCGM.
+
+**Phases**:
+1. **Acquire**: Clone from GitHub URL or read from local path
+2. **Discover**: Map all config files (CLAUDE.md, rules, commands, hooks, settings, MCP)
+3. **Analyze**: 4 parallel agents examine rules, commands, hooks/settings, and architecture patterns
+4. **Rank**: Score findings by impact (1-5) and effort (1-5), sort into priority groups
+5. **Walkthrough**: Present findings interactively, group by group (High Priority, Quick Wins, Worth Considering)
+6. **Implement**: Create GitHub issues for approved findings
+
+**Usage**:
+```
+/copycat owner/repo
+/copycat https://github.com/someone/claude-config
+/copycat ~/code/some-local-repo
+```
+
+---
+
 ## Self-improving commands
 
 Installed by the **self-improving** module.
