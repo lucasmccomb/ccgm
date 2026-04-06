@@ -1,0 +1,11 @@
+{
+  "name": "agent-manager",
+  "displayName": "Agent Manager",
+  "description": "Go-based TUI for managing Claude Code agent processes: launch, monitor, restart, and view logs across multi-clone repos.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {},
+  "tags": ["agents", "tui", "multi-agent", "process-management"],
+  "configPrompts": []
+}
