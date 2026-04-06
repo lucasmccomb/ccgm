@@ -7,7 +7,7 @@ allowed-tools: Agent
 
 Use the Agent tool to execute this workflow on a cheaper model:
 
-- **model**: haiku
+- **model**: sonnet
 - **description**: workspace setup
 
 Pass the agent all workflow instructions below. Include the received arguments: `$ARGUMENTS`

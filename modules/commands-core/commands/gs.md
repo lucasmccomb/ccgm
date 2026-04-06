@@ -7,7 +7,7 @@ allowed-tools: Agent
 
 Use the Agent tool to execute this entire workflow on a cheaper model:
 
-- **model**: haiku
+- **model**: sonnet
 - **description**: git status dashboard
 
 Pass the agent all workflow instructions below. Include the received arguments: `$ARGUMENTS`

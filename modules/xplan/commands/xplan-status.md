@@ -8,7 +8,7 @@ argument-hint: [plan-name]
 
 Use the Agent tool to execute this workflow on a cheaper model:
 
-- **model**: haiku
+- **model**: sonnet
 - **description**: xplan status check
 
 Pass the agent all workflow instructions below. Include the received arguments: `$ARGUMENTS`
