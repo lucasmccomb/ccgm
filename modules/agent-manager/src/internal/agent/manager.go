@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -299,7 +300,7 @@ func (m *AgentManager) GetAgent(agentID string) (*ManagedAgent, bool) {
 	return ma, ok
 }
 
-// ListAgents returns a snapshot of all registered agents (running or not).
+// ListAgents returns a snapshot of all registered agents sorted by name.
 func (m *AgentManager) ListAgents() []*ManagedAgent {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -307,5 +308,8 @@ func (m *AgentManager) ListAgents() []*ManagedAgent {
 	for _, ma := range m.agents {
 		out = append(out, ma)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Config.Name < out[j].Config.Name
+	})
 	return out
 }
