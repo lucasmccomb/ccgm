@@ -129,8 +129,9 @@ type AgentEvent struct {
 type ManagedAgent struct {
 	Config       types.AgentConfig
 	State        types.AgentState
-	TmuxSession  string    // tmux session name (e.g., "ccgm-my-agent")
-	Process      *Process  // legacy: only used by tests with direct spawn
+	TmuxSession  string    // legacy tmux session name
+	TmuxPaneID   string    // tmux pane ID (e.g., "%5") for pane-based layout
+	Process      *Process  // only used by tests with DirectSpawn
 	lastOutputAt time.Time // updated by the log collector when output is received
 }
 
@@ -223,15 +224,15 @@ func (m *AgentManager) StartAgent(agentCfg *types.AgentConfig) error {
 		return nil
 	}
 
-	// Tmux mode (production).
-	sessionName := TmuxSessionName(agentCfg.ID)
-	if _, err := TmuxLaunch(agentCfg); err != nil {
+	// Tmux pane mode (production).
+	paneInfo, err := TmuxLaunchPane(agentCfg)
+	if err != nil {
 		return fmt.Errorf("start agent %q: %w", agentCfg.ID, err)
 	}
 
 	ma := &ManagedAgent{
-		Config:      *agentCfg,
-		TmuxSession: sessionName,
+		Config:     *agentCfg,
+		TmuxPaneID: paneInfo.PaneID,
 		State: types.AgentState{
 			Config:    *agentCfg,
 			Status:    types.StatusRunning,
@@ -243,7 +244,7 @@ func (m *AgentManager) StartAgent(agentCfg *types.AgentConfig) error {
 	m.agents[agentCfg.ID] = ma
 	m.mu.Unlock()
 
-	m.emit(AgentEvent{AgentID: agentCfg.ID, Type: EventStarted, Details: fmt.Sprintf("tmux:%s", sessionName)})
+	m.emit(AgentEvent{AgentID: agentCfg.ID, Type: EventStarted, Details: fmt.Sprintf("pane:%s", paneInfo.PaneID)})
 	return nil
 }
 
@@ -257,8 +258,12 @@ func (m *AgentManager) StopAgent(agentID string) error {
 		return fmt.Errorf("stop agent %q: not found", agentID)
 	}
 
-	// Try tmux kill first, fall back to direct process kill.
-	if ma.TmuxSession != "" {
+	// Try tmux pane kill first, then session, then direct process.
+	if ma.TmuxPaneID != "" {
+		if err := TmuxKillPane(ma.TmuxPaneID); err != nil {
+			return fmt.Errorf("stop agent %q: %w", agentID, err)
+		}
+	} else if ma.TmuxSession != "" {
 		if err := TmuxKill(ma.TmuxSession); err != nil {
 			return fmt.Errorf("stop agent %q: %w", agentID, err)
 		}

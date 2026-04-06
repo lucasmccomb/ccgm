@@ -76,9 +76,11 @@ func (m *AgentManager) checkAgent(agentID string) {
 		return
 	}
 
-	// Check liveness: tmux session first, then direct process, then PID.
+	// Check liveness: tmux pane first, then session, then direct process, then PID.
 	isAlive := false
-	if ma.TmuxSession != "" {
+	if ma.TmuxPaneID != "" {
+		isAlive = TmuxPaneIsAlive(ma.TmuxPaneID)
+	} else if ma.TmuxSession != "" {
 		isAlive = TmuxIsAlive(ma.TmuxSession)
 	} else if ma.Process != nil {
 		isAlive = ma.Process.IsAlive()

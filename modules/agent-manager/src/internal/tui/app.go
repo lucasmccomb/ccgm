@@ -118,10 +118,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, tickCmd())
 
 		// Capture tmux pane for the agent the log viewer is watching.
-		// tmux capture gives a snapshot, so we clear and replace each tick.
 		if m.logViewer.AgentID() != "" {
-			if ma, ok := m.agentManager.GetAgent(m.logViewer.AgentID()); ok && ma.TmuxSession != "" {
-				if content, err := agent.TmuxCapture(ma.TmuxSession); err == nil && content != "" {
+			if ma, ok := m.agentManager.GetAgent(m.logViewer.AgentID()); ok {
+				var content string
+				var err error
+				if ma.TmuxPaneID != "" {
+					content, err = agent.TmuxCapturePane(ma.TmuxPaneID)
+				} else if ma.TmuxSession != "" {
+					content, err = agent.TmuxCapture(ma.TmuxSession)
+				}
+				if err == nil && content != "" {
 					lines := tmuxContentToLogLines(content)
 					if len(lines) > 0 {
 						m.logViewer.ClearLogs()
@@ -260,20 +266,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "a", "enter":
-			// Attach to the selected agent's tmux session.
+			// Focus the selected agent's tmux pane.
 			if m.activePanel == PanelAgentList {
 				if sel, ok := m.agentList.SelectedAgent(); ok {
-					if ma, ok := m.agentManager.GetAgent(sel.ID); ok && ma.TmuxSession != "" {
-						if agent.TmuxIsAlive(ma.TmuxSession) {
-							attachCmd := agent.TmuxAttachCmd(ma.TmuxSession)
-							return m, tea.ExecProcess(attachCmd, func(err error) tea.Msg {
-								if err != nil {
-									return StatusMsg{Text: fmt.Sprintf("attach failed: %v", err), IsError: true}
-								}
-								return StatusMsg{Text: fmt.Sprintf("detached from %s", sel.Name), IsError: false}
-							})
+					if ma, ok := m.agentManager.GetAgent(sel.ID); ok {
+						if ma.TmuxPaneID != "" && agent.TmuxPaneIsAlive(ma.TmuxPaneID) {
+							if err := agent.TmuxSelectPane(ma.TmuxPaneID); err != nil {
+								return m, sendStatus(fmt.Sprintf("focus failed: %v", err), true)
+							}
+							// Also switch log viewer to this agent.
+							m.logViewer.SetAgent(sel.ID, sel.Name)
+							m.logViewer.ClearLogs()
+							return m, sendStatus(fmt.Sprintf("focused %s (ctrl-b ← to return)", sel.Name), false)
 						}
-						return m, sendStatus(fmt.Sprintf("session %s is not running", ma.TmuxSession), true)
+						return m, sendStatus(fmt.Sprintf("%s is not running", sel.Name), true)
 					}
 				}
 				return m, tea.Batch(cmds...)

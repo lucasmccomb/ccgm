@@ -142,7 +142,7 @@ func (m CommandBarModel) hintsForContext() []hint {
 	default: // ContextAgentList
 		return []hint{
 			{key: "n", desc: "new"},
-			{key: "a", desc: "attach"},
+			{key: "a", desc: "focus"},
 			{key: "s", desc: "stop"},
 			{key: "r", desc: "restart"},
 			{key: "x", desc: "kill"},
