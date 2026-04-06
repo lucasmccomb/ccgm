@@ -129,7 +129,8 @@ type AgentEvent struct {
 type ManagedAgent struct {
 	Config       types.AgentConfig
 	State        types.AgentState
-	Process      *Process
+	TmuxSession  string    // tmux session name (e.g., "ccgm-my-agent")
+	Process      *Process  // legacy: only used by tests with direct spawn
 	lastOutputAt time.Time // updated by the log collector when output is received
 }
 
@@ -143,6 +144,7 @@ type AgentManager struct {
 	mu            sync.RWMutex
 	notifyCh      chan AgentEvent // buffered; events for TUI consumption
 	RestartEngine *RestartEngine // manages crash recovery and restart scheduling
+	DirectSpawn   bool           // if true, use os/exec instead of tmux (for tests)
 }
 
 const eventChannelBuffer = 64
@@ -175,33 +177,63 @@ func (m *AgentManager) emit(evt AgentEvent) {
 	}
 }
 
-// StartAgent validates cfg, spawns the process, registers it, and emits
-// EventStarted. Returns an error if the agent is already running.
+// StartAgent validates cfg, launches the agent (via tmux or direct spawn),
+// registers it, and emits EventStarted.
 func (m *AgentManager) StartAgent(agentCfg *types.AgentConfig) error {
 	if err := agentCfg.Validate(); err != nil {
 		return fmt.Errorf("start agent: %w", err)
 	}
 
+	// Check for already-running agent.
 	m.mu.Lock()
 	if existing, ok := m.agents[agentCfg.ID]; ok {
-		if existing.Process != nil && existing.Process.IsAlive() {
+		alive := false
+		if existing.TmuxSession != "" {
+			alive = TmuxIsAlive(existing.TmuxSession)
+		} else if existing.Process != nil {
+			alive = existing.Process.IsAlive()
+		}
+		if existing.State.Status == types.StatusRunning && alive {
 			m.mu.Unlock()
-			return fmt.Errorf("start agent %q: already running (PID %d)", agentCfg.ID, existing.State.PID)
+			return fmt.Errorf("start agent %q: already running", agentCfg.ID)
 		}
 	}
 	m.mu.Unlock()
 
-	proc, err := SpawnProcess(agentCfg)
-	if err != nil {
+	// Direct spawn mode (tests).
+	if m.DirectSpawn {
+		proc, err := SpawnProcess(agentCfg)
+		if err != nil {
+			return fmt.Errorf("start agent %q: %w", agentCfg.ID, err)
+		}
+		ma := &ManagedAgent{
+			Config:  *agentCfg,
+			Process: proc,
+			State: types.AgentState{
+				Config:    *agentCfg,
+				PID:       proc.PID(),
+				Status:    types.StatusRunning,
+				StartedAt: nowFunc(),
+			},
+		}
+		m.mu.Lock()
+		m.agents[agentCfg.ID] = ma
+		m.mu.Unlock()
+		m.emit(AgentEvent{AgentID: agentCfg.ID, Type: EventStarted, Details: fmt.Sprintf("PID %d", proc.PID())})
+		return nil
+	}
+
+	// Tmux mode (production).
+	sessionName := TmuxSessionName(agentCfg.ID)
+	if _, err := TmuxLaunch(agentCfg); err != nil {
 		return fmt.Errorf("start agent %q: %w", agentCfg.ID, err)
 	}
 
 	ma := &ManagedAgent{
-		Config:  *agentCfg,
-		Process: proc,
+		Config:      *agentCfg,
+		TmuxSession: sessionName,
 		State: types.AgentState{
 			Config:    *agentCfg,
-			PID:       proc.PID(),
 			Status:    types.StatusRunning,
 			StartedAt: nowFunc(),
 		},
@@ -211,12 +243,11 @@ func (m *AgentManager) StartAgent(agentCfg *types.AgentConfig) error {
 	m.agents[agentCfg.ID] = ma
 	m.mu.Unlock()
 
-	m.emit(AgentEvent{AgentID: agentCfg.ID, Type: EventStarted, Details: fmt.Sprintf("PID %d", proc.PID())})
+	m.emit(AgentEvent{AgentID: agentCfg.ID, Type: EventStarted, Details: fmt.Sprintf("tmux:%s", sessionName)})
 	return nil
 }
 
-// StopAgent sends SIGTERM (with a 5-second grace period, then SIGKILL) to the
-// agent identified by agentID and emits EventStopped.
+// StopAgent kills the tmux session for the agent and emits EventStopped.
 func (m *AgentManager) StopAgent(agentID string) error {
 	m.mu.RLock()
 	ma, ok := m.agents[agentID]
@@ -225,52 +256,34 @@ func (m *AgentManager) StopAgent(agentID string) error {
 	if !ok {
 		return fmt.Errorf("stop agent %q: not found", agentID)
 	}
-	if ma.Process == nil {
-		return fmt.Errorf("stop agent %q: no process attached", agentID)
-	}
 
-	const gracePeriod = 5e9 // 5 seconds in nanoseconds
-	if err := ma.Process.Stop(gracePeriod); err != nil {
-		return fmt.Errorf("stop agent %q: %w", agentID, err)
+	// Try tmux kill first, fall back to direct process kill.
+	if ma.TmuxSession != "" {
+		if err := TmuxKill(ma.TmuxSession); err != nil {
+			return fmt.Errorf("stop agent %q: %w", agentID, err)
+		}
+	} else if ma.Process != nil {
+		const gracePeriod = 5e9
+		if err := ma.Process.Stop(gracePeriod); err != nil {
+			return fmt.Errorf("stop agent %q: %w", agentID, err)
+		}
+	} else {
+		return fmt.Errorf("stop agent %q: no session or process attached", agentID)
 	}
 
 	m.mu.Lock()
 	ma.State.Status = types.StatusStopped
-	ma.State.ExitCode = ma.Process.ExitCode()
 	m.mu.Unlock()
 
-	// A manual stop is not a crash; reset retry counter so future crashes
-	// start fresh.
 	m.RestartEngine.ResetRetryCount(agentID)
-
-	m.emit(AgentEvent{AgentID: agentID, Type: EventStopped, Details: fmt.Sprintf("exit code %d", ma.State.ExitCode)})
+	m.emit(AgentEvent{AgentID: agentID, Type: EventStopped})
 	return nil
 }
 
-// KillAgent immediately sends SIGKILL to the agent process group.
+// KillAgent immediately kills the agent's tmux session.
 func (m *AgentManager) KillAgent(agentID string) error {
-	m.mu.RLock()
-	ma, ok := m.agents[agentID]
-	m.mu.RUnlock()
-
-	if !ok {
-		return fmt.Errorf("kill agent %q: not found", agentID)
-	}
-	if ma.Process == nil {
-		return fmt.Errorf("kill agent %q: no process attached", agentID)
-	}
-
-	if err := ma.Process.Kill(); err != nil {
-		return fmt.Errorf("kill agent %q: %w", agentID, err)
-	}
-
-	m.mu.Lock()
-	ma.State.Status = types.StatusStopped
-	ma.State.ExitCode = ma.Process.ExitCode()
-	m.mu.Unlock()
-
-	m.emit(AgentEvent{AgentID: agentID, Type: EventStopped, Details: "SIGKILL"})
-	return nil
+	// For tmux-based agents, kill and stop are equivalent.
+	return m.StopAgent(agentID)
 }
 
 // GetAgent returns the ManagedAgent for agentID, or false if not found.

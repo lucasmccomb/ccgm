@@ -20,7 +20,7 @@ func newTestManager(t *testing.T) (*agent.AgentManager, string) {
 		HealthCheckInterval: 50 * time.Millisecond,
 		HangingTimeout:      500 * time.Millisecond,
 	}
-	m := agent.NewAgentManager(dir, cfg)
+	m := agent.NewAgentManager(dir, cfg); m.DirectSpawn = true
 	return m, dir
 }
 
@@ -85,7 +85,7 @@ func TestHealthCheck_DetectsHang(t *testing.T) {
 		HealthCheckInterval: 50 * time.Millisecond,
 		HangingTimeout:      200 * time.Millisecond,
 	}
-	m := agent.NewAgentManager(dir, cfg)
+	m := agent.NewAgentManager(dir, cfg); m.DirectSpawn = true
 
 	// Agent runs for 10 seconds (well beyond the hanging timeout).
 	agentCfg := &types.AgentConfig{

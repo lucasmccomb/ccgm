@@ -76,9 +76,11 @@ func (m *AgentManager) checkAgent(agentID string) {
 		return
 	}
 
-	// For discovered agents (no Process handle), use kill -0 to check liveness.
+	// Check liveness: tmux session first, then direct process, then PID.
 	isAlive := false
-	if ma.Process != nil {
+	if ma.TmuxSession != "" {
+		isAlive = TmuxIsAlive(ma.TmuxSession)
+	} else if ma.Process != nil {
 		isAlive = ma.Process.IsAlive()
 	} else if ma.State.PID > 0 {
 		isAlive = syscall.Kill(ma.State.PID, 0) == nil

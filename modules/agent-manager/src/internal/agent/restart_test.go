@@ -43,7 +43,7 @@ func newRestartManager(t *testing.T) (*agent.AgentManager, string) {
 		HealthCheckInterval: 50 * time.Millisecond,
 		HangingTimeout:      0, // disable hang detection in restart tests
 	}
-	m := agent.NewAgentManager(dir, cfg)
+	m := agent.NewAgentManager(dir, cfg); m.DirectSpawn = true
 	return m, dir
 }
 

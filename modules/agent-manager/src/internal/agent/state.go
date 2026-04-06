@@ -18,9 +18,10 @@ const runningStateFile = "running.json"
 // RunningAgentState captures the minimal information needed to re-attach to
 // an agent process after the manager restarts.
 type RunningAgentState struct {
-	Config    types.AgentConfig `json:"config"`
-	PID       int               `json:"pid"`
-	StartedAt time.Time         `json:"started_at"`
+	Config      types.AgentConfig `json:"config"`
+	PID         int               `json:"pid"`
+	TmuxSession string            `json:"tmux_session,omitempty"`
+	StartedAt   time.Time         `json:"started_at"`
 }
 
 // RunningState is the top-level structure written to state/running.json.
@@ -46,13 +47,18 @@ func SaveRunningState(dataDir string, agents map[string]*ManagedAgent) error {
 		Agents:  make([]RunningAgentState, 0, len(agents)),
 	}
 	for _, ma := range agents {
-		if ma.Process == nil {
+		pid := ma.State.PID
+		if ma.Process != nil {
+			pid = ma.Process.PID()
+		}
+		if pid == 0 && ma.TmuxSession == "" {
 			continue
 		}
 		rs.Agents = append(rs.Agents, RunningAgentState{
-			Config:    ma.Config,
-			PID:       ma.Process.PID(),
-			StartedAt: ma.State.StartedAt,
+			Config:      ma.Config,
+			PID:         pid,
+			TmuxSession: ma.TmuxSession,
+			StartedAt:   ma.State.StartedAt,
 		})
 	}
 
@@ -103,7 +109,13 @@ func (m *AgentManager) ReattachFromState() error {
 	}
 
 	for _, ras := range rs.Agents {
-		alive := pidIsAlive(ras.PID)
+		// Check liveness: tmux session first, then PID.
+		alive := false
+		if ras.TmuxSession != "" {
+			alive = TmuxIsAlive(ras.TmuxSession)
+		} else if ras.PID > 0 {
+			alive = pidIsAlive(ras.PID)
+		}
 
 		status := types.StatusStopped
 		if alive {
@@ -111,15 +123,14 @@ func (m *AgentManager) ReattachFromState() error {
 		}
 
 		ma := &ManagedAgent{
-			Config: ras.Config,
+			Config:      ras.Config,
+			TmuxSession: ras.TmuxSession,
 			State: types.AgentState{
 				Config:    ras.Config,
 				PID:       ras.PID,
 				Status:    status,
 				StartedAt: ras.StartedAt,
 			},
-			// Process is nil for re-attached agents - we cannot reconstruct
-			// the pipe handles. The agent is "alive but log-blind".
 			Process: nil,
 		}
 
