@@ -147,7 +147,6 @@ func (m CommandBarModel) hintsForContext() []hint {
 			{key: "r", desc: "restart"},
 			{key: "x", desc: "kill"},
 			{key: "/", desc: "filter"},
-			{key: "tab", desc: "logs"},
 			{key: "?", desc: "help"},
 			{key: "q", desc: "quit"},
 		}
