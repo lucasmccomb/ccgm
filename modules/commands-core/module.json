@@ -11,7 +11,8 @@
     "commands/cpm.md": { "target": "commands/cpm.md", "type": "command", "template": false },
     "commands/gs.md": { "target": "commands/gs.md", "type": "command", "template": false },
     "lib/gs-gather.sh": { "target": "lib/gs-gather.sh", "type": "lib", "template": false },
-    "commands/ghi.md": { "target": "commands/ghi.md", "type": "command", "template": false }
+    "commands/ghi.md": { "target": "commands/ghi.md", "type": "command", "template": false },
+    "skills/cpm/SKILL.md": { "target": "skills/cpm/SKILL.md", "type": "skill", "template": false }
   },
   "tags": ["commands", "git", "github", "workflow"],
   "configPrompts": []
