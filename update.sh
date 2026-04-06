@@ -22,16 +22,39 @@ _check_installed_drift() {
 
   ui_header "Drift Check"
 
-  local modules
-  modules=$(jq -r '.modules[]?' "$manifest" 2>/dev/null)
   local link_mode
   link_mode=$(jq -r '.linkMode // false' "$manifest" 2>/dev/null)
+  local preset
+  preset=$(jq -r '.preset // "custom"' "$manifest" 2>/dev/null)
   local drift_count=0
 
-  if [ "$link_mode" = "true" ]; then
-    ui_info "Link mode: files auto-update with repo changes"
-    return 0
+  # --- Check 1: Missing modules (in preset but not installed) ---
+  local missing_modules=()
+  if [ "$preset" != "custom" ] && [ -f "${CCGM_ROOT}/presets/${preset}.json" ]; then
+    local preset_modules installed_modules
+    preset_modules=$(jq -r '.[]' "${CCGM_ROOT}/presets/${preset}.json" 2>/dev/null | sort)
+    installed_modules=$(jq -r '.modules[]?' "$manifest" 2>/dev/null | sort)
+
+    while IFS= read -r mod; do
+      [ -z "$mod" ] && continue
+      missing_modules+=("$mod")
+    done < <(comm -23 <(echo "$preset_modules") <(echo "$installed_modules"))
+
+    if [ ${#missing_modules[@]} -gt 0 ]; then
+      ui_warn "${#missing_modules[@]} module(s) in '${preset}' preset but not installed:"
+      for mod in "${missing_modules[@]}"; do
+        local display
+        display=$(get_module_display_name "$mod" 2>/dev/null)
+        echo "    $mod${display:+ ($display)}"
+      done
+      drift_count=$((drift_count + ${#missing_modules[@]}))
+    fi
   fi
+
+  # --- Check 2: Missing files in installed modules ---
+  local installed_modules
+  installed_modules=$(jq -r '.modules[]?' "$manifest" 2>/dev/null)
+  local missing_files=()
 
   while IFS= read -r mod; do
     [ -z "$mod" ] && continue
@@ -39,24 +62,158 @@ _check_installed_drift() {
       local full_src="${CCGM_ROOT}/modules/${mod}/${src}"
       local full_target="${HOME}/.claude/${target}"
 
-      if [ -f "$full_target" ] && [ -f "$full_src" ]; then
-        # For non-template, non-merge files, compare directly
-        if [ "$template" = "false" ] && [ "$merge" = "false" ]; then
-          if ! diff -q "$full_src" "$full_target" &>/dev/null; then
-            ui_warn "Drift detected: $target"
-            drift_count=$((drift_count + 1))
-          fi
-        fi
+      # Skip merge files (settings.json etc) - they're managed differently
+      [ "$merge" = "true" ] && continue
+
+      if [ ! -e "$full_target" ]; then
+        missing_files+=("${mod}:${target}")
+        ui_warn "Missing: $target (from $mod)"
+        drift_count=$((drift_count + 1))
+      elif [ "$link_mode" = "true" ] && [ ! -L "$full_target" ] && [ "$template" = "false" ]; then
+        # In link mode, non-template files should be symlinks
+        missing_files+=("${mod}:${target}")
+        ui_warn "Not symlinked: $target (from $mod)"
+        drift_count=$((drift_count + 1))
       fi
     done < <(get_module_files "$mod" 2>/dev/null)
-  done <<< "$modules"
+  done <<< "$installed_modules"
 
-  if [ $drift_count -eq 0 ]; then
-    ui_success "No drift detected - installed files match source"
+  # --- Check 3: Content drift (copy mode only) ---
+  if [ "$link_mode" != "true" ]; then
+    while IFS= read -r mod; do
+      [ -z "$mod" ] && continue
+      while IFS='|' read -r src target type template merge; do
+        local full_src="${CCGM_ROOT}/modules/${mod}/${src}"
+        local full_target="${HOME}/.claude/${target}"
+
+        if [ -f "$full_target" ] && [ -f "$full_src" ]; then
+          if [ "$template" = "false" ] && [ "$merge" = "false" ]; then
+            if ! diff -q "$full_src" "$full_target" &>/dev/null; then
+              ui_warn "Content drift: $target"
+              drift_count=$((drift_count + 1))
+            fi
+          fi
+        fi
+      done < <(get_module_files "$mod" 2>/dev/null)
+    done <<< "$installed_modules"
   else
-    ui_warn "$drift_count file(s) differ from source"
-    ui_info "Run ./start.sh to re-apply from source"
+    ui_info "Link mode: existing symlinks auto-update with repo changes"
   fi
+
+  # --- Report ---
+  if [ $drift_count -eq 0 ]; then
+    ui_success "No drift detected - installation is complete and current"
+  else
+    ui_warn "$drift_count issue(s) found"
+  fi
+
+  # --- Offer to fix ---
+  if [ ${#missing_modules[@]} -gt 0 ] || [ ${#missing_files[@]} -gt 0 ]; then
+    echo ""
+    if ui_confirm "Install missing modules/files now?"; then
+      _install_missing "$link_mode" missing_modules missing_files
+    else
+      ui_info "Run ./start.sh to do a full reinstall"
+    fi
+  fi
+}
+
+# ============================================================
+# Helper: Install missing modules and files
+# ============================================================
+_install_missing() {
+  local link_mode="$1"
+  local -n _missing_mods=$2
+  local -n _missing_files=$3
+  local installed_count=0
+
+  # Install files from missing modules
+  for mod in ${_missing_mods[@]+"${_missing_mods[@]}"}; do
+    ui_info "Installing module: $mod"
+    while IFS='|' read -r src target type template merge; do
+      local full_src="${CCGM_ROOT}/modules/${mod}/${src}"
+      local full_target="${HOME}/.claude/${target}"
+
+      mkdir -p "$(dirname "$full_target")"
+
+      if [ "$merge" = "true" ]; then
+        # Skip merge files (settings.json) - too complex for incremental install
+        ui_info "  Skipped (merge): $target"
+        continue
+      fi
+
+      [ -e "$full_target" ] && rm -f "$full_target"
+
+      if [ "$link_mode" = "true" ] && [ "$template" = "false" ]; then
+        ln -s "$full_src" "$full_target"
+        ui_success "  Linked: $target"
+      else
+        cp "$full_src" "$full_target"
+        ui_success "  Copied: $target"
+      fi
+      installed_count=$((installed_count + 1))
+    done < <(get_module_files "$mod" 2>/dev/null)
+  done
+
+  # Fix missing/unsymlinked files in already-installed modules
+  for entry in ${_missing_files[@]+"${_missing_files[@]}"}; do
+    local mod="${entry%%:*}"
+    local target="${entry#*:}"
+
+    # Skip if this module was just fully installed above
+    local already_done=false
+    for m in ${_missing_mods[@]+"${_missing_mods[@]}"}; do
+      [ "$m" = "$mod" ] && already_done=true
+    done
+    [ "$already_done" = true ] && continue
+
+    # Find the source for this target
+    while IFS='|' read -r src file_target type template merge; do
+      [ "$file_target" != "$target" ] && continue
+      local full_src="${CCGM_ROOT}/modules/${mod}/${src}"
+      local full_target="${HOME}/.claude/${target}"
+
+      mkdir -p "$(dirname "$full_target")"
+      [ -e "$full_target" ] && rm -f "$full_target"
+
+      if [ "$link_mode" = "true" ] && [ "$template" = "false" ]; then
+        ln -s "$full_src" "$full_target"
+        ui_success "  Linked: $target"
+      else
+        cp "$full_src" "$full_target"
+        ui_success "  Copied: $target"
+      fi
+      installed_count=$((installed_count + 1))
+    done < <(get_module_files "$mod" 2>/dev/null)
+  done
+
+  # Update manifest with newly installed modules
+  if [ ${#_missing_mods[@]} -gt 0 ]; then
+    local manifest="${HOME}/.claude/.ccgm-manifest.json"
+    local tmp_manifest
+    tmp_manifest=$(mktemp)
+
+    # Add missing modules to the modules array
+    local new_modules_json
+    new_modules_json=$(printf '%s\n' "${_missing_mods[@]}" | jq -R . | jq -s .)
+    jq --argjson new "$new_modules_json" '.modules = (.modules + $new | unique)' "$manifest" > "$tmp_manifest"
+
+    # Add new file paths to the files array
+    for mod in "${_missing_mods[@]}"; do
+      while IFS='|' read -r src target type template merge; do
+        [ "$merge" = "true" ] && continue
+        local full_target="${HOME}/.claude/${target}"
+        new_modules_json=$(jq --arg f "$full_target" '.files += [$f] | .files = (.files | unique)' "$tmp_manifest")
+        echo "$new_modules_json" > "$tmp_manifest"
+      done < <(get_module_files "$mod" 2>/dev/null)
+    done
+
+    mv "$tmp_manifest" "$manifest"
+    ui_success "Updated manifest with ${#_missing_mods[@]} new module(s)"
+  fi
+
+  echo ""
+  ui_success "Installed $installed_count file(s)"
 }
 
 # ============================================================
