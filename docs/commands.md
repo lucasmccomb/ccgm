@@ -471,6 +471,71 @@ Clones or reads an external Claude Code configuration repo and identifies patter
 
 ---
 
+## Test Vision commands
+
+Installed by the **test-vision** module.
+
+---
+
+### /test-vision
+
+**Comprehensive e2e test suite generation.**
+
+Discovers all features in a codebase, interviews the user to validate test cases, generates Playwright infrastructure, dispatches parallel `/e2e` agents, and produces a complete test suite with CI/CD integration.
+
+**Phases**:
+1. **Phase 0** - Codebase discovery (7-source checklist: routes, nav, README, API, tests, stores, forms)
+2. **Phase 1** - Chrome MCP visual discovery (explore running app, identify interactive elements)
+3. **Phase 2** - User interview (validate feature domains, prioritize, confirm auth setup, review delegation)
+4. **Phase 3** - Infrastructure generation (playwright.config.ts, fixtures.ts, auth.setup.ts)
+5. **Phase 4** - Parallel /e2e dispatch (one agent per feature domain, pre-assigned file paths)
+6. **Phase 5** - Integration and validation (test discovery, import paths, duplicates, smoke check)
+7. **Phase 6** - CI/CD workflow generation (GitHub Actions)
+8. **Phase 7** - Summary report
+
+**Flags**:
+- `--skip-chrome` - Skip Chrome MCP visual discovery (code-based only)
+- `--skip-interview` - Use auto-detected defaults without interview
+
+**Usage**:
+```
+/test-vision
+/test-vision --skip-chrome
+/test-vision --skip-interview
+```
+
+**Installed by**: test-vision module
+
+---
+
+### /e2e
+
+**Generate a Playwright e2e spec for a single feature.**
+
+Generates a complete Playwright spec file for one feature, flow, or GitHub issue. Works standalone or as the atomic building block within `/test-vision`.
+
+**Modes**:
+- **Standalone** - Called directly. Runs its own discovery, Chrome MCP exploration, infrastructure setup, and spec generation.
+- **Composed** - Called by `/test-vision`. Receives pre-computed context and skips discovery.
+
+**What it generates**:
+- Three-tier assertions: route loads, structural landmarks, behavioral interactions
+- Direct locators (getByRole, getByText, getByTestId)
+- Graceful credential skipping via auth fixtures
+- Auth provider detection (Better Auth, Supabase, Clerk)
+
+**Usage**:
+```
+/e2e authentication
+/e2e #42
+/e2e /dashboard/settings
+/e2e payments --file e2e/features/payments.spec.ts
+```
+
+**Installed by**: test-vision module
+
+---
+
 ## Self-improving commands
 
 Installed by the **self-improving** module.
