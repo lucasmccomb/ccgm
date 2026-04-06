@@ -7,7 +7,7 @@ allowed-tools: Agent
 
 Use the Agent tool to execute this entire workflow on a cheaper model:
 
-- **model**: haiku
+- **model**: sonnet
 - **description**: ccgm-sync
 
 Pass the agent all workflow instructions below.
