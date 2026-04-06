@@ -1,0 +1,13 @@
+{
+  "name": "copycat",
+  "displayName": "Copycat",
+  "description": "/copycat - analyze external Claude Code config repos to find useful patterns, rules, and techniques worth adopting into CCGM",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "commands/copycat.md": { "target": "commands/copycat.md", "type": "command", "template": false }
+  },
+  "tags": ["commands", "research", "ccgm", "config-analysis"],
+  "configPrompts": []
+}
