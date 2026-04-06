@@ -4,6 +4,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"syscall"
 	"time"
 
 	"github.com/lucasmccomb/ccgm/modules/agent-manager/src/internal/types"
@@ -62,7 +63,7 @@ func (m *AgentManager) checkAgent(agentID string) {
 	ma, ok := m.agents[agentID]
 	m.mu.RUnlock()
 
-	if !ok || ma.Process == nil {
+	if !ok {
 		return
 	}
 
@@ -75,7 +76,15 @@ func (m *AgentManager) checkAgent(agentID string) {
 		return
 	}
 
-	if ma.Process.IsAlive() {
+	// For discovered agents (no Process handle), use kill -0 to check liveness.
+	isAlive := false
+	if ma.Process != nil {
+		isAlive = ma.Process.IsAlive()
+	} else if ma.State.PID > 0 {
+		isAlive = syscall.Kill(ma.State.PID, 0) == nil
+	}
+
+	if isAlive {
 		// Process is still running. Check for hang: if no output has arrived
 		// for longer than HangingTimeout, mark it hanging.
 		//
@@ -116,7 +125,10 @@ func (m *AgentManager) checkAgent(agentID string) {
 		m.mu.Unlock()
 		return
 	}
-	exitCode := ma.Process.ExitCode()
+	exitCode := -1
+	if ma.Process != nil {
+		exitCode = ma.Process.ExitCode()
+	}
 	ma.State.Status = types.StatusCrashed
 	ma.State.ExitCode = exitCode
 	stoppedAt := nowFunc()

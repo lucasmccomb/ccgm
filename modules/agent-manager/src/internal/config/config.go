@@ -22,6 +22,8 @@ const (
 // GlobalConfig holds runtime settings for the agent-manager daemon.
 type GlobalConfig struct {
 	DataDir             string        `json:"data_dir"`
+	ProjectsDir         string        `json:"projects_dir"`
+	DefaultModel        string        `json:"default_model"`
 	HealthCheckInterval time.Duration `json:"health_check_interval"`
 	HangingTimeout      time.Duration `json:"hanging_timeout"`
 	LogMaxSize          int64         `json:"log_max_size"`
@@ -37,6 +39,8 @@ func DefaultConfig() *GlobalConfig {
 	}
 	return &GlobalConfig{
 		DataDir:             filepath.Join(home, ".ccgm", "agent-manager"),
+		ProjectsDir:         filepath.Join(home, "code"),
+		DefaultModel:        "opus",
 		HealthCheckInterval: defaultHealthCheckInterval,
 		HangingTimeout:      defaultHangingTimeout,
 		LogMaxSize:          defaultLogMaxSize,
