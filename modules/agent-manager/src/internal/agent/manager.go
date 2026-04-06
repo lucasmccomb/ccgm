@@ -137,11 +137,12 @@ type ManagedAgent struct {
 // functions at the top of this file operate on disk; the AgentManager tracks
 // the in-memory runtime state of processes it has spawned.
 type AgentManager struct {
-	dataDir  string
-	config   *config.GlobalConfig
-	agents   map[string]*ManagedAgent // ID -> agent
-	mu       sync.RWMutex
-	notifyCh chan AgentEvent // buffered; events for TUI consumption
+	dataDir       string
+	config        *config.GlobalConfig
+	agents        map[string]*ManagedAgent // ID -> agent
+	mu            sync.RWMutex
+	notifyCh      chan AgentEvent // buffered; events for TUI consumption
+	RestartEngine *RestartEngine // manages crash recovery and restart scheduling
 }
 
 const eventChannelBuffer = 64
@@ -149,12 +150,14 @@ const eventChannelBuffer = 64
 // NewAgentManager constructs an AgentManager. Call ReattachFromState after
 // creation to reconnect to any agents that survived a manager restart.
 func NewAgentManager(dataDir string, cfg *config.GlobalConfig) *AgentManager {
-	return &AgentManager{
+	m := &AgentManager{
 		dataDir:  dataDir,
 		config:   cfg,
 		agents:   make(map[string]*ManagedAgent),
 		notifyCh: make(chan AgentEvent, eventChannelBuffer),
 	}
+	m.RestartEngine = NewRestartEngine(m)
+	return m
 }
 
 // Events returns the read-only channel on which lifecycle events are published.
@@ -235,6 +238,10 @@ func (m *AgentManager) StopAgent(agentID string) error {
 	ma.State.Status = types.StatusStopped
 	ma.State.ExitCode = ma.Process.ExitCode()
 	m.mu.Unlock()
+
+	// A manual stop is not a crash; reset retry counter so future crashes
+	// start fresh.
+	m.RestartEngine.ResetRetryCount(agentID)
 
 	m.emit(AgentEvent{AgentID: agentID, Type: EventStopped, Details: fmt.Sprintf("exit code %d", ma.State.ExitCode)})
 	return nil
