@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 35 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 36 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -310,6 +310,22 @@ Structured root-cause debugging with Opus delegation.
 **What it does**: Enforces a disciplined debugging workflow (reproduce, hypothesize, instrument, diagnose, fix, verify) using Opus for deep root-cause analysis. Invoked automatically by the `systematic-debugging` module's routing rule.
 
 For `/deepresearch`, see [lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch) (installed separately).
+
+**Dependencies**: None
+
+---
+
+### copycat
+
+Analyze external Claude Code configuration repos to find useful patterns worth adopting into CCGM.
+
+**Installs**: 1 command file
+
+| Command | Description |
+|---------|-------------|
+| `/copycat` | Analyze an external Claude Code config repo and walk through what's worth incorporating into CCGM |
+
+**What it does**: Accepts a GitHub URL or local path to any Claude Code config repo. Clones/reads the repo, spawns 4 parallel analysis agents (rules, commands, hooks/settings, architecture patterns), compares each finding against CCGM's existing modules, ranks by impact and effort, and walks you through findings interactively. Creates GitHub issues for approved improvements.
 
 **Dependencies**: None
 
