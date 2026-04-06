@@ -1,3 +1,3 @@
 // state.go defines and transitions agent state (idle, running, crashed, stopping).
-// Epic 2 will implement the AgentState type and state machine transitions.
+// State machine transitions will be implemented in Epic 3.
 package agent
