@@ -1,0 +1,45 @@
+version: 2
+
+project_name: ccgm-agents
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ccgm-agents
+    binary: ccgm-agents
+    main: ./cmd/ccgm-agents
+    ldflags:
+      - -X main.version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: linux
+        goarch: arm64
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

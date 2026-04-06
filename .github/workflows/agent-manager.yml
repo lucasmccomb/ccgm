@@ -1,0 +1,44 @@
+name: Agent Manager CI
+
+on:
+  pull_request:
+    paths:
+      - "modules/agent-manager/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "modules/agent-manager/**"
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: modules/agent-manager/src/go.mod
+          cache-dependency-path: modules/agent-manager/src/go.sum
+
+      - name: Run tests
+        working-directory: modules/agent-manager/src
+        run: go test ./...
+
+      - name: Run vet
+        working-directory: modules/agent-manager/src
+        run: go vet ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: modules/agent-manager/src
+          version: latest
+
+      - name: Build
+        working-directory: modules/agent-manager/src
+        run: go build -ldflags "-X main.version=ci" ./cmd/ccgm-agents
