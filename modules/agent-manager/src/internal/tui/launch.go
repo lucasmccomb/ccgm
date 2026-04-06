@@ -1,71 +1,42 @@
-// launch.go implements the modal form for launching a new agent.
+// launch.go implements a directory picker modal for launching new agents.
+// Instead of typing fields manually, the user picks a project directory
+// from a configurable base path. Name and model are derived automatically.
 package tui
 
 import (
-	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lucasmccomb/ccgm/modules/agent-manager/src/internal/types"
 )
 
-// LaunchSubmitMsg is emitted when the user confirms the launch form.
+// LaunchSubmitMsg is emitted when the user selects a directory to launch in.
 type LaunchSubmitMsg struct {
 	Config types.AgentConfig
 }
 
-// launchField is an index into LaunchModel.inputs.
-const (
-	fieldName = iota
-	fieldCommand
-	fieldWorkDir
-	fieldModel
-	numFields
-)
-
-// LaunchModel is a Bubble Tea component that renders a centered modal form
-// for creating a new agent configuration.
+// LaunchModel is a Bubble Tea component that renders a directory picker modal.
 type LaunchModel struct {
-	inputs  [numFields]textinput.Model
-	focused int
-	visible bool
-	width   int
-	height  int
-	err     string
+	dirs         []string // directory names (basenames)
+	filtered     []string // filtered subset
+	cursor       int
+	filter       string
+	filtering    bool
+	visible      bool
+	width        int
+	height       int
+	projectsDir  string // base directory to scan
+	defaultModel string // default model (e.g., "opus")
 }
 
-// NewLaunchModel returns a LaunchModel with all inputs initialized.
+// NewLaunchModel returns a LaunchModel. Call SetProjectsDir before showing.
 func NewLaunchModel() LaunchModel {
-	m := LaunchModel{}
-
-	placeholders := [numFields]string{
-		"e.g. my-agent",
-		"claude",
-		"/path/to/workdir",
-		"opus (optional)",
-	}
-	labels := [numFields]string{
-		"Name (required)",
-		"Command (required)",
-		"Working Directory (required)",
-		"Model (optional)",
-	}
-
-	for i := 0; i < numFields; i++ {
-		ti := textinput.New()
-		ti.Placeholder = placeholders[i]
-		ti.CharLimit = 256
-		ti.Width = 50
-		ti.Prompt = fmt.Sprintf("%-28s ", labels[i])
-		m.inputs[i] = ti
-	}
-
-	// Defaults.
-	m.inputs[fieldCommand].SetValue("claude")
-	return m
+	return LaunchModel{}
 }
 
 // Init satisfies tea.Model.
@@ -81,77 +52,141 @@ func (m LaunchModel) Update(msg tea.Msg) (LaunchModel, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.filtering {
+			switch msg.String() {
+			case "esc":
+				m.filtering = false
+				m.filter = ""
+				m.applyFilter()
+				return m, nil
+			case "enter":
+				m.filtering = false
+				return m, nil
+			case "backspace":
+				if len(m.filter) > 0 {
+					m.filter = m.filter[:len(m.filter)-1]
+					m.applyFilter()
+				}
+				return m, nil
+			default:
+				if len(msg.String()) == 1 {
+					m.filter += msg.String()
+					m.applyFilter()
+					return m, nil
+				}
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
-		case "esc":
+		case "esc", "q":
 			m.visible = false
-			m.err = ""
 			return m, nil
 
-		case "tab", "down":
-			m.err = ""
-			m.inputs[m.focused].Blur()
-			m.focused = (m.focused + 1) % numFields
-			m.inputs[m.focused].Focus()
-			return m, textinput.Blink
+		case "j", "down":
+			if m.cursor < len(m.filtered)-1 {
+				m.cursor++
+			}
+			return m, nil
 
-		case "shift+tab", "up":
-			m.err = ""
-			m.inputs[m.focused].Blur()
-			m.focused = (m.focused - 1 + numFields) % numFields
-			m.inputs[m.focused].Focus()
-			return m, textinput.Blink
+		case "k", "up":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+			return m, nil
+
+		case "/":
+			m.filtering = true
+			m.filter = ""
+			return m, nil
 
 		case "enter":
-			if m.focused == numFields-1 {
-				// Last field: try to submit.
-				return m.trySubmit()
+			if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
+				return m.submit()
 			}
-			// Advance to next field.
-			m.inputs[m.focused].Blur()
-			m.focused++
-			m.inputs[m.focused].Focus()
-			return m, textinput.Blink
+			return m, nil
 		}
 	}
-
-	// Forward key strokes to the focused input.
-	var cmd tea.Cmd
-	m.inputs[m.focused], cmd = m.inputs[m.focused].Update(msg)
-	return m, cmd
+	return m, nil
 }
 
-// View renders the modal as a centered dialog string. Returns "" when hidden.
+// View renders the directory picker modal.
 func (m LaunchModel) View() string {
 	if !m.visible {
 		return ""
 	}
 
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62"))
+	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("62"))
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("62")).
-		Padding(1, 3).
-		Background(lipgloss.Color("235"))
+		Padding(1, 2).
+		Background(lipgloss.Color("235")).
+		Width(60)
 
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render("Launch New Agent"))
+	sb.WriteString("\n")
+	sb.WriteString(dimStyle.Render("Select a project directory"))
 	sb.WriteString("\n\n")
 
-	for i := 0; i < numFields; i++ {
-		sb.WriteString(m.inputs[i].View())
-		sb.WriteString("\n")
+	if m.filtering {
+		sb.WriteString(filterStyle.Render("/ " + m.filter + "█"))
+		sb.WriteString("\n\n")
+	} else if m.filter != "" {
+		sb.WriteString(dimStyle.Render("filter: " + m.filter))
+		sb.WriteString("\n\n")
 	}
 
-	if m.err != "" {
+	if len(m.filtered) == 0 {
+		sb.WriteString(dimStyle.Render("  (no directories found)"))
 		sb.WriteString("\n")
-		sb.WriteString(errorStyle.Render(m.err))
-		sb.WriteString("\n")
+	} else {
+		// Show a scrollable window of directories.
+		maxVisible := 15
+		if m.height > 0 {
+			maxVisible = m.height/2 - 6
+			if maxVisible < 5 {
+				maxVisible = 5
+			}
+		}
+
+		start := 0
+		if m.cursor >= maxVisible {
+			start = m.cursor - maxVisible + 1
+		}
+		end := start + maxVisible
+		if end > len(m.filtered) {
+			end = len(m.filtered)
+		}
+
+		for i := start; i < end; i++ {
+			prefix := "  "
+			style := normalStyle
+			if i == m.cursor {
+				prefix = "▸ "
+				style = selectedStyle
+			}
+			sb.WriteString(prefix + style.Render(m.filtered[i]))
+			sb.WriteString("\n")
+		}
+
+		if len(m.filtered) > maxVisible {
+			sb.WriteString(dimStyle.Render(
+				strings.Repeat(" ", 2) +
+					"(" + strings.Repeat("·", len(m.filtered)-maxVisible) + ")",
+			))
+			sb.WriteString("\n")
+		}
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(hintStyle.Render("tab/↓↑ navigate   enter confirm   esc cancel"))
+	sb.WriteString(hintStyle.Render("j/k navigate   enter select   / filter   esc cancel"))
 
 	return boxStyle.Render(sb.String())
 }
@@ -159,11 +194,6 @@ func (m LaunchModel) View() string {
 // SetVisible shows or hides the modal.
 func (m *LaunchModel) SetVisible(v bool) {
 	m.visible = v
-	if v {
-		m.inputs[m.focused].Focus()
-	} else {
-		m.inputs[m.focused].Blur()
-	}
 }
 
 // Visible reports whether the modal is currently shown.
@@ -171,78 +201,95 @@ func (m LaunchModel) Visible() bool {
 	return m.visible
 }
 
-// SetSize stores terminal dimensions (used by the parent to center the overlay).
+// SetSize stores terminal dimensions.
 func (m *LaunchModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 }
 
-// Reset clears all input fields and positions focus on the Name field.
-func (m *LaunchModel) Reset() {
-	for i := 0; i < numFields; i++ {
-		m.inputs[i].SetValue("")
-		m.inputs[i].Blur()
-	}
-	m.inputs[fieldCommand].SetValue("claude")
-	m.focused = fieldName
-	m.inputs[m.focused].Focus()
-	m.err = ""
+// SetProjectsDir sets the base directory to scan and the default model.
+func (m *LaunchModel) SetProjectsDir(dir, defaultModel string) {
+	m.projectsDir = dir
+	m.defaultModel = defaultModel
 }
 
-// trySubmit validates inputs and returns LaunchSubmitMsg if valid.
-func (m LaunchModel) trySubmit() (LaunchModel, tea.Cmd) {
-	name := strings.TrimSpace(m.inputs[fieldName].Value())
-	command := strings.TrimSpace(m.inputs[fieldCommand].Value())
-	workDir := strings.TrimSpace(m.inputs[fieldWorkDir].Value())
-	modelVal := strings.TrimSpace(m.inputs[fieldModel].Value())
+// Reset scans the projects directory and resets selection state.
+func (m *LaunchModel) Reset() {
+	m.cursor = 0
+	m.filter = ""
+	m.filtering = false
+	m.dirs = scanDirs(m.projectsDir)
+	m.filtered = m.dirs
+}
 
-	if name == "" {
-		m.err = "Name is required"
-		m.focused = fieldName
-		m.inputs[m.focused].Focus()
-		return m, nil
+// applyFilter updates the filtered list based on the current filter string.
+func (m *LaunchModel) applyFilter() {
+	if m.filter == "" {
+		m.filtered = m.dirs
+	} else {
+		lower := strings.ToLower(m.filter)
+		m.filtered = nil
+		for _, d := range m.dirs {
+			if strings.Contains(strings.ToLower(d), lower) {
+				m.filtered = append(m.filtered, d)
+			}
+		}
 	}
-	if command == "" {
-		m.err = "Command is required"
-		m.focused = fieldCommand
-		m.inputs[m.focused].Focus()
-		return m, nil
+	if m.cursor >= len(m.filtered) {
+		m.cursor = len(m.filtered) - 1
 	}
-	if workDir == "" {
-		m.err = "Working Directory is required"
-		m.focused = fieldWorkDir
-		m.inputs[m.focused].Focus()
-		return m, nil
+	if m.cursor < 0 {
+		m.cursor = 0
 	}
+}
 
-	// Generate a stable ID from the name.
-	id := sanitizeID(name)
+// submit creates an AgentConfig from the selected directory.
+func (m LaunchModel) submit() (LaunchModel, tea.Cmd) {
+	dirName := m.filtered[m.cursor]
+	fullPath := filepath.Join(m.projectsDir, dirName)
+	id := sanitizeID(dirName)
 
 	cfg := types.AgentConfig{
 		ID:         id,
-		Name:       name,
-		Command:    command,
-		WorkingDir: workDir,
-		Model:      modelVal,
+		Name:       dirName,
+		Command:    "claude",
+		WorkingDir: fullPath,
+		Model:      m.defaultModel,
 		RestartPolicy: types.RestartPolicy{
 			Type: "never",
 		},
 	}
 
-	if err := cfg.Validate(); err != nil {
-		m.err = err.Error()
-		return m, nil
-	}
-
 	m.visible = false
-	m.err = ""
 	return m, func() tea.Msg {
 		return LaunchSubmitMsg{Config: cfg}
 	}
 }
 
-// sanitizeID converts a display name to a valid agent ID by lowercasing and
-// replacing invalid characters with hyphens.
+// scanDirs reads the immediate subdirectories of dir and returns their names sorted.
+func scanDirs(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	var dirs []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Skip hidden directories.
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		dirs = append(dirs, name)
+	}
+	sort.Strings(dirs)
+	return dirs
+}
+
+// sanitizeID converts a display name to a valid agent ID.
 func sanitizeID(name string) string {
 	name = strings.ToLower(name)
 	var sb strings.Builder

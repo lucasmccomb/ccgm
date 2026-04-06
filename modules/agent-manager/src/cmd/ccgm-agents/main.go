@@ -56,6 +56,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "ccgm-agents: reattach warning: %v\n", err)
 	}
 
+	// Discover existing Claude Code processes running on the system.
+	if procs, err := agent.DiscoverClaudeProcesses(); err == nil && len(procs) > 0 {
+		count := mgr.RegisterDiscovered(procs)
+		if count > 0 {
+			fmt.Fprintf(os.Stderr, "ccgm-agents: discovered %d running Claude session(s)\n", count)
+		}
+	}
+
 	// Build and run the TUI.
 	app := tui.NewApp(mgr, cfg)
 	p := tea.NewProgram(app, tea.WithAltScreen())

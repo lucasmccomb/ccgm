@@ -157,19 +157,22 @@ func (m CommandBarModel) hintsForContext() []hint {
 func renderHints(hints []hint, width int) string {
 	keyStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("15")).
-		Background(lipgloss.Color("236"))
+		Foreground(lipgloss.Color("0")).
+		Background(lipgloss.Color("62")).
+		PaddingLeft(1).
+		PaddingRight(1)
 
 	descStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
-		Background(lipgloss.Color("236"))
+		Foreground(lipgloss.Color("252")).
+		Background(lipgloss.Color("236")).
+		PaddingRight(1)
 
 	var parts []string
 	for _, h := range hints {
-		parts = append(parts, keyStyle.Render(h.key)+" "+descStyle.Render(h.desc))
+		parts = append(parts, keyStyle.Render(h.key)+descStyle.Render(h.desc))
 	}
 
-	content := " " + strings.Join(parts, "  ")
+	content := " " + strings.Join(parts, " ")
 	_ = width // width is applied by the outer bg style
 	return content
 }

@@ -212,6 +212,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "n":
 			if m.activePanel == PanelAgentList {
+				m.launch.SetProjectsDir(m.config.ProjectsDir, m.config.DefaultModel)
 				m.launch.SetVisible(true)
 				m.launch.SetSize(m.width, m.height)
 				m.launch.Reset()
