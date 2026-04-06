@@ -1,0 +1,11 @@
+{
+  "name": "cloud-dispatch",
+  "displayName": "Cloud Dispatch",
+  "description": "Hetzner Cloud VM orchestration for ephemeral Claude Code agent execution: golden image pipeline, VM lifecycle management, and agent dispatch.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {},
+  "tags": ["cloud", "hetzner", "packer", "agents", "infrastructure"],
+  "configPrompts": []
+}
