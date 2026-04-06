@@ -1,3 +1,3 @@
 // restart.go implements automatic restart logic for crashed agents.
-// Epic 2 will implement backoff-aware restart with configurable limits.
+// Backoff-aware restart will be implemented in Epic 3.
 package agent

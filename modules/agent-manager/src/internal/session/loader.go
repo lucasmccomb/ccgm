@@ -1,3 +1,3 @@
-// loader.go discovers and reads Claude Code session files from disk.
-// Epic 2 will implement directory scanning and JSONL parsing of session transcripts.
+// loader.go re-exports session CRUD functions and will house Claude Code
+// session file discovery (JSONL parsing from ~/.claude/projects/) in Epic 3.
 package session
