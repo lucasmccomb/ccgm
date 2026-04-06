@@ -23,7 +23,7 @@ Check the status of a running or completed `/xplan` execution.
 
 Arguments: $ARGUMENTS
 
-### 1. Find the Plan
+### Step 1: Find the Plan
 
 If a plan name was provided in the arguments, look for it directly:
 ```bash
@@ -37,46 +37,23 @@ ls -lt ~/code/plans/ | head -20
 
 If multiple plans exist and none was specified, ask which plan to check.
 
-### 2. Read Progress File
+### Step 2: Read Progress File
 
 Read `~/code/plans/{plan-name}/progress.md` for execution state.
 
-### 3. Check Live State (if status is IN PROGRESS)
+Extract the project name and GitHub username from progress.md or plan.md.
 
-If the plan is still in progress, also check live state:
+### Step 3: Gather Live State (if IN PROGRESS)
+
+If the plan is still in progress, run the gather script:
 
 ```bash
-# Get project name from progress.md or plan.md
-# Check GitHub issues
-gh issue list --state open --repo {your-username}/{project-name} --limit 50
-
-# Check open PRs
-gh pr list --state open --repo {your-username}/{project-name}
-
-# Check clone states (auto-detect workspace vs flat model)
-WORKSPACES_DIR=~/code/{project-name}-workspaces
-REPOS_DIR=~/code/{project-name}-repos
-
-if [ -d "$WORKSPACES_DIR" ]; then
-  for dir in "${WORKSPACES_DIR}"/{project-name}-w*/{project-name}-w*-c*/; do
-    [ -d "$dir" ] || continue
-    echo "=== $(basename $dir) ==="
-    git -C "$dir" branch --show-current
-    git -C "$dir" status --short
-  done
-elif [ -d "$REPOS_DIR" ]; then
-  for dir in "${REPOS_DIR}"/{project-name}-[0-9]*/; do
-    [ -d "$dir" ] || continue
-    echo "=== $(basename $dir) ==="
-    git -C "$dir" branch --show-current
-    git -C "$dir" status --short
-  done
-fi
+bash ~/.claude/lib/xplan-status-gather.sh "{project-name}" "{github-user}"
 ```
 
-### 4. Present Dashboard
+This outputs structured `=== SECTION ===` blocks: ISSUES, PRS, CLONES, TRACKING.
 
-Display a concise dashboard:
+### Step 4: Present Dashboard
 
 ```
 Plan: {plan-name}
@@ -89,23 +66,21 @@ Wave Status:
   Wave 3: PENDING
 
 Active Agents:
-  agent-0 (clone-0): Epic 5 - "User Dashboard" [in-progress]
-  agent-1 (clone-1): Epic 6 - "API Endpoints" [PR open]
+  {clone}: {branch} [status from CLONES section]
 
 Open PRs:
-  #12 - Epic 6: API Endpoints (agent-1) - awaiting CI
+  {from PRS section}
 
 Human-Epics:
-  Human-Epic 1: "Google OAuth Setup" - BLOCKING Wave 3
-    Instructions: [brief summary]
+  {any blocking human tasks from progress.md}
 
-Last Checkpoint: Wave 2 partial - {timestamp}
+Last Checkpoint: {from progress.md}
 ```
 
-### 5. Suggest Actions
+### Step 5: Suggest Actions
 
-Based on the state, suggest what the user can do:
+Based on the state:
 - If INTERRUPTED: "Run `/xplan-resume {plan-name}` to continue execution"
-- If blocked by human-epic: Show the walkthrough instructions for the blocking human-epic
+- If blocked by human-epic: Show the walkthrough instructions for the blocking task
 - If COMPLETE: "Run `cat ~/code/plans/{plan-name}/retro.md` to see the retrospective"
-- If all agent work is done but human-epics remain: List exactly what the user needs to do
+- If all agent work done but human-epics remain: List exactly what the user needs to do

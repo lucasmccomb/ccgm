@@ -37,227 +37,55 @@ If no name provided, use AskUserQuestion to ask.
 
 ---
 
-## Phase 1: Domain Availability (All TLDs)
+## Phase 1: Gather Bash-Based Data
 
-Check the name across ALL specified TLDs.
-
-### 1.1 Instant Domain Search MCP (Preferred)
-
-If `instant-domain-search` MCP tools are available:
-
-1. Use `search_domains` with the name to get availability across all TLDs
-2. Use `check_domain_availability` for definitive verification on available ones
-3. Also use `generate_domain_variations` to surface creative alternatives
-
-### 1.2 Fallback: DNS + Whois
-
-If MCP is unavailable:
+Run the gather script to check domains, social media, app store, and GitHub/Reddit in parallel:
 
 ```bash
-# Check these TLDs
-TLDS=(ai io com life work app co dev org net me us xyz)
-
-for tld in "${TLDS[@]}"; do
-    # DNS pre-check
-    result=$(dig +short "$NAME.$tld" A 2>/dev/null)
-    ns=$(dig +short "$NAME.$tld" NS 2>/dev/null)
-    if [ -z "$result" ] && [ -z "$ns" ]; then
-        echo "MAYBE_AVAIL|$NAME.$tld"
-    else
-        echo "TAKEN|$NAME.$tld"
-    fi
-done
+bash ~/.claude/lib/brand-check-gather.sh "{name}" "{tlds}"
 ```
 
-For "MAYBE_AVAIL" results, verify with whois:
+For multiple names, run the script once per name. If checking 2+ names, run the bash calls in parallel tool calls.
 
-```bash
-# .com
-whois -h whois.verisign-grs.com "$NAME.com" 2>/dev/null | grep -q "No match" && echo "AVAIL" || echo "TAKEN"
+The script outputs structured `=== SECTION ===` blocks: DOMAINS, SOCIAL, APPSTORE, GH_REPOS, REDDIT.
 
-# .io
-whois -h whois.nic.io "$NAME.io" 2>/dev/null | grep -qi "NOT FOUND" && echo "AVAIL" || echo "TAKEN"
-
-# .ai
-whois -h whois.nic.ai "$NAME.ai" 2>/dev/null | grep -qi "not registered" && echo "AVAIL" || echo "TAKEN"
-
-# .work
-whois -h whois.nic.work "$NAME.work" 2>/dev/null | grep -qi "DOMAIN NOT FOUND" && echo "AVAIL" || echo "TAKEN"
-```
-
-### 1.3 Check Pricing
-
-For available domains, note approximate pricing:
-- `.com`: ~$10/yr
-- `.io`: ~$30-50/yr
-- `.ai`: ~$70-90/yr (Anguilla, premium)
-- `.life`: ~$5-15/yr
-- `.work`: ~$5-10/yr
-- `.app`: ~$15-20/yr
-- `.dev`: ~$12-15/yr
-- `.co`: ~$25-35/yr
-
-Also check if any available domains are "premium" priced by the registry (common for short/dictionary words).
-
----
-
-## Phase 2: Trademark Search
-
-### 2.1 USPTO (United States)
-
-Search for the name in the US trademark database:
-
-```bash
-# WebSearch for USPTO TESS results
-WebSearch: "NAME" trademark USPTO
-```
-
-Also search the Marker API if credentials are available:
-```bash
-curl -s "https://markerapi.com/api/v2/trademarks/trademark/NAME/username/USER/password/PASS"
-```
-
-Report:
-- **Exact matches**: Any live or dead trademarks with this exact name?
-- **Similar marks**: Any confusingly similar marks?
-- **Relevant classes**: Focus on Nice Class 9 (software), Class 42 (SaaS/cloud), Class 41 (education)
-- **Risk assessment**: Clear / Low Risk / Caution / High Risk
-
-### 2.2 International (WIPO)
-
-```bash
-WebSearch: "NAME" site:branddb.wipo.int OR "NAME" WIPO trademark
-```
-
-Note any international registrations in key markets (US, EU, UK, AU, CA).
-
----
-
-## Phase 3: App Store Check
-
-### 3.1 Apple App Store
-
-```bash
-# Search for exact and close matches
-curl -s "https://itunes.apple.com/search?term=NAME&entity=software&limit=10" | \
-  python3 -c "import sys,json; data=json.load(sys.stdin); [print(f'{r[\"trackName\"]} by {r[\"artistName\"]}') for r in data.get('results',[])]"
-```
-
-Report:
-- Exact name match? (deal-breaker)
-- Close matches? (confusing but not blocking)
-- Name available for use? (likely yes / caution / likely no)
-
-### 3.2 Google Play Store
-
-```bash
-WebSearch: "NAME" site:play.google.com/store/apps
-```
-
-Same analysis as App Store.
-
----
-
-## Phase 4: Social Media Handle Check
-
-Check handle availability on major platforms:
-
-### Direct URL Probing
-
-```bash
-# GitHub (404 = available)
-curl -s -o /dev/null -w "%{http_code}" "https://github.com/NAME"
-
-# Twitter/X (unreliable via URL, use web search)
-WebSearch: "twitter.com/NAME" OR "x.com/NAME"
-
-# Reddit (404 = available for subreddit)
-curl -s -o /dev/null -w "%{http_code}" "https://www.reddit.com/r/NAME"
-curl -s -o /dev/null -w "%{http_code}" "https://www.reddit.com/user/NAME"
-
-# YouTube
-curl -s -o /dev/null -w "%{http_code}" "https://www.youtube.com/@NAME"
-
-# TikTok
-curl -s -o /dev/null -w "%{http_code}" "https://www.tiktok.com/@NAME"
-
-# Instagram (use web search, direct URL unreliable)
-WebSearch: "instagram.com/NAME"
-
-# LinkedIn (company page)
-WebSearch: "linkedin.com/company/NAME"
-
-# Product Hunt
-curl -s -o /dev/null -w "%{http_code}" "https://www.producthunt.com/products/NAME"
-```
-
-Interpret HTTP codes:
+Interpret HTTP codes from SOCIAL section:
 - 404 = likely available
 - 200 = taken
-- 301/302 = taken (redirect to profile)
-- 429 = rate limited (note as "unknown")
-
-### Twitter/X Search
-
-```bash
-WebSearch: "NAME" site:twitter.com OR site:x.com
-```
-
-Check for active accounts, brands, or influencers using the name.
-
-### Reddit Search
-
-```bash
-curl -s "https://www.reddit.com/search.json?q=NAME&limit=5" -H "User-Agent: research-agent/1.0" | jq '.data.children[].data | {title, selftext: .selftext[:300], subreddit, score}'
-```
-
-Look for subreddits, communities, or products with the name.
-
-### YouTube Search
-
-```bash
-yt-dlp --dump-json "ytsearch3:NAME" 2>/dev/null | jq '[.[] | {title, channel, view_count, webpage_url}]'
-```
-
-Check for channels or prominent content using the name.
-
-### GitHub Search
-
-```bash
-gh search repos "NAME" --limit 5
-```
-
-Check for repos, orgs, or notable projects using the name (supplements the URL probe above).
+- 301/302 = taken (redirect)
+- 429 = rate limited (report as "unknown")
 
 ---
 
-## Phase 5: Existing Business Check
+## Phase 2: Web Search Checks (parallel tool calls)
 
-### 5.1 Web Presence
+Run ALL of the following WebSearch/WebFetch calls **in parallel tool calls** (batch them into a single response, do not run sequentially):
 
-```bash
-WebSearch: "NAME" company OR startup OR app -site:github.com
-```
+1. **USPTO trademark**: `WebSearch: "{name}" trademark USPTO`
+2. **WIPO trademark**: `WebSearch: "{name}" site:branddb.wipo.int OR "{name}" WIPO trademark`
+3. **Google Play**: `WebSearch: "{name}" site:play.google.com/store/apps`
+4. **Twitter/X**: `WebSearch: "{name}" site:twitter.com OR site:x.com`
+5. **Instagram**: `WebSearch: "instagram.com/{name}"`
+6. **LinkedIn**: `WebSearch: "linkedin.com/company/{name}"`
+7. **Existing business**: `WebSearch: "{name}" company OR startup OR app -site:github.com`
 
-Is there an existing company, product, or notable entity using this name?
+If Instant Domain Search MCP tools are available, also call `search_domains` and `generate_domain_variations` in the same parallel batch.
 
-### Deep Web Presence Check (Exa)
-
-```bash
-mcporter call 'exa.web_search_exa(query: "NAME company startup app product", numResults: 5)'
-```
-
-Exa provides semantic search results that surface companies, products, and startups that may not rank highly in traditional search. Compare with WebSearch results above for completeness.
-
-### 5.2 Business Registration (if Cobalt Intelligence credentials available)
-
-Check US business entity registration. Otherwise, note as "not checked - verify manually at your state's Secretary of State website."
+If `mcporter` / Exa is available, add: `bash: mcporter call 'exa.web_search_exa(query: "{name} company startup app product", numResults: 5)'`
 
 ---
 
-## Phase 6: Report
+## Phase 3: Domain Pricing Reference
 
-Present results as a clean summary:
+For available domains from Phase 1, note approximate pricing:
+- `.com`: ~$10/yr, `.io`: ~$30-50/yr, `.ai`: ~$70-90/yr, `.life`: ~$5-15/yr
+- `.work`: ~$5-10/yr, `.app`: ~$15-20/yr, `.dev`: ~$12-15/yr, `.co`: ~$25-35/yr
+
+---
+
+## Phase 4: Analyze and Report
+
+Synthesize all data into this report format:
 
 ```
 --------------------------------------------
@@ -280,8 +108,8 @@ TRADEMARKS
   WIPO:    {clear/caution/conflict} - {details}
 
 APP STORES
-  Apple:   {clear/collision} - {details}
-  Google:  {clear/collision} - {details}
+  Apple:   {clear/collision} - {details from gather + any WebSearch context}
+  Google:  {clear/collision} - {details from WebSearch}
 
 SOCIAL HANDLES
   GitHub:      {available/taken}
@@ -302,7 +130,7 @@ OVERALL ASSESSMENT
 
 ### If Multiple Names
 
-If the user provided comma-separated names, run all checks for each and present a comparison table at the end:
+Run all checks for each name and present a comparison table at the end:
 
 ```
 COMPARISON: {name1} vs {name2} vs {name3}

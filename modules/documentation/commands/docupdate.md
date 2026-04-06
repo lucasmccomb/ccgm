@@ -24,24 +24,15 @@ Extract from arguments:
 - **`--scope <areas>`**: Limit to specific areas. Default: `all`
 - **`--dry-run`**: Report gaps without making changes
 
-Discover the repository:
+Run the discovery script to gather all repo metadata in parallel:
 
 ```bash
-# Project type detection
-ls package.json Cargo.toml pyproject.toml go.mod Gemfile 2>/dev/null
-cat package.json 2>/dev/null | jq '{name, description, scripts: (.scripts // {}), dependencies: (.dependencies // {} | keys), devDependencies: (.devDependencies // {} | keys)}' 2>/dev/null
-
-# Find all documentation files
-find . -maxdepth 3 \( -name "README*" -o -name "CONTRIBUTING*" -o -name "CHANGELOG*" -o -name "INSTALL*" -o -name "SETUP*" -o -name "QUICKSTART*" \) -not -path "*/node_modules/*" -not -path "*/.git/*" 2>/dev/null
-
-# Find docs directories
-find . -maxdepth 3 -type d \( -name "docs" -o -name "doc" -o -name "documentation" -o -name ".github" \) -not -path "*/node_modules/*" 2>/dev/null
-
-# Find onboarding/setup docs
-find . -maxdepth 4 -name "*.md" -not -path "*/node_modules/*" -not -path "*/.git/*" | xargs grep -l -i "getting started\|installation\|setup\|onboarding\|quick start" 2>/dev/null | head -10
+bash ~/.claude/lib/docupdate-discover.sh
 ```
 
-Build a **repo manifest** - a mental model of:
+This outputs structured `=== SECTION ===` blocks: PROJECT, DOC_FILES, DOC_DIRS, ONBOARDING, STRUCTURE, SCRIPTS.
+
+Build a **repo manifest** from the output - a mental model of:
 - Project type (npm, Cargo, Python, Ruby, Go, monorepo, etc.)
 - All documentation files and their purposes
 - Key source directories (src/, lib/, packages/, modules/, apps/, etc.)

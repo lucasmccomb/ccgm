@@ -18,94 +18,47 @@ After the agent completes, relay its dashboard output to the user exactly as rec
 
 ## Workflow Instructions
 
-Display a comprehensive overview of the current repository state, including branch info, working directory status, sync status, and suggested next actions.
+Display a comprehensive overview of the current repository state.
 
 Arguments: $ARGUMENTS
 
-### 1. Branch and Remote Info
+### Step 1: Gather Data
+
+Run the gather script to collect all git data in parallel:
 
 ```bash
-# Current branch
-BRANCH=$(git branch --show-current)
-
-# Remote tracking branch
-git rev-parse --abbrev-ref @{upstream} 2>/dev/null || echo "No upstream tracking branch"
-
-# Fetch latest (non-blocking, just to check ahead/behind)
-git fetch origin 2>/dev/null
+bash ~/.claude/lib/gs-gather.sh
 ```
 
-### 2. Working Directory Status
+This outputs structured `=== SECTION ===` blocks with all data needed.
 
-```bash
-git status --short
+### Step 2: Present Dashboard
+
+Format the gathered data into this dashboard. Omit any section that is empty.
+
 ```
+Repository: {name from REPO section}
+Branch: {branch} -> {upstream}
+Status: {clean / N files changed based on STATUS section}
 
-Categorize and summarize:
-- Staged changes (ready to commit)
-- Unstaged changes (modified but not staged)
-- Untracked files
-- Conflicted files (if any)
+Sync:
+  Main: {ahead_behind from SYNC main: line - format as "N ahead, N behind"}
+  Remote: {ahead_behind from SYNC upstream: line - format as "N unpushed, N to pull"}
 
-### 3. Sync Status
+Recent Commits:
+  {LOG section content}
 
-```bash
-# Ahead/behind main
-git rev-list --left-right --count origin/main...HEAD 2>/dev/null
+Open PRs:
+  {PRS section content, highlight any from current branch}
 
-# Ahead/behind tracking branch
-git rev-list --left-right --count @{upstream}...HEAD 2>/dev/null
-```
-
-Report:
-- Commits ahead of main
-- Commits behind main
-- Commits ahead of remote tracking branch (unpushed)
-- Commits behind remote tracking branch (needs pull)
-
-### 4. Recent Commits
-
-```bash
-git log --oneline -5
-```
-
-### 5. Open Pull Requests
-
-```bash
-gh pr list --state open --limit 10 2>/dev/null
-```
-
-If any PRs are from the current branch, highlight them.
-
-### 5.5 Sibling Sessions
-
-Check for other Claude Code sessions working in the same repository:
-
-```bash
-python3 ~/.claude/lib/agent_sessions.py --repo "$(git remote get-url origin 2>/dev/null | xargs basename | sed 's/\.git$//')" --exclude-cwd "$PWD" --text 2>/dev/null
-```
-
-If any sessions are found, include them in the dashboard under "Sibling Sessions". If none found, omit this section entirely to keep the output clean.
-
-Dashboard format when siblings exist:
-```
 Sibling Sessions (same repo):
-  agent-w0-c2 | branch: 44-update-onboarding | up: 3h (ttys003)
-  agent-w0-c3 | branch: 45-fix-payments      | up: 45m (ttys009)
+  {SESSIONS content, or omit if empty}
+
+Changes:
+  {DIFF section content - summarize staged/unstaged/untracked}
+
+Suggested: {recommended next action per table below}
 ```
-
-### 6. Uncommitted Changes Summary
-
-If there are uncommitted changes, provide a brief summary:
-
-```bash
-git diff --stat
-git diff --cached --stat
-```
-
-### 7. Recommended Next Action
-
-Based on the gathered state, suggest the most logical next action:
 
 | State | Recommendation |
 |-------|---------------|
@@ -114,37 +67,4 @@ Based on the gathered state, suggest the most logical next action:
 | On main with no changes | Create a feature branch or run `/ghi` |
 | Behind main on feature branch | Run `git fetch origin && git rebase origin/main` |
 | PR open and CI passing | Run `gh pr merge --squash --delete-branch` |
-| Merge conflicts | Resolve conflicts, then `git rebase --continue` |
 | Clean state on main | Ready for new work |
-
-### 8. Display Dashboard
-
-Present the information in a clean, scannable format:
-
-```
-Repository: {repo-name}
-Branch: {branch} -> {tracking-branch}
-Status: {clean / N files changed}
-
-Sync:
-  Main: {N ahead, N behind}
-  Remote: {N unpushed, N to pull}
-
-Recent Commits:
-  {hash} {message}
-  {hash} {message}
-  ...
-
-Open PRs:
-  #{number} {title} ({branch})
-  ...
-
-Sibling Sessions (same repo):   <- only if siblings exist
-  {agent_id} | branch: {branch} | up: {uptime} ({tty})
-  ...
-
-Changes:
-  {staged/unstaged/untracked summary}
-
-Suggested: {recommended next action}
-```

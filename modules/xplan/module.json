@@ -8,6 +8,7 @@
   "files": {
     "commands/xplan.md": { "target": "commands/xplan.md", "type": "command", "template": false },
     "commands/xplan-status.md": { "target": "commands/xplan-status.md", "type": "command", "template": false },
+    "lib/xplan-status-gather.sh": { "target": "lib/xplan-status-gather.sh", "type": "lib", "template": false },
     "commands/xplan-resume.md": { "target": "commands/xplan-resume.md", "type": "command", "template": false }
   },
   "tags": ["planning", "execution", "research", "parallel"],

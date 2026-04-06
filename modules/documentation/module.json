@@ -6,7 +6,8 @@
   "scope": ["global"],
   "dependencies": [],
   "files": {
-    "commands/docupdate.md": { "target": "commands/docupdate.md", "type": "command", "template": false }
+    "commands/docupdate.md": { "target": "commands/docupdate.md", "type": "command", "template": false },
+    "lib/docupdate-discover.sh": { "target": "lib/docupdate-discover.sh", "type": "lib", "template": false }
   },
   "tags": ["commands", "documentation", "maintenance"],
   "configPrompts": []
