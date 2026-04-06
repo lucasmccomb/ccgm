@@ -1,9 +1,11 @@
 // launch.go implements a directory picker modal for launching new agents.
-// Instead of typing fields manually, the user picks a project directory
-// from a configurable base path. Name and model are derived automatically.
+// The user picks a project directory from a configurable base path.
+// Name and model are derived automatically. If a Claude session is already
+// running in the selected directory, a warning is shown.
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lucasmccomb/ccgm/modules/agent-manager/src/internal/agent"
 	"github.com/lucasmccomb/ccgm/modules/agent-manager/src/internal/types"
 )
 
@@ -19,6 +22,14 @@ import (
 type LaunchSubmitMsg struct {
 	Config types.AgentConfig
 }
+
+// launchState tracks which screen the launch modal is on.
+type launchState int
+
+const (
+	statePicking  launchState = iota // directory picker
+	stateWarning                     // conflict warning
+)
 
 // LaunchModel is a Bubble Tea component that renders a directory picker modal.
 type LaunchModel struct {
@@ -32,6 +43,12 @@ type LaunchModel struct {
 	height       int
 	projectsDir  string // base directory to scan
 	defaultModel string // default model (e.g., "opus")
+
+	// Conflict warning state.
+	state       launchState
+	conflictDir string
+	conflictPID int
+	pendingCfg  types.AgentConfig
 }
 
 // NewLaunchModel returns a LaunchModel. Call SetProjectsDir before showing.
@@ -52,8 +69,28 @@ func (m LaunchModel) Update(msg tea.Msg) (LaunchModel, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		key := msg.String()
+
+		// Warning screen: simple yes/no.
+		if m.state == stateWarning {
+			switch key {
+			case "y", "Y", "enter":
+				m.visible = false
+				m.state = statePicking
+				cfg := m.pendingCfg
+				return m, func() tea.Msg {
+					return LaunchSubmitMsg{Config: cfg}
+				}
+			case "n", "N", "esc":
+				m.state = statePicking
+				return m, nil
+			}
+			return m, nil
+		}
+
+		// Filter input mode.
 		if m.filtering {
-			switch msg.String() {
+			switch key {
 			case "esc":
 				m.filtering = false
 				m.filter = ""
@@ -69,16 +106,16 @@ func (m LaunchModel) Update(msg tea.Msg) (LaunchModel, tea.Cmd) {
 				}
 				return m, nil
 			default:
-				if len(msg.String()) == 1 {
-					m.filter += msg.String()
+				if len(key) == 1 {
+					m.filter += key
 					m.applyFilter()
-					return m, nil
 				}
 			}
 			return m, nil
 		}
 
-		switch msg.String() {
+		// Directory picker.
+		switch key {
 		case "esc", "q":
 			m.visible = false
 			return m, nil
@@ -102,7 +139,7 @@ func (m LaunchModel) Update(msg tea.Msg) (LaunchModel, tea.Cmd) {
 
 		case "enter":
 			if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
-				return m.submit()
+				return m.tryLaunch()
 			}
 			return m, nil
 		}
@@ -110,18 +147,26 @@ func (m LaunchModel) Update(msg tea.Msg) (LaunchModel, tea.Cmd) {
 	return m, nil
 }
 
-// View renders the directory picker modal.
+// View renders the directory picker or conflict warning.
 func (m LaunchModel) View() string {
 	if !m.visible {
 		return ""
 	}
 
+	if m.state == stateWarning {
+		return m.viewWarning()
+	}
+	return m.viewPicker()
+}
+
+func (m LaunchModel) viewPicker() string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62"))
-	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("62"))
+	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("62")).PaddingRight(1)
 	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 	filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	hintKeyStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("62")).PaddingLeft(1).PaddingRight(1)
+	hintDescStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).PaddingRight(1)
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("62")).
@@ -132,7 +177,7 @@ func (m LaunchModel) View() string {
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render("Launch New Agent"))
 	sb.WriteString("\n")
-	sb.WriteString(dimStyle.Render("Select a project directory"))
+	sb.WriteString(dimStyle.Render("Select a project directory from " + m.projectsDir))
 	sb.WriteString("\n\n")
 
 	if m.filtering {
@@ -147,10 +192,9 @@ func (m LaunchModel) View() string {
 		sb.WriteString(dimStyle.Render("  (no directories found)"))
 		sb.WriteString("\n")
 	} else {
-		// Show a scrollable window of directories.
 		maxVisible := 15
 		if m.height > 0 {
-			maxVisible = m.height/2 - 6
+			maxVisible = m.height/2 - 8
 			if maxVisible < 5 {
 				maxVisible = 5
 			}
@@ -166,27 +210,60 @@ func (m LaunchModel) View() string {
 		}
 
 		for i := start; i < end; i++ {
-			prefix := "  "
-			style := normalStyle
 			if i == m.cursor {
-				prefix = "▸ "
-				style = selectedStyle
+				sb.WriteString("  " + selectedStyle.Render(" "+m.filtered[i]))
+			} else {
+				sb.WriteString("  " + normalStyle.Render(" "+m.filtered[i]))
 			}
-			sb.WriteString(prefix + style.Render(m.filtered[i]))
 			sb.WriteString("\n")
 		}
 
 		if len(m.filtered) > maxVisible {
-			sb.WriteString(dimStyle.Render(
-				strings.Repeat(" ", 2) +
-					"(" + strings.Repeat("·", len(m.filtered)-maxVisible) + ")",
-			))
+			shown := end - start
+			total := len(m.filtered)
+			sb.WriteString(dimStyle.Render(fmt.Sprintf("    showing %d of %d", shown, total)))
 			sb.WriteString("\n")
 		}
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(hintStyle.Render("j/k navigate   enter select   / filter   esc cancel"))
+	sb.WriteString(
+		hintKeyStyle.Render("j/k") + hintDescStyle.Render("navigate") + " " +
+			hintKeyStyle.Render("enter") + hintDescStyle.Render("select") + " " +
+			hintKeyStyle.Render("/") + hintDescStyle.Render("filter") + " " +
+			hintKeyStyle.Render("esc") + hintDescStyle.Render("cancel"),
+	)
+
+	return boxStyle.Render(sb.String())
+}
+
+func (m LaunchModel) viewWarning() string {
+	warnStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	hintKeyStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("62")).PaddingLeft(1).PaddingRight(1)
+	hintDescStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).PaddingRight(1)
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("214")).
+		Padding(1, 3).
+		Background(lipgloss.Color("235")).
+		Width(60)
+
+	var sb strings.Builder
+	sb.WriteString(warnStyle.Render("⚠  Claude Already Running"))
+	sb.WriteString("\n\n")
+	sb.WriteString(dimStyle.Render(fmt.Sprintf("A Claude session is already active in:")))
+	sb.WriteString("\n")
+	sb.WriteString(dimStyle.Render(fmt.Sprintf("  %s", m.conflictDir)))
+	sb.WriteString("\n")
+	sb.WriteString(dimStyle.Render(fmt.Sprintf("  PID: %d", m.conflictPID)))
+	sb.WriteString("\n\n")
+	sb.WriteString(dimStyle.Render("Launch another session in this directory?"))
+	sb.WriteString("\n\n")
+	sb.WriteString(
+		hintKeyStyle.Render("y") + hintDescStyle.Render("yes, launch") + " " +
+			hintKeyStyle.Render("n") + hintDescStyle.Render("cancel"),
+	)
 
 	return boxStyle.Render(sb.String())
 }
@@ -194,6 +271,9 @@ func (m LaunchModel) View() string {
 // SetVisible shows or hides the modal.
 func (m *LaunchModel) SetVisible(v bool) {
 	m.visible = v
+	if !v {
+		m.state = statePicking
+	}
 }
 
 // Visible reports whether the modal is currently shown.
@@ -218,6 +298,7 @@ func (m *LaunchModel) Reset() {
 	m.cursor = 0
 	m.filter = ""
 	m.filtering = false
+	m.state = statePicking
 	m.dirs = scanDirs(m.projectsDir)
 	m.filtered = m.dirs
 }
@@ -243,8 +324,8 @@ func (m *LaunchModel) applyFilter() {
 	}
 }
 
-// submit creates an AgentConfig from the selected directory.
-func (m LaunchModel) submit() (LaunchModel, tea.Cmd) {
+// tryLaunch checks for conflicts and either shows a warning or submits.
+func (m LaunchModel) tryLaunch() (LaunchModel, tea.Cmd) {
 	dirName := m.filtered[m.cursor]
 	fullPath := filepath.Join(m.projectsDir, dirName)
 	id := sanitizeID(dirName)
@@ -260,6 +341,20 @@ func (m LaunchModel) submit() (LaunchModel, tea.Cmd) {
 		},
 	}
 
+	// Check for existing Claude process in this directory.
+	if procs, err := agent.DiscoverClaudeProcesses(); err == nil {
+		for _, p := range procs {
+			if p.WorkingDir == fullPath || strings.HasPrefix(p.WorkingDir, fullPath+"/") {
+				m.state = stateWarning
+				m.conflictDir = p.WorkingDir
+				m.conflictPID = p.PID
+				m.pendingCfg = cfg
+				return m, nil
+			}
+		}
+	}
+
+	// No conflict - launch directly.
 	m.visible = false
 	return m, func() tea.Msg {
 		return LaunchSubmitMsg{Config: cfg}
@@ -279,7 +374,6 @@ func scanDirs(dir string) []string {
 			continue
 		}
 		name := e.Name()
-		// Skip hidden directories.
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
