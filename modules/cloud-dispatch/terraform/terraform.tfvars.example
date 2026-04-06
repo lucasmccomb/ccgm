@@ -1,0 +1,11 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# DO NOT commit terraform.tfvars - it is excluded by .gitignore.
+#
+# Get your public IP: curl -s https://ifconfig.me
+
+hcloud_token    = "your-hetzner-api-token"
+orchestrator_ip = "203.0.113.10/32"
+ssh_public_key  = "ssh-ed25519 AAAA... your-key-comment"
+
+# Optional: override the default resource name prefix
+# project_name = "ccgm-dispatch"
