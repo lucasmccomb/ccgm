@@ -158,15 +158,18 @@ SETTINGS_JSON='{
 
 ssh_root "printf '%s\n' '${SETTINGS_JSON}' > '${CLAUDE_DIR}/settings.json' && chown '${AGENT_USER}:${AGENT_USER}' '${CLAUDE_DIR}/settings.json'"
 
-# Symlink global CCGM rules from /opt/ccgm if the directory exists on the VM
-RULES_SYMLINK="${CLAUDE_DIR}/rules"
+# Refresh CCGM installation from the repo on the VM.
+# The golden image pre-installs CCGM, but this ensures rules are current
+# if the image is stale. Also re-runs headless install to pick up any new modules.
+HEADLESS_INSTALLER="/opt/ccgm/repo/modules/cloud-dispatch/lib/ccgm-headless-install.sh"
 ssh_root "
-if [[ -d /opt/ccgm/rules && ! -e '${RULES_SYMLINK}' ]]; then
-  ln -s /opt/ccgm/rules '${RULES_SYMLINK}'
-  chown -h '${AGENT_USER}:${AGENT_USER}' '${RULES_SYMLINK}'
-  echo 'Symlinked /opt/ccgm/rules -> ${RULES_SYMLINK}'
+if [[ -x '${HEADLESS_INSTALLER}' ]]; then
+  echo 'Refreshing CCGM cloud-agent preset for ${AGENT_USER}'
+  bash '${HEADLESS_INSTALLER}' /opt/ccgm/repo cloud-agent '${AGENT_HOME}'
+  chown -R '${AGENT_USER}:${AGENT_USER}' '${CLAUDE_DIR}'
 else
-  echo 'Skipping rules symlink (/opt/ccgm/rules not found or link already exists)'
+  echo 'WARN: CCGM headless installer not found at ${HEADLESS_INSTALLER}'
+  echo 'Agents will run without CCGM rules. Rebuild golden image to fix.'
 fi
 "
 

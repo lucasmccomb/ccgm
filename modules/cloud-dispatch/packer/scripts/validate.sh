@@ -60,8 +60,14 @@ for i in 0 1 2 3; do
   check_user "agent-${i}"
 done
 
-echo "==> Verifying /opt/ccgm directory"
-check_file "/opt/ccgm exists" "/opt/ccgm"
+echo "==> Verifying CCGM installation"
+check_file "/opt/ccgm/repo exists" "/opt/ccgm/repo"
+check_file "/opt/ccgm/repo/modules dir" "/opt/ccgm/repo/modules"
+check_file "/opt/ccgm/repo/presets/cloud-agent.json" "/opt/ccgm/repo/presets/cloud-agent.json"
+for i in 0 1 2 3; do
+  check_file "agent-${i} has .claude/rules" "/home/agent-${i}/.claude/rules"
+  check "agent-${i} has CCGM rules installed" bash -c "ls /home/agent-${i}/.claude/rules/*.md 2>/dev/null | wc -l | grep -qv '^0$'"
+done
 
 echo "==> Verifying iptables rules are active"
 check "iptables OUTPUT rules present" bash -c "iptables -L OUTPUT -n | grep -q 'DROP\|ACCEPT'"
