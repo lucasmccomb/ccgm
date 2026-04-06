@@ -26,6 +26,8 @@ Run the gather script. It collects all session data in parallel and outputs stru
 bash ~/.claude/lib/startup-gather.sh
 ```
 
+**IMPORTANT**: The gather output is raw internal data. Do NOT display it to the user. Parse it silently and only output the formatted dashboard in Step 4.
+
 ### Step 2: Read Previous Log
 
 From the `=== LOG ===` section:
@@ -50,41 +52,55 @@ Only if `status:new` in the LOG section:
 
 ### Step 4: Present Dashboard
 
-Format the gathered data into this dashboard. Omit any section that is empty.
+Format the gathered data using markdown. Omit any section that has no content.
 
-```
-Session: {agent_id} - {repo} - {date}
-Branch: {branch}
-Status: {clean/dirty}
-Sync: {ahead_behind}
+Output this exact structure (replace placeholders, keep the formatting):
 
-Previous Session:
-  {Summary from PREV_LOG_TAIL, or "No previous session found"}
+```markdown
+## {agent_id} | {repo} | {date}
 
-Cross-Agent Activity:
-  {CROSS_AGENT content, or "No other agent activity"}
+**Branch:** `{branch}` | **Status:** {clean/dirty} | **Sync:** {ahead_behind or "up to date"}
 
-Live Sessions:
-  {SESSIONS content, or omit}
+---
 
-Open PRs: {count}
-  {PR list if any}
+**Previous Session** — {One-line summary from PREV_LOG_TAIL, or "No prior session found"}
 
-Tracking:
-  {TRACKING content}
-
-Siblings:
-  {SIBLINGS content, or omit}
-
-Recommended: {next action per table below}
+---
 ```
 
-If RELEASE section contains `UPDATE_AVAILABLE`:
-```
-Update: v{current} -> v{latest} (npm i -g @anthropic-ai/claude-code@latest)
+Then add only the sections that have content. Each section uses `###` heading:
+
+```markdown
+### Live Sessions
+{table or list from SESSIONS section}
+
+### Open PRs ({count})
+{PR list}
+
+### Tracking
+{TRACKING content - active claims and unclaimed issues}
+
+### Cross-Agent Activity
+{CROSS_AGENT content}
+
+### Siblings
+{SIBLINGS content}
 ```
 
-If ORPHANS section has output, include the warning.
+End with the recommendation, visually separated:
+
+```markdown
+---
+
+> **Next:** {recommended action per table below}
+```
+
+If RELEASE section contains `UPDATE_AVAILABLE`, add before the recommendation:
+```markdown
+> **Update available:** v{current} -> v{latest} (`npm i -g @anthropic-ai/claude-code@latest`)
+```
+
+If ORPHANS section has output, add its warning as a blockquote.
 
 **STOP after presenting the dashboard.** Do not continue work. Wait for user instruction.
 
