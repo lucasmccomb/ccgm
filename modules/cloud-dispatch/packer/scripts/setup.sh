@@ -6,9 +6,16 @@ AGENT_COUNT=4
 CCGM_DIR="/opt/ccgm"
 SECRETS_BASE="/run/secrets"
 
-echo "==> Creating /opt/ccgm shared directory"
+echo "==> Cloning CCGM repo to /opt/ccgm/repo"
 mkdir -p "${CCGM_DIR}"
 chmod 755 "${CCGM_DIR}"
+git clone https://github.com/lucasmccomb/ccgm.git "${CCGM_DIR}/repo"
+
+echo "==> Pre-installing CCGM cloud-agent preset for each agent user"
+# The headless installer copies rules and commands from the CCGM repo
+# into each agent's ~/.claude/ directory without interactive prompts.
+HEADLESS_INSTALLER="${CCGM_DIR}/repo/modules/cloud-dispatch/lib/ccgm-headless-install.sh"
+chmod +x "${HEADLESS_INSTALLER}"
 
 echo "==> Creating agent user accounts (agent-0 through agent-$((AGENT_COUNT - 1)))"
 for i in $(seq 0 $((AGENT_COUNT - 1))); do
@@ -66,6 +73,15 @@ Host github.com
 SSHCONFIG
   chmod 600 "${ssh_dir}/config"
   chown -R "${USER}:${USER}" "${ssh_dir}"
+done
+
+echo "==> Installing CCGM cloud-agent preset for each agent user"
+for i in $(seq 0 $((AGENT_COUNT - 1))); do
+  USER="agent-${i}"
+  HOME_DIR="/home/${USER}"
+  bash "${HEADLESS_INSTALLER}" "${CCGM_DIR}/repo" "cloud-agent" "${HOME_DIR}"
+  chown -R "${USER}:${USER}" "${HOME_DIR}/.claude"
+  echo "  installed CCGM for ${USER}"
 done
 
 echo "==> Creating /run/secrets mount points for agent credential injection"
