@@ -2,6 +2,8 @@ package agent_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -27,7 +29,13 @@ func TestHealthCheck_DetectsCrash(t *testing.T) {
 		t.Skip("mock_agent binary not available")
 	}
 
-	m, _ := newTestManager(t)
+	m, dataDir := newTestManager(t)
+	// The restart engine writes crash tombstones asynchronously into
+	// dataDir/history/<agentID>/. Register a cleanup that removes those files
+	// before t.TempDir's own cleanup runs, preventing "directory not empty" errors.
+	t.Cleanup(func() {
+		os.RemoveAll(filepath.Join(dataDir, "history"))
+	})
 
 	// Agent exits after 100ms.
 	agentCfg := &types.AgentConfig{
