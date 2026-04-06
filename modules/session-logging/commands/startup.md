@@ -52,55 +52,51 @@ Only if `status:new` in the LOG section:
 
 ### Step 4: Present Dashboard
 
-Format the gathered data using markdown. Omit any section that has no content.
+Format the gathered data for terminal display. Use **bold** for labels, `backticks` for values, and `---` for separators. Do NOT use markdown headers (`#`, `##`, `###`). Omit sections with no content.
 
-Output this exact structure (replace placeholders, keep the formatting):
+Output this exact structure (replace placeholders, keep formatting):
 
-```markdown
-## {agent_id} | {repo} | {date}
-
+```
+**{agent_id}** | `{repo}` | {date}
 **Branch:** `{branch}` | **Status:** {clean/dirty} | **Sync:** {ahead_behind or "up to date"}
 
 ---
 
-**Previous Session** — {One-line summary from PREV_LOG_TAIL, or "No prior session found"}
+**Previous** — {One-line summary from PREV_LOG_TAIL, or "No prior session found"}
+```
 
+Then add only sections that have content, each separated by a blank line with a bold label:
+
+```
+**Live Sessions**
+  {each session on its own line, indented}
+
+**Open PRs** ({count})
+  {each PR on its own line, indented}
+
+**Tracking**
+  {active claims and unclaimed issues, indented}
+
+**Cross-Agent**
+  {CROSS_AGENT content, indented}
+
+**Siblings**
+  {SIBLINGS content, indented}
+```
+
+End with the recommendation after a separator:
+
+```
 ---
+**Next:** {recommended action per table below}
 ```
 
-Then add only the sections that have content. Each section uses `###` heading:
-
-```markdown
-### Live Sessions
-{table or list from SESSIONS section}
-
-### Open PRs ({count})
-{PR list}
-
-### Tracking
-{TRACKING content - active claims and unclaimed issues}
-
-### Cross-Agent Activity
-{CROSS_AGENT content}
-
-### Siblings
-{SIBLINGS content}
+If RELEASE section contains `UPDATE_AVAILABLE`, add before Next:
+```
+**Update:** v{current} -> v{latest} (`npm i -g @anthropic-ai/claude-code@latest`)
 ```
 
-End with the recommendation, visually separated:
-
-```markdown
----
-
-> **Next:** {recommended action per table below}
-```
-
-If RELEASE section contains `UPDATE_AVAILABLE`, add before the recommendation:
-```markdown
-> **Update available:** v{current} -> v{latest} (`npm i -g @anthropic-ai/claude-code@latest`)
-```
-
-If ORPHANS section has output, add its warning as a blockquote.
+If ORPHANS section has output, include its warning.
 
 **STOP after presenting the dashboard.** Do not continue work. Wait for user instruction.
 
