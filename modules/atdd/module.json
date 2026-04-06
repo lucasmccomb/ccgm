@@ -1,0 +1,14 @@
+{
+  "name": "atdd",
+  "displayName": "Agentic Test-Driven Development",
+  "description": "Spec-driven development where E2E vision specs define target behavior. /atdd reads Playwright specs, iteratively builds app code until all tests pass, then ships.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "commands/atdd.md": { "target": "commands/atdd.md", "type": "command", "template": false },
+    "rules/atdd.md": { "target": "rules/atdd.md", "type": "rule", "template": false }
+  },
+  "tags": ["testing", "playwright", "e2e", "tdd", "development"],
+  "configPrompts": []
+}
