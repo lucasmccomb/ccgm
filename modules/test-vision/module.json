@@ -1,0 +1,14 @@
+{
+  "name": "test-vision",
+  "displayName": "Test Vision",
+  "description": "Vision-driven e2e test suite generation. /test-vision for full repo analysis + parallel test suite creation. /e2e for single-feature spec generation. Composes /e2e as the atomic unit within /test-vision orchestration.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["browser-automation", "multi-agent"],
+  "files": {
+    "commands/test-vision.md": { "target": "commands/test-vision.md", "type": "command", "template": false },
+    "commands/e2e.md": { "target": "commands/e2e.md", "type": "command", "template": false }
+  },
+  "tags": ["testing", "playwright", "e2e", "parallel", "browser-automation"],
+  "configPrompts": []
+}
