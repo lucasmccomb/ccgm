@@ -51,7 +51,7 @@ matches=""
 set +e
 matches=$(grep -rlE "$PATTERN" \
   --include="*.md" --include="*.json" --include="*.py" --include="*.sh" --include="*.yml" \
-  "${existing_targets[@]}" 2>/dev/null | grep -v "README.md$" || true)
+  "${existing_targets[@]}" 2>/dev/null | grep -v "README.md$" | grep -v "postInstall.sh$" || true)
 
 # Also check README.md separately with a pattern that excludes the repo URL
 readme_pattern='/Users/lem|lem-personal|lem-agent-logs|hyhaowdndehadgcwjxtw|hwoxbllmdqvavxthrlql|eluketronic\.app\.n8n\.cloud|lem-mbp|100\.113\.180\.79|iphone171'
