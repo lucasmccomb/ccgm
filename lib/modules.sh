@@ -70,6 +70,35 @@ _json_field_fallback() {
   esac
 }
 
+# --- Get module status (stable|beta) ---
+# Usage: module_status "module-name"
+# Prints "beta" for modules marked with "status": "beta", "stable" otherwise.
+module_status() {
+  local name="$1"
+  local manifest="${CCGM_ROOT}/modules/${name}/module.json"
+  if [ ! -f "$manifest" ]; then
+    echo "stable"
+    return
+  fi
+  if command -v jq &>/dev/null; then
+    local status
+    status=$(jq -r '.status // "stable"' "$manifest" 2>/dev/null)
+    echo "${status:-stable}"
+  else
+    if grep -q '"status"[[:space:]]*:[[:space:]]*"beta"' "$manifest"; then
+      echo "beta"
+    else
+      echo "stable"
+    fi
+  fi
+}
+
+# --- Check if module is beta ---
+# Usage: is_beta "module-name" && echo "beta" || echo "stable"
+is_beta() {
+  [ "$(module_status "$1")" = "beta" ]
+}
+
 # --- Get module info (human-readable) ---
 # Usage: get_module_info "module-name"
 get_module_info() {
