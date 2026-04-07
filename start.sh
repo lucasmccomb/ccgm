@@ -485,9 +485,10 @@ main() {
         [ -n "$mod" ] && SELECTED_MODULES+=("$mod")
       done < <(load_preset "$PRESET_NAME")
     else
-      # Custom module selection
+      # Custom module selection - stable modules first, beta modules last.
       local all_modules=()
-      local module_labels=()
+      local stable_labels=()
+      local beta_labels=()
       local desc
       while IFS= read -r mod; do
         all_modules+=("$mod")
@@ -495,12 +496,22 @@ main() {
         if [ "$has_jq" = true ]; then
           desc=$(jq -r '.description' "${CCGM_ROOT}/modules/${mod}/module.json" 2>/dev/null | head -c 80)
         fi
-        if [ -n "$desc" ]; then
-          module_labels+=("$mod - $desc")
+        if is_beta "$mod"; then
+          if [ -n "$desc" ]; then
+            beta_labels+=("$mod [BETA] - $desc")
+          else
+            beta_labels+=("$mod [BETA]")
+          fi
         else
-          module_labels+=("$mod")
+          if [ -n "$desc" ]; then
+            stable_labels+=("$mod - $desc")
+          else
+            stable_labels+=("$mod")
+          fi
         fi
       done < <(discover_modules)
+
+      local module_labels=("${stable_labels[@]}" "${beta_labels[@]}")
 
       local selected_labels
       selected_labels=$(ui_multichoose "Select modules to install" "${module_labels[@]}")

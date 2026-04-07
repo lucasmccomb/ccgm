@@ -1,5 +1,9 @@
 # Agent Manager TUI
 
+> **Status: BETA (experimental)**
+>
+> This module is experimental and not recommended for daily use. It is excluded from default presets and must be explicitly selected during custom installation. A GUI-based replacement is being considered, so further development of this TUI may be paused.
+
 A terminal UI for managing Claude Code agent processes across multi-clone repos. Built with Go and Bubble Tea.
 
 ## What It Does
