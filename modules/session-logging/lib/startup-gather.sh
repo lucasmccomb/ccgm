@@ -96,11 +96,13 @@ fi
   gh pr list --state open --limit 10 2>/dev/null || echo "none"
 ) > "$TMPDIR/prs" 2>/dev/null &
 
-# 3. Tracking dashboard
+# 3. Tracking dashboard (active claims only - skip stale-claim GC, skip in coordinator dirs)
 (
-  python3 ~/.claude/lib/agent_tracking.py list --repo "$REPO_NAME" 2>/dev/null || echo "unavailable"
-  echo "---GC---"
-  python3 ~/.claude/lib/agent_tracking.py gc --repo "$REPO_NAME" 2>/dev/null || true
+  if [ -n "$REPO_NAME" ]; then
+    python3 ~/.claude/lib/agent_tracking.py list --repo "$REPO_NAME" 2>/dev/null || echo "unavailable"
+  else
+    echo "(coordinator workspace - tracking shown by individual clones)"
+  fi
 ) > "$TMPDIR/tracking" 2>/dev/null &
 
 # 4. Live sessions

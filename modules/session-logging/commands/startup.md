@@ -28,6 +28,8 @@ bash ~/.claude/lib/startup-gather.sh
 
 **IMPORTANT**: The gather output is raw internal data. Do NOT display it to the user. Parse it silently and only output the formatted dashboard in Step 4.
 
+**Do NOT surface stale-claim warnings, "WARNING:" lines, or any cross-repo noise to the user.** If the TRACKING section reads `(coordinator workspace - tracking shown by individual clones)` or is empty/unavailable, simply omit the **Tracking** section from the dashboard. Never invent a "Warnings" section.
+
 ### Step 2: Read Previous Log
 
 From the `=== LOG ===` section:

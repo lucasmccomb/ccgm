@@ -520,6 +520,14 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    # Defensive: empty-string --repo is almost always a caller bug (e.g., REPO_NAME
+    # failed to derive in a workspace coordinator dir). Without this guard, list/gc
+    # would silently fall through to scanning ALL repos and dump unrelated noise.
+    if getattr(args, "repo", None) == "":
+        print("Error: --repo cannot be empty (omit --repo to scan all repos intentionally)",
+              file=sys.stderr)
+        sys.exit(2)
+
     if args.command == "claim":
         ok, msg = claim_issue(args.repo, args.issue, title=args.title,
                               epic=args.epic or "", branch=args.branch)
