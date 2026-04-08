@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 38 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 40 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -537,6 +537,60 @@ Methodology for decomposing tasks and delegating to subagents.
 - **Dispatch patterns**: Parallel research with aggregation, parallel implementation with separate clones
 - **Two-stage review**: First check spec compliance, then check code quality
 - **Coordination rules**: No shared mutable state, aggregate results in the parent, report failures immediately
+
+**Dependencies**: None
+
+---
+
+### agent-manager
+
+[BETA] Go-based terminal UI for managing Claude Code agent processes.
+
+**Installs**: `commands/agents.md`, Go binary (`~/.ccgm/bin/ccgm-agents`) via postInstall.sh
+
+**What it does**: Provides a terminal dashboard for monitoring and controlling Claude Code agents across multi-clone repos:
+
+- **Agent list**: Shows all agents running in tmux panes with health status, current task, and last activity
+- **Log viewer**: Stream or browse agent log output in real time
+- **Controls**: Launch, stop, restart, and force-kill agents from the TUI
+- **Filtering**: Filter agent list by name, status, or repo
+
+The `/agents` command launches the TUI. The binary is built and installed by the `postInstall.sh` script during CCGM installation.
+
+| Command | Description |
+|---------|-------------|
+| `/agents` | Launch the Agent Manager TUI |
+
+**Status**: Beta - experimental, not recommended for daily use. A GUI-based replacement is being considered.
+
+**Dependencies**: multi-agent
+
+---
+
+### cloud-dispatch
+
+Delegate GitHub issues to autonomous Claude Code agents on Hetzner Cloud VMs.
+
+**Installs**: 4 command files, 1 rule file, lib scripts for VM lifecycle and workspace management
+
+**What it does**: A complete cloud agent dispatch system for running CCGM agents on remote VMs:
+
+- **VM lifecycle**: Create, health-check, and destroy Hetzner Cloud cx22 VMs from the CLI
+- **Secret management**: Inject GitHub tokens and SSH keys at session start; revoke on cleanup
+- **Workspace provisioning**: Clone repos, set up agent identities, and assign issues to agent slots
+- **Agent launch**: Start CCGM agents headlessly across all VMs with configurable turn limits
+- **Status and collection**: Check agent progress, pull PR URLs, and collect completed work
+
+Commands installed:
+
+| Command | Description |
+|---------|-------------|
+| `/dispatch` | Dispatch GitHub issues to cloud VMs |
+| `/dispatch-status` | Check status of dispatched agents across all VMs |
+| `/dispatch-stop` | Stop agents and optionally destroy VMs |
+| `/vm-manage` | Create, destroy, health-check, or SSH into dispatch VMs |
+
+**Config prompts**: Set `HCLOUD_TOKEN` in your shell environment (see Hetzner Cloud console)
 
 **Dependencies**: None
 

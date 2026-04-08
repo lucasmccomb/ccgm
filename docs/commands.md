@@ -823,3 +823,115 @@ Delegates to a Haiku agent to minimize token usage. Interprets natural language 
 ```
 
 **Installed by**: remote-server module
+
+---
+
+## Agent manager commands
+
+Installed by the **agent-manager** module.
+
+---
+
+### /agents
+
+**Launch the Agent Manager TUI.**
+
+Opens a terminal dashboard for monitoring and controlling Claude Code agent processes across multi-clone repos.
+
+**What it shows**:
+- All agents running in tmux panes with health status and last activity
+- Real-time log streaming per agent
+- Controls: launch, stop, restart, force-kill
+
+**Usage**:
+```
+/agents
+```
+
+**Installed by**: agent-manager module
+
+---
+
+## Cloud dispatch commands
+
+Installed by the **cloud-dispatch** module.
+
+---
+
+### /dispatch
+
+**Dispatch GitHub issues to cloud VMs.**
+
+Provisions Hetzner Cloud VMs, injects secrets, sets up agent workspaces, and launches autonomous Claude Code agents to work on specified GitHub issues.
+
+**What happens**:
+1. Validates prerequisites (hcloud CLI, gh CLI, Hetzner auth)
+2. Creates or health-checks existing VMs
+3. Injects GitHub token and SSH keys to all VMs
+4. Clones repos and assigns issues to agent slots
+5. Launches agents headlessly with configurable turn/time limits
+6. Reports dispatch summary and estimated cost (~$0.015/hr per cx22 VM)
+
+**Usage**:
+```
+/dispatch lucasmccomb/my-repo --issues 42,43,44
+/dispatch my-repo --issues 42 --vms 1 --max-turns 100
+```
+
+**Installed by**: cloud-dispatch module
+
+---
+
+### /dispatch-status
+
+**Check status of dispatched agents.**
+
+Polls all VMs, shows each agent's current status and last commit, and collects PR URLs and completed work.
+
+**Usage**:
+```
+/dispatch-status
+```
+
+**Installed by**: cloud-dispatch module
+
+---
+
+### /dispatch-stop
+
+**Stop dispatched agents and optionally destroy VMs.**
+
+Stops all running agents, collects final results, then asks whether to keep VMs running (for reuse) or destroy them (stops billing).
+
+**Usage**:
+```
+/dispatch-stop
+```
+
+**Installed by**: cloud-dispatch module
+
+---
+
+### /vm-manage
+
+**Manage Hetzner Cloud VMs.**
+
+Create, destroy, health-check, check status, or SSH into dispatch VMs.
+
+**Actions**:
+- `status` - List all VMs with IP, state, and uptime
+- `create [N]` - Create N VMs (default 3)
+- `destroy [--all | name]` - Destroy one or all VMs
+- `health` - Run health checks on all VMs
+- `ssh <name>` - Open SSH session into a VM
+
+**Usage**:
+```
+/vm-manage status
+/vm-manage create 3
+/vm-manage destroy --all
+/vm-manage health
+/vm-manage ssh ccgm-agent-1
+```
+
+**Installed by**: cloud-dispatch module
