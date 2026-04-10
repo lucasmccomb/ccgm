@@ -1,6 +1,6 @@
 ---
 description: Analyze external Claude Code config repos to find useful patterns, rules, and techniques worth adopting into CCGM
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, WebSearch, WebFetch, AskUserQuestion
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, WebSearch, WebFetch, AskUserQuestion
 argument-hint: <github-url-or-local-path>
 ---
 

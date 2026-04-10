@@ -1,6 +1,6 @@
 ---
 description: Resume an interrupted xplan execution
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, AskUserQuestion, WebSearch, WebFetch
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
 argument-hint: <plan-name>
 ---
 

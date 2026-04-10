@@ -1,6 +1,6 @@
 ---
 description: Interactive deep research + planning + execution framework for new projects and features
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, AskUserQuestion, WebSearch, WebFetch
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
 argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--light]
 ---
 

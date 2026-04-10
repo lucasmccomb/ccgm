@@ -1,6 +1,6 @@
 ---
 description: Multi-Agent Workflow - take unstructured feedback, split into issues, spin up parallel agents
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, AskUserQuestion, WebSearch
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch
 ---
 
 # /mawf - Multi-Agent Workflow

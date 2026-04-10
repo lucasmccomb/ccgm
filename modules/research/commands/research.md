@@ -1,6 +1,6 @@
 ---
 description: Multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, and Reddit. No external dependencies.
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, WebSearch, WebFetch, AskUserQuestion
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, WebSearch, WebFetch, AskUserQuestion
 argument-hint: <topic> [--depth full|technical|market|lite|custom] [--output <path>] [--repo <path>] [--plan-dir <path>] [--extend <prior-research-path>]
 ---
 

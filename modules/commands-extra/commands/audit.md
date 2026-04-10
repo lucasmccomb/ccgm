@@ -1,6 +1,6 @@
 ---
 description: Codebase Audit with Auto-Fix - 8 categories including optional CVE/advisory checks
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, WebSearch, WebFetch, AskUserQuestion
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, WebSearch, WebFetch, AskUserQuestion
 ---
 
 # /audit - Codebase Audit with Auto-Fix
