@@ -1,24 +1,12 @@
 ---
 description: Log initialization - create today's log without full session startup
-allowed-tools: Agent
 ---
 
 # /log-init - Log Initialization
 
-Use the Agent tool to execute this workflow on a cheaper model:
-
-- **model**: haiku
-- **description**: log initialization
-
-Pass the agent all workflow instructions below.
-
-After the agent completes, relay its brief status line to the user exactly as received. Then wait for the user's next instruction.
-
----
-
-## Workflow Instructions
-
 Initialize session logging only. Faster than /startup - no git status, no issue check, no release check.
+
+Run the bash commands below directly. Do not delegate to a sub-agent.
 
 ### 1. Derive Agent Identity
 
