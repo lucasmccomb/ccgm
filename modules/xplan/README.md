@@ -44,7 +44,7 @@ Companion commands:
 
 xplan's research phase (Phase 1) spawns an agent that runs `/deepresearch` to produce a comprehensive research.md. Without it, xplan cannot complete its research step.
 
-`/deepresearch` uses a local pipeline - Ollama (qwen2.5:72b) for query generation and fact extraction, SearXNG (self-hosted Docker) for web search, and a single Anthropic API call (Sonnet) for synthesis. It requires Docker, Ollama (~40GB model), and a Python venv, which the installer handles.
+`/deepresearch` uses a fully local pipeline - Ollama (qwen2.5:72b) for query generation and fact extraction, SearXNG (self-hosted Docker) for web search - then Claude Code synthesizes the results. No external API keys required. It requires Docker, Ollama (~40GB model), and a Python venv, which the installer handles.
 
 ```bash
 git clone https://github.com/lucasmccomb/lem-deepresearch.git

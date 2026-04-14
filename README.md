@@ -161,7 +161,7 @@ For a quick install with a preset:
 
 The `/deepresearch` command is a more powerful research pipeline that lives in its own repo: **[lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch)**. It replaces `/research`'s parallel subagent approach with a local-first pipeline that produces higher-quality, source-backed research documents.
 
-**How it works:** Ollama (qwen2.5:72b) generates search queries and extracts facts, SearXNG (self-hosted Docker) runs parallel web searches across Google/Bing/DuckDuckGo, and a single Anthropic API call (Sonnet) synthesizes everything into a structured research.md.
+**How it works:** Ollama (qwen2.5:72b) generates search queries and extracts facts, SearXNG (self-hosted Docker) runs parallel web searches across Google/Bing/DuckDuckGo, and Claude Code synthesizes everything into a structured research.md. The pipeline is fully local - no external API keys required beyond what Claude Code already uses.
 
 **Why it's separate:** It requires local infrastructure (Docker, Ollama with a ~40GB model, a Python venv) that not every CCGM user will want. But if you use `/xplan`, you'll want this - xplan delegates its research phase to `/deepresearch`.
 
