@@ -25,7 +25,7 @@ Spawns up to 7 parallel research agents that each investigate the topic from a d
 
 ## /deepresearch - Local Pipeline Upgrade
 
-For higher-quality, faster, and cheaper research, install **[lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch)**. It replaces parallel subagents with a local pipeline: Ollama for query generation and fact extraction, SearXNG for web search, and a single Anthropic API call for synthesis.
+For higher-quality, faster, and cheaper research, install **[lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch)**. It replaces parallel subagents with a fully local pipeline: Ollama for query generation and fact extraction, SearXNG for web search. Claude Code performs the final synthesis using its own model. No external API keys required.
 
 `/deepresearch` requires Docker, Ollama (~40GB model), and a Python venv. See the [lem-deepresearch README](https://github.com/lucasmccomb/lem-deepresearch) for setup.
 
