@@ -1,6 +1,10 @@
 # Test-Driven Development
 
-No production code without a failing test first. This is the core discipline - if you did not watch the test fail, you do not know if it tests the right thing.
+**Iron Law:** NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST.
+
+Violating the letter of this rule is violating the spirit of this rule. If you did not watch the test fail, you do not know if it tests the right thing.
+
+**Announce at start:** "I'm using the TDD discipline. Writing the failing test first."
 
 ## The Red-Green-Refactor Cycle
 
@@ -67,9 +71,27 @@ TDD may not be practical for:
 
 If you think TDD does not apply to the current task, say so and get confirmation before writing code without tests.
 
-## Common Rationalizations to Reject
+## Rationalizations That Mean You Are About to Skip TDD
 
-- "It's too simple to test" - simple code has simple tests; write them
-- "I'll add tests after" - tests written after implementation prove nothing about correctness
-- "I already tested it manually" - manual testing does not prevent regressions
-- "It's just a refactor" - refactors without tests are just hoping nothing breaks
+| You are about to say... | The reality is... |
+|-------------------------|-------------------|
+| "It's too simple to test" | Simple code has simple tests. Write them. |
+| "I'll add tests after" | Tests written after the fact prove nothing about correctness. A test you did not watch fail may be passing for the wrong reason. |
+| "I already tested it manually" | Manual testing does not prevent regressions. Tomorrow's refactor needs today's automated test. |
+| "It's just a refactor" | Refactors without tests are hoping nothing breaks. If tests do not yet exist, they are a prerequisite of the refactor. |
+| "This is a one-off script" | One-off code written without tests is code written without understanding. |
+| "I'll mock the whole thing" | Heavy mocking tests the mock, not the code. |
+| "The test doesn't really matter here" | If the test does not matter, the behavior does not matter. Delete the code instead. |
+| "Tests are slow, I'll skip them this time" | "This time" is how every untested codebase was born. |
+
+## Red Flags
+
+Stop and write the test if you catch yourself:
+
+- "One more implementation first, then tests"
+- "Being pragmatic, not dogmatic"
+- "I'll add coverage later in a follow-up PR"
+- Reaching for production code before any test file exists
+- Writing or modifying tests AFTER the feature code is already written
+- Telling yourself the task is "too small" to bother
+- Accepting a passing test you did not watch fail first

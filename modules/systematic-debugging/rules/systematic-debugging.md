@@ -1,6 +1,10 @@
 # Systematic Debugging
 
-No fixes without root cause investigation first. Random fix attempts are failure mode - they waste time and often introduce new bugs.
+**Iron Law:** NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST.
+
+Violating the letter of this rule is violating the spirit of this rule. Random fix attempts are a failure mode - they waste time and often introduce new bugs.
+
+**Announce at start:** "I'm using the systematic-debugging discipline. Investigating root cause before proposing a fix."
 
 ## Phase 1: Root Cause Investigation
 
@@ -35,6 +39,18 @@ Do NOT skip this phase. Do NOT guess at the root cause.
 4. **Document the root cause** in the commit message
 5. **Extract the pattern** - If the bug took more than 2 attempts to diagnose, or if the root cause was surprising, write the pattern to a feedback memory file. Focus on what would help identify this class of bug faster next time.
 
+## Rationalizations That Mean You Are About to Skip Root-Cause Investigation
+
+| You are about to say... | The reality is... |
+|-------------------------|-------------------|
+| "I think I know what it is, let me just try X" | If you knew, you would not be guessing. Investigate first. |
+| "One more fix attempt" | The previous two did not work. This one probably will not either. Stop guessing and read the code. |
+| "While I'm here, let me also..." | Unrelated changes hide the signal when the fix fails. Stay focused. |
+| "The error message is misleading" | Often true, but it is the first evidence. Trace it before dismissing it. |
+| "It works on my machine" | Then the machine is part of the bug. Identify the delta. |
+| "Let me just add a try/catch" | Swallowing the error does not fix it; it hides the next failure. |
+| "This is probably a flaky test" | Sometimes true. Run it 20 times before believing it. Flake is itself a bug. |
+
 ## Red Flags
 
 Stop and reassess if you catch yourself:
@@ -43,6 +59,9 @@ Stop and reassess if you catch yourself:
 - Making multiple changes at once ("while I'm here...")
 - Assuming you know the cause without evidence
 - Trying the same approach a second time expecting different results
+- "One more fix attempt" - you have exhausted your budget; it is time to question assumptions
+- Adding logging only to confirm what you already believe, not to discover something new
+- Reaching for `try/catch` to make the symptom disappear
 
 ## Three-Strike Rule
 

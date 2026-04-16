@@ -1,6 +1,10 @@
 # Verification Before Completion
 
-Evidence before claims, always. Never assert that something works, passes, or is fixed without fresh proof.
+**Iron Law:** NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE.
+
+Violating the letter of this rule is violating the spirit of this rule. Never assert that something works, passes, or is fixed without fresh proof.
+
+**Announce at start:** "I'm using the verification discipline. Running fresh checks before claiming completion."
 
 ## The 5-Step Verification Process
 
@@ -23,6 +27,7 @@ Before claiming any task is complete:
 | "No regressions" | Full test suite output, not just the new tests |
 | "Types check" | Type checker output showing 0 errors |
 | "Deployed successfully" | Deployment URL responding with expected content |
+| "Agent completed" | The actual diff, test run, or artifact the subagent claims to have produced - never the subagent's self-report alone |
 
 ## Rules
 
@@ -50,6 +55,29 @@ Before claiming any task is complete:
 - **Stale results**: "Tests passed earlier" - they might not pass now after your changes
 - **Partial verification**: Running a subset of tests instead of the full suite
 - **Assumed verification**: "This change is trivial, it can't break anything" - run the checks anyway
+- **Trusting subagent self-reports**: A subagent saying "DONE" is not evidence. Read the diff, run the tests yourself, or inspect the artifact
+
+## Rationalizations That Mean You Are About to Claim Completion Without Evidence
+
+| You are about to say... | The reality is... |
+|-------------------------|-------------------|
+| "The change is too small to bother re-running" | Small changes break builds all the time. Run it. |
+| "I ran it earlier in this session" | State has changed since then. Run it again. |
+| "Type check passed, that's good enough" | Type check is not a test run. It is not a lint run. They catch different classes of problems. |
+| "The subagent said it succeeded" | A subagent's summary describes what it intended. Read the diff. |
+| "CI will catch anything I miss" | CI is a last-resort. Local checks are faster and cheaper. Do not ship the blame. |
+| "I can see from the code it will work" | Reading is not running. If you did not see exit code 0, you did not verify. |
+
+## Red Flags
+
+Stop and run the check if you catch yourself:
+
+- Saying "tests pass" without having just run them
+- Claiming a fix works before seeing fresh output
+- Trusting an earlier-in-session result after editing code
+- Reporting a subagent's result as your own without verifying the artifact
+- Summarizing what you did instead of showing the output
+- "I'll just do one more thing before I run the full suite"
 
 ## When to Verify
 

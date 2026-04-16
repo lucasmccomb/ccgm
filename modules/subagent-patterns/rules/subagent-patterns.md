@@ -83,3 +83,20 @@ If either stage fails, provide specific feedback and re-dispatch. Do not manuall
 - **No shared state**: Subagents should not modify the same files. If two tasks need to touch the same file, either serialize them or make one task handle both changes.
 - **Aggregate results**: After all subagents return, synthesize their outputs into a coherent whole before presenting to the user.
 - **Report failures**: If a subagent fails or produces unexpected results, report it clearly rather than silently working around it.
+
+## Subagent Completion Status Protocol
+
+Every subagent must return one of four structured status values, not a free-form summary. This is the vocabulary that lets the dispatcher make an immediate routing decision without re-reading the whole result.
+
+Instruct subagents to end their reports with one of:
+
+| Status | Meaning | Dispatcher Action |
+|--------|---------|-------------------|
+| **DONE** | Task completed as specified; all deliverables present; no unresolved concerns. | Verify the artifact (read the diff, run the test) and move on. |
+| **DONE_WITH_CONCERNS** | Task completed but the agent has doubts about the approach, missing context, or edge cases it could not resolve. | Read the concerns section. Decide to accept, fix, or re-dispatch with guidance. |
+| **BLOCKED** | The task cannot be completed as specified. Specify what is blocking (missing file, conflicting constraint, environmental issue). | Resolve the blocker and re-dispatch, or revise the spec. |
+| **NEEDS_CONTEXT** | The task is under-specified. Specify what information would unblock it. | Supply the missing context and re-dispatch. |
+
+Free-form summaries force the dispatcher to re-read everything to decide what to do. DONE_WITH_CONCERNS in particular captures "I completed it but I have doubts" - a state that silent success would otherwise hide.
+
+**Do not trust the self-report.** A subagent reporting DONE is a claim, not evidence. Before accepting the result, verify the artifact (read the diff, check the file exists, run the test). See the `verification` rule for the full evidence table.
