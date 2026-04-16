@@ -1,0 +1,35 @@
+{
+  "name": "usage-halt",
+  "displayName": "5hr Usage Halt",
+  "description": "Polls Claude Code's 5-hour usage block via ccusage. At 99% of the block limit, writes a halt flag that a universal PreToolUse hook reads to deny every tool call until the block resets. Sends macOS notifications on halt and resume.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["settings"],
+  "files": {
+    "hooks/halt-gate.py": {
+      "target": "hooks/halt-gate.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/usage-monitor.sh": {
+      "target": "hooks/usage-monitor.sh",
+      "type": "hook",
+      "template": false
+    },
+    "settings.partial.json": {
+      "target": "settings.json",
+      "type": "config",
+      "merge": true,
+      "template": false
+    }
+  },
+  "postInstall": "postInstall.sh",
+  "tags": ["usage", "rate-limit", "hooks", "launchd", "notifications"],
+  "configPrompts": [
+    {
+      "key": "haltThreshold",
+      "prompt": "Halt threshold percent (0-100). Default 99 halts at 99% of the 5hr block.",
+      "default": "99"
+    }
+  ]
+}

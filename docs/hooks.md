@@ -18,29 +18,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 12 hooks (11 Python + 1 shell script), 2 Python libraries, and a settings partial. The **session-logging** module installs 1 additional hook. The **self-improving** module installs 2 additional hooks. Total: 15 hooks across 3 modules.
-
----
-
-### halt-gate.py
-
-**Type**: PreToolUse (universal - no matcher, fires on every tool call)
-**Module**: hooks
-**Can block**: Yes
-
-Universal gate that enforces the 5-hour usage-halt system. Runs before every tool call and denies execution when Claude Code is in a usage-halt state.
-
-**How it works**:
-1. Checks for `~/.claude/halt.flag`
-2. If the file exists, reads the ISO 8601 reset timestamp inside it
-3. If the reset time is in the future, exits with code 2 (block) and a message showing the reset ETA
-4. If the reset time has passed, deletes the flag file and allows the tool call through
-
-**Paired with**: `usage-monitor.sh` (a launchd-driven shell script in this module that polls `ccusage blocks --active --json --token-limit max` every 60 seconds). When usage hits 99%, the monitor writes the halt flag and sends a macOS notification. When usage drops below threshold after the reset period, it deletes the flag and notifies again.
-
-**Setup**: The monitor is installed as a launchd plist at `~/Library/LaunchAgents/com.lem.claude-usage-monitor.plist`. Load it with `launchctl load ~/Library/LaunchAgents/com.lem.claude-usage-monitor.plist`. The plist lives outside `~/.claude/` and is not managed by CCGM's installer - see the hooks module README for manual setup.
-
-**Escape hatch**: Delete `~/.claude/halt.flag` manually to override a halt immediately.
+The **hooks** module installs 10 hooks, 2 Python libraries, and a settings partial. The **session-logging** module installs 1 additional hook. The **self-improving** module installs 2 additional hooks. Total: 13 hooks across 3 modules.
 
 ---
 
