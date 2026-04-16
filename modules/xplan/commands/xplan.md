@@ -610,6 +610,7 @@ Rules:
 - Each epic results in **working, tested code** (unit + integration tests included)
 - Define clear **inputs** (what must exist) and **outputs** (what results)
 - Identify **dependency order** - parallel vs. sequential
+- Define **bring-up steps** - the concrete actions required to get the app (local and/or production) into a testable state once this epic merges: migrations to run, dev servers to restart, deploys to trigger, env vars/secrets to set, caches to invalidate, seed data to load. "Code merged" is not "change testable"; the plan must close that gap explicitly.
 
 Epic categories:
 - **Foundation epics**: Repo setup, CI/CD, shared types, config - run first
@@ -646,6 +647,7 @@ Define:
 - **Agent allocation**: How many agents per wave (based on Phase 2.7 decision)
 - **Integration points**: Where parallel streams merge
 - **Verification gates**: Checkpoints before proceeding
+- **Post-wave bring-up**: Aggregate the bring-up steps from every epic in the wave into a single ordered runbook. Include: migrations (with correct order if multiple), which services to restart (local dev servers, workers, background jobs), which deploys to trigger and verify, env vars/secrets to set, and the smoke-test command(s) that prove all layers are live. This runbook executes between waves - agents do not advance to the next wave until the previous wave's app state is reactivated and verified working.
 
 ### 3.7 Create decisions.md
 
@@ -771,6 +773,7 @@ Create `~/code/plans/{concept-name}/plan.md`:
 - **Tests**: [What tests are written]
 - **Files created/modified**: [List]
 - **Acceptance criteria**: [Checkboxes]
+- **Bring-up steps**: [Concrete actions required to make this change testable once merged - migrations, server restarts, deploys, env vars, cache invalidation, seed data. "None" only if truly none (e.g., docs-only).]
 - **Checkpoint notes**: [Key context to preserve if session compacts]
 
 ## 6. Human-Epics
@@ -792,38 +795,76 @@ Create `~/code/plans/{concept-name}/plan.md`:
 ### 8.3 E2E Tests (Playwright)
 ### 8.4 Test Coverage Targets
 
-## 9. Review Findings
-[Only sections for reviews selected in Phase 4.0]
-### 9.1 Security Review Summary (if selected)
-### 9.2 Architecture Review Summary (if selected)
-### 9.3 Business Logic Review Summary (if selected)
-### 9.4 Changes Made Based on Reviews
+## 9. Post-Implementation Integration
 
-## 10. Risk Register
+Getting the system from "code merged" to "app live and testable" is a first-class deliverable of this plan, not an afterthought. This section is the runbook for every transition.
+
+### 9.1 Per-Wave Bring-Up Runbook
+
+For each wave, a single ordered checklist that executes AFTER the wave's PRs merge and BEFORE the next wave begins:
+
+```
+Wave N Bring-Up:
+1. Pull latest main in all active clones
+2. Install new dependencies if package manifests changed: `{pnpm install | npm install}`
+3. Run new DB migrations: `{exact commands, in order}`
+4. Regenerate types if schema changed: `{exact command}`
+5. Set new env vars/secrets: `{exact commands or file updates}`
+6. Restart local dev servers: `{frontend, backend, workers, background jobs}`
+7. Trigger/verify production deploys: `{commands or dashboard links}`
+8. Invalidate caches if needed: `{exact commands}`
+9. Load/update seed data if needed: `{exact commands}`
+10. Smoke test: `{exact command or manual steps that prove all layers are live}`
+```
+
+Every step has an exact command or link. Vague instructions like "restart the server" do not belong here.
+
+### 9.2 Local vs. Production Parity
+
+Specify which bring-up steps apply to local vs. production vs. both. Production deploys often need extra steps (DNS propagation, CDN cache purge, health checks) that local doesn't.
+
+### 9.3 Rollback Plan
+
+For each wave's bring-up, specify the rollback: how to revert migrations, redeploy previous version, restore env vars. Rollback needs to be as well-defined as roll-forward.
+
+### 9.4 Final Bring-Up (end of execution)
+
+The last-wave bring-up runbook that takes the fully-merged project to a confirmed-live state. This is the single source of truth for "app is ready to test". Anything that was deferred or flagged during waves gets resolved here.
+
+## 10. Review Findings
+[Only sections for reviews selected in Phase 4.0]
+### 10.1 Security Review Summary (if selected)
+### 10.2 Architecture Review Summary (if selected)
+### 10.3 Business Logic Review Summary (if selected)
+### 10.4 Changes Made Based on Reviews
+
+## 11. Risk Register
 | Risk | Severity | Likelihood | Mitigation | Owner |
 |------|----------|------------|------------|-------|
 
-## 11. Scope Estimate
+## 12. Scope Estimate
 [See Phase 5.5 for generation details]
 
-## 12. Post-Execution Verification Checklist
+## 13. Post-Execution Verification Checklist
 - [ ] All agent-epics completed and merged
 - [ ] All tests passing (unit, integration, e2e)
 - [ ] No open PRs (except human-blocked)
 - [ ] No uncommitted changes in any clone
 - [ ] No open issues (except human-agent/human-epic)
 - [ ] CI/CD pipeline green
-- [ ] Deployment working
+- [ ] **Final Bring-Up runbook (Section 9.4) executed end-to-end**
+- [ ] **All app layers confirmed live: frontend loads, backend responds, DB reachable, migrations applied, deploys current**
+- [ ] **Smoke test passes against the running system**
 - [ ] All review findings addressed
 - [ ] README.md generated and merged
 ```
 
 ### Phase 5.5: Scope Estimate
 
-Add to plan.md Section 11:
+Add to plan.md Section 12:
 
 ```markdown
-## 11. Scope Estimate
+## 12. Scope Estimate
 
 | Metric | Count |
 |--------|-------|
@@ -1005,6 +1046,7 @@ When all wave agents complete:
 - Verify all PRs are created and passing CI
 - Verify all tests pass, no conflicts between PRs
 - Merge all PRs for the wave
+- **Execute the wave's Bring-Up Runbook (plan.md Section 9.1)**: run migrations in order, install new deps, regenerate types, set new env vars/secrets, restart local dev servers, trigger/verify deploys, invalidate caches, load seed data, run smoke tests. Do not declare the wave done until every step has run and passed.
 
 #### 7.3.5 Checkpoint (MANDATORY after each wave)
 
@@ -1024,6 +1066,9 @@ Write to `progress.md`:
 ### State
 - All clones synced to main: yes/no
 - CI status: green/red
+- Bring-up runbook executed: yes/no
+- All layers verified live (DB, backend, frontend, workers, deploy): yes/no
+- Smoke test passed: yes/no
 - Open blockers: none / [list]
 ### Resume context
 [Key decisions, patterns established, and gotchas discovered so far]
@@ -1035,11 +1080,18 @@ This checkpoint enables `/xplan-resume` to pick up where execution left off.
 
 ### 7.4 Integration Verification
 
-After each wave:
+After each wave, AFTER the Bring-Up Runbook (7.3.4) has executed:
 - Pull latest main into all clones
 - Run full test suite
-- **Verify the deployed application works** - confirm deploy succeeds and test the actual running app. Use curl, browser automation, or whatever method fits. Do not rely solely on CI passing.
-- Fix integration issues before proceeding
+- **Verify every layer is live**:
+  - Database: new migrations applied, no pending migrations, schema matches code
+  - Backend: API responds to health check and a representative request, logs show no startup errors
+  - Frontend: loads without console errors, hits the backend successfully
+  - Workers/background jobs: running, processing queues, no crash loops
+  - Deploy (if production-affecting): new version live at the canonical URL, old version retired
+- **Run the wave's smoke test** against the running system (curl, browser automation, or explicit manual steps) - not just CI
+- If any layer is broken or stale, fix it before proceeding. The next wave does NOT start against a degraded system.
+- Record completion in progress.md: bring-up done, layers verified, smoke test passed
 
 ### 7.5 Continue Until Complete
 
@@ -1051,6 +1103,8 @@ After each wave:
 - No open PRs
 - CI is green
 - Deployment working
+- **Final Bring-Up (plan.md Section 9.4) executed** - all migrations applied, all services running current code, all layers confirmed live
+- **End-to-end smoke test passes** against the running system - the user should be able to open the app and use it immediately
 
 If blocked by a human-epic: create a P0 issue with exact instructions, notify the user, continue non-blocked work.
 
