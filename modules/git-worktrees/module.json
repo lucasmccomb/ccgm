@@ -1,0 +1,27 @@
+{
+  "name": "git-worktrees",
+  "displayName": "Git Worktrees",
+  "description": "Solo-agent worktree-based isolation for feature work. Lighter alternative to multi-clone setup when only one agent is active.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "rules/git-worktrees.md": {
+      "target": "rules/git-worktrees.md",
+      "type": "rule",
+      "template": false
+    },
+    "commands/worktree-start.md": {
+      "target": "commands/worktree-start.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/worktree-finish.md": {
+      "target": "commands/worktree-finish.md",
+      "type": "command",
+      "template": false
+    }
+  },
+  "tags": ["git", "worktree", "isolation", "workflow"],
+  "configPrompts": []
+}
