@@ -1,7 +1,7 @@
 {
   "name": "commands-extra",
   "displayName": "Extra Commands",
-  "description": "Additional slash commands: /audit (codebase audit), /pwv (Playwright visual verify), /walkthrough (step-by-step guide), /promote-rule (promote repo rules to global).",
+  "description": "Additional slash commands: /audit (codebase audit), /pwv (Playwright visual verify), /walkthrough (step-by-step guide), /promote-rule (promote repo rules to global), /freeze + /unfreeze + /guard (safety-hook state management).",
   "category": "commands",
   "scope": ["global"],
   "dependencies": [],
@@ -10,8 +10,11 @@
     "commands/pwv.md": { "target": "commands/pwv.md", "type": "command", "template": false },
     "commands/walkthrough.md": { "target": "commands/walkthrough.md", "type": "command", "template": false },
     "commands/promote-rule.md": { "target": "commands/promote-rule.md", "type": "command", "template": false },
+    "commands/freeze.md": { "target": "commands/freeze.md", "type": "command", "template": false },
+    "commands/unfreeze.md": { "target": "commands/unfreeze.md", "type": "command", "template": false },
+    "commands/guard.md": { "target": "commands/guard.md", "type": "command", "template": false },
     "skills/audit/SKILL.md": { "target": "skills/audit/SKILL.md", "type": "skill", "template": false }
   },
-  "tags": ["commands", "audit", "verification", "walkthrough"],
+  "tags": ["commands", "audit", "verification", "walkthrough", "safety"],
   "configPrompts": []
 }

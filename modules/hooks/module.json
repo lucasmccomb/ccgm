@@ -66,6 +66,16 @@
       "type": "hook",
       "template": false
     },
+    "hooks/check-careful.py": {
+      "target": "hooks/check-careful.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/check-freeze.py": {
+      "target": "hooks/check-freeze.py",
+      "type": "hook",
+      "template": false
+    },
     "settings.partial.json": {
       "target": "settings.json",
       "type": "config",
