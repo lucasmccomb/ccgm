@@ -1,0 +1,27 @@
+{
+  "name": "onboarding",
+  "displayName": "Onboarding Generator",
+  "description": "/onboarding - analyzes a repository and generates a structured ONBOARDING.md (architecture, dev setup, key commands, test workflow, glossary). Runs an inventory script to build a language-aware structural map, reads only the files that map surfaces, and writes prose with strict voice rules so the output reads like a knowledgeable teammate rather than generated documentation.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "commands/onboarding.md": {
+      "target": "commands/onboarding.md",
+      "type": "command",
+      "template": false
+    },
+    "skills/onboarding/SKILL.md": {
+      "target": "skills/onboarding/SKILL.md",
+      "type": "skill",
+      "template": false
+    },
+    "scripts/inventory.mjs": {
+      "target": "scripts/inventory.mjs",
+      "type": "script",
+      "template": false
+    }
+  },
+  "tags": ["onboarding", "documentation", "inventory", "command", "skill"],
+  "configPrompts": []
+}
