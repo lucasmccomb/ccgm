@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# Fetch unresolved PR review threads via GitHub GraphQL.
+#
+# Usage:
+#   get-pr-comments <pr-number> [--repo owner/repo] [--state unresolved|all]
+#                                [--format json|markdown]
+#
+# Defaults:
+#   --repo     Current repo (via `gh repo view`)
+#   --state    unresolved (drops threads where isResolved=true)
+#   --format   json
+#
+# Output (json):
+#   {
+#     "pr": 123,
+#     "repo": "owner/repo",
+#     "fetched_at": "2026-04-16T14:32:00Z",
+#     "threads": [
+#       {
+#         "thread_id": "PRRT_...",          # GraphQL node id (use to resolve)
+#         "is_resolved": false,
+#         "is_outdated": false,
+#         "path": "src/foo.ts",
+#         "line": 42,
+#         "diff_side": "RIGHT",
+#         "comments": [
+#           {
+#             "id": "IC_...",
+#             "author": "login",
+#             "body": "...",
+#             "created_at": "...",
+#             "url": "https://github.com/..."
+#           }
+#         ]
+#       }
+#     ]
+#   }
+#
+# Markdown format is human-readable; json is for machine consumption by the
+# resolve-pr-feedback skill.
+#
+# Requires: gh (authenticated), jq.
+
+set -euo pipefail
+
+PR=""
+REPO=""
+STATE="unresolved"
+FORMAT="json"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repo)   REPO="$2"; shift 2 ;;
+    --state)  STATE="$2"; shift 2 ;;
+    --format) FORMAT="$2"; shift 2 ;;
+    --help|-h)
+      sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    -*)
+      echo "Unknown flag: $1" >&2
+      exit 2
+      ;;
+    *)
+      if [ -z "$PR" ]; then PR="$1"; else
+        echo "Unexpected argument: $1" >&2
+        exit 2
+      fi
+      shift
+      ;;
+  esac
+done
+
+if [ -z "$PR" ]; then
+  echo "Usage: get-pr-comments <pr-number> [--repo owner/repo] [--state unresolved|all] [--format json|markdown]" >&2
+  exit 2
+fi
+
+# Resolve repo if not provided.
+if [ -z "$REPO" ]; then
+  REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+fi
+
+OWNER="${REPO%%/*}"
+NAME="${REPO##*/}"
+
+# GraphQL query. Paginates review threads up to 100 at a time; each thread's
+# comments up to 50. Most PRs fit in one page - paginate threads if HasNextPage.
+read -r -d '' QUERY <<'GRAPHQL' || true
+query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          originalLine
+          diffSide
+          comments(first: 50) {
+            nodes {
+              id
+              author { login }
+              body
+              createdAt
+              url
+            }
+          }
+        }
+      }
+    }
+  }
+}
+GRAPHQL
+
+# Accumulate threads across paginated requests.
+ACCUM='[]'
+CURSOR="null"
+
+while :; do
+  if [ "$CURSOR" = "null" ]; then
+    RESPONSE=$(gh api graphql \
+      -f query="$QUERY" \
+      -F owner="$OWNER" -F name="$NAME" -F pr="$PR")
+  else
+    RESPONSE=$(gh api graphql \
+      -f query="$QUERY" \
+      -F owner="$OWNER" -F name="$NAME" -F pr="$PR" -F cursor="$CURSOR")
+  fi
+
+  PAGE_THREADS=$(echo "$RESPONSE" | jq '.data.repository.pullRequest.reviewThreads.nodes')
+  ACCUM=$(jq -n --argjson a "$ACCUM" --argjson b "$PAGE_THREADS" '$a + $b')
+
+  HAS_NEXT=$(echo "$RESPONSE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
+  if [ "$HAS_NEXT" != "true" ]; then break; fi
+  CURSOR=$(echo "$RESPONSE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+done
+
+# Filter by state.
+if [ "$STATE" = "unresolved" ]; then
+  ACCUM=$(echo "$ACCUM" | jq '[.[] | select(.isResolved == false)]')
+fi
+
+# Shape output.
+SHAPED=$(echo "$ACCUM" | jq '[.[] | {
+  thread_id: .id,
+  is_resolved: .isResolved,
+  is_outdated: .isOutdated,
+  path: .path,
+  line: (.line // .originalLine),
+  diff_side: .diffSide,
+  comments: [.comments.nodes[] | {
+    id: .id,
+    author: (.author.login // "ghost"),
+    body: .body,
+    created_at: .createdAt,
+    url: .url
+  }]
+}]')
+
+FETCHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+if [ "$FORMAT" = "json" ]; then
+  jq -n \
+    --argjson threads "$SHAPED" \
+    --arg repo "$REPO" \
+    --argjson pr "$PR" \
+    --arg fetched_at "$FETCHED_AT" \
+    '{pr: $pr, repo: $repo, fetched_at: $fetched_at, threads: $threads}'
+elif [ "$FORMAT" = "markdown" ]; then
+  echo "# PR #$PR review threads ($REPO)"
+  echo ""
+  echo "Fetched at $FETCHED_AT. State filter: $STATE."
+  echo ""
+  COUNT=$(echo "$SHAPED" | jq 'length')
+  echo "$COUNT threads."
+  echo ""
+  echo "$SHAPED" | jq -r '.[] |
+    "## " + (.path // "(general)") + ":" + ((.line|tostring) // "?") +
+    "  (thread " + .thread_id + ", " +
+    (if .is_resolved then "resolved" else "unresolved" end) +
+    (if .is_outdated then ", outdated" else "" end) + ")\n\n" +
+    (.comments | map(
+      "- **@" + .author + "** (" + .created_at + "): " +
+      (.body | gsub("\n"; "\n  ")) + "\n  " + .url
+    ) | join("\n\n")) + "\n"'
+else
+  echo "Unknown format: $FORMAT (expected json|markdown)" >&2
+  exit 2
+fi
