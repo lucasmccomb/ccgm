@@ -1,0 +1,17 @@
+{
+  "name": "skill-authoring",
+  "displayName": "Skill Authoring",
+  "description": "Discipline for writing skills and slash commands that stay efficient, portable, and context-safe. Covers reference-file inclusion, conditional content extraction, tool selection, and writing style.",
+  "category": "patterns",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/skill-authoring.md": {
+      "target": "rules/skill-authoring.md",
+      "type": "rule",
+      "template": false
+    }
+  },
+  "tags": ["skills", "commands", "authoring", "context-window", "discipline"],
+  "configPrompts": []
+}
