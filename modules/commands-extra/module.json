@@ -1,7 +1,7 @@
 {
   "name": "commands-extra",
   "displayName": "Extra Commands",
-  "description": "Additional slash commands: /audit (codebase audit), /pwv (Playwright visual verify), /walkthrough (step-by-step guide), /promote-rule (promote repo rules to global), /freeze + /unfreeze + /guard (safety-hook state management).",
+  "description": "Additional slash commands: /audit (codebase audit), /pwv (Playwright visual verify), /walkthrough (step-by-step guide), /promote-rule (promote repo rules to global), /freeze + /unfreeze + /guard (safety-hook state management), /checkpoint (save/resume WIP session state).",
   "category": "commands",
   "scope": ["global"],
   "dependencies": [],
@@ -13,8 +13,9 @@
     "commands/freeze.md": { "target": "commands/freeze.md", "type": "command", "template": false },
     "commands/unfreeze.md": { "target": "commands/unfreeze.md", "type": "command", "template": false },
     "commands/guard.md": { "target": "commands/guard.md", "type": "command", "template": false },
+    "commands/checkpoint.md": { "target": "commands/checkpoint.md", "type": "command", "template": false },
     "skills/audit/SKILL.md": { "target": "skills/audit/SKILL.md", "type": "skill", "template": false }
   },
-  "tags": ["commands", "audit", "verification", "walkthrough", "safety"],
+  "tags": ["commands", "audit", "verification", "walkthrough", "safety", "checkpoint"],
   "configPrompts": []
 }

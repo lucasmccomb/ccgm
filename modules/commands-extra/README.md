@@ -1,10 +1,10 @@
 # commands-extra
 
-Additional slash commands for codebase audits, visual verification, guided walkthroughs, rule promotion, and safety-hook state management.
+Additional slash commands for codebase audits, visual verification, guided walkthroughs, rule promotion, safety-hook state management, and session-state checkpoints.
 
 ## What It Does
 
-This module installs seven slash command files:
+This module installs eight slash command files:
 
 - **/audit** - Run a comprehensive codebase audit across 8 categories (security, dependencies, code quality, architecture, TypeScript/React, testing, documentation, performance) with auto-fix capabilities
 - **/pwv** - Playwright Visual Verification for testing UI in a headless browser with screenshots, viewport checks, and theme verification
@@ -13,6 +13,7 @@ This module installs seven slash command files:
 - **/freeze** - Scope-lock Edit/Write to a directory by writing `~/.claude/freeze-dir.txt`. Reads by `check-freeze.py` (see the `hooks` module)
 - **/unfreeze** - Clear the freeze scope by deleting `~/.claude/freeze-dir.txt`
 - **/guard** - Compose careful + freeze for focused, safe sessions. Activates the freeze state file and confirms both safety hooks are installed
+- **/checkpoint** - Save or resume a structured WIP snapshot (working-on / decisions / remaining work / notes) under `~/.claude/checkpoints/{repo}/`. Complements session-logging: logs are chronological narrative, checkpoints are compact handoff state
 
 ## Manual Installation
 
@@ -27,6 +28,7 @@ cp commands/promote-rule.md ~/.claude/commands/promote-rule.md
 cp commands/freeze.md ~/.claude/commands/freeze.md
 cp commands/unfreeze.md ~/.claude/commands/unfreeze.md
 cp commands/guard.md ~/.claude/commands/guard.md
+cp commands/checkpoint.md ~/.claude/commands/checkpoint.md
 
 # Project-level
 cp commands/audit.md .claude/commands/audit.md
@@ -36,6 +38,7 @@ cp commands/promote-rule.md .claude/commands/promote-rule.md
 cp commands/freeze.md .claude/commands/freeze.md
 cp commands/unfreeze.md .claude/commands/unfreeze.md
 cp commands/guard.md .claude/commands/guard.md
+cp commands/checkpoint.md .claude/commands/checkpoint.md
 ```
 
 ## Files
@@ -49,3 +52,4 @@ cp commands/guard.md .claude/commands/guard.md
 | `commands/freeze.md` | Activate the freeze scope (writes `~/.claude/freeze-dir.txt`) |
 | `commands/unfreeze.md` | Clear the freeze scope (deletes `~/.claude/freeze-dir.txt`) |
 | `commands/guard.md` | Compose careful + freeze for focused, safe sessions |
+| `commands/checkpoint.md` | Save or resume a WIP session-state checkpoint under `~/.claude/checkpoints/{repo}/` |
