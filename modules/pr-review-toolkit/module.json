@@ -1,0 +1,22 @@
+{
+  "name": "pr-review-toolkit",
+  "displayName": "PR Review Toolkit",
+  "description": "Augments the external pr-review-toolkit plugin with scope-drift detection (compare stated intent to actual diff) and a Fix-First output format (AUTO-FIXED vs NEEDS INPUT). Ported from garrytan/gstack review skill.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "skills/scope-drift/SKILL.md": {
+      "target": "skills/scope-drift/SKILL.md",
+      "type": "skill",
+      "template": false
+    },
+    "rules/fix-first-review.md": {
+      "target": "rules/fix-first-review.md",
+      "type": "rule",
+      "template": false
+    }
+  },
+  "tags": ["commands", "review", "scope-drift", "fix-first", "pr"],
+  "configPrompts": []
+}
