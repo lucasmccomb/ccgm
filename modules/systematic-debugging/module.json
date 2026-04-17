@@ -7,7 +7,10 @@
   "dependencies": [],
   "files": {
     "rules/systematic-debugging.md": { "target": "rules/systematic-debugging.md", "type": "rule", "template": false },
-    "rules/debugging.md": { "target": "rules/debugging.md", "type": "rule", "template": false }
+    "rules/debugging.md": { "target": "rules/debugging.md", "type": "rule", "template": false },
+    "rules/root-cause-tracing.md": { "target": "rules/root-cause-tracing.md", "type": "rule", "template": false },
+    "rules/defense-in-depth.md": { "target": "rules/defense-in-depth.md", "type": "rule", "template": false },
+    "rules/condition-based-waiting.md": { "target": "rules/condition-based-waiting.md", "type": "rule", "template": false }
   },
   "tags": ["debugging", "root-cause", "methodology", "troubleshooting"],
   "configPrompts": []
