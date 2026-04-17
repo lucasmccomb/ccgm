@@ -1,0 +1,13 @@
+{
+  "name": "ship-readiness",
+  "displayName": "Ship Readiness Dashboard",
+  "description": "/ship-ready command: at-a-glance dashboard of what gates a merge on the current branch (failing tests, open PR count, stale branches, outdated deps, merge velocity, review freshness, unresolved risks from docs/solutions/). Reads ce-review envelopes for commit-hash staleness detection.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "commands/ship-ready.md": { "target": "commands/ship-ready.md", "type": "command", "template": false }
+  },
+  "tags": ["ship", "dashboard", "review", "staleness", "gating", "pre-merge"],
+  "configPrompts": []
+}
