@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""
+ccgm-learnings-log — append a new learning to the project JSONL store.
+
+Usage:
+    ccgm-learnings-log --type pattern --content "..." [opts]
+    ccgm-learnings-log --from-json '{...}'
+    ccgm-learnings-log --stdin                     # read a JSON object
+    ccgm-learnings-log verify <id>                 # bump uses + last_verified
+    ccgm-learnings-log contradict <id>             # bump contradictions counter
+    ccgm-learnings-log deprecate <id>              # mark deprecated
+    ccgm-learnings-log config cross-project on|off
+
+Fields:
+    --type       pattern | pitfall | preference | architecture | tool | operational
+    --source     observed | user-stated | inferred | cross-model (default observed)
+    --content    prose (will be sanitized; see learnings_store.sanitize_content)
+    --confidence 1-10 (default 5)
+    --tag        repeatable; lowercase kebab-case
+    --file       repeatable; repo-relative path for staleness tracking
+    --project    override project slug (default: auto-detect from git remote)
+
+Writes to:
+    ~/.claude/learnings/{project-slug}/learnings.jsonl
+
+The sanitizer neutralizes instruction-like patterns (`system:`, `ignore
+previous instructions`, <system> tags, etc.) so untrusted content cannot
+trivially be replayed as an instruction when injected into later prompts.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent / "lib"))
+
+import learnings_store as ls  # noqa: E402
+
+
+def _cmd_log(args: argparse.Namespace) -> int:
+    if args.from_json:
+        payload = json.loads(args.from_json)
+    elif args.stdin:
+        payload = json.load(sys.stdin)
+    else:
+        if not args.type or not args.content:
+            print("error: --type and --content are required (or use --from-json / --stdin)",
+                  file=sys.stderr)
+            return 2
+        payload = {
+            "type": args.type,
+            "content": args.content,
+            "source": args.source or "observed",
+            "confidence": args.confidence if args.confidence is not None else ls.DEFAULT_CONFIDENCE,
+            "tags": args.tag or [],
+            "files": args.file or [],
+            "project": args.project,
+        }
+
+    try:
+        entry = ls.build_entry(
+            type_=payload["type"],
+            content=payload["content"],
+            source=payload.get("source", "observed"),
+            confidence=payload.get("confidence", ls.DEFAULT_CONFIDENCE),
+            tags=payload.get("tags") or [],
+            files=payload.get("files") or [],
+            project=payload.get("project"),
+            key=payload.get("key"),
+        )
+    except ls.ValidationError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+    path = ls.append_entry(entry)
+    print(json.dumps({"id": entry["id"], "path": str(path), "slug": entry["project"]}))
+    return 0
+
+
+def _cmd_verify(args: argparse.Namespace) -> int:
+    ok = ls.update_entry_by_id(args.id, slug=args.project, verify=True)
+    return 0 if ok else 1
+
+
+def _cmd_contradict(args: argparse.Namespace) -> int:
+    ok = ls.update_entry_by_id(args.id, slug=args.project, contradict=True)
+    return 0 if ok else 1
+
+
+def _cmd_deprecate(args: argparse.Namespace) -> int:
+    ok = ls.update_entry_by_id(args.id, slug=args.project, deprecate=True)
+    return 0 if ok else 1
+
+
+def _cmd_config(args: argparse.Namespace) -> int:
+    cfg = ls.load_config()
+    if args.setting == "cross-project":
+        cfg["cross_project_search"] = (args.value == "on")
+        ls.save_config(cfg)
+        print(json.dumps({"cross_project_search": cfg["cross_project_search"]}))
+        return 0
+    print(f"error: unknown config setting {args.setting!r}", file=sys.stderr)
+    return 2
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="ccgm-learnings-log", description=__doc__.splitlines()[1])
+    sub = p.add_subparsers(dest="cmd")
+
+    # Default (no subcommand) == log
+    p.add_argument("--type", choices=sorted(ls.VALID_TYPES))
+    p.add_argument("--source", choices=sorted(ls.VALID_SOURCES))
+    p.add_argument("--content")
+    p.add_argument("--confidence", type=int)
+    p.add_argument("--tag", action="append")
+    p.add_argument("--file", action="append")
+    p.add_argument("--project")
+    p.add_argument("--key")
+    p.add_argument("--from-json", help="raw JSON payload instead of flags")
+    p.add_argument("--stdin", action="store_true", help="read JSON payload from stdin")
+
+    verify = sub.add_parser("verify", help="record a successful reuse of a learning")
+    verify.add_argument("id")
+    verify.add_argument("--project")
+    verify.set_defaults(func=_cmd_verify)
+
+    contra = sub.add_parser("contradict", help="record a contradiction against a learning")
+    contra.add_argument("id")
+    contra.add_argument("--project")
+    contra.set_defaults(func=_cmd_contradict)
+
+    dep = sub.add_parser("deprecate", help="mark a learning as deprecated (excluded from reads)")
+    dep.add_argument("id")
+    dep.add_argument("--project")
+    dep.set_defaults(func=_cmd_deprecate)
+
+    cfg_sub = sub.add_parser("config", help="adjust learnings-store config")
+    cfg_sub.add_argument("setting", choices=["cross-project"])
+    cfg_sub.add_argument("value")
+    cfg_sub.set_defaults(func=_cmd_config)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if getattr(args, "func", None):
+        return args.func(args)
+    return _cmd_log(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

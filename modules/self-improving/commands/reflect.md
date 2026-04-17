@@ -2,6 +2,8 @@
 
 Run the self-improving reflection loop for the current session. This command runs inline (not delegated to a subagent) to preserve full session context.
 
+Learnings are written to the schema-validated JSONL store at `~/.claude/learnings/{project-slug}/learnings.jsonl`; a pointer line is appended to MEMORY.md as a human-readable index.
+
 ---
 
 ## When to Use
@@ -44,36 +46,68 @@ Walk through each item:
 5. **Did I learn a user preference?** A working style, communication preference, or approach the user validated.
 6. **Did I discover a tool/framework gotcha?** A non-obvious behavior, config requirement, or pitfall.
 
-### Phase 4: Write to Memory (if warranted)
+### Phase 4: Search Before Logging
 
-For each pattern worth capturing from Phase 3, write it to the appropriate memory file:
+For each candidate learning from Phase 3, search the store before writing:
 
-| Pattern type | Memory file type | Example filename |
-|---|---|---|
-| Root cause / debugging lesson | feedback | `feedback_debugging_pattern.md` |
-| User preference | user | `user_preference_prs.md` |
-| Tool/framework gotcha | feedback | `feedback_tailwind_gotcha.md` |
-| Codebase discovery | project | `project_auth_architecture.md` |
-
-Use the standard memory file format:
-
-```markdown
----
-name: {pattern name}
-description: {one-line description for relevance matching}
-type: {user|feedback|project|reference}
----
-
-{Pattern content. For feedback/project types: rule/fact, then **Why:** and **How to apply:** lines.}
+```bash
+ccgm-learnings-search --query "<one or two keywords>" --max 5
 ```
 
-After writing, update MEMORY.md with a pointer to the new file.
+If a matching entry exists, reinforce it instead of creating a duplicate:
 
-If nothing from the checklist warrants a memory entry, that is fine. Report "No patterns worth capturing from this session" and move on.
+```bash
+ccgm-learnings-log verify <id>
+```
 
-### Phase 5: Report
+If no match exists, proceed to Phase 5.
+
+### Phase 5: Write to the Learnings Store
+
+Pick the right `type` from the vocabulary:
+
+| Pattern type | `--type` | Example content |
+|---|---|---|
+| Root cause / debugging lesson | `pitfall` | "Never stash before a branch switch; stale stashes lose context." |
+| User preference | `preference` | "Lucas prefers single bundled PRs for refactors over many small ones." |
+| Tool/framework gotcha | `tool` | "Tailwind v4 does not set cursor:pointer on buttons; add base styles." |
+| Codebase architecture fact | `architecture` | "Auth middleware runs before rate limiting in this repo." |
+| Process that worked | `pattern` | "Run migrations before regenerating TypeScript types to prevent drift." |
+| Ops / deploy fact | `operational` | "Cloudflare Pages takes 2-3 min to deploy; do not test immediately after merge." |
+
+Log the entry:
+
+```bash
+ccgm-learnings-log \
+  --type <type> \
+  --content "<one-paragraph rule, sanitized on write>" \
+  --tag <kebab-case-tag> --tag <another> \
+  --confidence <1-10> \
+  --file path/to/anchor  # optional, enables staleness detection
+```
+
+Set confidence honestly:
+- 8-10: confirmed 3+ times or explicitly stated by user
+- 5-7: observed twice or strongly implied
+- 3-4: tentative
+
+For learnings that apply across projects, set `--project _global`.
+
+### Phase 6: Dual-Write the MEMORY.md Index (optional)
+
+If a legacy MEMORY.md exists at `~/.claude/projects/*/memory/MEMORY.md`, append a one-line pointer so the human-readable index stays current:
+
+```markdown
+- [{type}] {short title} — id: {id} ({date})
+```
+
+The JSONL is the source of truth; MEMORY.md is a rendered view. If the two disagree, trust the JSONL.
+
+If nothing from the checklist warrants a learning entry, that is fine. Report "No patterns worth capturing from this session" and move on.
+
+### Phase 7: Report
 
 Briefly state what was captured:
-- Number of memory entries written (0 is valid)
-- One-line summary of each pattern captured
+- Number of learnings written (0 is valid)
+- One-line summary of each, including the id
 - Or "Nothing notable to capture from this session"
