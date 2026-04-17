@@ -10,6 +10,11 @@
       "target": "rules/autonomy.md",
       "type": "rule",
       "template": false
+    },
+    "rules/confusion-protocol.md": {
+      "target": "rules/confusion-protocol.md",
+      "type": "rule",
+      "template": false
     }
   },
   "tags": ["autonomy", "workflow", "productivity"],
