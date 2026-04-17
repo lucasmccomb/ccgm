@@ -1,0 +1,27 @@
+{
+  "name": "session-history",
+  "displayName": "Session History",
+  "description": "Cross-platform session historian agent. Searches prior Claude Code and Codex session transcripts for what was tried, what failed, and what was decided in earlier sessions on the same repo. Invoked by other skills (/compound, /xplan, /debug) to surface institutional knowledge a fresh session cannot see.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "agents/session-historian.md": {
+      "target": "agents/session-historian.md",
+      "type": "agent",
+      "template": false
+    },
+    "scripts/discover-sessions.sh": {
+      "target": "scripts/discover-sessions.sh",
+      "type": "script",
+      "template": false
+    },
+    "scripts/extract-metadata.py": {
+      "target": "scripts/extract-metadata.py",
+      "type": "script",
+      "template": false
+    }
+  },
+  "tags": ["session", "history", "retrieval", "agent", "cross-platform", "claude-code", "codex"],
+  "configPrompts": []
+}
