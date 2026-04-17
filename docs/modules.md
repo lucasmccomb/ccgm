@@ -280,6 +280,22 @@ Structured ideation framework.
 
 ---
 
+### brainstorm
+
+Design-before-implementation gate.
+
+**Installs**: 1 skill file
+
+| Command | Description |
+|---------|-------------|
+| `/brainstorm` | Hard gate forbidding code until a design spec with 2-3 approach tradeoffs is written and user-approved |
+
+**What it does**: Forbids code, scaffolding, or implementation until a design spec is written and explicitly approved. Explores context with read-only tools, proposes 2-3 genuinely distinct approaches with honest tradeoffs, writes a spec to `docs/brainstorm-notes/`, self-reviews for TBDs and contradictions, then waits for user approval before handoff to `/xplan`. Pairs with `/ideate` (concept refinement) to enforce spec-before-plan-before-code separation.
+
+**Dependencies**: None
+
+---
+
 ### research
 
 Multi-channel research using parallel agents.

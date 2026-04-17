@@ -131,6 +131,7 @@ For a quick install with a preset:
 | **editorial-critique** | commands | /editorial-critique - 8-pass editorial review of long-form writing: prose craft, AI-tell detection, argument, conciseness, accuracy, structure, impact, grammar. Scored report with auto-fix | - |
 | **design-review** | commands | /design-review - 6-pass visual design review: spacing, typography, responsive, hierarchy, accessibility, consistency. Screenshots + CSS analysis with auto-fix | - |
 | **ideate** | commands | /ideate - structured ideation framework: Socratic interview to refine ideas to 95% clarity, then hand off to /deepresearch or /xplan | - |
+| **brainstorm** | commands | /brainstorm - design-before-implementation gate: forbids code until a design spec with 2-3 approach tradeoffs is written and user-approved, then hands off to /xplan | - |
 | **research** | commands | /research - multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, Reddit. Zero dependencies.* | - |
 | **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
 | **session-logging** | workflow | Structured agent session logging with mandatory triggers and startup command | - |

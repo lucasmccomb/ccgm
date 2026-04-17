@@ -1,0 +1,13 @@
+{
+  "name": "brainstorm",
+  "displayName": "Brainstorm (Design-Before-Implementation Gate)",
+  "description": "/brainstorm - hard gate that forbids code, scaffolding, or implementation until a design spec is written and user-approved. Proposes 2-3 approaches with tradeoffs, writes a design doc, self-reviews for TBDs and contradictions, then hands off to /xplan. Pairs with /ideate (which refines the concept) to enforce spec-before-plan-before-code.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "skills/brainstorm/SKILL.md": { "target": "skills/brainstorm/SKILL.md", "type": "skill", "template": false }
+  },
+  "tags": ["commands", "design", "spec", "gate", "brainstorming", "planning"],
+  "configPrompts": []
+}
