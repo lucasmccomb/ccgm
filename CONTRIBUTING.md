@@ -18,6 +18,8 @@ modules/{name}/
 │   └── {name}.md
 ├── commands/            # Command files (.md) - available as /command-name
 │   └── {command}.md
+├── agents/              # Reusable subagent prompts (.md) - invoked by commands/skills
+│   └── {agent}.md
 ├── hooks/               # Hook scripts (.py) - triggered by Claude Code events
 │   └── {hook}.py
 ├── settings.base.json   # Settings template (merged into settings.json)
@@ -67,7 +69,12 @@ Create the files referenced in `module.json`. Place them in subdirectories that 
 
 - `rules/*.md` for rule files
 - `commands/*.md` for slash commands
+- `agents/*.md` for reusable subagent prompts
 - `hooks/*.py` for event hooks
+
+### When to use `agents/`
+
+Use `agents/` for reusable subagent definitions that are invoked by multiple commands or skills (for example, a `code-reviewer` or `adversarial-reviewer` prompt that several review pipelines share). Keep one-off prompts inline in the command or skill that uses them — promote to `agents/` only when the second caller appears.
 
 ### 4. Write a README.md
 
@@ -133,7 +140,7 @@ Each entry in the `files` object maps a source path (relative to the module dire
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `target` | string | yes | Destination path relative to the install root (`~/.claude/` or `.claude/`). |
-| `type` | string | yes | File type: `rule`, `command`, `hook`, `config`, or `doc`. |
+| `type` | string | yes | File type: `rule`, `command`, `agent`, `hook`, `config`, or `doc`. |
 | `template` | boolean | yes | Whether the file contains `__PLACEHOLDER__` template variables to expand. |
 | `merge` | boolean | no | For `config` type only. If `true`, the file is merged into the target rather than replacing it. Used for settings partials. |
 
@@ -143,6 +150,7 @@ Each entry in the `files` object maps a source path (relative to the module dire
 |------|-----------|-------------|
 | `rule` | `.md` | Markdown rules loaded by Claude Code at session start. Shapes behavior and decision-making. |
 | `command` | `.md` | Markdown files that become slash commands in Claude Code. File name becomes the command name. |
+| `agent` | `.md` | Reusable subagent prompts invoked by commands or skills via the Task tool. Installed to `~/.claude/agents/`. Use for prompts shared across two or more callers; keep one-off prompts inline. |
 | `hook` | `.py` | Python scripts triggered by Claude Code events (PreToolUse, UserPromptSubmit, etc.). |
 | `config` | `.json` | JSON configuration files (settings, partials). May be merged into existing files. |
 | `doc` | `.md` | Documentation files installed alongside rules. Referenced by rules but not auto-loaded. |
