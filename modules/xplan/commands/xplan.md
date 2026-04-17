@@ -891,6 +891,110 @@ Add to plan.md Section 12:
 
 ---
 
+### Phase 5.6: Plan Quality Self-Review (MANDATORY)
+
+**Prerequisite**: plan.md and Section 12 (Scope Estimate) have been written.
+
+**Goal**: Catch vague, placeholder, or internally inconsistent plan content before the user (or downstream execution agents) relies on it. Vague tasks and type-name drift are the two most common reasons parallel execution agents produce divergent implementations from the same plan.
+
+**Announce at start**: "I'm running the Phase 5.6 plan-quality self-review - scanning for placeholders and type-consistency issues before the final gate."
+
+This phase is a tight loop: scan, fix, rescan. Do not advance to Phase 6 while any check fails.
+
+#### 5.6.1 Placeholder Scan
+
+Scan the plan output for placeholder patterns. "Plan output" means ALL files written in this run:
+
+- `~/code/plans/{concept-name}/plan.md`
+- `~/code/plans/{concept-name}/decisions.md`
+- `~/code/plans/{concept-name}/naming.md` (if Phase 2 ran)
+- `~/code/plans/{concept-name}/progress.md` (if it exists yet)
+
+Run a literal scan for forbidden patterns:
+
+```bash
+cd ~/code/plans/{concept-name}
+grep -nE 'TBD|TODO|\[fill in\]|\[placeholder\]|similar to (Task|Epic) [0-9]|add appropriate (error handling|validation|tests)|write tests for the above|etc\.$|\.\.\.$|<insert|<fill' plan.md decisions.md naming.md progress.md 2>/dev/null
+```
+
+Also scan for soft placeholders that the grep won't catch - read the plan and look for:
+
+- Epics with acceptance criteria like "works correctly" or "as appropriate" instead of concrete verifiable outcomes
+- File lists that end in "etc." or "..." instead of being exhaustive
+- Bring-up steps that say "restart the server" instead of the exact command
+- "See above" or "same as Epic N" references that require the reader to reconstruct scope from another epic
+- Code blocks labeled as snippets rather than complete, drop-in content
+
+**Forbidden patterns (non-exhaustive)**:
+- `TBD`, `TODO`, `[fill in]`, `[placeholder]`, `<insert ...>`, `<fill ...>`
+- `similar to Task N`, `similar to Epic N`, `same as above`, `see above`
+- `add appropriate error handling`, `add appropriate validation`, `add appropriate tests`
+- `write tests for the above`
+- Sentences that trail off with `etc.` or `...` where a concrete list belongs
+
+**If any placeholder is found**: fix it in place by filling in the concrete content (exact file path, exact command, exact acceptance criterion, full code block). Do NOT delete the section - the section's presence means the information is needed. Re-run the scan after edits.
+
+#### 5.6.2 Type & Identifier Consistency Scan
+
+Plans frequently drift on the names of types, functions, database fields, env vars, and file paths across sections and across documents. Epic 3 calling a helper `clearLayers()` while Epic 7 calls the same helper `clearFullLayers()` will produce divergent implementations.
+
+Extract the canonical identifier set from the plan and check for drift:
+
+1. **Collect all proper-noun identifiers** referenced across plan.md, decisions.md, and naming.md. These include:
+   - Type / interface / class names (e.g., `UserProfile`, `AgentEpic`)
+   - Function / method names (e.g., `clearLayers`, `scheduleDraw`)
+   - Database table and column names
+   - Environment variable names (e.g., `CLOUDFLARE_API_TOKEN`)
+   - File paths (e.g., `src/lib/agent-tracking.ts`)
+   - Route / endpoint paths (e.g., `/api/users/:id`)
+   - Package names and import aliases
+
+2. **For each identifier**, grep across the plan output and verify it is spelled identically everywhere:
+
+   ```bash
+   cd ~/code/plans/{concept-name}
+   grep -n 'IdentifierName' plan.md decisions.md naming.md progress.md 2>/dev/null
+   ```
+
+3. **Flag near-duplicates** - same concept, different names. Common patterns:
+   - `clearLayers` vs `clearFullLayers` vs `resetLayers`
+   - `userId` vs `user_id` vs `uid`
+   - `VITE_SUPABASE_KEY` vs `VITE_SUPABASE_PUBLISHABLE_KEY`
+   - `src/lib/foo.ts` vs `src/lib/Foo.ts` vs `apps/web/src/lib/foo.ts`
+   - `AgentEpic` vs `Agent-Epic` vs `agent_epic`
+
+4. **Cross-document consistency** - identifiers that appear in multiple plan docs (plan.md, decisions.md, naming.md, progress.md) MUST use the exact same spelling, casing, and path in all of them. A decisions.md entry that chose Drizzle cannot coexist with a plan.md that references Prisma.
+
+**If any drift is found**: pick the canonical form (usually the one most consistent with the tech stack and naming conventions), update every occurrence, and re-run the scan. Record the canonical choice in decisions.md if the drift represented an actual choice between candidates.
+
+#### 5.6.3 Granularity & Concreteness Check
+
+Each agent-epic must be executable by a sub-agent without needing to ask the orchestrator for clarification. Check every Epic section in plan.md:
+
+- **Exact file paths** - every file created or modified is listed by absolute-within-repo path, not by description ("the auth handler")
+- **Complete code blocks** - any code shown in the plan is drop-in complete, not a snippet with "..." gaps
+- **Verifiable acceptance criteria** - every acceptance checkbox describes something the agent can run a command or test to confirm (not "works correctly")
+- **Explicit bring-up** - the Bring-up steps field lists exact commands, not descriptions
+- **Named dependencies** - "Dependencies" lists specific epic names or "None", not "the previous work"
+
+If any epic fails these checks, rewrite it until it passes. An epic that cannot be scoped concretely belongs in a different epic structure - consider splitting or merging.
+
+#### 5.6.4 Loop Until Clean
+
+Re-run 5.6.1, 5.6.2, and 5.6.3 after every round of fixes. Do not advance to Phase 6 until all three scans report zero findings. If three consecutive passes do not converge (new placeholders or drift keep appearing), stop and surface the specific section(s) to the user - the plan likely has a structural ambiguity that needs a human decision.
+
+**Self-review output**: Append a short block to `decisions.md` recording that the self-review ran and what it found:
+
+```markdown
+## Plan Quality Self-Review (Phase 5.6)
+- Placeholder scan: clean / fixed {N} instances
+- Type-consistency scan: clean / fixed {N} instances (canonical forms: {list})
+- Granularity check: clean / rewrote {N} epics
+- Final pass: clean
+```
+
+---
+
 ## Phase 6: Final Confirmation Gate
 
 ### 6.0 Mode Split
