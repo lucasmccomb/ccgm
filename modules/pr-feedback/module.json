@@ -1,0 +1,32 @@
+{
+  "name": "pr-feedback",
+  "displayName": "PR Feedback Resolver",
+  "description": "Structured resolver for PR review comments. /resolve-pr-feedback fetches unresolved review threads via GraphQL, triages new vs already-handled, and if 3+ new items arrive (or a cross-invocation signal fires) runs cluster analysis - categorizes each into 11 fixed concern categories and groups by category + spatial proximity. Clusters surface systemic issues instead of dispatching 10 one-off fixes. Parallel pr-comment-resolver subagents apply unambiguous fixes, post inline replies via gh api, and resolve threads; taste questions are batched for human decision.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["skill-authoring", "subagent-patterns"],
+  "files": {
+    "skills/resolve-pr-feedback/SKILL.md": {
+      "target": "skills/resolve-pr-feedback/SKILL.md",
+      "type": "skill",
+      "template": false
+    },
+    "skills/resolve-pr-feedback/references/cluster-categories.md": {
+      "target": "skills/resolve-pr-feedback/references/cluster-categories.md",
+      "type": "doc",
+      "template": false
+    },
+    "scripts/get-pr-comments": {
+      "target": "scripts/get-pr-comments",
+      "type": "script",
+      "template": false
+    },
+    "agents/pr-comment-resolver.md": {
+      "target": "agents/pr-comment-resolver.md",
+      "type": "agent",
+      "template": false
+    }
+  },
+  "tags": ["pr", "review", "feedback", "comments", "cluster", "github", "graphql", "resolver"],
+  "configPrompts": []
+}
