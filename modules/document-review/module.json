@@ -1,0 +1,52 @@
+{
+  "name": "document-review",
+  "displayName": "Document Review",
+  "description": "Seven-lens plan-quality gate. Before a plan, spec, or requirements doc ships to execution, /document-review fans out to 7 role-specific reviewer agents (coherence, feasibility, product-lens, scope-guardian, design-lens, security-lens, adversarial) and merges structured JSON findings with severity and confidence. Each lens has tight what-you-flag boundaries so they do not overlap.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["skill-authoring", "subagent-patterns"],
+  "files": {
+    "skills/document-review/SKILL.md": {
+      "target": "skills/document-review/SKILL.md",
+      "type": "skill",
+      "template": false
+    },
+    "agents/coherence-reviewer.md": {
+      "target": "agents/coherence-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/feasibility-reviewer.md": {
+      "target": "agents/feasibility-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/product-lens-reviewer.md": {
+      "target": "agents/product-lens-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/scope-guardian-reviewer.md": {
+      "target": "agents/scope-guardian-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/design-lens-reviewer.md": {
+      "target": "agents/design-lens-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/security-lens-reviewer.md": {
+      "target": "agents/security-lens-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/adversarial-document-reviewer.md": {
+      "target": "agents/adversarial-document-reviewer.md",
+      "type": "agent",
+      "template": false
+    }
+  },
+  "tags": ["review", "planning", "quality-gate", "plan-review", "document-review", "adversarial", "scope", "yagni"],
+  "configPrompts": []
+}
