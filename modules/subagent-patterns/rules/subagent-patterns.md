@@ -60,6 +60,35 @@ Agent 3: "Write shared validation helpers in src/utils/validate.ts"
 
 Note: If agents share dependencies (Agent 3's output is needed by 1 and 2), run the dependency first, then the dependents in parallel.
 
+## Pass Paths, Not Contents
+
+When a subagent needs access to reference material, pass **file paths**, not file contents. The orchestrator should not pre-read files and splice their text into the prompt. It should tell the subagent where the files are and let the subagent read what it actually needs.
+
+Why this matters:
+- **No wasted reads** - the orchestrator does not spend tokens loading files that the subagent may skim or skip
+- **Prompt does not balloon** - adding a tenth reference path costs one line, not a thousand tokens of file content
+- **Subagent keeps agency** - it decides which files are relevant, in what order, and can search within them; pasted content is a snapshot, not a live reference
+- **Works at scale** - ten reference files do not grow the dispatch prompt linearly
+
+Bad: "Here is the content of src/auth/session.ts: [2000 lines pasted]. Here is tests/auth.test.ts: [800 lines pasted]. Find the bug."
+
+Good: "The relevant files are src/auth/session.ts and tests/auth.test.ts. Also check any other file matching src/auth/**. Find the bug."
+
+Template:
+
+```
+Task: {one-sentence objective}
+
+Reference files (read as needed):
+- {path 1}
+- {path 2}
+- Search pattern: {glob or grep query if the set is open-ended}
+
+Deliverable: {what to return}
+```
+
+The only exception: inline a small excerpt (10-30 lines) when the subagent needs to match a specific passage and searching for it would be ambiguous. Paste the snippet with its file path as a locator, not as a replacement for the file.
+
 ## Two-Stage Review
 
 After subagent results come back, review in two passes:
@@ -100,3 +129,45 @@ Instruct subagents to end their reports with one of:
 Free-form summaries force the dispatcher to re-read everything to decide what to do. DONE_WITH_CONCERNS in particular captures "I completed it but I have doubts" - a state that silent success would otherwise hide.
 
 **Do not trust the self-report.** A subagent reporting DONE is a claim, not evidence. Before accepting the result, verify the artifact (read the diff, check the file exists, run the test). See the `verification` rule for the full evidence table.
+
+## Skill Invocation Modes
+
+When a skill is invoked - whether by the user directly or by another skill via subagent dispatch - the caller and callee need a shared contract about what the skill will do: will it prompt, will it write files, will it produce parseable output. Skills with side effects should expose explicit modes, parsed from `$ARGUMENTS` via `mode:{name}` tokens.
+
+Four standard modes:
+
+| Mode | Behavior | Use Case |
+|------|----------|----------|
+| **interactive** (default) | May prompt the user, may apply fixes interactively, may write artifacts. Safe to assume when no mode token is present. | Direct user invocation. The skill can ask clarifying questions, confirm destructive actions, and stream progress. |
+| **autofix** | No user questions. Apply safe fixes automatically. Write a structured run artifact (e.g., a summary file) describing what changed. | Batch cleanup runs. The user trusts the skill to act without confirmation for well-bounded fix classes. |
+| **report-only** | Strictly read-only. Write findings to stdout or a report file; never modify source files. Safe for concurrent runs. | Audits, parallel reviews, CI checks. Multiple instances can run simultaneously without stepping on each other. |
+| **headless** | For skill-to-skill invocation. No prompts. Emit a structured output envelope (JSON or delimited block). End with a terminal signal like "Review complete" so the caller knows the skill has finished. | One skill dispatches another. The caller parses the envelope and routes based on status. |
+
+### Invocation Examples
+
+```
+# Default interactive mode
+/ce:review
+
+# Apply safe fixes, no prompts, write run artifact
+/ce:review mode:autofix
+
+# Read-only audit - safe to run in parallel with other reviewers
+/ce:review mode:report-only
+
+# Called by another skill - structured output, no prompts
+/ce:review mode:headless
+```
+
+### Authoring Rules
+
+When authoring a skill that may be called by another skill, declare which modes it supports. Each mode should specify:
+
+- **Stop conditions** - when does the skill return control (after fixes applied, after report written, after N iterations)?
+- **Write policy** - what files, if any, may be created or modified in this mode?
+- **Output contract** - what does the caller receive (freeform text, structured envelope, status code)?
+- **Prompt policy** - may the skill ask the user anything? In `autofix`, `report-only`, and `headless`: no.
+
+### Caller Rules
+
+When one skill invokes another via subagent dispatch, **pass `mode:headless` unless there is a specific reason to choose a different mode.** Headless is the contract that makes composition safe: the caller knows the callee will not prompt, will not write unexpected files, and will return parseable output. Any other mode requires the caller to reason about side effects.
