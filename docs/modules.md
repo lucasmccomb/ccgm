@@ -10,6 +10,7 @@ A module installs one or more of these file types:
 |-----------|----------|-------------------|
 | **Rules** (`rules/*.md`) | `~/.claude/rules/` | Loaded automatically at session start. Guides Claude's behavior. |
 | **Commands** (`commands/*.md`) | `~/.claude/commands/` | Available as `/command-name` slash commands. |
+| **Agents** (`agents/*.md`) | `~/.claude/agents/` | Reusable subagent prompts invoked by commands or skills via the Task tool. Use for prompts shared by multiple callers; keep one-off prompts inline. |
 | **Hooks** (`hooks/*.py`) | `~/.claude/hooks/` | Triggered by Claude Code events (tool calls, session start, etc.). |
 | **Settings** (`settings.*.json`) | `~/.claude/settings.json` | Deep-merged into the permissions configuration. |
 | **Docs** (`*.md` reference files) | `~/.claude/` | Reference documentation accessible to Claude. |

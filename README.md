@@ -34,6 +34,7 @@ CCGM places files into `~/.claude/` (global) or `.claude/` (project-level):
 |-----------|------|-------------------|
 | `rules/*.md` | Behavior rules | Loaded automatically at session start |
 | `commands/*.md` | Slash commands | Available as `/commit`, `/pr`, etc. |
+| `agents/*.md` | Subagent prompts | Reusable prompts invoked by commands and skills via the Task tool |
 | `hooks/*.py` | Workflow hooks | Triggered on Claude Code events |
 | `settings.json` | Permissions | Controls tool access and auto-approval |
 
