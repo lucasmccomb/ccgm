@@ -1,0 +1,119 @@
+# Frontmatter schema for .claude/todos/**/*.md
+#
+# Every todo file under .claude/todos/ starts with a YAML frontmatter
+# block matching this schema. The filename encodes status and priority
+# so a bare `ls .claude/todos/` gives a fast visual scan without reading
+# each file.
+
+# --- Filename convention ---
+#
+# .claude/todos/NNN-{status}-{priority}-{slug}.md
+#
+# - NNN     : zero-padded sequence number (001, 002, ...) allocated at
+#             creation time. Never renumbered. Gaps are fine after resolve.
+# - status  : pending | ready | complete
+#             Matches the frontmatter status field. When the status
+#             changes the file is renamed in place.
+# - priority: p1 | p2 | p3
+#             p1 = must-fix before next PR / blocks something
+#             p2 = should-fix this cycle
+#             p3 = nice-to-fix, nitpick, style, polish
+# - slug    : short-kebab-case-description, <= 40 chars
+#
+# Example: .claude/todos/007-ready-p2-extract-auth-middleware.md
+
+fields:
+  title:
+    required: true
+    type: string
+    description: >
+      One-line human-readable title. Imperative voice. Example:
+      "Extract auth middleware out of the request handler".
+
+  status:
+    required: true
+    type: enum
+    values:
+      - pending
+      - ready
+      - complete
+    description: >
+      pending - captured but not yet triaged. /todo-triage decides to
+                promote to ready (with concrete scope) or drop.
+      ready   - scoped, agreed, ready to be picked up by /todo-resolve
+                or a human in the next editing pass.
+      complete- resolved. Kept for history; /todo-resolve updates this
+                and writes a short resolution note in the body.
+
+  priority:
+    required: true
+    type: enum
+    values:
+      - p1
+      - p2
+      - p3
+    description: >
+      p1 blocks the current PR or a downstream task. p2 is this-cycle
+      work that should not slip to the next release. p3 is polish,
+      nitpicks, and low-risk style items.
+
+  created:
+    required: true
+    type: string
+    format: YYYY-MM-DD
+    description: Date the todo was first captured.
+
+  source:
+    required: true
+    type: enum
+    values:
+      - review
+      - pr-comment
+      - debug
+      - planning
+      - ad-hoc
+    description: >
+      Where the todo came from. review = code review finding; pr-comment
+      = GitHub PR review thread; debug = surfaced while debugging an
+      unrelated bug; planning = noted during /xplan; ad-hoc = anything
+      else. Used by /todo-resolve to route to the right fixer subagent.
+
+  pr:
+    required: false
+    type: integer
+    description: >
+      GitHub PR number the todo originated from, if any. Enables
+      /todo-resolve to post a resolution comment back on the thread.
+
+  files:
+    required: false
+    type: array
+    description: >
+      Paths the todo touches, relative to repo root. Lets /todo-resolve
+      dispatch subagents with pass-paths-not-contents.
+
+  dependencies:
+    required: false
+    type: array
+    description: >
+      Other todo sequence numbers this one depends on. Example: [3, 7].
+      /todo-resolve will not run a todo whose dependencies are not
+      status:complete.
+
+  tags:
+    required: false
+    type: array
+    description: >
+      Free-form searchable tags. Example - ["refactor", "auth"].
+
+# --- Body convention ---
+#
+# Body sections in order:
+#   1. Context        - one paragraph. What surfaced this? Who flagged it?
+#   2. Problem        - what is wrong or missing, concretely.
+#   3. Proposed change- what the fix should look like, in imperative voice.
+#                       Skip this section until triage promotes to ready.
+#   4. Notes          - optional. Links, prior art, discussion snippets.
+#   5. Resolution     - written by /todo-resolve when status flips to
+#                       complete. One paragraph: what was done, commit
+#                       SHA, and any follow-ups spawned.
