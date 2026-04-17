@@ -1,0 +1,28 @@
+{
+  "name": "commands-preamble",
+  "displayName": "Command Preamble Injection (Experimental)",
+  "description": "Experimental UserPromptSubmit hook that injects a compact preamble of iron-law principles (Confusion Protocol, Completeness, Evidence Before Claims, Root Cause Before Fix) at the start of slash-command invocations. Opt-in, disabled by default.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["settings", "autonomy", "code-quality"],
+  "files": {
+    "hooks/inject-preamble.py": {
+      "target": "hooks/inject-preamble.py",
+      "type": "hook",
+      "template": false
+    },
+    "preamble/preamble.md": {
+      "target": "preamble/preamble.md",
+      "type": "content",
+      "template": false
+    },
+    "settings.partial.json": {
+      "target": "settings.json",
+      "type": "config",
+      "merge": true,
+      "template": false
+    }
+  },
+  "tags": ["experimental", "hooks", "preamble", "commands", "principles"],
+  "configPrompts": []
+}
