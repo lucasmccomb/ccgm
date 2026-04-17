@@ -44,3 +44,17 @@ cp settings.base.json ~/.claude/settings.json
 | File | Description |
 |------|-------------|
 | `settings.base.json` | Complete settings.json template with all permissions |
+
+## Maintaining the Allow List
+
+The `settings.base.json` allow list is a static, hand-curated baseline. To extend it for commands you actually run, use Claude Code's built-in `/less-permission-prompts` skill:
+
+> "Scan your transcripts for common read-only Bash and MCP tool calls, then add a prioritized allowlist to project `.claude/settings.json` to reduce permission prompts."
+
+Run `/less-permission-prompts` in any project to generate a project-local `.claude/settings.json` with allowlist additions derived from your session history. If patterns from a project-local file turn out to be universal across your work, promote them into this module's `settings.base.json` via a PR.
+
+### Evaluation: CE claude-permissions-optimizer (issue #285)
+
+EveryInc/compound-engineering-plugin previously shipped a `claude-permissions-optimizer` skill with similar goals (scan session history, classify commands, write allowlist entries). As of CE PR #578/#583 the skill was **removed from CE** and the CHANGELOG states: "drop skill in favor of `/less-permission-prompts`". CE's authors explicitly adopted Anthropic's first-party built-in as the recommended path.
+
+**CCGM action**: none required. CCGM does not ship a permissions-optimizer skill (the `settings` module ships only a static allow list), and the CE version is no longer maintained. Users rely on the Anthropic-shipped `/less-permission-prompts` skill for dynamic allowlist additions. The transferable pipeline-design lessons from CE's defunct skill (ordering of filter / normalize / group / threshold / re-classify) are captured in their `docs/solutions/skill-design/claude-permissions-optimizer-classification-fix.md` if a future CCGM-native optimizer is ever written; they are not re-documented here to avoid duplicating upstream content.
