@@ -1,0 +1,32 @@
+{
+  "name": "todos",
+  "displayName": "Todos",
+  "description": "File-based review-finding tracker. Review findings, PR nitpicks, and tech debt that does not merit a full GitHub issue go to .claude/todos/NNN-{status}-{priority}-{description}.md with YAML frontmatter. Three skills compose - /todo-create (canonical writer), /todo-triage (interactive pending->ready), /todo-resolve (batch-resolve ready todos via parallel subagents). Fills the gap between review-found-it and cut-an-issue with a lightweight, in-repo third option.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["skill-authoring", "subagent-patterns"],
+  "files": {
+    "skills/todo-create/SKILL.md": {
+      "target": "skills/todo-create/SKILL.md",
+      "type": "skill",
+      "template": false
+    },
+    "skills/todo-create/references/schema.yaml": {
+      "target": "skills/todo-create/references/schema.yaml",
+      "type": "doc",
+      "template": false
+    },
+    "skills/todo-triage/SKILL.md": {
+      "target": "skills/todo-triage/SKILL.md",
+      "type": "skill",
+      "template": false
+    },
+    "skills/todo-resolve/SKILL.md": {
+      "target": "skills/todo-resolve/SKILL.md",
+      "type": "skill",
+      "template": false
+    }
+  },
+  "tags": ["todos", "review", "pr-feedback", "tech-debt", "tracker", "triage"],
+  "configPrompts": []
+}
