@@ -1,0 +1,132 @@
+# Finding schema - every reviewer agent returns a JSON array of objects
+# matching this shape. The orchestrator merges, dedupes, and routes by these
+# fields. Keep schema stable - existing envelopes in .context/ce-review/ must
+# still parse after a schema edit.
+
+schema_version: "1"
+
+finding:
+  required:
+    - reviewer
+    - file
+    - severity
+    - confidence
+    - category
+    - title
+    - detail
+    - autofix_class
+  optional:
+    - line
+    - lines
+    - fix
+    - test_stub
+    - related_findings
+    - fingerprint
+
+fields:
+  reviewer:
+    type: string
+    description: >
+      Name of the agent that produced the finding, matching the file under
+      agents/reviewers/. Examples: correctness-reviewer, security-reviewer,
+      adversarial-reviewer.
+
+  file:
+    type: string
+    description: Path relative to repo root, as in `git diff`.
+
+  line:
+    type: integer
+    description: Single line number (1-based). Use `lines` when the finding spans a range.
+
+  lines:
+    type: string
+    description: >
+      Line range in the form `start-end`. Use when the finding is inherently
+      multi-line (e.g., a function that should be split).
+
+  severity:
+    type: string
+    enum: [P0, P1, P2, P3]
+    description: >
+      P0 - blocking; merge would break prod, leak data, or violate a hard
+      requirement.
+      P1 - must fix before merge; observable bug, missing test on critical
+      path, contract break.
+      P2 - should fix before merge; maintainability, narrow-impact bug.
+      P3 - nice to fix; nits, cosmetics.
+
+  confidence:
+    type: float
+    range: 0.0 - 1.0
+    description: >
+      HIGH >= 0.80 - reviewer has direct evidence in the diff.
+      MODERATE 0.60-0.79 - pattern-match from code, plausible but not
+      confirmed.
+      LOW 0.50-0.59 - suspicion; orchestrator surfaces only for security or
+      data-integrity categories.
+      <= 0.49 - orchestrator SUPPRESSES; do not include these in the output.
+
+  category:
+    type: string
+    description: >
+      Short kebab-case label for the finding type. Examples: off-by-one,
+      missing-null-check, sql-injection, n-plus-one, missing-test,
+      api-break, migration-reserved-word, race-condition, silent-failure,
+      trust-boundary, edge-case.
+
+  title:
+    type: string
+    description: One-line finding headline, imperative or declarative.
+
+  detail:
+    type: string
+    description: >
+      2-6 sentence explanation. What is wrong, why it matters, what the code
+      currently does vs what it should do. No stack traces. No paragraphs
+      longer than a screen.
+
+  autofix_class:
+    type: string
+    enum: [safe_auto, gated_auto, manual, advisory]
+    description: >
+      safe_auto - mechanical, one reasonable fix, no behavior change.
+      Orchestrator applies immediately in interactive and autofix modes.
+      gated_auto - fix is clear but changes observable behavior or makes a
+      taste call; batched into the NEEDS INPUT question in interactive mode;
+      listed as a todo in autofix mode.
+      manual - no auto-fix possible; report with recommended direction.
+      advisory - informational only; do not propose a fix.
+
+      Hard ceiling - adversarial-reviewer findings are at most gated_auto.
+      scope-drift findings are at most gated_auto.
+
+  fix:
+    type: string
+    description: >
+      One-line description of the proposed change, in imperative voice. For
+      safe_auto findings, short enough that the orchestrator can mechanically
+      translate it to an Edit tool call. For gated_auto, enough that the
+      batched question shows the author exactly what would change.
+
+  test_stub:
+    type: string
+    description: >
+      Optional - a one-to-three-line test that would demonstrate the bug or
+      assert the fixed behavior. Reviewers include this when they are
+      confident the fix is correct and a regression test is cheap.
+
+  related_findings:
+    type: array of string
+    description: >
+      Optional - list of `fingerprint` values of other findings this one
+      depends on or overlaps with. Used for deduplication and to flag
+      cascades.
+
+  fingerprint:
+    type: string
+    description: >
+      Optional short hash-like identifier the reviewer generates for its own
+      finding. Two findings with the same fingerprint are the same finding;
+      two findings with overlapping fingerprints are related. Not required -
+      the orchestrator falls back to (file, line ±3, category) for dedupe.

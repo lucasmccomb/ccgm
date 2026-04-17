@@ -1,0 +1,72 @@
+{
+  "name": "ce-review",
+  "displayName": "CE Review Orchestrator",
+  "description": "Unified code-review orchestrator. Composes scope-drift, learnings-researcher, tiered reviewer personas (correctness, testing, maintainability, project-standards + conditional security, performance, reliability, api-contract, data-migrations), and an adversarial/red-team lens that runs AFTER the specialists with access to their findings. Confidence-gated autofix routing with safe_auto / gated_auto / manual / advisory classes. Modes - interactive / autofix / report-only / headless.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": ["compound-knowledge", "pr-review-toolkit", "subagent-patterns"],
+  "files": {
+    "skills/ce-review/SKILL.md": {
+      "target": "skills/ce-review/SKILL.md",
+      "type": "skill",
+      "template": false
+    },
+    "skills/ce-review/references/finding.schema.yaml": {
+      "target": "skills/ce-review/references/finding.schema.yaml",
+      "type": "doc",
+      "template": false
+    },
+    "agents/reviewers/correctness-reviewer.md": {
+      "target": "agents/reviewers/correctness-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/reviewers/testing-reviewer.md": {
+      "target": "agents/reviewers/testing-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/reviewers/maintainability-reviewer.md": {
+      "target": "agents/reviewers/maintainability-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/reviewers/project-standards-reviewer.md": {
+      "target": "agents/reviewers/project-standards-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/reviewers/security-reviewer.md": {
+      "target": "agents/reviewers/security-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/reviewers/performance-reviewer.md": {
+      "target": "agents/reviewers/performance-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/reviewers/reliability-reviewer.md": {
+      "target": "agents/reviewers/reliability-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/reviewers/api-contract-reviewer.md": {
+      "target": "agents/reviewers/api-contract-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/reviewers/data-migrations-reviewer.md": {
+      "target": "agents/reviewers/data-migrations-reviewer.md",
+      "type": "agent",
+      "template": false
+    },
+    "agents/reviewers/adversarial-reviewer.md": {
+      "target": "agents/reviewers/adversarial-reviewer.md",
+      "type": "agent",
+      "template": false
+    }
+  },
+  "tags": ["review", "pr", "orchestrator", "adversarial", "red-team", "autofix", "confidence", "tiered"],
+  "configPrompts": []
+}
