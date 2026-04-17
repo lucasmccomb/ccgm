@@ -8,7 +8,8 @@
   "files": {
     "rules/code-quality.md": { "target": "rules/code-quality.md", "type": "rule", "template": false },
     "rules/change-philosophy.md": { "target": "rules/change-philosophy.md", "type": "rule", "template": false },
-    "rules/completeness.md": { "target": "rules/completeness.md", "type": "rule", "template": false }
+    "rules/completeness.md": { "target": "rules/completeness.md", "type": "rule", "template": false },
+    "rules/receiving-code-review.md": { "target": "rules/receiving-code-review.md", "type": "rule", "template": false }
   },
   "tags": ["code-quality", "testing", "security", "standards"],
   "configPrompts": []
