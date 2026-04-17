@@ -12,6 +12,11 @@ Provides five foundational commands that cover the most common development opera
 - **/gs** - Show git status and project overview
 - **/ghi** - Create a GitHub issue with proper labels
 
+Also ships two reusable skills:
+
+- **pr-description** - Pure writer that returns `{title, body}` for a PR in CCGM voice. Callable from `/pr`, `/cpm`, or any agent that needs a PR body without the publishing plumbing. Does NOT invoke `gh pr create` or `gh pr edit`.
+- **cpm** - Sequenced commit-PR-merge workflow encoded as a skill so other commands can embed it.
+
 ## Files
 
 | File | Type | Description |
@@ -21,6 +26,9 @@ Provides five foundational commands that cover the most common development opera
 | `commands/cpm.md` | command | Commit, create PR, and merge in one shot |
 | `commands/gs.md` | command | Git status dashboard with project info |
 | `commands/ghi.md` | command | Create GitHub issue with labels |
+| `skills/cpm/SKILL.md` | skill | Sequenced commit-PR-merge workflow |
+| `skills/pr-description/SKILL.md` | skill | Pure PR title and body writer (returns structured output, no publishing) |
+| `skills/pr-description/references/default-template.md` | skill-reference | Fallback PR body structure when no repo template exists |
 
 ## Dependencies
 
@@ -40,6 +48,12 @@ cp commands/pr.md ~/.claude/commands/pr.md
 cp commands/cpm.md ~/.claude/commands/cpm.md
 cp commands/gs.md ~/.claude/commands/gs.md
 cp commands/ghi.md ~/.claude/commands/ghi.md
+
+# Skills
+mkdir -p ~/.claude/skills/cpm ~/.claude/skills/pr-description/references
+cp skills/cpm/SKILL.md ~/.claude/skills/cpm/SKILL.md
+cp skills/pr-description/SKILL.md ~/.claude/skills/pr-description/SKILL.md
+cp skills/pr-description/references/default-template.md ~/.claude/skills/pr-description/references/default-template.md
 ```
 
-After copying, the commands are available as `/commit`, `/pr`, `/cpm`, `/gs`, and `/ghi` in Claude Code.
+After copying, the commands are available as `/commit`, `/pr`, `/cpm`, `/gs`, and `/ghi` in Claude Code. The `pr-description` and `cpm` skills are invocable by name from other commands or agents.
