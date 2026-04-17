@@ -1,0 +1,27 @@
+{
+  "name": "rule-authoring",
+  "displayName": "Rule Authoring",
+  "description": "Discipline for writing rules that hold up under pressure. Treats rule authoring as TDD: pressure-test a candidate rule with adversarial scenarios, capture the rationalizations agents use to bypass it, and rewrite until the rule closes those loopholes.",
+  "category": "patterns",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/rule-authoring.md": {
+      "target": "rules/rule-authoring.md",
+      "type": "rule",
+      "template": false
+    },
+    "rules/pressure-testing.md": {
+      "target": "rules/pressure-testing.md",
+      "type": "rule",
+      "template": false
+    },
+    "commands/pressure-test.md": {
+      "target": "commands/pressure-test.md",
+      "type": "command",
+      "template": false
+    }
+  },
+  "tags": ["rules", "authoring", "pressure-testing", "discipline", "tdd-for-rules"],
+  "configPrompts": []
+}
