@@ -6,7 +6,8 @@
   "scope": ["global", "project"],
   "dependencies": [],
   "files": {
-    "rules/verification.md": { "target": "rules/verification.md", "type": "rule", "template": false }
+    "rules/verification.md": { "target": "rules/verification.md", "type": "rule", "template": false },
+    "rules/config-change-detection.md": { "target": "rules/config-change-detection.md", "type": "rule", "template": false }
   },
   "tags": ["verification", "quality", "evidence", "completion"],
   "configPrompts": []
