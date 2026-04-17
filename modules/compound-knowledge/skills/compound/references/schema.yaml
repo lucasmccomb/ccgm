@@ -1,0 +1,136 @@
+# Frontmatter schema for docs/solutions/**/*.md
+#
+# Every learning doc under docs/solutions/ starts with a YAML frontmatter
+# block matching this schema. The learnings-researcher agent greps the
+# frontmatter to retrieve relevant priors during /xplan and /review.
+#
+# Fields marked required: true must be present on every doc. Fields marked
+# required: false are optional but should be filled when the information is
+# known.
+
+fields:
+  title:
+    required: true
+    type: string
+    description: >
+      Short human-readable title. One line. Imperative or noun-phrase, not a
+      question. Example: "Quote PostgreSQL reserved words in migrations".
+
+  date:
+    required: true
+    type: string
+    format: YYYY-MM-DD
+    description: Date the learning was recorded.
+
+  problem_type:
+    required: true
+    type: enum
+    values:
+      - bug
+      - knowledge
+    description: >
+      "bug" tracks a fix for a specific failure with a reproducible trigger.
+      "knowledge" tracks a durable insight, convention, or pattern that is
+      not tied to a single failure (e.g., "we always quote reserved words").
+
+  category:
+    required: true
+    type: string
+    description: >
+      Directory category under docs/solutions/. Matches one of the standard
+      categories below, or a repo-specific category added in the repo's
+      docs/solutions/README.md.
+    standard_values:
+      - build-errors
+      - runtime-errors
+      - performance-issues
+      - security-issues
+      - data-migrations
+      - testing
+      - tooling
+      - skill-design
+      - architecture
+      - api-contracts
+      - deployment
+      - dev-environment
+
+  module:
+    required: false
+    type: string
+    description: >
+      Codebase module / package / service the learning applies to. Use the
+      path or package name the repo itself uses. Blank if the learning is
+      cross-cutting.
+
+  root_cause:
+    required: true
+    type: string
+    description: >
+      One-sentence description of why the problem occurred. For "knowledge"
+      docs, the underlying mechanism or constraint that motivates the
+      pattern.
+
+  component:
+    required: false
+    type: string
+    description: >
+      Finer-grained pointer than "module" - a function, file, class, or
+      subsystem. Example: "auth/middleware/refreshToken".
+
+  tags:
+    required: true
+    type: list<string>
+    description: >
+      3-8 searchable tags. Prefer reusing tags that already appear in other
+      docs/solutions/ files in the same repo. Tags drive retrieval by
+      learnings-researcher.
+    examples:
+      - [supabase, migrations, reserved-words]
+      - [vite, env-vars, build-config]
+      - [react-query, cache-invalidation]
+
+  severity:
+    required: true
+    type: enum
+    values:
+      - P0
+      - P1
+      - P2
+      - P3
+    description: >
+      Impact of the original problem. P0 = blocked a ship / production
+      outage. P1 = broke a workflow for hours. P2 = noticeable friction or
+      rework. P3 = nit or nice-to-know.
+
+  files:
+    required: false
+    type: list<string>
+    description: >
+      Paths to files that were changed or that the fix touches. Used by the
+      overlap scorer to detect duplicate learnings.
+
+  related:
+    required: false
+    type: list<string>
+    description: >
+      Paths (relative to docs/solutions/) of related prior learnings. Use
+      when the new doc extends or supersedes an earlier one.
+
+example: |
+  ---
+  title: "Quote PostgreSQL reserved words in migrations"
+  date: 2026-04-15
+  problem_type: knowledge
+  category: data-migrations
+  module: db/migrations
+  root_cause: >
+    PostgreSQL reserves identifiers like "position", "order", "user" - using
+    them unquoted in CREATE TABLE fails with a syntax error at the column
+    definition.
+  component: supabase/migrations
+  tags: [supabase, postgres, migrations, reserved-words]
+  severity: P1
+  files:
+    - supabase/migrations/20260415_add_user_position.sql
+  related: []
+  ---
