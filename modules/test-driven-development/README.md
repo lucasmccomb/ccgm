@@ -17,9 +17,11 @@ Covers new features (test each behavior incrementally), bug fixes (reproduce fir
 ```bash
 # Global (all projects)
 cp rules/test-driven-development.md ~/.claude/rules/test-driven-development.md
+cp rules/testing-anti-patterns.md ~/.claude/rules/testing-anti-patterns.md
 
 # Project-level
 cp rules/test-driven-development.md .claude/rules/test-driven-development.md
+cp rules/testing-anti-patterns.md .claude/rules/testing-anti-patterns.md
 ```
 
 ## Files
@@ -27,3 +29,4 @@ cp rules/test-driven-development.md .claude/rules/test-driven-development.md
 | File | Description |
 |------|-------------|
 | `rules/test-driven-development.md` | TDD methodology with cycle rules, quality standards, and skip criteria |
+| `rules/testing-anti-patterns.md` | Five testing mistakes agents default to under pressure, each with a Gate Function |

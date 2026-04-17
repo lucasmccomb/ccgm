@@ -6,7 +6,8 @@
   "scope": ["global", "project"],
   "dependencies": [],
   "files": {
-    "rules/test-driven-development.md": { "target": "rules/test-driven-development.md", "type": "rule", "template": false }
+    "rules/test-driven-development.md": { "target": "rules/test-driven-development.md", "type": "rule", "template": false },
+    "rules/testing-anti-patterns.md": { "target": "rules/testing-anti-patterns.md", "type": "rule", "template": false }
   },
   "tags": ["testing", "tdd", "red-green-refactor", "methodology"],
   "configPrompts": []
