@@ -9,6 +9,7 @@
     "rules/self-improving.md": { "target": "rules/self-improving.md", "type": "rule", "template": false },
     "commands/reflect.md": { "target": "commands/reflect.md", "type": "command", "template": false },
     "commands/consolidate.md": { "target": "commands/consolidate.md", "type": "command", "template": false },
+    "commands/retro.md": { "target": "commands/retro.md", "type": "command", "template": false },
     "hooks/reflection-trigger.py": { "target": "hooks/reflection-trigger.py", "type": "hook", "template": false },
     "hooks/precompact-reflection.py": { "target": "hooks/precompact-reflection.py", "type": "hook", "template": false },
     "settings.partial.json": { "target": "settings.json", "type": "config", "template": false, "merge": true }
