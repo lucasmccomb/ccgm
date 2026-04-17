@@ -1,7 +1,7 @@
 ---
 description: Interactive deep research + planning + execution framework for new projects and features
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--light]
+argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--light] [--deepen [<plan-dir>]]
 ---
 
 # xplan - Interactive Project Planning & Execution
@@ -11,6 +11,7 @@ A human-in-the-loop planning framework that interviews you upfront, deeply resea
 **Flags:**
 - `--repo <path>` - Analyze and plan work for an existing repo
 - `--light` - Skip the interactive interview phases; uses minimal clarification + traditional walkthrough at the end (old xplan behavior)
+- `--deepen [<plan-dir>]` - Skip fresh planning; load an existing plan and run targeted deepening passes on under-specified sections. See "Deepen Mode" below.
 
 **Companion commands:**
 - `/xplan-status` - Check progress on a running or completed plan
@@ -97,9 +98,16 @@ Extract from `$ARGUMENTS`:
 - **Main concept/idea**: The core description of what to build
 - **`--repo <path>`**: (Optional) Path to an existing repo to analyze
 - **`--light`**: (Optional) Flag to skip interactive interview phases
+- **`--deepen [<plan-dir>]`**: (Optional) Iteratively deepen an existing plan instead of creating a new one. Also triggered when the free-text argument is exactly `deepen` (intent keyword). If a plan directory path follows the flag, use it; otherwise fall back to the current working directory.
 - If no arguments provided, use AskUserQuestion to ask what the user wants to plan
 
 Store whether `--light` is active. It affects Phases 0.5, 1.5, 2.5, 2.6, 2.7, and 6.
+
+**Semantic distinction** (from CE `ce-plan` skill):
+- **"deepen the plan"** (holistic) → triggers `--deepen` mode. Run targeted deepening passes on under-specified sections of the whole plan.
+- **"strengthen section X"** (targeted edit) → NOT deepen mode. Handle as a normal free-text edit request against the existing plan; do not enter the Deepen Mode branch.
+
+If `--deepen` is active (or the argument is the bare keyword `deepen`), jump to **Deepen Mode** below after completing 0.2's directory resolution. Skip Phases 0.5, 1, 1.5, 2, 2.5, 2.6, 2.7, 3, 4, 5, and 5.5 entirely. Phase 5.6 (self-review) is re-run at the end of the deepening pass. Phases 6-8 proceed normally only if the user explicitly requests execution after deepening.
 
 ### 0.2 Create Plan Directory
 
@@ -126,6 +134,138 @@ If an existing repo path was given:
 3. Check `gh issue list` and `gh pr list` for open work
 4. Read recent agent logs from the log repo for the project
 5. This context feeds into Phase 1 research and Phase 0.5 interview
+
+---
+
+## Deepen Mode (--deepen)
+
+**Entry condition**: `--deepen` flag present, OR `$ARGUMENTS` is exactly the keyword `deepen`. Parsed in Phase 0.1.
+
+**Goal**: Iteratively tighten an existing plan without re-running the full research + planning pipeline. Deepening fills confidence gaps in sections that are vague, under-specified, or resting on unverified assumptions - it does not re-do Phases 1-5.
+
+**Announce at start**: "Entering Deepen Mode - loading existing plan and identifying under-specified sections. Skipping Phases 1-5."
+
+### D.1 Resolve Plan Directory
+
+Determine which plan to deepen:
+
+1. If `--deepen <plan-dir>` was passed, use that path.
+2. Else if the current working directory is under `~/code/plans/{concept-name}/` and contains `plan.md`, use that directory.
+3. Else list `~/code/plans/*/plan.md` modified in the last 30 days and ask via AskUserQuestion which plan to deepen.
+4. Else error out with `BLOCKED`: no plan to deepen.
+
+Verify `plan.md` exists at the resolved path. If missing, stop and surface the problem - deepening requires a plan to operate on.
+
+### D.2 Load Existing Context
+
+Read every artifact already in the plan directory so the deepening pass operates with full context, not a fresh slate:
+
+- `plan.md` (required)
+- `research.md` (if it exists)
+- `decisions.md` (if it exists)
+- `naming.md` (if it exists)
+- `progress.md` (if it exists)
+- `reviews/*.md` (all review agent outputs, if any)
+
+Do NOT ask the user to re-do the discovery interview. The plan already encodes those decisions.
+
+### D.3 Identify Under-Specified Sections
+
+Scan the loaded plan for confidence gaps. Categorize findings into four buckets (adapted from CE's "Confidence Check and Deepening"):
+
+1. **Unclear patterns to follow** - sections that reference an approach or convention without a concrete example (e.g., "follow the repo's auth pattern" without citing a specific file or function).
+2. **Missing test scenarios** - epics whose acceptance criteria do not include at least one testable scenario, or whose test list is labeled "etc." / "and more".
+3. **Unverified technology assumptions** - framework versions, library capabilities, API shapes, or platform behaviors asserted without a source link or a pointer into research.md.
+4. **Structural ambiguity** - sections where two reasonable interpretations exist and the plan does not disambiguate (e.g., "store the session" could mean cookie, localStorage, or server-side).
+
+Produce a shortlist of 3-8 deepening candidates. Each candidate must cite:
+- The section / heading in `plan.md` it targets
+- The bucket (one of the four above)
+- A one-sentence description of the gap
+- A proposed research or clarification action
+
+If zero gaps are found, report `DONE` for Deepen Mode - the plan is already tight enough to not benefit from this pass. Still run Phase 5.6 as a final check.
+
+### D.4 User Selects Which Gaps to Close
+
+Present the shortlist via AskUserQuestion (`multiSelect: true`) so the user picks which gaps to deepen. Include:
+- "All of the above" as a convenience option
+- "None - just re-run self-review" as an escape hatch
+
+Wait for explicit selection. Do not auto-select.
+
+### D.5 Dispatch Targeted Deepening Passes
+
+For each selected candidate, spawn a focused Task agent (model: sonnet) whose entire job is to close that one gap. The agent's brief:
+
+```
+You are deepening one section of an existing plan.
+
+Target section: {heading from plan.md}
+Gap type: {pattern / test / tech-assumption / ambiguity}
+Gap description: {one-sentence description}
+
+Plan directory: ~/code/plans/{concept-name}/
+Existing plan: ~/code/plans/{concept-name}/plan.md
+Existing research: ~/code/plans/{concept-name}/research.md
+
+Do:
+- Research ONLY what is needed to close this specific gap (web search, repo grep, or doc read).
+- Return a proposed replacement block for the target section, in diff-ready markdown.
+- Cite every new claim with a source URL or repo file path.
+
+Do NOT:
+- Rewrite sections outside the target.
+- Introduce new epics or restructure the plan.
+- Re-run the discovery interview or naming phase.
+
+Output:
+- A "Findings" summary (3-8 bullet points)
+- A "Proposed replacement" block containing the full rewritten section
+- "Open questions" (any remaining unknowns the user still has to decide)
+```
+
+Run these agents in parallel when the targets are in different sections. Serialize them when two candidates touch the same section.
+
+### D.6 User-Controlled Integration
+
+For each returned deepening pass, present the user with the findings + proposed replacement via AskUserQuestion:
+
+```
+question: "Integrate these deepening findings for section {heading}?"
+options:
+  - "Yes - apply the full proposed replacement"
+  - "Yes - apply with edits (I'll describe)"
+  - "No - discard this deepening pass"
+  - "Defer - keep the findings in decisions.md but don't touch plan.md yet"
+```
+
+Apply each accepted replacement by editing `plan.md` in place. Append a short deepening-log block to `decisions.md`:
+
+```markdown
+## Deepen Pass ({ISO date})
+- Target: {heading}
+- Gap: {bucket} - {description}
+- Outcome: applied / edited-then-applied / discarded / deferred
+- Sources added: {URLs or file paths}
+```
+
+### D.7 Re-run Phase 5.6 Self-Review
+
+After all accepted deepening edits land, **re-run Phase 5.6 (Plan Quality Self-Review) against the updated plan.md, decisions.md, and naming.md**. This catches:
+- New placeholders introduced by partial replacements
+- Type / identifier drift introduced when a deepening agent picked a new name
+- Granularity regressions (a deepened section that is now longer but still vague)
+
+Loop until 5.6 reports clean, same as a fresh planning run. Do NOT modify Phase 5.6 - it is the same self-review used by the main flow.
+
+### D.8 Exit Deepen Mode
+
+After 5.6 passes:
+
+1. Summarize the deepening pass for the user: which gaps were closed, which were deferred, which were discarded.
+2. Ask via AskUserQuestion whether to proceed with execution (Phase 7) or stop here. Default is to stop - deepening is a planning activity, not an execution trigger.
+3. If the user chooses to execute, resume at Phase 6 (Final Confirmation Gate). Otherwise end the command.
 
 ---
 
