@@ -91,13 +91,16 @@ The only exception: inline a small excerpt (10-30 lines) when the subagent needs
 
 ## Two-Stage Review
 
-After subagent results come back, review in two passes:
+After subagent results come back, review in two passes. **Order matters: Stage 1 gates Stage 2.** Running code-quality review on a scope-creeping or deliverable-incomplete implementation wastes effort polishing code that will be reverted or re-dispatched.
 
 ### Stage 1: Spec Compliance
 
 - Did the agent do what was asked?
 - Are all deliverables present?
 - Were constraints respected?
+- Did the agent creep beyond the spec (touching files, helpers, or adjacent bugs it was not asked to)?
+
+If Stage 1 fails, re-dispatch the implementer with specific feedback. Do NOT proceed to Stage 2.
 
 ### Stage 2: Code Quality
 
@@ -105,7 +108,30 @@ After subagent results come back, review in two passes:
 - Are there edge cases not handled?
 - Is the solution appropriately simple (not over-engineered)?
 
+Stage 2 runs only after Stage 1 returns DONE (or DONE_WITH_CONCERNS that the caller chose to accept).
+
 If either stage fails, provide specific feedback and re-dispatch. Do not manually patch subagent output without understanding why it diverged.
+
+### Reusable Prompt Templates
+
+Three agent prompt templates live under `~/.claude/agents/` once this module is installed. Reference them by name when dispatching:
+
+| Template | Role | Returns |
+|----------|------|---------|
+| `implementer` | Does the work inside a spec without creeping | Four-state status |
+| `spec-compliance-reviewer` | Stage 1 reviewer - adversarial stance, does not trust implementer self-reports | Four-state status |
+| `code-quality-reviewer` | Stage 2 reviewer - refuses to run if Stage 1 did not pass | Four-state status |
+
+The `spec-compliance-reviewer` is specifically hardened to treat the implementer's `DONE` as a claim, not evidence - it re-reads the diff, itemizes deliverables, and runs fresh verification before concurring.
+
+### Red Flags
+
+Stop and re-sequence if you catch yourself:
+
+- Starting Stage 2 before Stage 1 has returned DONE
+- Merging a subagent's output without running either stage because "the code looks fine"
+- Accepting the implementer's self-report as evidence of spec compliance
+- Running Stage 1 and Stage 2 in parallel (they are deliberately serial - Stage 1 gates Stage 2)
 
 ## Coordination Rules
 
