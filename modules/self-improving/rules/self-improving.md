@@ -23,19 +23,29 @@ Distill specific experiences into general rules:
 
 ### 3. Update Memory
 
-Write confirmed patterns to your memory files:
-- Add patterns to topic-specific memory files (e.g., `debugging.md`, `patterns.md`)
-- Update MEMORY.md index with links to new topic files
-- Remove or correct patterns that turned out to be wrong
+Write confirmed patterns to the learnings store. The store is a schema-validated JSONL file per project at `~/.claude/learnings/{project-slug}/learnings.jsonl`:
+
+```bash
+ccgm-learnings-log \
+  --type pattern \
+  --content "Always quote PostgreSQL reserved keywords in migrations" \
+  --tag supabase --tag migrations \
+  --confidence 8
+```
+
+See `learnings-store.md` for the full schema, type vocabulary, and confidence-decay model. `MEMORY.md` remains as a human-readable index that `/reflect` dual-writes into during the transition, but the JSONL is the source of truth.
+
+Before logging, search for an existing entry (`ccgm-learnings-search --query "<topic>"`). If the pattern already exists, run `ccgm-learnings-log verify <id>` to reinforce it instead of creating a duplicate.
 
 ### 4. Consolidate
 
-Periodically review memory files for:
-- Duplicate or contradictory entries
-- Patterns that have been superseded by new learning
-- Entries that are too specific (should be generalized) or too vague (should be made concrete)
+Periodically review learnings for:
+- Duplicate or contradictory entries (the JSONL keeps them; the read path dedupes by key)
+- Patterns that have been superseded by new learning (use `ccgm-learnings-log contradict <id>` or `deprecate <id>`)
+- Entries whose `files[]` anchors no longer exist (stale)
+- Entries below the effective-confidence threshold that should be retired explicitly
 
-Use `/consolidate` to run a structured memory maintenance pass.
+Use `/consolidate` to run a structured maintenance pass against both the JSONL store and any legacy MEMORY.md entries.
 
 ---
 
@@ -80,15 +90,16 @@ If none of the checklist items produce a pattern worth capturing, that is fine. 
 
 ## What to Write to Memory
 
-### Memory Type Mapping
+### Type Mapping (learnings store vocabulary)
 
-| What you learned | Memory type | Example |
-|------------------|-------------|---------|
-| Root cause of a tricky bug | feedback | "PostgreSQL JSONB operators require explicit casting in WHERE clauses" |
-| Codebase architecture pattern | project | "Auth middleware runs before rate limiting in this project's middleware chain" |
-| Tool or framework gotcha | feedback | "Tailwind v4 preflight does not set cursor:pointer on buttons" |
-| User preference or working style | user | "User prefers single bundled PRs for refactors, not many small ones" |
-| Process that worked well | feedback | "Running migrations before writing TypeScript types prevents type drift" |
+| What you learned | Learnings type | Example |
+|------------------|----------------|---------|
+| Root cause of a tricky bug | `pitfall` | "PostgreSQL JSONB operators require explicit casting in WHERE clauses" |
+| Codebase architecture pattern | `architecture` | "Auth middleware runs before rate limiting in this project's middleware chain" |
+| Tool or framework gotcha | `tool` | "Tailwind v4 preflight does not set cursor:pointer on buttons" |
+| User preference or working style | `preference` | "User prefers single bundled PRs for refactors, not many small ones" |
+| Process that worked well | `pattern` | "Running migrations before writing TypeScript types prevents type drift" |
+| Ops fact (deploy, CLI, infra) | `operational` | "Cloudflare Pages deploys take 2-3 minutes; do not test immediately after merge" |
 
 ### What NOT to Capture
 
@@ -101,17 +112,21 @@ If none of the checklist items produce a pattern worth capturing, that is fine. 
 
 ## Confidence Tracking
 
-Not all patterns are equally reliable:
+Every learning has an explicit `confidence` score 1-10. The read path applies time-based decay automatically, so you do not need to hand-manage staleness. You do need to set the initial score honestly:
 
-- **High confidence**: Confirmed across 3+ interactions or explicitly stated by the user
-- **Medium confidence**: Observed twice or strongly implied by project structure
-- **Low confidence**: Observed once. Note as tentative, verify before relying on it.
+- **8-10**: Confirmed across 3+ interactions, explicitly stated by the user, or directly evidenced by the codebase.
+- **5-7**: Observed twice or strongly implied by project structure.
+- **3-4**: Observed once; tentative. Consider waiting for confirmation before logging, OR log with the lower score and verify on next occurrence.
+- **1-2**: Rarely worth logging. Speculative.
 
-Only write high and medium confidence patterns to memory. Keep low confidence observations as mental notes until confirmed.
+Log high and medium confidence learnings. For once-only observations, prefer a mental note until the pattern is confirmed; when it recurs, log it then.
+
+Each successful reuse (`ccgm-learnings-log verify <id>`) slightly boosts effective confidence and refreshes `last_verified`. Contradictions (`contradict <id>`) cut it hard.
 
 ---
 
 ## Commands
 
-- **`/reflect`** - Run the full reflection checklist inline. Use after completing significant work or when prompted by a hook.
-- **`/consolidate`** - Run a memory maintenance pass: review all memory files, identify duplicates/contradictions/stale entries, clean up.
+- **`/reflect`** - Run the full reflection checklist inline. Dual-writes confirmed patterns to the JSONL learnings store and MEMORY.md index.
+- **`/consolidate`** - Review the learnings store and legacy MEMORY.md: find duplicates, contradictions, stale anchors, and entries below threshold.
+- **`/retro`** - Windowed retrospective over git history; surfaces candidate learnings for the next `/reflect` pass.

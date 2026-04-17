@@ -229,11 +229,21 @@ I noticed these potentially-reusable patterns:
   1. {pattern}
   2. {pattern}
 
-Want me to capture any of these to memory via /reflect? (y/N/which)
+Want me to capture any of these to the learnings store via /reflect? (y/N/which)
 ```
 
-Do NOT auto-write memory entries from a retro. Retros surface candidates;
-`/reflect` confirms and writes them.
+Do NOT auto-write learnings from a retro. Retros surface candidates;
+`/reflect` validates, picks the right `type`, and writes via
+`ccgm-learnings-log` so the store stays schema-valid and dedup'd.
+
+Before suggesting capture, check the store for existing matches:
+
+```bash
+ccgm-learnings-search --query "<topic>" --max 3
+```
+
+If a match exists, suggest `ccgm-learnings-log verify <id>` instead of a
+new entry.
 
 ## Global Mode
 

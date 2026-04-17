@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""
+ccgm-learnings-search — rank + filter + token-cap learnings for injection.
+
+Usage:
+    ccgm-learnings-search [--query "..."] [--tag foo --tag bar] [--type pattern ...]
+                          [--cross-project] [--max N] [--budget TOKENS]
+                          [--format jsonl|markdown|preamble] [--include-stale]
+                          [--project SLUG]
+
+Examples:
+    # Top 5 matches for "migration" as a preamble block
+    ccgm-learnings-search --query migration --max 5 --format preamble
+
+    # All high-confidence pitfalls tagged supabase across all projects
+    ccgm-learnings-search --type pitfall --tag supabase --cross-project
+
+    # Raw JSONL (for piping into other tools)
+    ccgm-learnings-search --query auth --format jsonl
+
+The search path applies time-based confidence decay, dedupes by (key, type),
+drops deprecated or stale-below-threshold entries, and caps output by the
+configured token budget (chars/4 approximation).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent / "lib"))
+
+import learnings_store as ls  # noqa: E402
+
+
+def _render_markdown(entries: list[dict]) -> str:
+    if not entries:
+        return "_No learnings matched._\n"
+    lines = ["# Learnings (ranked)", ""]
+    for e in entries:
+        eff = ls.effective_confidence(e)
+        tag_str = " ".join(f"`#{t}`" for t in e.get("tags", []))
+        lines.append(f"## [{e.get('type')}] {e.get('id')}  (conf {eff:.1f}, uses {e.get('uses', 0)})")
+        if tag_str:
+            lines.append(tag_str)
+        lines.append("")
+        lines.append(e.get("content", ""))
+        if e.get("files"):
+            lines.append("")
+            lines.append("**Anchors:** " + ", ".join(f"`{f}`" for f in e["files"]))
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _render_preamble(entries: list[dict]) -> str:
+    """Compact preamble block suitable for injection at command start."""
+    if not entries:
+        return ""
+    lines = ["<learnings source=\"ccgm-learnings-store\">"]
+    for e in entries:
+        eff = ls.effective_confidence(e)
+        tags = ",".join(e.get("tags", []))
+        lines.append(
+            f"  - [{e.get('type')}] ({eff:.1f}) {e.get('content')}"
+            + (f"  [tags: {tags}]" if tags else "")
+        )
+    lines.append("</learnings>")
+    return "\n".join(lines) + "\n"
+
+
+def _render_jsonl(entries: list[dict]) -> str:
+    return "\n".join(json.dumps(e, sort_keys=True) for e in entries) + ("\n" if entries else "")
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(prog="ccgm-learnings-search", description=__doc__.splitlines()[1])
+    p.add_argument("--query", default="")
+    p.add_argument("--tag", action="append", dest="tags", default=[])
+    p.add_argument("--type", action="append", dest="types", default=[],
+                   choices=sorted(ls.VALID_TYPES))
+    p.add_argument("--project")
+    p.add_argument("--cross-project", action="store_true")
+    p.add_argument("--max", type=int, dest="max_results")
+    p.add_argument("--budget", type=int, dest="token_budget")
+    p.add_argument("--include-stale", action="store_true")
+    p.add_argument("--format", choices=["jsonl", "markdown", "preamble"], default="preamble")
+    p.add_argument("--list-projects", action="store_true")
+    args = p.parse_args(argv)
+
+    if args.list_projects:
+        for s in ls.list_project_slugs():
+            print(s)
+        return 0
+
+    entries = ls.search(
+        query=args.query,
+        tags=args.tags,
+        types=args.types,
+        slug=args.project,
+        cross_project=True if args.cross_project else None,
+        max_results=args.max_results,
+        token_budget=args.token_budget,
+        include_stale=args.include_stale,
+    )
+
+    if args.format == "jsonl":
+        sys.stdout.write(_render_jsonl(entries))
+    elif args.format == "markdown":
+        sys.stdout.write(_render_markdown(entries))
+    else:
+        sys.stdout.write(_render_preamble(entries))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

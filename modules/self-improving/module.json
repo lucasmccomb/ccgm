@@ -1,19 +1,23 @@
 {
   "name": "self-improving",
   "displayName": "Self-Improving Agent",
-  "description": "Meta-learning system: automated reflection triggers, pattern extraction, memory management commands, and hooks that fire at key moments (PR merge, context compaction, debugging failures).",
+  "description": "Meta-learning system with a structured JSONL learnings store (confidence decay, staleness, prompt-injection-filtered), automated reflection triggers, and hooks that fire at key moments (PR merge, context compaction, debugging failures). Replaces narrative MEMORY.md with a queryable, token-budgeted store while keeping MEMORY.md as a rendered index.",
   "category": "workflow",
   "scope": ["global"],
   "dependencies": [],
   "files": {
     "rules/self-improving.md": { "target": "rules/self-improving.md", "type": "rule", "template": false },
+    "rules/learnings-store.md": { "target": "rules/learnings-store.md", "type": "rule", "template": false },
     "commands/reflect.md": { "target": "commands/reflect.md", "type": "command", "template": false },
     "commands/consolidate.md": { "target": "commands/consolidate.md", "type": "command", "template": false },
     "commands/retro.md": { "target": "commands/retro.md", "type": "command", "template": false },
     "hooks/reflection-trigger.py": { "target": "hooks/reflection-trigger.py", "type": "hook", "template": false },
     "hooks/precompact-reflection.py": { "target": "hooks/precompact-reflection.py", "type": "hook", "template": false },
+    "bin/ccgm-learnings-log": { "target": "bin/ccgm-learnings-log", "type": "script", "template": false },
+    "bin/ccgm-learnings-search": { "target": "bin/ccgm-learnings-search", "type": "script", "template": false },
+    "lib/learnings_store.py": { "target": "lib/learnings_store.py", "type": "lib", "template": false },
     "settings.partial.json": { "target": "settings.json", "type": "config", "template": false, "merge": true }
   },
-  "tags": ["meta-learning", "reflection", "improvement", "memory", "hooks"],
+  "tags": ["meta-learning", "reflection", "improvement", "memory", "learnings", "jsonl", "confidence-decay", "hooks"],
   "configPrompts": []
 }

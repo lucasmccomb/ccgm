@@ -1,14 +1,14 @@
 ---
-description: Review and maintain memory files - find duplicates, contradictions, and stale entries
+description: Maintain the learnings store - dedup, retire stale entries, reconcile with legacy MEMORY.md
 allowed-tools: Agent
 ---
 
-# /consolidate - Memory Maintenance
+# /consolidate - Learnings Maintenance
 
 Use the Agent tool to execute this workflow:
 
 - **model**: sonnet
-- **description**: memory consolidation
+- **description**: learnings consolidation
 
 Pass the agent all workflow instructions below.
 
@@ -18,51 +18,61 @@ After the agent completes, relay its report to the user exactly as received.
 
 ## Workflow Instructions
 
-Review all memory files and clean up duplicates, contradictions, and stale entries.
+Review the JSONL learnings store AND any legacy MEMORY.md files. Dedup, flag contradictions, retire stale entries, and keep the store tight.
 
-### 1. Read the Memory Index
+### 1. Snapshot the Store
 
 ```bash
-cat "$HOME/.claude/projects/*/memory/MEMORY.md" 2>/dev/null | head -200
+# Projects with learnings
+ccgm-learnings-search --list-projects
+
+# Dump current project (incl stale)
+ccgm-learnings-search --include-stale --max 200 --budget 100000 --format jsonl
 ```
 
-If no MEMORY.md exists, report "No memory index found - nothing to consolidate" and exit.
+Also read any legacy MEMORY.md at `~/.claude/projects/*/memory/MEMORY.md` and the linked topic files. Note which entries exist only in MEMORY.md (not yet migrated).
 
-### 2. Read All Memory Files
+### 2. Categorize Issues
 
-For each file referenced in MEMORY.md, read it and note:
-- **Name and type** (from frontmatter)
-- **Content summary** (one sentence)
-- **Potential issues**: duplicate of another entry? contradicts another? too specific? too vague? likely stale?
+For each entry, check:
 
-### 3. Identify Issues
+**Duplicates** — Same pattern, different ids. Keep the highest-confidence or most recently verified, `deprecate` the others (do not delete; the JSONL is append-only).
 
-Group findings into categories:
+**Contradictions** — Two entries give conflicting guidance. Determine which is correct (check the codebase). Record a contradiction on the incorrect one (`ccgm-learnings-log contradict <id>`) or deprecate it outright.
 
-**Duplicates**: Two or more entries that capture the same pattern. Keep the more complete or general version, remove the others.
+**Stale anchors** — Entry has `files[]` but one or more files no longer exist. Verify the pattern still applies. If yes, update anchors via a new entry (append; mark old one deprecated). If no, deprecate.
 
-**Contradictions**: Entries that give conflicting guidance. Determine which is correct (check the codebase or context), update the correct one, remove the incorrect one.
+**Below threshold** — Effective confidence < 2.0 after decay. If the pattern is still true, reinforce (`verify`). If obsolete, `deprecate` to remove from reads without losing history.
 
-**Stale entries**: Patterns that reference files, functions, or behaviors that no longer exist. Verify by checking the codebase. Remove confirmed stale entries.
+**Too specific** — One-incident entries that will not recur. Deprecate.
 
-**Too specific**: Entries tied to a single incident that are unlikely to recur. Remove or generalize.
+**Too vague** — Entries that provide no actionable guidance. Deprecate and (if the underlying insight is real) log a concrete replacement.
 
-**Too vague**: Entries so general they provide no actionable guidance. Either make concrete or remove.
+### 3. Apply Changes
 
-### 4. Apply Changes
+Use the CLI, not direct file edits (append-only log):
 
-For each issue found:
-- Edit or remove the memory file
-- Update MEMORY.md index if files were added or removed
+```bash
+ccgm-learnings-log verify <id>
+ccgm-learnings-log contradict <id>
+ccgm-learnings-log deprecate <id>
 
-### 5. Report
+# For new entries replacing a deprecated one
+ccgm-learnings-log --type <type> --content "<replacement>" ...
+```
+
+For MEMORY.md entries worth keeping, port them via `ccgm-learnings-log --from-json '...'` and then remove the stale markdown.
+
+### 4. Report
 
 ```
-## Memory Consolidation Report
+## Learnings Consolidation Report
 
-- **Files reviewed**: N
-- **Files updated**: N (list which and why)
-- **Files removed**: N (list which and why)
-- **Files unchanged**: N
-- **New issues found**: (any patterns that need human input to resolve)
+- **Entries reviewed**: N (JSONL) + N (MEMORY.md)
+- **Deprecated**: N (list ids + one-line reason)
+- **Contradictions recorded**: N
+- **Verifications**: N (refreshed last_verified)
+- **Migrated from MEMORY.md**: N
+- **New replacements written**: N (list ids)
+- **Unresolved**: (any patterns that need human input)
 ```
