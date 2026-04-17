@@ -4,7 +4,7 @@ Python hooks that enforce git workflow rules: issue-first workflow, commit messa
 
 ## What It Does
 
-This module installs eleven Python hooks, two Python libraries, and a settings partial:
+This module installs twelve Python hooks, two Python libraries, and a settings partial:
 
 | Hook | Event | Purpose |
 |------|-------|---------|
@@ -19,6 +19,7 @@ This module installs eleven Python hooks, two Python libraries, and a settings p
 | `check-migration-timestamps.py` | PreToolUse | Validates Supabase migration file timestamps for duplicates before commit |
 | `check-careful.py` | PreToolUse (Bash) | Prompts before destructive Bash commands (rm -rf, SQL DROP/TRUNCATE, force push, hard reset, kubectl delete, docker prune). Build-artifact directories (node_modules, dist, .next, build, __pycache__, .cache, .turbo, coverage) are whitelisted for `rm -rf` |
 | `check-freeze.py` | PreToolUse (Edit/Write) | Denies Edit/Write outside the frozen directory when `~/.claude/freeze-dir.txt` is set. Pair with `/freeze`, `/unfreeze`, `/guard` from `commands-extra` |
+| `session-start-enforce.py` | SessionStart (startup) | Experimental. Injects an Iron-Law rule-enforcement meta-instruction at fresh session start so discipline rules activate under pressure. OFF by default; opt in via `CCGM_RULE_ENFORCEMENT=true` in `~/.claude/.ccgm.env` |
 
 The `settings.partial.json` wires these hooks into your `~/.claude/settings.json`.
 
@@ -70,6 +71,16 @@ You can add additional protected branches by creating `~/.claude/git-flow-protec
 
 The default protected branches are: main, master, production, prod, staging, stag, develop, dev, release, trunk.
 
+### Experimental: rule-enforcement meta-instruction
+
+`session-start-enforce.py` is OFF by default. To pilot it, add this to `~/.claude/.ccgm.env`:
+
+```
+CCGM_RULE_ENFORCEMENT=true
+```
+
+On fresh session start, the hook injects a short reminder that routes tasks through loaded Iron-Law rules (TDD, systematic-debugging, verification, subagent-patterns, confusion-protocol). Remove or set to `false` to disable.
+
 ## Files
 
 | File | Description |
@@ -85,6 +96,7 @@ The default protected branches are: main, master, production, prod, staging, sta
 | `hooks/check-migration-timestamps.py` | Supabase migration timestamp validation |
 | `hooks/check-careful.py` | Destructive-command warning (careful safety hook) |
 | `hooks/check-freeze.py` | Scope-lock Edit/Write to `~/.claude/freeze-dir.txt` (freeze safety hook) |
+| `hooks/session-start-enforce.py` | Experimental Iron-Law rule-enforcement meta-instruction at session start (opt in via `CCGM_RULE_ENFORCEMENT=true`) |
 | `lib/agent_tracking.py` | Python library for tracking CSV operations |
 | `lib/agent_sessions.py` | Python library for live session detection |
 | `settings.partial.json` | Hook wiring configuration to merge into settings.json |

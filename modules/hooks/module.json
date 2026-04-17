@@ -76,6 +76,11 @@
       "type": "hook",
       "template": false
     },
+    "hooks/session-start-enforce.py": {
+      "target": "hooks/session-start-enforce.py",
+      "type": "hook",
+      "template": false
+    },
     "settings.partial.json": {
       "target": "settings.json",
       "type": "config",
