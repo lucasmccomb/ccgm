@@ -1,0 +1,32 @@
+{
+  "name": "compound-knowledge",
+  "displayName": "Compound Knowledge",
+  "description": "Team-shared learnings in docs/solutions/. After solving a non-trivial problem, /compound writes a structured markdown doc with YAML frontmatter that later /xplan and /review runs re-inject as grounding. Counterpart to self-improving's personal MEMORY.md.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["skill-authoring"],
+  "files": {
+    "skills/compound/SKILL.md": {
+      "target": "skills/compound/SKILL.md",
+      "type": "skill",
+      "template": false
+    },
+    "skills/compound/references/schema.yaml": {
+      "target": "skills/compound/references/schema.yaml",
+      "type": "doc",
+      "template": false
+    },
+    "skills/compound-refresh/SKILL.md": {
+      "target": "skills/compound-refresh/SKILL.md",
+      "type": "skill",
+      "template": false
+    },
+    "agents/learnings-researcher.md": {
+      "target": "agents/learnings-researcher.md",
+      "type": "agent",
+      "template": false
+    }
+  },
+  "tags": ["knowledge", "learnings", "compound", "team", "docs-solutions", "review", "planning"],
+  "configPrompts": []
+}
