@@ -23,6 +23,7 @@ Includes a reflection checklist, mandatory trigger points, memory type mapping, 
 |---------|-------------|
 | `/reflect` | Run the full reflection checklist inline (preserves session context) |
 | `/consolidate` | Review all memory files, find duplicates/contradictions/stale entries, clean up |
+| `/retro` | Generate a retrospective from git history over a time window (default 7d); supports `/retro global` across all repos |
 
 ### Hooks
 
@@ -50,6 +51,7 @@ cp rules/self-improving.md ~/.claude/rules/self-improving.md
 # Commands
 cp commands/reflect.md ~/.claude/commands/reflect.md
 cp commands/consolidate.md ~/.claude/commands/consolidate.md
+cp commands/retro.md ~/.claude/commands/retro.md
 
 # Hooks
 cp hooks/reflection-trigger.py ~/.claude/hooks/reflection-trigger.py
@@ -66,6 +68,7 @@ cp hooks/precompact-reflection.py ~/.claude/hooks/precompact-reflection.py
 | `rules/self-improving.md` | rule | Reflection loop, trigger points, checklist, memory mapping, confidence tracking |
 | `commands/reflect.md` | command | Inline structured reflection workflow |
 | `commands/consolidate.md` | command | Memory maintenance via subagent |
+| `commands/retro.md` | command | Windowed git-history retrospective with hotspots and per-author activity |
 | `hooks/reflection-trigger.py` | hook | PostToolUse detection for PR merge and issue close |
 | `hooks/precompact-reflection.py` | hook | PreCompact reminder to capture patterns |
 | `settings.partial.json` | config | Hook registration (PostToolUse:Bash, PreCompact) |
