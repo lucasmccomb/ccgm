@@ -30,3 +30,5 @@ cp rules/code-quality.md .claude/rules/code-quality.md
 | File | Description |
 |------|-------------|
 | `rules/code-quality.md` | Rule file covering code standards, testing, error handling, security, build verification, and living documents |
+| `rules/change-philosophy.md` | Rule file on elegant integration: redesign existing systems rather than bolting on |
+| `rules/completeness.md` | Rule file on the Boil-the-Lake completeness principle and scoring rubric |
