@@ -185,7 +185,31 @@ fi
 
 printf '%s  ·  %s  ·  %s\n' "$AGENT_ID" "$REPO_DISPLAY" "$DATE_PRETTY"
 printf 'Branch    %-30s  Status  %-8s  Sync  %s\n' "$BRANCH" "$STATUS_LABEL" "$SYNC_LABEL"
+
+# Confirm logging status so the user knows a session log is active.
+if [ -n "$LOG_FILE" ]; then
+  case "$LOG_STATUS" in
+    new)      printf 'Log       Started new session log at %s\n' "$LOG_FILE" ;;
+    existing) printf 'Log       Continuing session log at %s\n' "$LOG_FILE" ;;
+  esac
+fi
+
 printf 'Previous  %s\n' "$PREV_SUMMARY"
+
+# Previous-session summary: last few ## headings from the prior log's tail.
+# Adds context beyond the single-line Previous field when the prior session
+# hit multiple milestones (commit, PR, merge, etc.).
+if [ -n "$(trim "$PREV_TAIL")" ] && [ "$(trim "$PREV_TAIL")" != "none" ]; then
+  PREV_HEADINGS=$(printf '%s\n' "$PREV_TAIL" \
+    | grep -E '^## ' \
+    | tail -5 \
+    | sed -E 's/^## //; s/[[:space:]]*#[a-z-]+$//')
+  HEADING_COUNT=$(printf '%s\n' "$PREV_HEADINGS" | grep -c . || true)
+  if [ "${HEADING_COUNT:-0}" -gt 1 ]; then
+    printf '\nPrevious Session\n'
+    printf '%s\n' "$PREV_HEADINGS" | indent
+  fi
+fi
 
 emit_section() {
   local label="$1" body="$2"
