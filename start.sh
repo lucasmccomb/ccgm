@@ -18,6 +18,8 @@ source "${CCGM_ROOT}/lib/template.sh"
 source "${CCGM_ROOT}/lib/merge.sh"
 # shellcheck source=lib/backup.sh
 source "${CCGM_ROOT}/lib/backup.sh"
+# shellcheck source=lib/repair.sh
+source "${CCGM_ROOT}/lib/repair.sh"
 
 # --- Write manifest helper ---
 write_manifest() {
@@ -791,6 +793,12 @@ main() {
   # Create target directories
   [ "$install_global" = true ] && mkdir -p "$global_dir"
   [ "$install_project" = true ] && mkdir -p "$project_dir"
+
+  # Remove stale symlinks from prior installs (e.g. modules renamed upstream).
+  # Must run before `ln -s` below, because `ln -s` fails if a dangling symlink
+  # already occupies the target path (`[ -e ... ]` doesn't detect it).
+  [ "$install_global" = true ] && repair_dangling_symlinks "$global_dir"
+  [ "$install_project" = true ] && repair_dangling_symlinks "$project_dir"
 
   # Write .ccgm.env
   local env_file="${global_dir}/.ccgm.env"
