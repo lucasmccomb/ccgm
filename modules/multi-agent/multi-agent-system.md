@@ -441,7 +441,7 @@ All agents write to the agent log repo at `{log-repo-name}/{repo-name}/YYYYMMDD/
 - Workspace model: `agent-w1-c2.md`
 - Flat clone model: `agent-0.md`
 
-Per-agent files = no merge conflicts. See `~/.claude/log-system.md` for full protocol.
+Per-agent files = no merge conflicts. See `docs/session-memory.md` for how session memory and `/recall` work.
 
 At session start, read other agents' logs in the same date subdirectory for cross-agent awareness.
 
