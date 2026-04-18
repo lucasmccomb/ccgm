@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# startup-dashboard.sh - Run gather, create log if needed, emit formatted dashboard.
+# startup-dashboard.sh - Run gather and emit formatted dashboard.
 # Replaces the model-delegated formatting step of /startup (#335).
 # Called directly by /startup; no Agent tool dispatch, no model tokens for formatting.
 
@@ -52,12 +52,6 @@ indent() {
 AGENT_ID=$(kv IDENTITY agent_id)
 REPO=$(kv IDENTITY repo)
 DATE=$(kv IDENTITY date)
-TIME=$(kv IDENTITY time)
-
-LOG_STATUS=$(kv LOG status)
-LOG_FILE=$(kv LOG file)
-LOG_DIR=$(kv LOG dir)
-PREV_LOG=$(kv LOG prev)
 
 GIT_SECTION=$(section GIT)
 if printf '%s' "$GIT_SECTION" | grep -q '^NOT_A_GIT_REPO$'; then
@@ -79,10 +73,9 @@ fi
 PRS_BODY=$(section PRS)
 TRACKING_BODY=$(section TRACKING)
 SESSIONS_BODY=$(section SESSIONS)
-CROSS_AGENT_BODY=$(section CROSS_AGENT)
 SIBLINGS_BODY=$(section SIBLINGS)
 ORPHANS_BODY=$(section ORPHANS)
-PREV_TAIL=$(section PREV_LOG_TAIL)
+RECENT_BODY=$(section RECENT_ACTIVITY)
 
 RELEASE_CURRENT=$(kv RELEASE current)
 RELEASE_LATEST=$(kv RELEASE latest)
@@ -91,42 +84,7 @@ if printf '%s\n' "$GATHER" | grep -q '^UPDATE_AVAILABLE$'; then
   UPDATE_AVAILABLE=1
 fi
 
-# ---- Create today's log if missing ----
-if [ "$LOG_STATUS" = "new" ] && [ -n "$LOG_DIR" ] && [ -n "$LOG_FILE" ]; then
-  mkdir -p "$LOG_DIR"
-  if [ ! -f "$LOG_FILE" ]; then
-    STATE="clean"
-    if [ -n "$(trim "$GIT_STATUS_BODY")" ]; then
-      STATE="dirty"
-    fi
-    cat > "$LOG_FILE" <<LOGEOF
-# ${AGENT_ID} - ${DATE} - ${REPO}
-
-## Session Start
-- **Time**: ${TIME}
-- **Branch**: \`${BRANCH}\`
-- **State**: ${STATE}
-LOGEOF
-  fi
-fi
-
 # ---- Summaries ----
-
-# "Previous" one-liner: last meaningful "## " heading from PREV_LOG_TAIL.
-# Skip the "Session Start" stub since it has no information content.
-PREV_SUMMARY="No prior session found"
-if [ -n "$(trim "$PREV_TAIL")" ] && [ "$(trim "$PREV_TAIL")" != "none" ]; then
-  LAST_HEADING=$(printf '%s\n' "$PREV_TAIL" \
-    | grep -E '^## ' \
-    | grep -vE '^## Session Start$' \
-    | tail -1 \
-    | sed -E 's/^## //; s/[[:space:]]*#[a-z-]+$//')
-  if [ -n "$LAST_HEADING" ]; then
-    PREV_SUMMARY="$LAST_HEADING"
-  elif printf '%s\n' "$PREV_TAIL" | grep -qE '^## Session Start$'; then
-    PREV_SUMMARY="Session started, no updates logged yet"
-  fi
-fi
 
 # Status label: clean/dirty/n-a
 if [ "$BRANCH" = "(not a git repo)" ]; then
@@ -165,8 +123,6 @@ if [ "$PR_COUNT" -gt 0 ] 2>/dev/null; then
   NEXT="Review ${PR_COUNT} open PR(s)"
 elif [ "$STATUS_LABEL" = "dirty" ]; then
   NEXT="Review uncommitted changes or continue previous work"
-elif printf '%s\n' "$PREV_TAIL" | grep -qE '#in-progress'; then
-  NEXT="Continue in-progress work from previous session"
 fi
 
 # ---- Emit dashboard ----
@@ -185,31 +141,6 @@ fi
 
 printf '%s  ·  %s  ·  %s\n' "$AGENT_ID" "$REPO_DISPLAY" "$DATE_PRETTY"
 printf 'Branch    %-30s  Status  %-8s  Sync  %s\n' "$BRANCH" "$STATUS_LABEL" "$SYNC_LABEL"
-
-# Confirm logging status so the user knows a session log is active.
-if [ -n "$LOG_FILE" ]; then
-  case "$LOG_STATUS" in
-    new)      printf 'Log       Started new session log at %s\n' "$LOG_FILE" ;;
-    existing) printf 'Log       Continuing session log at %s\n' "$LOG_FILE" ;;
-  esac
-fi
-
-printf 'Previous  %s\n' "$PREV_SUMMARY"
-
-# Previous-session summary: last few ## headings from the prior log's tail.
-# Adds context beyond the single-line Previous field when the prior session
-# hit multiple milestones (commit, PR, merge, etc.).
-if [ -n "$(trim "$PREV_TAIL")" ] && [ "$(trim "$PREV_TAIL")" != "none" ]; then
-  PREV_HEADINGS=$(printf '%s\n' "$PREV_TAIL" \
-    | grep -E '^## ' \
-    | tail -5 \
-    | sed -E 's/^## //; s/[[:space:]]*#[a-z-]+$//')
-  HEADING_COUNT=$(printf '%s\n' "$PREV_HEADINGS" | grep -c . || true)
-  if [ "${HEADING_COUNT:-0}" -gt 1 ]; then
-    printf '\nPrevious Session\n'
-    printf '%s\n' "$PREV_HEADINGS" | indent
-  fi
-fi
 
 emit_section() {
   local label="$1" body="$2"
@@ -230,7 +161,7 @@ if [ "$PR_COUNT" -gt 0 ] 2>/dev/null; then
 fi
 
 emit_section "Tracking" "$TRACKING_BODY"
-emit_section "Cross-Agent" "$CROSS_AGENT_BODY"
+emit_section "Recent Activity" "$RECENT_BODY"
 emit_section "Siblings" "$SIBLINGS_BODY"
 
 ORPHANS_TRIMMED=$(trim "$ORPHANS_BODY")
