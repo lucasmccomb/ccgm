@@ -10,11 +10,19 @@ Files installed globally to `~/.claude/`:
 
 | Source | Target | Purpose |
 |--------|--------|---------|
-| `agents/session-historian.md` | `agents/session-historian.md` | Retrieval agent, invoked by other skills |
+| `agents/session-historian.md` | `agents/session-historian.md` | Retrieval agent, invoked by other skills for deep synthesis |
+| `commands/recall.md` | `commands/recall.md` | `/recall` slash command (lightweight, user-facing) |
 | `scripts/discover-sessions.sh` | `scripts/discover-sessions.sh` | Enumerate session files across platforms |
 | `scripts/extract-metadata.py` | `scripts/extract-metadata.py` | Batch-extract session metadata (branch, cwd, timestamps) |
+| `scripts/recall.py` | `scripts/recall.py` | `/recall` implementation — unified session view across clones |
+| `scripts/repo_detect.py` | `scripts/repo_detect.py` | Canonical repo-name detection + multi-clone project-dir matching |
 
-The agent is a drop-in. It is not wired into any command by this module - callers dispatch it via the Task tool when they want prior-session context.
+Two consumption patterns:
+
+1. **`/recall` slash command** — fast, deterministic summary / query over the last N days of sessions for the current repo (unified across all clones). Default 7 days. No agent dispatch, no LLM calls.
+2. **`session-historian` agent** — heavier synthesis via Task tool dispatch when you need "what was tried, what failed, what was decided" analysis across platforms (Claude Code + Codex).
+
+Use `/recall` for quick lookups. Use the agent when you need the history interpreted, not just listed.
 
 ## Supported Platforms
 
@@ -46,6 +54,19 @@ chmod +x ~/.claude/scripts/extract-metadata.py
 ```
 
 ## Usage
+
+### `/recall` slash command
+
+```
+/recall                     # Last 7 days, current repo, all clones, summary
+/recall migration           # Last 7 days, filter turns by "migration"
+/recall --days 30 auth      # Custom window + filter
+/recall --repo voxter       # Different repo (canonical name required)
+/recall --session 65b57a04  # Dump a specific session
+/recall --summary --limit 3 # Top 3 most recent sessions, compact format
+```
+
+`--repo` takes the canonical repo name as returned by `git remote get-url origin` — substring matching is NOT supported to avoid false positives (e.g., `ccgm` matching `ccgm-agent-learning`).
 
 ### From another skill or command
 

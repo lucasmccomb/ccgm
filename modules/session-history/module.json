@@ -11,6 +11,11 @@
       "type": "agent",
       "template": false
     },
+    "commands/recall.md": {
+      "target": "commands/recall.md",
+      "type": "command",
+      "template": false
+    },
     "scripts/discover-sessions.sh": {
       "target": "scripts/discover-sessions.sh",
       "type": "script",
@@ -20,8 +25,18 @@
       "target": "scripts/extract-metadata.py",
       "type": "script",
       "template": false
+    },
+    "scripts/recall.py": {
+      "target": "scripts/recall.py",
+      "type": "script",
+      "template": false
+    },
+    "scripts/repo_detect.py": {
+      "target": "scripts/repo_detect.py",
+      "type": "script",
+      "template": false
     }
   },
-  "tags": ["session", "history", "retrieval", "agent", "cross-platform", "claude-code", "codex"],
+  "tags": ["session", "history", "retrieval", "agent", "recall", "cross-platform", "claude-code", "codex"],
   "configPrompts": []
 }
