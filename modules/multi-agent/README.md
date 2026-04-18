@@ -24,7 +24,7 @@ Key capabilities:
 
 ## Dependencies
 
-- **session-logging**: Required for cross-agent visibility and session continuity
+- **startup-dashboard**: Provides the `/startup` dashboard (tracking.csv claims, live sessions, recent activity) for cross-agent visibility
 
 ## Manual Installation
 

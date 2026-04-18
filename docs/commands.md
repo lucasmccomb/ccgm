@@ -624,7 +624,7 @@ Delegates to a Sonnet agent that reads all memory files, identifies duplicates, 
 
 ## Workflow commands
 
-Installed by the **xplan**, **multi-agent**, and **session-logging** modules.
+Installed by the **xplan**, **multi-agent**, and **startup-dashboard** modules.
 
 ---
 
@@ -744,49 +744,26 @@ Sets up isolated workspace directories with multiple clones for parallel agent w
 
 ### /startup
 
-**Session initialization.**
+**Session initialization dashboard.**
 
-Automatically runs at session start (if auto-startup is enabled) or can be invoked manually. Provides full context for beginning a work session.
+Runs on demand at the start of a session. Prints a plain-text dashboard with everything you need to orient.
 
 **What it does**:
 1. Derives agent identity from directory name
-2. Pulls latest session logs and reads today's entries
-3. Reads other agents' logs for cross-agent awareness
-4. Creates today's log file if it doesn't exist
-5. Checks git status, syncs with remote
-6. Lists open PRs and issues
-7. Queries the tracking dashboard for claimed/unclaimed work
-8. Checks sibling clones for what other agents are doing
-9. Checks for Claude Code updates
-10. Presents a session dashboard with recommended next action
+2. Checks git status and syncs with remote
+3. Lists open PRs and tracking.csv claims for the current repo
+4. Lists live Claude Code sessions on the machine
+5. Lists sibling clone branches
+6. Surfaces the last 7 days of recent activity across all clones of the repo (via session-history `/recall`)
+7. Warns about orphan test processes
+8. Checks for Claude Code updates
 
 **Usage**:
 ```
 /startup
 ```
 
-**Installed by**: session-logging module
-
----
-
-### /log-init
-
-**Lightweight log initialization.**
-
-Faster alternative to `/startup` - initializes session logging without the full git status check, issue list, or release check. Use when you want a quick log entry at the start of a session without the full dashboard.
-
-**What it does**:
-1. Derives agent identity from directory name
-2. Pulls latest session logs
-3. Creates today's log file if it doesn't exist
-4. Reports log path and any sibling agent sessions
-
-**Usage**:
-```
-/log-init
-```
-
-**Installed by**: session-logging module
+**Installed by**: startup-dashboard module
 
 ---
 

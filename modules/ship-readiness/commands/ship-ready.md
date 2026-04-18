@@ -348,7 +348,7 @@ may not interpret them. Plain text, one signal per line.
   section 7. This command reads them; it never writes.
 - `learnings-researcher` (compound-knowledge module) provides section 8. If
   absent, section 8 is skipped gracefully.
-- Session logging (session-logging module) is not coupled. The dashboard is
+- The startup-dashboard module is not coupled. The dashboard is
   transient.
 
 ## Source

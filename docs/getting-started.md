@@ -89,12 +89,12 @@ After installation, start Claude Code:
 claude
 ```
 
-If you installed the **session-logging** module, Claude will automatically run the `/startup` command, which:
+If you installed the **startup-dashboard** module, run `/startup` at the beginning of a session to see:
 
-1. Identifies your agent and repo context
-2. Pulls and reads session logs
-3. Checks git status, open PRs, and open issues
-4. Presents a dashboard with recommended next actions
+1. Your agent and repo context
+2. Git status, open PRs, and tracking.csv claims
+3. Live Claude Code sessions and sibling branches
+4. Recent activity across all clones of the repo (via session-history `/recall`)
 
 If you installed **commands-core**, you now have these slash commands available:
 

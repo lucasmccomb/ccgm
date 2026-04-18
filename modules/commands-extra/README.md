@@ -13,7 +13,7 @@ This module installs eight slash command files:
 - **/freeze** - Scope-lock Edit/Write to a directory by writing `~/.claude/freeze-dir.txt`. Reads by `check-freeze.py` (see the `hooks` module)
 - **/unfreeze** - Clear the freeze scope by deleting `~/.claude/freeze-dir.txt`
 - **/guard** - Compose careful + freeze for focused, safe sessions. Activates the freeze state file and confirms both safety hooks are installed
-- **/checkpoint** - Save or resume a structured WIP snapshot (working-on / decisions / remaining work / notes) under `~/.claude/checkpoints/{repo}/`. Complements session-logging: logs are chronological narrative, checkpoints are compact handoff state
+- **/checkpoint** - Save or resume a structured WIP snapshot (working-on / decisions / remaining work / notes) under `~/.claude/checkpoints/{repo}/`. Complements the session-history /recall: recall surfaces recent transcripts, checkpoints are compact handoff state
 
 ## Manual Installation
 

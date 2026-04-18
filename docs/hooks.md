@@ -18,7 +18,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 10 hooks, 2 Python libraries, and a settings partial. The **session-logging** module installs 1 additional hook. The **self-improving** module installs 2 additional hooks. Total: 13 hooks across 3 modules.
+The **hooks** module installs 10 hooks, 2 Python libraries, and a settings partial. The **self-improving** module installs 2 additional hooks. Total: 12 hooks across 2 modules.
 
 ---
 
@@ -216,23 +216,6 @@ Detects orphaned test worker processes (vitest, jest) left behind when a previou
 
 ---
 
-### auto-startup.py
-
-**Type**: SessionStart
-**Module**: session-logging
-**Can block**: No (context injection)
-
-Triggers the `/startup` command at the beginning of each new session.
-
-**How it works**:
-1. Only fires on fresh session starts (source == "startup"), not on resume or context compaction
-2. Prints `<auto-startup>Run the /startup command now to initialize this session.</auto-startup>` to stdout
-3. Claude Code picks up this output and Claude executes the `/startup` command
-
-**Configuration**: Enabled/disabled via `CCGM_AUTO_STARTUP` in `~/.claude/.ccgm.env`.
-
----
-
 ### reflection-trigger.py
 
 **Type**: PostToolUse:Bash
@@ -245,7 +228,7 @@ Injects a reflection reminder into Claude's context after significant git events
 - `gh pr merge` - reminds Claude to run the post-merge reflection checklist
 - `gh issue close` - reminds Claude to check for reusable patterns
 
-**Does not fire**: On regular commits, in the log repo, or on non-git commands.
+**Does not fire**: On regular commits or on non-git commands.
 
 **Output**: XML-tagged instruction (e.g., `<reflection-trigger>PR merged. Run the post-merge reflection...</reflection-trigger>`) that Claude picks up as a context injection.
 

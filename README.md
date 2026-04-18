@@ -134,8 +134,9 @@ For a quick install with a preset:
 | **brainstorm** | commands | /brainstorm - design-before-implementation gate: forbids code until a design spec with 2-3 approach tradeoffs is written and user-approved, then hands off to /xplan | - |
 | **research** | commands | /research - multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, Reddit. Zero dependencies.* | - |
 | **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
-| **session-logging** | workflow | Structured agent session logging with mandatory triggers and startup command | - |
-| **multi-agent** | workflow | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | session-logging |
+| **startup-dashboard** | workflow | Plain-text `/startup` dashboard: git state, tracking claims, live sessions, recent activity (via session-history /recall) | session-history |
+| **session-history** | workflow | `/recall` for unified session transcript history across all clones of a repo; session-historian agent for deeper retrieval | - |
+| **multi-agent** | workflow | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | startup-dashboard |
 | **atdd** | workflow | Agentic Test-Driven Development. /atdd reads Playwright vision specs, iteratively builds app code until all tests pass, then ships | - |
 | **test-vision** | workflow | Vision-driven e2e test suite generation. /test-vision for full repo analysis + parallel test suite creation. /e2e for single-feature spec generation | browser-automation, multi-agent |
 | **xplan** | workflow | Interactive planning framework: discovery interview, deep research, tech stack sign-off, peer review, parallel agent execution. Requires [/deepresearch](#companion-module-deepresearch) | multi-agent |
@@ -194,7 +195,6 @@ Config files use placeholders that are expanded during installation:
 | `__HOME__` | Home directory path | settings |
 | `__USERNAME__` | GitHub username | hooks |
 | `__CODE_DIR__` | Code workspace directory | settings |
-| `__LOG_REPO__` | Agent log repo name | session-logging |
 | `__TIMEZONE__` | Your timezone | - |
 | `__DEFAULT_MODE__` | Permission mode (ask/dontAsk) | settings |
 

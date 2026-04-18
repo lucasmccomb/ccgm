@@ -328,6 +328,6 @@ a compact 3-5 line summary per repo, not a full retro. Then aggregate:
   writes them to memory; `/consolidate` maintains them.
 - **multi-agent** - global mode reads `tracking.csv` to report agent-level
   issue state alongside commit activity.
-- **session-logging** - the log repo is the durable record of what happened
-  session-by-session; retro is the windowed git-ground summary that
-  complements it.
+- **session-history** - `/recall` surfaces the raw per-session transcripts
+  captured natively by Claude Code; retro is the windowed git-ground summary
+  that complements them.
