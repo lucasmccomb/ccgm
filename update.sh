@@ -10,6 +10,7 @@ CCGM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # --- Source libraries ---
 source "${CCGM_ROOT}/lib/ui.sh"
 source "${CCGM_ROOT}/lib/modules.sh"
+source "${CCGM_ROOT}/lib/repair.sh"
 
 # ============================================================
 # Helper: Check installed file drift
@@ -21,6 +22,11 @@ _check_installed_drift() {
   fi
 
   ui_header "Drift Check"
+
+  # Prune symlinks whose source file no longer exists in the CCGM repo
+  # (e.g. after a module rename). Missing files surface as drift below
+  # and can be reinstalled via the existing "Install missing?" prompt.
+  repair_dangling_symlinks "${HOME}/.claude"
 
   local link_mode
   link_mode=$(jq -r '.linkMode // false' "$manifest" 2>/dev/null)
