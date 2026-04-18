@@ -233,7 +233,6 @@ expected_files=(
   "rules/cloudflare.md"
   "commands/commit.md"
   "commands/xplan.md"
-  "log-system.md"
   "multi-agent-system.md"
   "github-repo-protocols.md"
 )

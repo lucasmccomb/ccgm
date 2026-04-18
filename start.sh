@@ -1207,8 +1207,8 @@ TMPL
 
   ui_info "Next steps:"
   local step=1
-  if [ "$alias_ccgm_installed" = true ] || [ "$alias_ccgms_installed" = true ]; then
-    echo "  ${step}. Run 'source ${rc_file}' to activate the new aliases"
+  if [ "$alias_ccgm_installed" = true ]; then
+    echo "  ${step}. Run 'source ${rc_file}' to activate the new alias"
     step=$((step + 1))
   else
     echo "  ${step}. Open a new Claude Code session to pick up the new config"
@@ -1226,10 +1226,7 @@ TMPL
   echo ""
   ui_info "Useful commands:"
   if [ "$alias_ccgm_installed" = true ]; then
-    echo "  ccgm             Quick session start (log init only)"
-  fi
-  if [ "$alias_ccgms_installed" = true ]; then
-    echo "  ccgms            Full startup (git status, issues, agent dashboard)"
+    echo "  ccgm             Session startup (git status, tracking, live sessions, recent activity)"
   fi
   echo "  ./update.sh      Check for upstream updates"
   echo "  ./uninstall.sh   Remove installed modules"

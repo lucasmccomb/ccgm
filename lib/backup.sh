@@ -25,7 +25,6 @@ create_backup() {
     "rules"
     "commands"
     "hooks"
-    "log-system.md"
     "multi-agent-system.md"
     "github-repo-protocols.md"
   )
