@@ -170,13 +170,22 @@ elif printf '%s\n' "$PREV_TAIL" | grep -qE '#in-progress'; then
 fi
 
 # ---- Emit dashboard ----
+# Output is pure plain text — no markdown, no ANSI. Claude Code renders
+# Bash tool output literally, so formatting relies on spacing and Unicode.
 
 REPO_DISPLAY="$REPO"
 [ -z "$REPO_DISPLAY" ] && REPO_DISPLAY="(no repo)"
 
-printf '**%s** | `%s` | %s\n' "$AGENT_ID" "$REPO_DISPLAY" "$DATE"
-printf '**Branch:** `%s` | **Status:** %s | **Sync:** %s\n' "$BRANCH" "$STATUS_LABEL" "$SYNC_LABEL"
-printf '**Previous** - %s\n' "$PREV_SUMMARY"
+# Pretty date: YYYYMMDD -> YYYY-MM-DD
+if [ ${#DATE} -eq 8 ]; then
+  DATE_PRETTY="${DATE:0:4}-${DATE:4:2}-${DATE:6:2}"
+else
+  DATE_PRETTY="$DATE"
+fi
+
+printf '%s  ·  %s  ·  %s\n' "$AGENT_ID" "$REPO_DISPLAY" "$DATE_PRETTY"
+printf 'Branch    %-30s  Status  %-8s  Sync  %s\n' "$BRANCH" "$STATUS_LABEL" "$SYNC_LABEL"
+printf 'Previous  %s\n' "$PREV_SUMMARY"
 
 emit_section() {
   local label="$1" body="$2"
@@ -185,14 +194,14 @@ emit_section() {
   [ -z "$trimmed" ] && return 0
   [ "$trimmed" = "none" ] && return 0
   [ "$trimmed" = "(coordinator workspace - tracking shown by individual clones)" ] && return 0
-  printf '\n**%s**\n' "$label"
+  printf '\n%s\n' "$label"
   printf '%s\n' "$body" | indent
 }
 
 emit_section "Live Sessions" "$SESSIONS_BODY"
 
 if [ "$PR_COUNT" -gt 0 ] 2>/dev/null; then
-  printf '\n**Open PRs** (%s)\n' "$PR_COUNT"
+  printf '\nOpen PRs (%s)\n' "$PR_COUNT"
   printf '%s\n' "$PRS_BODY" | indent
 fi
 
@@ -202,13 +211,13 @@ emit_section "Siblings" "$SIBLINGS_BODY"
 
 ORPHANS_TRIMMED=$(trim "$ORPHANS_BODY")
 if [ -n "$ORPHANS_TRIMMED" ]; then
-  printf '\n**Orphans**\n'
+  printf '\nOrphans\n'
   printf '%s\n' "$ORPHANS_BODY" | indent
 fi
 
 if [ "$UPDATE_AVAILABLE" = "1" ]; then
-  printf '\n**Update:** v%s -> v%s (`npm i -g @anthropic-ai/claude-code@latest`)\n' \
+  printf '\nUpdate    v%s -> v%s   (npm i -g @anthropic-ai/claude-code@latest)\n' \
     "$(trim "$RELEASE_CURRENT")" "$(trim "$RELEASE_LATEST")"
 fi
 
-printf '\n**Next:** %s\n' "$NEXT"
+printf '\nNext  %s\n' "$NEXT"
