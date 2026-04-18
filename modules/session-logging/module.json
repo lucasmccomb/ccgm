@@ -1,7 +1,7 @@
 {
   "name": "session-logging",
   "displayName": "Session Logging",
-  "description": "Structured agent session logging system with mandatory log triggers, log repo management, session startup command, and auto-startup hook.",
+  "description": "Startup dashboard for Claude Code sessions. Surfaces git state, live sessions, tracking, and recent activity (via session-history /recall). Session-logging parts retired; module will be renamed to startup-dashboard.",
   "category": "workflow",
   "scope": ["global"],
   "dependencies": [],
@@ -10,10 +10,8 @@
     "log-system.md": { "target": "log-system.md", "type": "doc", "template": false },
     "commands/startup.md": { "target": "commands/startup.md", "type": "command", "template": false },
     "commands/log-init.md": { "target": "commands/log-init.md", "type": "command", "template": false },
-    "lib/startup-gather.sh": { "target": "lib/startup-gather.sh", "type": "lib", "template": true },
-    "lib/startup-dashboard.sh": { "target": "lib/startup-dashboard.sh", "type": "lib", "template": false },
-    "hooks/auto-startup.py": { "target": "hooks/auto-startup.py", "type": "hook", "template": false },
-    "settings.partial.json": { "target": "settings.json", "type": "config", "merge": true, "template": false }
+    "lib/startup-gather.sh": { "target": "lib/startup-gather.sh", "type": "lib", "template": false },
+    "lib/startup-dashboard.sh": { "target": "lib/startup-dashboard.sh", "type": "lib", "template": false }
   },
   "tags": ["logging", "session", "agent", "coordination"],
   "configPrompts": [
