@@ -34,6 +34,12 @@ variable "claude_code_version" {
   default     = "1.2.3"
 }
 
+variable "ccgm_repo_url" {
+  type        = string
+  description = "Git URL of the CCGM repo to clone into the image (read from CCGM_REPO_URL env var)"
+  default     = env("CCGM_REPO_URL")
+}
+
 source "hcloud" "agent" {
   token       = var.hcloud_token
   image       = "ubuntu-22.04"
@@ -75,8 +81,11 @@ build {
 
   # 2. Create agent users and shared directories
   provisioner "shell" {
-    script          = "scripts/setup.sh"
-    execute_command = "chmod +x '{{ .Path }}' && bash -eu '{{ .Path }}'"
+    script = "scripts/setup.sh"
+    environment_vars = [
+      "CCGM_REPO_URL=${var.ccgm_repo_url}"
+    ]
+    execute_command = "chmod +x '{{ .Path }}' && env {{ .Vars }} bash -eu '{{ .Path }}'"
   }
 
   # 3. Apply security hardening (iptables, sshd config, unattended-upgrades)

@@ -62,16 +62,16 @@ def list_project_dirs(repo: str) -> list[Path]:
     the named repo.
 
     Claude Code encodes cwd paths by replacing '/' with '-' in the project-dir
-    name. Example: /Users/lem/code/ccgm-repos/ccgm-1 becomes
-    -Users-lem-code-ccgm-repos-ccgm-1. Decoding is ambiguous because literal
+    name. Example: /home/alice/code/myrepo/myrepo-1 becomes
+    -home-alice-code-myrepo-myrepo-1. Decoding is ambiguous because literal
     '-' chars collide with path-separator encoding, so we match on the TAIL of
     the encoded name with a strict regex instead of decoding.
 
     A project dir matches if its encoded name ends with one of:
-      -{repo}                    (non-multi-clone, e.g. -Users-lem-code-ccgm)
-      -{repo}-\\d+                (flat clone: ccgm-0, ccgm-1, ...)
-      -{repo}-w\\d+               (workspace root: ccgm-w0)
-      -{repo}-w\\d+-c\\d+          (workspace clone: ccgm-w0-c2)
+      -{repo}                    (non-multi-clone, e.g. -home-alice-code-myrepo)
+      -{repo}-\\d+                (flat clone: myrepo-0, myrepo-1, ...)
+      -{repo}-w\\d+               (workspace root: myrepo-w0)
+      -{repo}-w\\d+-c\\d+          (workspace clone: myrepo-w0-c2)
     """
     if not CLAUDE_PROJECTS.exists():
         return []
