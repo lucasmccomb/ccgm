@@ -94,6 +94,51 @@ def _get_git_context(cwd: str) -> tuple[str | None, str | None]:
     return repo, branch
 
 
+def _get_tmux_pane_pids() -> dict[int, str]:
+    """Return {pane_pid: session_name} for all tmux panes, or {} if tmux unavailable."""
+    out = _run(["tmux", "list-panes", "-a", "-F", "#{pane_pid} #{session_name}"])
+    panes: dict[int, str] = {}
+    for line in out.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            panes[int(parts[0])] = parts[1]
+    return panes
+
+
+def _get_tmux_attached_sessions() -> set[str]:
+    """Return set of tmux session names with at least one attached client."""
+    out = _run(["tmux", "list-clients", "-F", "#{session_name}"])
+    return {line.strip() for line in out.splitlines() if line.strip()}
+
+
+def _get_ppid_map() -> dict[int, int]:
+    """Return {pid: ppid} for all running processes."""
+    out = _run(["ps", "-eo", "pid,ppid"])
+    ppid_map: dict[int, int] = {}
+    for line in out.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            ppid_map[int(parts[0])] = int(parts[1])
+    return ppid_map
+
+
+def _find_tmux_session(
+    pid: int,
+    ppid_map: dict[int, int],
+    pane_pids: dict[int, str],
+) -> str | None:
+    """Walk parent chain from pid; return tmux session name if an ancestor is a tmux pane."""
+    cur = pid
+    for _ in range(32):
+        if cur in pane_pids:
+            return pane_pids[cur]
+        parent = ppid_map.get(cur)
+        if parent is None or parent <= 1 or parent == cur:
+            return None
+        cur = parent
+    return None
+
+
 def _get_agent_id(cwd: str) -> str | None:
     """
     Derive agent identity from .env.clone or directory name pattern.
@@ -139,13 +184,18 @@ def get_active_sessions(repo_filter: str | None = None, exclude_cwd: str | None 
             "tty":      str,    # Terminal (e.g. ttys003, ?? for background)
             "uptime":   str,    # Elapsed time (e.g. "01-02:30:45", "15:30")
             "cwd":      str,    # Working directory
-            "repo":     str,    # Git repo name (or None)
-            "branch":   str,    # Current git branch (or None)
-            "agent_id": str,    # Derived agent ID (or None)
+            "repo":       str,    # Git repo name (or None)
+            "branch":     str,    # Current git branch (or None)
+            "agent_id":   str,    # Derived agent ID (or None)
+            "tmux_state": str,    # "attached", "detached", or None (not in tmux)
         }
     """
     sessions: list[dict] = []
     my_cwd = os.path.realpath(exclude_cwd) if exclude_cwd else None
+
+    pane_pids = _get_tmux_pane_pids()
+    attached_sessions = _get_tmux_attached_sessions() if pane_pids else set()
+    ppid_map = _get_ppid_map() if pane_pids else {}
 
     for pid, tty, etime in _get_claude_pids():
         cwd = _get_cwd(pid)
@@ -162,14 +212,23 @@ def get_active_sessions(repo_filter: str | None = None, exclude_cwd: str | None 
         if repo_filter and repo != repo_filter:
             continue
 
+        tmux_session = _find_tmux_session(pid, ppid_map, pane_pids) if pane_pids else None
+        if tmux_session is None:
+            tmux_state: str | None = None
+        elif tmux_session in attached_sessions:
+            tmux_state = "attached"
+        else:
+            tmux_state = "detached"
+
         sessions.append({
-            "pid":      pid,
-            "tty":      tty,
-            "uptime":   etime,
-            "cwd":      cwd,
-            "repo":     repo,
-            "branch":   branch,
-            "agent_id": _get_agent_id(cwd),
+            "pid":        pid,
+            "tty":        tty,
+            "uptime":     etime,
+            "cwd":        cwd,
+            "repo":       repo,
+            "branch":     branch,
+            "agent_id":   _get_agent_id(cwd),
+            "tmux_state": tmux_state,
         })
 
     return sessions
@@ -194,14 +253,17 @@ def format_sessions_text(sessions: list[dict], header: bool = True) -> str:
         tty = s["tty"]
         cwd = s["cwd"]
 
+        tmux_state = s.get("tmux_state")
+        suffix = f"  [tmux:{tmux_state}]" if tmux_state else ""
+
         if s["repo"]:
             lines.append(
                 f"  PID {pid_str:6} | {repo:25} | branch: {branch:30} | "
-                f"up: {uptime:12} | {tty}"
+                f"up: {uptime:12} | {tty}{suffix}"
             )
         else:
             lines.append(
-                f"  PID {pid_str:6} | (no repo) {cwd:40} | up: {uptime:12} | {tty}"
+                f"  PID {pid_str:6} | (no repo) {cwd:40} | up: {uptime:12} | {tty}{suffix}"
             )
     return "\n".join(lines)
 
