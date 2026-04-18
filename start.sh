@@ -794,8 +794,6 @@ main() {
 
   # Write .ccgm.env
   local env_file="${global_dir}/.ccgm.env"
-  local log_repo
-  log_repo=$(_get_module_config "session-logging____LOG_REPO__" "${github_username}-agent-logs")
   local default_mode
   default_mode=$(_get_module_config "settings__defaultMode" "ask")
   local auto_update_raw
@@ -804,21 +802,13 @@ main() {
   case "$auto_update_raw" in
     yes|true|1) auto_update_check="true" ;;
   esac
-  local auto_startup_raw
-  auto_startup_raw=$(_get_module_config "session-logging__autoStartup" "yes")
-  local auto_startup="false"
-  case "$auto_startup_raw" in
-    yes|true|1) auto_startup="true" ;;
-  esac
   local env_entries=(
     "CCGM_HOME=${HOME}"
     "CCGM_USERNAME=${github_username}"
     "CCGM_CODE_DIR=${code_dir}"
-    "CCGM_LOG_REPO=${log_repo}"
     "CCGM_TIMEZONE=${timezone}"
     "CCGM_DEFAULT_MODE=${default_mode}"
     "CCGM_AUTO_UPDATE_CHECK=${auto_update_check}"
-    "CCGM_AUTO_STARTUP=${auto_startup}"
   )
 
   # Add module-specific configs
@@ -826,7 +816,7 @@ main() {
   while [ $cfg_idx -lt ${#MODULE_CONFIG_KEYS[@]} ]; do
     local cfg_key="${MODULE_CONFIG_KEYS[$cfg_idx]}"
     case "$cfg_key" in
-      *__LOG_REPO__*|*__defaultMode__*|*__autoUpdateCheck__*|*__autoStartup__*) cfg_idx=$((cfg_idx + 1)); continue ;;
+      *__defaultMode__*|*__autoUpdateCheck__*) cfg_idx=$((cfg_idx + 1)); continue ;;
     esac
     env_entries+=("CCGM_MODULE_${cfg_key}=${MODULE_CONFIG_VALS[$cfg_idx]}")
     cfg_idx=$((cfg_idx + 1))
@@ -1161,31 +1151,24 @@ TMPL
       ;;
   esac
 
-  # Explain both aliases before prompting
+  # Explain the alias before prompting
   echo ""
-  ui_info "CCGM provides two shell aliases for launching Claude Code:"
+  ui_info "CCGM provides a shell alias for launching Claude Code:"
   echo ""
-  echo "  ccgm   Quick session start   claude /log-init --dangerously-skip-permissions"
-  echo "         Initializes your session log in ~1 second. Run this every time"
-  echo "         you open a new Claude Code session in a repo."
-  echo ""
-  echo "  ccgms  Full startup           claude /startup --dangerously-skip-permissions"
-  echo "         Full session orientation: git status, open issues, live agent"
-  echo "         dashboard, Claude Code release check. Use when starting work"
-  echo "         after time away or in a new repo."
+  echo "  ccgm   Session startup   claude /startup --dangerously-skip-permissions"
+  echo "         Prints the startup dashboard: git state, open PRs, tracking,"
+  echo "         live sessions, recent activity, orphans, release check."
   echo ""
 
   local alias_ccgm_installed=false
-  local alias_ccgms_installed=false
 
   if [ -n "$rc_file" ]; then
-    # --- ccgm alias ---
-    local ccgm_cmd='claude /log-init --dangerously-skip-permissions'
+    local ccgm_cmd='claude /startup --dangerously-skip-permissions'
     if [ -f "$rc_file" ] && grep -qF 'alias ccgm=' "$rc_file" 2>/dev/null; then
       ui_info "Alias 'ccgm' already exists in ${rc_file} - skipping"
-    elif ui_confirm "Add 'ccgm' (quick log-init) alias to ${rc_file}?"; then
+    elif ui_confirm "Add 'ccgm' alias to ${rc_file}?"; then
       echo "" >> "$rc_file"
-      echo "# CCGM - quick session log init" >> "$rc_file"
+      echo "# CCGM - startup dashboard" >> "$rc_file"
       echo "alias ccgm=\"${ccgm_cmd}\"" >> "$rc_file"
       ui_success "ccgm alias added"
       alias_ccgm_installed=true
@@ -1193,35 +1176,15 @@ TMPL
       ui_info "Skipped. Add manually: alias ccgm=\"${ccgm_cmd}\""
     fi
 
-    echo ""
-
-    # --- ccgms alias ---
-    local ccgms_cmd='claude /startup --dangerously-skip-permissions'
-    if [ -f "$rc_file" ] && grep -qF 'alias ccgms=' "$rc_file" 2>/dev/null; then
-      ui_info "Alias 'ccgms' already exists in ${rc_file} - skipping"
-    elif ui_confirm "Add 'ccgms' (full startup) alias to ${rc_file}?"; then
-      # Add comment only if ccgm wasn't just added (avoid duplicate comment)
-      if [ "$alias_ccgm_installed" = false ]; then
-        echo "" >> "$rc_file"
-        echo "# CCGM - full session startup" >> "$rc_file"
-      fi
-      echo "alias ccgms=\"${ccgms_cmd}\"" >> "$rc_file"
-      ui_success "ccgms alias added"
-      alias_ccgms_installed=true
-    else
-      ui_info "Skipped. Add manually: alias ccgms=\"${ccgms_cmd}\""
-    fi
-
-    if [ "$alias_ccgm_installed" = true ] || [ "$alias_ccgms_installed" = true ]; then
+    if [ "$alias_ccgm_installed" = true ]; then
       echo ""
-      ui_info "Run 'source ${rc_file}' or open a new terminal to use the aliases"
+      ui_info "Run 'source ${rc_file}' or open a new terminal to use the alias"
     fi
   else
     ui_info "Skipping alias setup."
     echo ""
     echo "Add manually to your shell config:"
-    echo "  alias ccgm=\"claude /log-init --dangerously-skip-permissions\""
-    echo "  alias ccgms=\"claude /startup --dangerously-skip-permissions\""
+    echo "  alias ccgm=\"claude /startup --dangerously-skip-permissions\""
   fi
 
   # ===========================================================

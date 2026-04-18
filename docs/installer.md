@@ -48,7 +48,7 @@ Choose a preset (minimal, standard, full, team) or select individual modules fro
 
 Automatically adds any modules required by your selection. Uses a depth-first topological sort with cycle detection. Reports any automatically added dependencies.
 
-For example, selecting `xplan` automatically adds `multi-agent` (its dependency), which adds `session-logging` (multi-agent's dependency).
+For example, selecting `xplan` automatically adds `multi-agent` (its dependency), which adds `startup-dashboard` (multi-agent's dependency).
 
 ### Step 7: Module config prompts
 

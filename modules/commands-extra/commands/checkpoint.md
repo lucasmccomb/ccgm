@@ -206,10 +206,9 @@ of the user's machine. A checkpoint saved from `myrepo-w0-c0` is visible to
 that contains the same commits referenced by `files_modified` - otherwise
 paths may not exist yet.
 
-If the log repo (session-logging module) is configured and the user prefers
-remote backup, the user can symlink `~/.claude/checkpoints/` into the log
-repo. This command does not do that automatically - the default is local-only
-to avoid leaking WIP to the log remote.
+Checkpoints are local-only by default. If you want remote backup, symlink
+`~/.claude/checkpoints/` into a private git repo yourself; this command
+does not do that automatically.
 
 ## Conventions
 

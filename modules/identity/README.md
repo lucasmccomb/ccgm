@@ -22,7 +22,7 @@ Together they transform generic AI sessions into a working relationship with a c
 
 Both files are installed as global rules (`~/.claude/rules/`), which means they're automatically loaded in every Claude Code session. No manual steps needed.
 
-If the `session-logging` module is also installed, `/startup` and `/log-init` will actively read and acknowledge these files at session start for stronger context priming.
+If the `startup-dashboard` module is also installed, `/startup` will surface this context at session start.
 
 ## Customization
 

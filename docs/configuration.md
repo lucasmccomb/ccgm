@@ -63,14 +63,11 @@ CCGM_USERNAME=janedoe
 CCGM_CODE_DIR=/Users/jane/code
 CCGM_TIMEZONE=America/New_York
 CCGM_DEFAULT_MODE=ask
-CCGM_LOG_REPO=agent-logs
 CCGM_AUTO_UPDATE_CHECK=true
-CCGM_AUTO_STARTUP=true
 ```
 
 Some hooks read values from this file at runtime:
 - `ccgm-update-check.py` reads `CCGM_AUTO_UPDATE_CHECK`
-- `auto-startup.py` reads `CCGM_AUTO_STARTUP`
 
 ## The CCGM manifest
 
@@ -102,9 +99,6 @@ Some modules ask questions during installation that affect their behavior:
 | **settings** | Permission mode | `ask` / `dontAsk` | Controls whether Claude asks before running tools or auto-approves |
 | **hooks** | Protected branches | Custom list | Additional branch names to protect from direct commits |
 | **hooks** | Auto update check | yes / no | Whether to check for CCGM updates once daily |
-| **session-logging** | Log repo name | Text input | Name of the git repo for session logs |
-| **session-logging** | Create log repo | yes / no | Whether to initialize the log repo during install |
-| **session-logging** | Auto startup | yes / no | Whether to auto-run `/startup` at session start |
 | **brand-naming** | Add MCP server | yes / no | Whether to add Instant Domain Search MCP server to `mcp.json` |
 
 ## Customizing hooks

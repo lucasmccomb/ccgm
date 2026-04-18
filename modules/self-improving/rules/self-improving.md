@@ -55,7 +55,7 @@ Reflection fires at specific moments. These are not suggestions - they are check
 
 ### Mandatory Triggers
 
-1. **After PR merge** - Before moving to the next task, run the reflection checklist below. The PostToolUse hook provides an automated reminder when `gh pr merge` runs; this rule covers merges via other paths (web UI, admin override). Cross-references session-logging mandatory trigger #8.
+1. **After PR merge** - Before moving to the next task, run the reflection checklist below. The PostToolUse hook provides an automated reminder when `gh pr merge` runs; this rule covers merges via other paths (web UI, admin override).
 
 2. **After debugging that took 3+ attempts** - When the three-strike rule fires (see systematic-debugging rules), capture the debugging pattern after resolution. What was the misleading assumption? What was the actual root cause? What would have found it faster?
 

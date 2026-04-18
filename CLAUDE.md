@@ -61,7 +61,6 @@ Used only in config files (not rule files):
 - `__HOME__` - User's home directory
 - `__USERNAME__` - GitHub username
 - `__CODE_DIR__` - Code workspace directory
-- `__LOG_REPO__` - Agent log repo name
 - `__TIMEZONE__` - User's timezone
 - `__DEFAULT_MODE__` - Permission default mode (ask/dontAsk)
 

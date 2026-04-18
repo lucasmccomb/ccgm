@@ -182,7 +182,6 @@ Template variables use `__DOUBLE_UNDERSCORE__` syntax and are expanded during in
 | `__HOME__` | User's home directory | Auto-detected |
 | `__USERNAME__` | GitHub username | Prompted during install |
 | `__CODE_DIR__` | Code workspace directory | Prompted during install |
-| `__LOG_REPO__` | Agent log repo name | session-logging module |
 | `__TIMEZONE__` | User's timezone | Auto-detected |
 | `__DEFAULT_MODE__` | Permission default mode (ask/dontAsk) | settings module |
 

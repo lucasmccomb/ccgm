@@ -4,7 +4,7 @@
   "description": "Multi-clone architecture for parallel agent work with issue claiming, port allocation, and the /mawf workflow command.",
   "category": "workflow",
   "scope": ["global"],
-  "dependencies": ["session-logging"],
+  "dependencies": ["startup-dashboard"],
   "files": {
     "rules/multi-agent.md": { "target": "rules/multi-agent.md", "type": "rule", "template": false },
     "multi-agent-system.md": { "target": "multi-agent-system.md", "type": "doc", "template": false },

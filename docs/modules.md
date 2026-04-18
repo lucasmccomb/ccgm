@@ -372,25 +372,26 @@ Issue-first workflow, PR conventions, label taxonomy, and code review standards.
 
 ---
 
-### session-logging
+### startup-dashboard
 
-Structured agent session logging with mandatory triggers, log management, and auto-startup.
+Plain-text `/startup` dashboard for Claude Code sessions.
 
-**Installs**: `rules/session-logging.md`, `log-system.md` (reference doc), `commands/startup.md`, `hooks/auto-startup.py`, settings.json fragment
+**Installs**: `commands/startup.md`, `lib/startup-gather.sh`, `lib/startup-dashboard.sh`
 
-**What it does**: Creates a system for tracking work across sessions:
+**What it does**: Emits a single-screen dashboard at session start:
 
-- **Session logs**: Markdown files in a dedicated log repo (`~/code/{log-repo}/`)
-- **Mandatory triggers**: Logs must be updated after commits, PR creation, PR merge, issue close, and before context compaction
-- **Agent identity**: Each clone gets a unique agent ID derived from its directory name
-- **Auto-startup**: A SessionStart hook automatically runs `/startup` to initialize each session
-- **Cross-agent awareness**: Agents read each other's logs to avoid duplicate work
+- **Git state**: branch, status, sync with origin/main
+- **Live sessions**: other Claude Code processes on the machine
+- **Open PRs and tracking.csv claims** for the current repo
+- **Sibling branches** across clones in the same workspace
+- **Recent activity**: last 7 days of session transcripts across every clone of the repo, powered by the `session-history` module's `/recall`
+- **Update banner** when a new Claude Code release is available
 
-The `/startup` command is the primary interface. It pulls logs, checks git status, queries the tracking dashboard, checks for Claude Code updates, and presents a session dashboard.
+There are no agent-discipline logging rules, no log repo writes, and no triggers to remember. Claude Code captures session transcripts natively as JSONL; `/recall` queries them on demand.
 
-**Config prompts**: Log repo name, whether to create the log repo, whether to enable auto-startup
+**Config prompts**: None
 
-**Dependencies**: None
+**Dependencies**: session-history
 
 ---
 
@@ -414,7 +415,7 @@ Commands installed:
 | `/mawf` | Multi-Agent Workflow - parse feedback into issues, spawn parallel agents |
 | `/workspace-setup` | Create workspace directory structure for a repo |
 
-**Dependencies**: session-logging
+**Dependencies**: startup-dashboard
 
 ---
 
@@ -448,7 +449,7 @@ Commands installed:
 | `/xplan-status` | Check progress on a running or completed plan |
 | `/xplan-resume` | Resume an interrupted plan execution |
 
-**Dependencies**: multi-agent (which depends on session-logging)
+**Dependencies**: multi-agent (which depends on startup-dashboard)
 
 ---
 
@@ -535,9 +536,9 @@ Meta-learning system with automated reflection triggers, commands, and hooks.
 - **Reflection checklist**: Mechanical checklist walked at each trigger point to identify patterns worth capturing
 - **Commands**: `/reflect` (inline structured reflection) and `/consolidate` (memory maintenance via subagent)
 - **Hooks**: PostToolUse hook injects reflection reminder after `gh pr merge` and `gh issue close`; PreCompact hook reminds agent to capture patterns before context compression
-- **Cross-module integration**: Works with session-logging (trigger #8), systematic-debugging (three-strike capture), and common-mistakes (living document)
+- **Cross-module integration**: Works with systematic-debugging (three-strike capture) and common-mistakes (living document)
 
-**Dependencies**: None (soft references to session-logging, systematic-debugging, common-mistakes)
+**Dependencies**: None (soft references to systematic-debugging, common-mistakes)
 
 ---
 

@@ -59,7 +59,6 @@ The JSONL wins any disagreement. MEMORY.md is treated as a derived view that can
 
 This module works best alongside:
 
-- **session-logging** - Mandatory trigger #8 prompts post-merge reflection
 - **systematic-debugging** - Three-strike rule triggers debugging pattern capture
 - **common-mistakes** - Living document that self-improving feeds new entries into
 - **compound-knowledge** (team-shared) - personal JSONL vs team `docs/solutions/`; related but non-overlapping
