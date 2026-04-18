@@ -271,6 +271,7 @@ The `docs/` directory contains comprehensive documentation:
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |
 | [Configuration](docs/configuration.md) | Customization, template variables, settings overrides |
 | [Multi-Agent System](docs/multi-agent.md) | Parallel agent coordination, port allocation, issue tracking |
+| [Session Memory](docs/session-memory.md) | Native JSONL transcripts, `/recall`, `CLAUDE.md`/`MEMORY.md`, retired agent-log-repo |
 
 ## Contributing
 
