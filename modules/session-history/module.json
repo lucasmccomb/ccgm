@@ -35,6 +35,11 @@
       "target": "scripts/repo_detect.py",
       "type": "script",
       "template": false
+    },
+    "scripts/add-agents-md-symlinks.sh": {
+      "target": "scripts/add-agents-md-symlinks.sh",
+      "type": "script",
+      "template": false
     }
   },
   "tags": ["session", "history", "retrieval", "agent", "recall", "cross-platform", "claude-code", "codex"],
