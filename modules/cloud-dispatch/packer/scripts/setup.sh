@@ -9,7 +9,11 @@ SECRETS_BASE="/run/secrets"
 echo "==> Cloning CCGM repo to /opt/ccgm/repo"
 mkdir -p "${CCGM_DIR}"
 chmod 755 "${CCGM_DIR}"
-git clone https://github.com/lucasmccomb/ccgm.git "${CCGM_DIR}/repo"
+if [ -z "${CCGM_REPO_URL:-}" ]; then
+  echo "ERROR: CCGM_REPO_URL env var is required" >&2
+  exit 1
+fi
+git clone "${CCGM_REPO_URL}" "${CCGM_DIR}/repo"
 
 echo "==> Pre-installing CCGM cloud-agent preset for each agent user"
 # The headless installer copies rules and commands from the CCGM repo

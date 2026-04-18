@@ -21,7 +21,7 @@
 #   bash tests/e2e-dispatch.sh --skip-cleanup  # Leave VMs running after test
 #
 # Environment variables:
-#   E2E_TEST_REPO   GitHub repo to use (default: lucasmccomb/ccgm)
+#   E2E_TEST_REPO   GitHub repo to use (REQUIRED, e.g. myorg/myrepo)
 #   E2E_VM_COUNT    Number of VMs to create (default: 1)
 #   E2E_MAX_TURNS   Max agent turns before stopping (default: 10)
 
@@ -35,7 +35,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/lib/common.sh"
 
-TEST_REPO="${E2E_TEST_REPO:-lucasmccomb/ccgm}"
+if [ -z "${E2E_TEST_REPO:-}" ]; then
+  echo "ERROR: E2E_TEST_REPO must be set to a GitHub repo slug like myorg/myrepo" >&2
+  exit 1
+fi
+TEST_REPO="$E2E_TEST_REPO"
 VM_COUNT="${E2E_VM_COUNT:-1}"
 MAX_TURNS="${E2E_MAX_TURNS:-10}"
 
