@@ -19,13 +19,48 @@ else
   AGENT_ID="agent-${AGENT_NUM}"
 fi
 
-REPO_NAME=$(git remote get-url origin 2>/dev/null | xargs basename 2>/dev/null | sed 's/\.git$//' || echo "unknown")
+# Workspace-root detection: cwd itself isn't a git repo, but child clones exist.
+IS_WORKSPACE_ROOT=false
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  for child in "$PWD"/*-c[0-9]*/; do
+    if [ -d "$child" ] && git -C "$child" rev-parse --git-dir >/dev/null 2>&1; then
+      IS_WORKSPACE_ROOT=true
+      break
+    fi
+  done
+fi
+
+# Repo detection: direct if in a git repo, otherwise infer from a child clone.
+REPO_NAME=$(git remote get-url origin 2>/dev/null | xargs basename 2>/dev/null | sed 's/\.git$//' || echo "")
+if [ -z "$REPO_NAME" ] && [ "$IS_WORKSPACE_ROOT" = true ]; then
+  for child in "$PWD"/*-c[0-9]*/; do
+    [ -d "$child" ] || continue
+    cand=$(git -C "$child" remote get-url origin 2>/dev/null | xargs basename 2>/dev/null | sed 's/\.git$//')
+    if [ -n "$cand" ]; then
+      REPO_NAME="$cand"
+      break
+    fi
+  done
+fi
+[ -z "$REPO_NAME" ] && REPO_NAME="unknown"
+
 TODAY=$(date +%Y%m%d)
 NOW_TIME=$(date +%H:%M)
 
+# Where to run gh (needs a git-repo cwd). In workspace mode, any child clone works.
+GH_CWD="$PROJECT_DIR"
+if [ "$IS_WORKSPACE_ROOT" = true ]; then
+  for child in "$PWD"/*-c[0-9]*/; do
+    if [ -d "$child" ] && git -C "$child" rev-parse --git-dir >/dev/null 2>&1; then
+      GH_CWD="${child%/}"
+      break
+    fi
+  done
+fi
+
 # --- Parallel jobs (all independent) ---
 
-# 1. Git status + sync
+# 1. Git status + sync (clone mode only; workspace mode emits per-clone summary instead)
 (
   cd "$PROJECT_DIR"
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -48,18 +83,48 @@ NOW_TIME=$(date +%H:%M)
   git log --oneline -5 2>/dev/null
 ) > "$TMPDIR/git" 2>/dev/null &
 
+# 1b. Per-clone summary (workspace mode only)
+(
+  if [ "$IS_WORKSPACE_ROOT" != true ]; then
+    exit 0
+  fi
+  for child in "$PROJECT_DIR"/*-c[0-9]*/; do
+    [ -d "$child" ] || continue
+    git -C "$child" rev-parse --git-dir >/dev/null 2>&1 || continue
+    name=$(basename "$child")
+    # Drop the workspace prefix for a compact label (e.g. ccgm-w0-c1 -> c1)
+    short=$(echo "$name" | grep -oE 'c[0-9]+$' || echo "$name")
+    branch=$(git -C "$child" branch --show-current 2>/dev/null || echo "detached")
+    dirty_count=$(git -C "$child" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$dirty_count" = "0" ]; then
+      status="clean"
+    else
+      status="dirty(${dirty_count})"
+    fi
+    ab=$(git -C "$child" rev-list --left-right --count origin/main...HEAD 2>/dev/null || echo "")
+    behind=$(echo "$ab" | awk '{print $1}')
+    ahead=$(echo "$ab" | awk '{print $2}')
+    if [ -z "$ab" ] || { [ "$behind" = "0" ] && [ "$ahead" = "0" ]; }; then
+      sync="up to date"
+    else
+      sync="ahead ${ahead:-0}, behind ${behind:-0}"
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$short" "$branch" "$status" "$sync"
+  done
+) > "$TMPDIR/clones" 2>/dev/null &
+
 # 2. Open PRs
 (
-  cd "$PROJECT_DIR"
+  cd "$GH_CWD" 2>/dev/null || exit 0
   gh pr list --state open --limit 10 2>/dev/null || echo "none"
 ) > "$TMPDIR/prs" 2>/dev/null &
 
-# 3. Tracking dashboard (active claims only - skip stale-claim GC, skip in coordinator dirs)
+# 3. Tracking dashboard (active claims only)
 (
-  if [ -n "$REPO_NAME" ]; then
+  if [ -n "$REPO_NAME" ] && [ "$REPO_NAME" != "unknown" ]; then
     python3 ~/.claude/lib/agent_tracking.py list --repo "$REPO_NAME" 2>/dev/null || echo "unavailable"
   else
-    echo "(coordinator workspace - tracking shown by individual clones)"
+    echo "(unknown repo - tracking unavailable)"
   fi
 ) > "$TMPDIR/tracking" 2>/dev/null &
 
@@ -68,8 +133,11 @@ NOW_TIME=$(date +%H:%M)
   python3 ~/.claude/lib/agent_sessions.py --text --exclude-cwd "$PROJECT_DIR" 2>/dev/null || true
 ) > "$TMPDIR/sessions" 2>/dev/null &
 
-# 5. Sibling branches
+# 5. Sibling branches (clone mode only; workspace mode uses the CLONES section)
 (
+  if [ "$IS_WORKSPACE_ROOT" = true ]; then
+    exit 0
+  fi
   cd "$PROJECT_DIR"
   WC=$(basename "$PWD" | grep -oE 'w[0-9]+-c[0-9]+$' 2>/dev/null || true)
   if [ -n "$WC" ]; then
@@ -104,12 +172,39 @@ NOW_TIME=$(date +%H:%M)
   fi
 ) > "$TMPDIR/release" 2>/dev/null &
 
-# 8. Recent activity (unified session history across all clones of this repo)
+# 8. Recent activity (7-day session history)
 (
   if [ -n "$REPO_NAME" ] && [ "$REPO_NAME" != "unknown" ] && [ -x "$(command -v python3)" ]; then
     python3 "$HOME/.claude/scripts/recall.py" --summary --limit 3 --days 7 2>/dev/null || true
   fi
 ) > "$TMPDIR/recent" 2>/dev/null &
+
+# 9. Recent merges (last 48h on main)
+(
+  cd "$GH_CWD" 2>/dev/null || exit 0
+  cutoff=$(python3 -c "import datetime; print((datetime.datetime.utcnow()-datetime.timedelta(hours=48)).strftime('%Y-%m-%dT%H:%M:%SZ'))" 2>/dev/null)
+  [ -z "$cutoff" ] && exit 0
+  gh pr list --state merged --limit 30 --json number,title,mergedAt,author \
+    --jq ".[] | select(.mergedAt > \"$cutoff\") | \"#\\(.number)\\t\\(.mergedAt)\\t\\(.author.login)\\t\\(.title)\"" \
+    2>/dev/null || true
+) > "$TMPDIR/recent_merges" 2>/dev/null &
+
+# 10. Candidate issues to pick up (open, no linked open PR, not already claimed)
+(
+  cd "$GH_CWD" 2>/dev/null || exit 0
+  # Build set of issue numbers referenced by open PRs (Closes #N / Fixes #N / Resolves #N).
+  open_pr_bodies=$(gh pr list --state open --limit 30 --json body,headRefName --jq '.[] | "\(.body) \(.headRefName)"' 2>/dev/null)
+  claimed_issues=$(echo "$open_pr_bodies" | grep -oiE '(closes|fixes|resolves) +#[0-9]+' | grep -oE '[0-9]+' | sort -u)
+  # Also treat branch names like "123-foo" as a claim on #123.
+  branch_claims=$(echo "$open_pr_bodies" | grep -oE '\b[0-9]+-[a-z0-9-]+' | grep -oE '^[0-9]+' | sort -u)
+  claimed=$(printf '%s\n%s\n' "$claimed_issues" "$branch_claims" | sort -u | grep -v '^$')
+  gh issue list --state open --limit 20 --json number,title,labels \
+    --jq '.[] | "\(.number)\t\(.title)"' 2>/dev/null | while IFS=$'\t' read -r n title; do
+      if ! echo "$claimed" | grep -qx "$n"; then
+        printf '#%s\t%s\n' "$n" "$title"
+      fi
+    done | head -5
+) > "$TMPDIR/candidate_issues" 2>/dev/null &
 
 # Wait for all background jobs
 wait
@@ -123,9 +218,13 @@ repo:${REPO_NAME}
 date:${TODAY}
 time:${NOW_TIME}
 project_dir:${PROJECT_DIR}
+is_workspace_root:${IS_WORKSPACE_ROOT}
 
 === GIT ===
 $(cat "$TMPDIR/git")
+
+=== CLONES ===
+$(cat "$TMPDIR/clones")
 
 === PRS ===
 $(cat "$TMPDIR/prs")
@@ -147,4 +246,10 @@ $(cat "$TMPDIR/release")
 
 === RECENT_ACTIVITY ===
 $(cat "$TMPDIR/recent")
+
+=== RECENT_MERGES ===
+$(cat "$TMPDIR/recent_merges")
+
+=== CANDIDATE_ISSUES ===
+$(cat "$TMPDIR/candidate_issues")
 GATHER_EOF

@@ -19,7 +19,6 @@ if [ -z "$GATHER" ]; then
 fi
 
 # ---- Section extraction ----
-# Print lines between "=== NAME ===" and the next "=== ... ===" (exclusive).
 section() {
   local name="$1"
   printf '%s\n' "$GATHER" | awk -v marker="=== $name ===" '
@@ -29,13 +28,11 @@ section() {
   '
 }
 
-# Read a "key:value" from a section. Returns the value verbatim (everything after the first colon).
 kv() {
   local name="$1" key="$2"
   section "$name" | awk -F: -v k="$key" '$1 == k { sub(/^[^:]*:/, ""); print; exit }'
 }
 
-# Trim leading/trailing whitespace.
 trim() {
   local s="$1"
   s="${s#"${s%%[![:space:]]*}"}"
@@ -43,7 +40,6 @@ trim() {
   printf '%s' "$s"
 }
 
-# Indent every non-empty line by two spaces.
 indent() {
   awk 'NF { print "  " $0 } !NF { print }'
 }
@@ -52,6 +48,7 @@ indent() {
 AGENT_ID=$(kv IDENTITY agent_id)
 REPO=$(kv IDENTITY repo)
 DATE=$(kv IDENTITY date)
+IS_WORKSPACE_ROOT=$(kv IDENTITY is_workspace_root)
 
 GIT_SECTION=$(section GIT)
 if printf '%s' "$GIT_SECTION" | grep -q '^NOT_A_GIT_REPO$'; then
@@ -70,12 +67,15 @@ else
   ')
 fi
 
+CLONES_BODY=$(section CLONES)
 PRS_BODY=$(section PRS)
 TRACKING_BODY=$(section TRACKING)
 SESSIONS_BODY=$(section SESSIONS)
 SIBLINGS_BODY=$(section SIBLINGS)
 ORPHANS_BODY=$(section ORPHANS)
 RECENT_BODY=$(section RECENT_ACTIVITY)
+RECENT_MERGES_BODY=$(section RECENT_MERGES)
+CANDIDATE_ISSUES_BODY=$(section CANDIDATE_ISSUES)
 
 RELEASE_CURRENT=$(kv RELEASE current)
 RELEASE_LATEST=$(kv RELEASE latest)
@@ -86,7 +86,6 @@ fi
 
 # ---- Summaries ----
 
-# Status label: clean/dirty/n-a
 if [ "$BRANCH" = "(not a git repo)" ]; then
   STATUS_LABEL="n/a"
   SYNC_LABEL="n/a"
@@ -110,6 +109,19 @@ if [ "$BRANCH" != "(not a git repo)" ]; then
   esac
 fi
 
+# Parse CLONES body to find dirty clones (workspace mode).
+DIRTY_CLONES=""
+if [ "$IS_WORKSPACE_ROOT" = "true" ] && [ -n "$(trim "$CLONES_BODY")" ]; then
+  while IFS=$'\t' read -r clone branch status sync; do
+    [ -z "$clone" ] && continue
+    case "$status" in
+      dirty*) DIRTY_CLONES="${DIRTY_CLONES:+$DIRTY_CLONES, }${clone}" ;;
+    esac
+  done <<EOF
+$CLONES_BODY
+EOF
+fi
+
 # PR count for header
 PR_COUNT=0
 if [ -n "$(trim "$PRS_BODY")" ] && [ "$(trim "$PRS_BODY")" != "none" ]; then
@@ -117,22 +129,44 @@ if [ -n "$(trim "$PRS_BODY")" ] && [ "$(trim "$PRS_BODY")" != "none" ]; then
   [ -z "$PR_COUNT" ] && PR_COUNT=0
 fi
 
-# Recommendation
+# Recent merge count
+MERGE_COUNT=0
+if [ -n "$(trim "$RECENT_MERGES_BODY")" ]; then
+  MERGE_COUNT=$(printf '%s\n' "$RECENT_MERGES_BODY" | grep -c . || true)
+  [ -z "$MERGE_COUNT" ] && MERGE_COUNT=0
+fi
+
+# First candidate issue (if any)
+FIRST_CANDIDATE=""
+if [ -n "$(trim "$CANDIDATE_ISSUES_BODY")" ]; then
+  FIRST_CANDIDATE=$(printf '%s\n' "$CANDIDATE_ISSUES_BODY" | head -1)
+fi
+
+# Recommendation priority:
+# 1. Open PRs (review/merge)
+# 2. Dirty working tree (in-clone) or dirty clones (workspace mode)
+# 3. Unclaimed open issue
+# 4. Fallback
 NEXT="What would you like to work on?"
 if [ "$PR_COUNT" -gt 0 ] 2>/dev/null; then
   NEXT="Review ${PR_COUNT} open PR(s)"
 elif [ "$STATUS_LABEL" = "dirty" ]; then
   NEXT="Review uncommitted changes or continue previous work"
+elif [ -n "$DIRTY_CLONES" ]; then
+  NEXT="Uncommitted changes in: ${DIRTY_CLONES}"
+elif [ -n "$FIRST_CANDIDATE" ]; then
+  # Render as "Pick up <first candidate>"
+  NEXT="Pick up $(printf '%s' "$FIRST_CANDIDATE" | awk -F'\t' '{printf "%s: %s", $1, $2}')"
 fi
 
 # ---- Emit dashboard ----
-# Output is pure plain text — no markdown, no ANSI. Claude Code renders
-# Bash tool output literally, so formatting relies on spacing and Unicode.
 
 REPO_DISPLAY="$REPO"
 [ -z "$REPO_DISPLAY" ] && REPO_DISPLAY="(no repo)"
+if [ "$IS_WORKSPACE_ROOT" = "true" ] && [ "$REPO_DISPLAY" != "(no repo)" ] && [ "$REPO_DISPLAY" != "unknown" ]; then
+  REPO_DISPLAY="${REPO_DISPLAY} (workspace)"
+fi
 
-# Pretty date: YYYYMMDD -> YYYY-MM-DD
 if [ ${#DATE} -eq 8 ]; then
   DATE_PRETTY="${DATE:0:4}-${DATE:4:2}-${DATE:6:2}"
 else
@@ -140,7 +174,18 @@ else
 fi
 
 printf '%s  ·  %s  ·  %s\n' "$AGENT_ID" "$REPO_DISPLAY" "$DATE_PRETTY"
-printf 'Branch    %-30s  Status  %-8s  Sync  %s\n' "$BRANCH" "$STATUS_LABEL" "$SYNC_LABEL"
+
+# Header line differs by mode. In workspace mode, the Clones section carries the
+# per-clone detail, so the header just summarizes repo-level state.
+if [ "$IS_WORKSPACE_ROOT" = "true" ]; then
+  CLONE_COUNT=0
+  if [ -n "$(trim "$CLONES_BODY")" ]; then
+    CLONE_COUNT=$(printf '%s\n' "$CLONES_BODY" | grep -c . || true)
+  fi
+  printf 'Workspace  %s clone(s)\n' "${CLONE_COUNT:-0}"
+else
+  printf 'Branch    %-30s  Status  %-8s  Sync  %s\n' "$BRANCH" "$STATUS_LABEL" "$SYNC_LABEL"
+fi
 
 emit_section() {
   local label="$1" body="$2"
@@ -148,16 +193,35 @@ emit_section() {
   trimmed=$(trim "$body")
   [ -z "$trimmed" ] && return 0
   [ "$trimmed" = "none" ] && return 0
+  [ "$trimmed" = "(unknown repo - tracking unavailable)" ] && return 0
   [ "$trimmed" = "(coordinator workspace - tracking shown by individual clones)" ] && return 0
   printf '\n%s\n' "$label"
   printf '%s\n' "$body" | indent
 }
+
+# Clones table (workspace mode only)
+if [ "$IS_WORKSPACE_ROOT" = "true" ] && [ -n "$(trim "$CLONES_BODY")" ]; then
+  printf '\nClones\n'
+  printf '%s\n' "$CLONES_BODY" | awk -F'\t' '{printf "  %-4s  %-36s  %-12s  %s\n", $1, $2, $3, $4}'
+fi
 
 emit_section "Live Sessions" "$SESSIONS_BODY"
 
 if [ "$PR_COUNT" -gt 0 ] 2>/dev/null; then
   printf '\nOpen PRs (%s)\n' "$PR_COUNT"
   printf '%s\n' "$PRS_BODY" | indent
+fi
+
+# Recent merges (last 48h)
+if [ "$MERGE_COUNT" -gt 0 ] 2>/dev/null; then
+  printf '\nMerged (last 48h, %s)\n' "$MERGE_COUNT"
+  printf '%s\n' "$RECENT_MERGES_BODY" | awk -F'\t' '{
+    # Shorten mergedAt YYYY-MM-DDThh:mm:ssZ -> MM-DD hh:mm
+    t = $2
+    date = substr(t, 6, 5)
+    time = substr(t, 12, 5)
+    printf "  %s  %s %s  %s  %s\n", $1, date, time, $3, $4
+  }'
 fi
 
 emit_section "Tracking" "$TRACKING_BODY"
