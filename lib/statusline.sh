@@ -7,6 +7,7 @@ input=$(cat)
 # --- Model (abbreviated: O-4.6, S-4.6, H-4.5, etc.) with tier indicators
 model_raw=$(echo "$input" | jq -r '.model.display_name // ""')
 case "$model_raw" in
+  *"Opus 4.7"*)   model_abbr="O-4.7"; model_tier="opus-best" ;;
   *"Opus 4.6"*)   model_abbr="O-4.6"; model_tier="opus-best" ;;
   *"Opus 4.5"*)   model_abbr="O-4.5"; model_tier="opus-other" ;;
   *"Opus 4"*)     model_abbr="O-4"; model_tier="opus-other" ;;
@@ -22,6 +23,29 @@ esac
 # --- Directory: immediate dir name only
 cwd=$(echo "$input" | jq -r '.cwd // ""')
 cwd_display="${cwd##*/}"
+
+# --- Effort level (env > project local > project > user settings)
+# Statusline stdin does not expose effort, so read the same sources Claude Code uses.
+# /effort max is session-only unless set via CLAUDE_CODE_EFFORT_LEVEL, so the
+# displayed value reflects the last persisted setting when max is a live override.
+read_effort_from() {
+  [ -f "$1" ] || return 1
+  jq -r '.effortLevel // empty' "$1" 2>/dev/null
+}
+effort_raw="${CLAUDE_CODE_EFFORT_LEVEL:-}"
+if [ -z "$effort_raw" ] && [ -n "$cwd" ]; then
+  effort_raw=$(read_effort_from "$cwd/.claude/settings.local.json")
+  [ -z "$effort_raw" ] && effort_raw=$(read_effort_from "$cwd/.claude/settings.json")
+fi
+[ -z "$effort_raw" ] && effort_raw=$(read_effort_from "$HOME/.claude/settings.json")
+case "$effort_raw" in
+  low)    effort_abbr="L" ;;
+  medium) effort_abbr="M" ;;
+  high)   effort_abbr="H" ;;
+  xhigh)  effort_abbr="XH" ;;
+  max)    effort_abbr="Max" ;;
+  *)      effort_abbr="" ;;
+esac
 
 # --- Git branch (skip optional locks to avoid hangs in multi-clone repos)
 git_branch=""
@@ -67,20 +91,22 @@ make_bar() {
 SEP=$(printf " ${DIM}|${RESET} ")
 sections=()
 
-# Model with tier indicators
+# Model with tier indicators + optional effort suffix
 if [ -n "$model_abbr" ]; then
+  effort_suffix=""
+  [ -n "$effort_abbr" ] && effort_suffix="$(printf " ${DIM}%s${RESET}" "$effort_abbr")"
   case "$model_tier" in
     opus-best)
-      sections+=("$(printf "${BLUE}🧠 %s${RESET}" "$model_abbr")")
+      sections+=("$(printf "${BLUE}🧠 %s${RESET}%s" "$model_abbr" "$effort_suffix")")
       ;;
     sonnet)
-      sections+=("$(printf "${ORANGE}🐢 %s${RESET}" "$model_abbr")")
+      sections+=("$(printf "${ORANGE}🐢 %s${RESET}%s" "$model_abbr" "$effort_suffix")")
       ;;
     haiku)
-      sections+=("$(printf "${RED}⚠️ %s${RESET}" "$model_abbr")")
+      sections+=("$(printf "${RED}⚠️ %s${RESET}%s" "$model_abbr" "$effort_suffix")")
       ;;
     *)
-      sections+=("$(printf "%s" "$model_abbr")")
+      sections+=("$(printf "%s%s" "$model_abbr" "$effort_suffix")")
       ;;
   esac
 fi
