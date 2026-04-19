@@ -1,30 +1,41 @@
 ---
-description: Session startup - check logs, git status, open issues, and orient
+description: Session startup - repo-aware intelligent summary
 allowed-tools: Bash
 ---
 
 # /startup - Session Startup
 
-Run the dashboard script and display its output verbatim:
+Run the summary script and display its output verbatim:
 
 ```bash
-bash ~/.claude/lib/startup-dashboard.sh
+bash ~/.claude/lib/startup-summary.sh $ARGUMENTS
 ```
 
-The script runs the data-gather pipeline, creates today's log if missing, and emits the formatted dashboard to stdout. Display the output as-is to the user, then **stop and wait for the user's next instruction**.
+The script runs the gather pipeline, feeds the output to a headless Sonnet
+model via `claude -p`, and emits a short markdown summary with sections for
+Where we are / Recent activity / Open PRs / Top open issues / Live sessions /
+Next up. Display the output as-is, then **stop and wait** for the user's next
+instruction. Do NOT add commentary, do NOT continue into other work.
 
-Do NOT add commentary, reformat the output, or continue into other work after the dashboard appears.
+## Flags
 
----
+- `/startup --raw` — skip the model pipeline; emit the deterministic plain-text
+  dashboard produced by `startup-dashboard.sh`. Useful for debugging or when
+  offline.
 
-## Why this is a single bash call
+## How it works
 
-The formatting is deterministic (section extraction + string interpolation), so there is no benefit to running it through a model. The previous implementation delegated to a Sonnet sub-agent and routinely burned ~48k tokens per startup while sometimes failing to surface the dashboard at all. The current implementation costs ~0 model tokens for formatting and is fail-fast visible (stderr messages appear directly if anything breaks).
+1. `startup-gather.sh` collects structured data (git state, merges, PRs,
+   tracking, sessions, priority issues, etc.) in parallel — deterministic,
+   zero model tokens.
+2. `startup-summary.sh` pipes the gather output plus a fixed prompt into
+   `claude --model sonnet --no-session-persistence -p`. Summarization is a
+   judgment task, so a model call is warranted.
+3. If `claude` is missing, returns empty, or any step fails, the script falls
+   back to `startup-dashboard.sh` automatically.
 
-If you need to debug what the dashboard is seeing, run the gather script directly:
+To debug the raw data the summary is working from:
 
 ```bash
 bash ~/.claude/lib/startup-gather.sh
 ```
-
-That produces the raw `=== SECTION ===` blocks the dashboard parses.
