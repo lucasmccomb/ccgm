@@ -189,7 +189,25 @@ fi
     2>/dev/null || true
 ) > "$TMPDIR/recent_merges" 2>/dev/null &
 
-# 10. Candidate issues to pick up (open, no linked open PR, not already claimed)
+# 10a. Priority issues (top 5 open, ordered by priority labels then recency)
+(
+  cd "$GH_CWD" 2>/dev/null || exit 0
+  # Issues with priority labels first, then most recently updated.
+  gh issue list --state open --limit 40 --json number,title,labels,updatedAt \
+    --jq '[.[] | {n: .number, t: .title, labels: [.labels[].name], u: .updatedAt}]
+          | map(. + {priority: (
+              if any(.labels[]; . == "p0" or . == "P0" or . == "critical") then 0
+              elif any(.labels[]; . == "p1" or . == "P1" or . == "high-priority" or . == "priority") then 1
+              elif any(.labels[]; . == "bug") then 2
+              elif any(.labels[]; . == "p2" or . == "P2") then 3
+              else 4 end)})
+          | sort_by(.priority, (.u | split("T")[0] | split("-") | map(tonumber) | (0-.[0]*10000 - .[1]*100 - .[2])))
+          | .[0:5]
+          | .[] | "#\(.n)\t\((.labels | join(",")) // "")\t\(.t)"' \
+    2>/dev/null || true
+) > "$TMPDIR/priority_issues" 2>/dev/null &
+
+# 10b. Candidate issues to pick up (open, no linked open PR, not already claimed)
 (
   cd "$GH_CWD" 2>/dev/null || exit 0
   # Build set of issue numbers referenced by open PRs (Closes #N / Fixes #N / Resolves #N).
@@ -252,4 +270,7 @@ $(cat "$TMPDIR/recent_merges")
 
 === CANDIDATE_ISSUES ===
 $(cat "$TMPDIR/candidate_issues")
+
+=== PRIORITY_ISSUES ===
+$(cat "$TMPDIR/priority_issues")
 GATHER_EOF
