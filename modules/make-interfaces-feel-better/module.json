@@ -1,0 +1,37 @@
+{
+  "name": "make-interfaces-feel-better",
+  "displayName": "Make Interfaces Feel Better",
+  "description": "Design-engineering details that compound into polished interfaces. Model-invoked skill with references on typography (text-wrap, tabular nums, font smoothing), surfaces (concentric radii, shadows over borders, optical alignment, image outlines), animations (interruptible transitions, enter/exit, icon micro-interactions), and performance (transition specificity, will-change).",
+  "category": "patterns",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "skills/make-interfaces-feel-better/SKILL.md": {
+      "target": "skills/make-interfaces-feel-better/SKILL.md",
+      "type": "skill",
+      "template": false
+    },
+    "skills/make-interfaces-feel-better/typography.md": {
+      "target": "skills/make-interfaces-feel-better/typography.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/make-interfaces-feel-better/surfaces.md": {
+      "target": "skills/make-interfaces-feel-better/surfaces.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/make-interfaces-feel-better/animations.md": {
+      "target": "skills/make-interfaces-feel-better/animations.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/make-interfaces-feel-better/performance.md": {
+      "target": "skills/make-interfaces-feel-better/performance.md",
+      "type": "doc",
+      "template": false
+    }
+  },
+  "tags": ["design", "ui", "frontend", "css", "animation", "typography", "micro-interactions"],
+  "configPrompts": []
+}
