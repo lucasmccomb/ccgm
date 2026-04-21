@@ -9,7 +9,7 @@
     "hooks/enforce-git-workflow.py": {
       "target": "hooks/enforce-git-workflow.py",
       "type": "hook",
-      "template": true
+      "template": false
     },
     "hooks/enforce-issue-workflow.py": {
       "target": "hooks/enforce-issue-workflow.py",

@@ -9,7 +9,10 @@
     "rules/subagent-patterns.md": { "target": "rules/subagent-patterns.md", "type": "rule", "template": false },
     "agents/implementer.md": { "target": "agents/implementer.md", "type": "agent", "template": false },
     "agents/spec-compliance-reviewer.md": { "target": "agents/spec-compliance-reviewer.md", "type": "agent", "template": false },
-    "agents/code-quality-reviewer.md": { "target": "agents/code-quality-reviewer.md", "type": "agent", "template": false }
+    "agents/code-quality-reviewer.md": { "target": "agents/code-quality-reviewer.md", "type": "agent", "template": false },
+    "hooks/subagent-stop-check.py": { "target": "hooks/subagent-stop-check.py", "type": "hook", "template": false },
+    "hooks/task-completed-check.py": { "target": "hooks/task-completed-check.py", "type": "hook", "template": false },
+    "settings.partial.json": { "target": "settings.json", "type": "config", "merge": true, "template": false }
   },
   "tags": ["subagents", "delegation", "parallel", "coordination", "review", "agents"],
   "configPrompts": []

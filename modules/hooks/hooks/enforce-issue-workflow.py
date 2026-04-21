@@ -5,7 +5,9 @@ UserPromptSubmit hook to enforce issue-first workflow.
 This hook detects work requests and injects a reminder into Claude's context
 to ensure the issue-first workflow is followed before making changes.
 
-Always active - no external files needed. Coordination injection is
+Scoped to ~/code/ — the reminder only fires when cwd is under that directory.
+Outside that scope (e.g., a note-taking vault or other non-code working
+directory), the hook stays silent. Coordination injection is additionally
 conditional on .claude/logs/ existing in the current working directory.
 """
 
@@ -52,6 +54,13 @@ def is_work_request(prompt: str) -> bool:
 def has_logs_directory() -> bool:
     """Check if .claude/logs/ exists in the current working directory."""
     return os.path.isdir(os.path.join(os.getcwd(), ".claude", "logs"))
+
+
+def is_in_code_dir() -> bool:
+    """Scope check: only fire the reminder when cwd is under ~/code/."""
+    code_root = os.path.realpath(os.path.expanduser("~/code"))
+    cwd = os.path.realpath(os.getcwd())
+    return cwd == code_root or cwd.startswith(code_root + os.sep)
 
 
 def build_reminder() -> str:
@@ -115,7 +124,7 @@ def main() -> None:
 
     prompt = input_data.get("prompt", "")
 
-    if is_work_request(prompt):
+    if is_work_request(prompt) and is_in_code_dir():
         print(build_reminder())
 
     sys.exit(0)

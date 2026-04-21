@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-PreToolUse hook that checks for CCGM updates once per day.
+UserPromptSubmit hook: daily CCGM health check (upstream + install drift).
 
-On the first tool call of each day, fetches the CCGM remote and checks
-if new commits are available. If updates are found, prints a notification
-to stderr. Uses a daily flag file to avoid repeated checks.
+On the first prompt of each day:
+  1. Check the CCGM remote for new commits and warn if updates are available.
+  2. Audit install drift: verify every file the manifest claims is installed
+     actually exists on disk (and symlinks resolve).
 
-Can be disabled by setting CCGM_AUTO_UPDATE_CHECK=false in ~/.claude/.ccgm.env
+Both checks print warnings to stderr. A single daily flag file gates both so
+subsequent prompts skip the work entirely.
+
+Disable via CCGM_AUTO_UPDATE_CHECK=false in ~/.claude/.ccgm.env.
 """
 from __future__ import annotations
 
@@ -69,6 +73,32 @@ def get_ccgm_root() -> str | None:
         return None
 
 
+def check_install_drift() -> list[str]:
+    """Return a list of manifest-claimed files that are missing from disk.
+
+    A file is "missing" if its path does not exist. For symlinks, the
+    symlink itself must resolve to an existing target. Returns file paths
+    (max 10) so output stays readable.
+    """
+    if not MANIFEST_FILE.exists():
+        return []
+    try:
+        with open(MANIFEST_FILE) as f:
+            manifest = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    missing: list[str] = []
+    for entry in manifest.get("files", []):
+        p = Path(entry)
+        # Path.exists() follows symlinks, so a dangling symlink shows as missing.
+        if not p.exists():
+            missing.append(entry)
+            if len(missing) >= 10:
+                break
+    return missing
+
+
 def check_for_updates(ccgm_root: str) -> int:
     """Fetch remote and count new commits on main."""
     try:
@@ -119,6 +149,24 @@ def main() -> None:
         print(
             f"\n  CCGM: {count} update{s} available. "
             f"Run: cd {ccgm_root} && ./update.sh\n",
+            file=sys.stderr,
+        )
+
+    drift = check_install_drift()
+    if drift:
+        more = ""
+        if len(drift) >= 10:
+            more = " (more truncated)"
+        print(
+            f"\n  CCGM install drift: {len(drift)} manifest-claimed "
+            f"file(s) missing from disk{more}:",
+            file=sys.stderr,
+        )
+        for path in drift:
+            print(f"    - {path}", file=sys.stderr)
+        print(
+            "  Resolve by re-running the relevant module install, or "
+            "prune the manifest via /ccgm-sync.\n",
             file=sys.stderr,
         )
 

@@ -126,13 +126,15 @@ else
   fail "Link-mode installer exited with code $installer_exit (standard)"
 fi
 
-# Template files should be regular files (copies), not symlinks.
-# hooks/enforce-git-workflow.py has template=true in hooks module.json
+# hooks/enforce-git-workflow.py is template=false — direct-to-main allowlist
+# now lives in a runtime config (~/.claude/git-flow-direct-to-main-repos.json),
+# so the hook no longer embeds a __USERNAME__ token and can be symlinked like
+# the other hooks. Template-copy code path is still covered via test-templates.sh.
 hook_file="$LINK2_HOME/.claude/hooks/enforce-git-workflow.py"
-if [ -f "$hook_file" ] && [ ! -L "$hook_file" ]; then
-  pass "hooks/enforce-git-workflow.py is a regular file (template - correctly copied)"
-elif [ -L "$hook_file" ]; then
-  fail "hooks/enforce-git-workflow.py is a symlink (should be copy because template=true)"
+if [ -L "$hook_file" ]; then
+  pass "hooks/enforce-git-workflow.py is a symlink (non-template)"
+elif [ -f "$hook_file" ]; then
+  fail "hooks/enforce-git-workflow.py is a regular file, expected symlink (template flipped to false)"
 else
   fail "hooks/enforce-git-workflow.py does not exist"
 fi
