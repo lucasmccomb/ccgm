@@ -6,9 +6,9 @@ This hook detects work requests and injects a reminder into Claude's context
 to ensure the issue-first workflow is followed before making changes.
 
 Scoped to ~/code/ — the reminder only fires when cwd is under that directory.
-Outside that scope (e.g., the Obsidian vault at ~/Documents/lem-personal/),
-the hook stays silent. Coordination injection is additionally conditional
-on .claude/logs/ existing in the current working directory.
+Outside that scope (e.g., a note-taking vault or other non-code working
+directory), the hook stays silent. Coordination injection is additionally
+conditional on .claude/logs/ existing in the current working directory.
 """
 
 from __future__ import annotations
