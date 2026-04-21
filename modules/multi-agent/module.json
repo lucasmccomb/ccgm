@@ -10,6 +10,8 @@
     "multi-agent-system.md": { "target": "multi-agent-system.md", "type": "doc", "template": false },
     "commands/mawf.md": { "target": "commands/mawf.md", "type": "command", "template": false },
     "commands/workspace-setup.md": { "target": "commands/workspace-setup.md", "type": "command", "template": false },
+    "commands/handoff.md": { "target": "commands/handoff.md", "type": "command", "template": false },
+    "lib/handoff.py": { "target": "lib/handoff.py", "type": "lib", "template": false },
     "port-registry.json": { "target": "port-registry.json", "type": "config", "template": true }
   },
   "tags": ["multi-agent", "parallel", "coordination", "workflow"],
