@@ -10,7 +10,9 @@
     "lib/startup-gather.sh": { "target": "lib/startup-gather.sh", "type": "lib", "template": false },
     "lib/startup-dashboard.sh": { "target": "lib/startup-dashboard.sh", "type": "lib", "template": false },
     "lib/startup-summary.sh": { "target": "lib/startup-summary.sh", "type": "lib", "template": false },
-    "lib/startup-summary-prompt.md": { "target": "lib/startup-summary-prompt.md", "type": "lib", "template": false }
+    "lib/startup-summary-prompt.md": { "target": "lib/startup-summary-prompt.md", "type": "lib", "template": false },
+    "hooks/auto-startup.py": { "target": "hooks/auto-startup.py", "type": "hook", "template": false },
+    "settings.partial.json": { "target": "settings.json", "type": "config", "template": false, "merge": true }
   },
   "tags": ["startup", "dashboard", "session"],
   "configPrompts": []

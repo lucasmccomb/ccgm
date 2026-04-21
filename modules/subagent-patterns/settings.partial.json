@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/subagent-stop-check.py",
+            "timeout": 2000
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/task-completed-check.py",
+            "timeout": 2000
+          }
+        ]
+      }
+    ]
+  }
+}

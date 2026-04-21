@@ -58,10 +58,20 @@ PROTECTED_BRANCHES_SET = {b.lower() for b in PROTECTED_BRANCHES}
 
 # ─── Direct-to-main repos ────────────────────────────────────────────
 # Repos that use direct-to-main workflow (no feature branches, no issue numbers).
-# Matched against the git remote URL. Example: "yourorg/your-dotfiles-repo"
-DIRECT_TO_MAIN_REPOS = [
-    "__USERNAME__/ccgm",
-]
+# Matched as substrings against the git remote URL. Populate via
+# ~/.claude/git-flow-direct-to-main-repos.json: e.g. ["myorg/dotfiles"].
+DIRECT_TO_MAIN_REPOS: list[str] = []
+
+_DIRECT_TO_MAIN_FILE = os.path.expanduser(
+    "~/.claude/git-flow-direct-to-main-repos.json"
+)
+try:
+    with open(_DIRECT_TO_MAIN_FILE) as f:
+        _d2m = json.load(f)
+        if isinstance(_d2m, list):
+            DIRECT_TO_MAIN_REPOS.extend(str(x) for x in _d2m)
+except (FileNotFoundError, json.JSONDecodeError, TypeError):
+    pass
 
 
 def is_direct_to_main_repo() -> bool:
