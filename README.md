@@ -22,7 +22,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 40 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 56 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 
@@ -94,7 +94,7 @@ For a quick install with a preset:
 |--------|---------|----------|
 | **minimal** | global-claude-md, autonomy, git-workflow | Getting started |
 | **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, settings, commands-core, commands-utility | Most users |
-| **full** | All 38 stable modules | Power users |
+| **full** | All 41 stable modules | Power users |
 | **team** | global-claude-md, autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification | Teams |
 
 ### Other install options
@@ -124,6 +124,10 @@ For a quick install with a preset:
 | **commands-core** | commands | /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue) | - |
 | **commands-extra** | commands | /audit (codebase audit), /pwv (Playwright verify), /walkthrough, /promote-rule | - |
 | **commands-utility** | commands | /cws-submit (Chrome Web Store walkthrough), /ccgm-sync (sync config to CCGM + lem-deepresearch), /user-test (browser user testing) | - |
+| **ce-review** | commands | /ce-review unified code-review orchestrator. Composes scope-drift, learnings-researcher, tier-sharpener, and review-synthesizer with structured JSON findings | - |
+| **onboarding** | commands | /onboarding - analyzes a repository and generates a structured ONBOARDING.md for new contributors | - |
+| **pr-review-toolkit** | commands | Augments the external pr-review-toolkit plugin with scope-drift detection on top of the standard code/test/comment/silent-failure/type passes | - |
+| **ship-readiness** | commands | /ship-ready - at-a-glance merge-gate dashboard for the current branch: checks, conflicts, diff size, reviewer state | - |
 | **documentation** | commands | /docupdate (comprehensive documentation audit: README, TOC, onboarding, packages, module coverage) | - |
 | **copycat** | commands | /copycat (analyze external Claude Code config repos for CCGM improvements) | - |
 | **debugging** | commands | /debug (structured root-cause debugging with Opus) | - |
@@ -145,6 +149,12 @@ For a quick install with a preset:
 | **cloud-dispatch** | workflow | Delegate GitHub issues to autonomous Claude Code agents on Hetzner Cloud VMs. Includes /dispatch, /dispatch-status, /dispatch-stop, /vm-manage commands | - |
 | **self-improving** | workflow | Meta-learning system: /reflect and /consolidate commands, PostToolUse hook (PR merge/issue close reminders), PreCompact hook (pre-compaction capture), prescriptive reflection triggers | - |
 | **subagent-patterns** | workflow | Subagent dispatch: task decomposition, spec-driven delegation, two-stage review, parallel coordination | - |
+| **commands-preamble** | workflow | [EXPERIMENTAL] UserPromptSubmit hook that injects a compact preamble of iron-law principles into every prompt | - |
+| **compound-knowledge** | workflow | Team-shared learnings in `docs/solutions/`. After solving a non-trivial problem, capture the pattern in a versioned schema | - |
+| **document-review** | workflow | Seven-lens plan-quality gate. /document-review fans out to 7 role-specific reviewers (coherence, feasibility, product, scope, design, security, adversarial) with structured JSON findings | skill-authoring, subagent-patterns |
+| **git-worktrees** | workflow | Solo-agent worktree-based isolation for feature work. Lighter alternative to multi-clone | - |
+| **pr-feedback** | workflow | /resolve-pr-feedback - fetches unresolved PR review threads via GraphQL, clusters 3+ items by category, dispatches parallel resolver agents | skill-authoring, subagent-patterns |
+| **todos** | workflow | File-based review-finding tracker. Review findings, PR nitpicks, and tech debt tracked with structured YAML | - |
 | **code-quality** | patterns | Code standards, testing requirements, error handling, security, build verification | - |
 | **browser-automation** | patterns | Browser tool selection (Chrome, Playwright, WebMCP), verification priority, UI testing workflow | - |
 | **common-mistakes** | patterns | 8 battle-tested anti-patterns: shallow exploration, dependency blindness, ESLint Fast Refresh, more | - |
@@ -152,6 +162,10 @@ For a quick install with a preset:
 | **systematic-debugging** | patterns | 4-phase root cause investigation: investigate, analyze, test hypotheses, implement fix | - |
 | **test-driven-development** | patterns | Strict red-green-refactor TDD discipline. No production code without a failing test first | - |
 | **verification** | patterns | Evidence-before-claims: fresh execution of verification commands, read full output before asserting done | - |
+| **agent-native** | patterns | Principles and audit skill for building applications where an agent is a first-class client | - |
+| **make-interfaces-feel-better** | patterns | Design-engineering details that compound into polished interfaces. Model-invoked skill covering typography, surfaces, animations, performance | - |
+| **rule-authoring** | patterns | Discipline for writing rules that hold up under pressure. Treats rule authoring as a first-class skill with iron-law structure | - |
+| **skill-authoring** | patterns | Discipline for writing skills and slash commands that stay efficient, portable, and structured across models | - |
 | **cloudflare** | tech-specific | Pages vs Workers selection, deployment methods, Git integration requirements | - |
 | **supabase** | tech-specific | API key terminology, env var naming, migration validation, database workflow | - |
 | **mcp-development** | tech-specific | Building MCP servers: project structure, tool design, error handling, testing, evaluation patterns | - |
@@ -264,7 +278,7 @@ The `docs/` directory contains comprehensive documentation:
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 40 modules |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 56 modules |
 | [Commands Reference](docs/commands.md) | All 36 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 13 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |

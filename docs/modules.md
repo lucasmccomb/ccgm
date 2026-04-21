@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 40 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 56 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -696,6 +696,25 @@ Principles for building distinctive, production-grade web interfaces.
 - **Motion**: Purposeful animations (feedback, orientation, delight), not decoration
 - **What to avoid**: Default framework styles, generic card grids, excessive gradients
 - **Implementation checklist**: Questions to ask before writing UI code
+
+**Dependencies**: None
+
+---
+
+### make-interfaces-feel-better
+
+Design-engineering details that compound into polished interfaces. Vendored from [jakubkrehel/make-interfaces-feel-better](https://github.com/jakubkrehel/make-interfaces-feel-better) (MIT).
+
+**Installs**: `skills/make-interfaces-feel-better/` (SKILL.md + typography.md, surfaces.md, animations.md, performance.md)
+
+**What it does**: A model-invoked skill. Claude loads it automatically when the conversation is about UI polish, animations, shadows, borders, typography, micro-interactions, or any visual-detail work. Covers:
+
+- **Typography**: `text-wrap: balance` / `pretty`, font smoothing on macOS, tabular numbers for dynamic values
+- **Surfaces**: Concentric border radius, optical vs geometric alignment, shadows instead of borders, image outlines, hit areas
+- **Animations**: Interruptible animations (transitions vs keyframes), enter/exit transitions, icon micro-interactions, scale on press
+- **Performance**: Transition specificity, `will-change` usage
+
+Complements `frontend-design` (aesthetic direction) and `design-review` (automated review) with implementation-level details.
 
 **Dependencies**: None
 
