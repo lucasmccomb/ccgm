@@ -68,6 +68,8 @@ def main() -> None:
         print("<reflection-trigger>")
         print("PR merged. Run the post-merge reflection from the self-improving rules:")
         print("review what you learned, check if any patterns should be captured to memory.")
+        print("If this was non-trivial work that a sibling clone should see on next")
+        print("startup, also run /handoff to write a peer-visible handoff note.")
         print("</reflection-trigger>")
         sys.exit(0)
 
