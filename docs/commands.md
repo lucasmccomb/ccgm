@@ -225,6 +225,63 @@ Scans the current repo's CLAUDE.md for rules that could be promoted to the globa
 
 ---
 
+### /checkpoint
+
+**Save or resume a structured WIP checkpoint.**
+
+Captures a compact "pick up here next time" snapshot (current task, decisions, remaining work) stored as YAML-fronted markdown under `~/.claude/checkpoints/{repo}/`. Different from the session log: session logs are chronological narrative, checkpoints are handoff state between sessions or between clones in a workspace.
+
+**Usage**:
+```
+/checkpoint save [title]     # Write a checkpoint now
+/checkpoint resume           # Load the most recent checkpoint for this repo
+/checkpoint resume [query]   # Load by title substring or YYYYMMDD date
+/checkpoint list             # Show checkpoints for this repo, newest first
+```
+
+---
+
+### /freeze
+
+**Scope-lock Edit/Write to a directory.**
+
+Activates the `check-freeze.py` PreToolUse hook by writing a path to `~/.claude/freeze-dir.txt`. While a freeze is active, Edit and Write calls outside that directory are denied. Bash is not scope-locked - pair with `/guard` for destructive-command warnings.
+
+**Usage**:
+```
+/freeze                      # Freeze to the current working directory
+/freeze <path>               # Freeze to an absolute or relative path
+```
+
+---
+
+### /unfreeze
+
+**Clear the active freeze scope.**
+
+Deletes `~/.claude/freeze-dir.txt`, restoring unrestricted Edit and Write. The hook itself stays installed - it is a no-op when no freeze is set.
+
+**Usage**:
+```
+/unfreeze
+```
+
+---
+
+### /guard
+
+**Compose careful + freeze for focused, safe sessions.**
+
+Combines the two safety hooks shipped by the `hooks` module: `check-careful.py` (prompts on destructive Bash commands) and `check-freeze.py` (denies writes outside the frozen directory). Activates both for a named scope. Use during investigation or refactors where you want to stay inside one module and avoid destructive surprises.
+
+**Usage**:
+```
+/guard                       # Guard the current working directory
+/guard <path>                # Guard an absolute or relative path
+```
+
+---
+
 ## Utility commands
 
 Installed by the **commands-utility** module.
@@ -622,6 +679,25 @@ Delegates to a Sonnet agent that reads all memory files, identifies duplicates, 
 
 ---
 
+### /retro
+
+**Weekly retrospective from git history.**
+
+Synthesizes what shipped in a time window by walking the git log, surfacing hotspots, per-author activity, and patterns worth capturing as learnings. Different from `/reflect` (which introspects one session), `/retro` surveys all commits across the window - including work by sibling-clone agents, co-workers, and past sessions you no longer remember. Global mode aggregates across every repo under the code directory.
+
+**Usage**:
+```
+/retro                     # Last 7 days, this repo
+/retro [N]d                # Last N days (e.g. /retro 14d)
+/retro [YYYY-MM-DD]        # From that date through today
+/retro global              # Aggregate across ALL repos under the code directory
+/retro global [window]     # Global + windowed
+```
+
+**Installed by**: self-improving module
+
+---
+
 ## Workflow commands
 
 Installed by the **xplan**, **multi-agent**, and **startup-dashboard** modules.
@@ -736,6 +812,24 @@ Sets up isolated workspace directories with multiple clones for parallel agent w
 **Usage**:
 ```
 /workspace-setup my-repo
+```
+
+**Installed by**: multi-agent module
+
+---
+
+### /handoff
+
+**Write a handoff note for peer clones.**
+
+Writes a short markdown handoff under `~/.claude/handoffs/{repo}/` so sibling clones on this machine can orient quickly on startup. `auto-startup.py` reads these on SessionStart, filters out the current agent's own notes and anything older than 7 days, and injects a compact block into the fresh session. Lightweight alternative between "nothing" and a full `/recall` transcript dive.
+
+**When to use**: After `gh pr merge` on non-trivial work, before ending a session that touched shared code, or when handing off a blocker.
+
+**Usage**:
+```
+/handoff                           # Prompt yourself to fill in three sections
+/handoff {one-line description}    # Pre-seed the title
 ```
 
 **Installed by**: multi-agent module
@@ -912,3 +1006,379 @@ Create, destroy, health-check, check status, or SSH into dispatch VMs.
 ```
 
 **Installed by**: cloud-dispatch module
+
+---
+
+## Session history commands
+
+Installed by the **session-history** module.
+
+---
+
+### /recall
+
+**Search session history across all clones of a repo.**
+
+Reads Claude Code's native JSONL transcripts at `~/.claude/projects/**/*.jsonl` and surfaces session history for the current repo, unified across all of its clones (flat-clone and workspace models). No separate index or database - transcripts are the source of truth, read on demand.
+
+**Usage**:
+```
+/recall                         # Last 7 days, current repo, all clones
+/recall <query>                 # Filter to turns matching query (case-insensitive regex)
+/recall --days N                # Custom time window
+/recall --repo <name>           # Switch to a different repo (canonical name)
+/recall --session <id>          # Dump a specific session's transcript
+/recall --full <query>          # Do not truncate matched turn content
+/recall --limit N               # Max sessions/results (default 50)
+```
+
+---
+
+## Ship readiness commands
+
+Installed by the **ship-readiness** module.
+
+---
+
+### /ship-ready
+
+**Ship readiness dashboard.**
+
+One-screen dashboard summarizing whether the current branch is ready to merge. Shows branch context, failing tests, open PRs, stale branches, outdated deps, merge velocity, review freshness (from `/ce-review` envelopes), and unresolved risks (via `learnings-researcher`). Read-only - never runs tests or modifies files. Prints a final GATE line (GREEN / YELLOW / RED).
+
+**Usage**:
+```
+/ship-ready                   # Dashboard for the current branch
+/ship-ready base:origin/main  # Override the base ref
+/ship-ready mode:strict       # Exit non-zero if any gate is red (for CI or /cpm)
+```
+
+---
+
+## Onboarding commands
+
+Installed by the **onboarding** module.
+
+---
+
+### /onboarding
+
+**Generate a structured ONBOARDING.md for the current repo.**
+
+Analyzes the repository via an inventory script and writes `ONBOARDING.md` at the repo root. Covers Overview, Architecture, Dev Setup, Key Commands, Test Workflow, and Glossary - sized so a new engineer (or fresh Claude session) can get productive in under ten minutes. Always regenerates from scratch; never diffs against an existing ONBOARDING.md.
+
+**Usage**:
+```
+/onboarding                   # Write ONBOARDING.md at current repo root
+/onboarding <path>            # Target a different repo root
+/onboarding --dry-run         # Print to stdout instead of writing
+```
+
+---
+
+## Rule authoring commands
+
+Installed by the **rule-authoring** module.
+
+---
+
+### /pressure-test
+
+**Pressure-test a candidate rule with adversarial scenarios.**
+
+Generates 5-10 adversarial scenarios targeting a rule's discipline, dispatches subagents with and without the rule loaded, captures rationalizations, and proposes additions to the rule's Rationalizations Table and Red Flags list. Runs a RED baseline, a GREEN run with the rule loaded, then an adversarial self-test against new scenarios the rule was not designed for.
+
+**Usage**:
+```
+/pressure-test <path-to-rule-file>
+/pressure-test modules/verification/rules/verification.md
+```
+
+---
+
+## Git worktrees commands
+
+Installed by the **git-worktrees** module.
+
+---
+
+### /worktree-start
+
+**Start a new worktree for solo-agent feature work.**
+
+Creates an isolated git worktree in `.worktrees/<branch-name>/` (or `~/code/worktrees/` as fallback), verifies `.worktrees/` is gitignored, detects project type, runs install and a baseline test, and copies local `.env` files from the main checkout. For solo-agent parallel branch work - for multi-agent, use the `multi-agent` module's clone setup.
+
+**Usage**:
+```
+/worktree-start <branch-name>
+/worktree-start <branch-name> <base-branch>    # base defaults to origin/main
+```
+
+---
+
+### /worktree-finish
+
+**Finish a worktree with an explicit four-option gate.**
+
+Ends feature work in a worktree without silently merging, pushing, or discarding. Presents four options (merge locally / push + PR / keep / discard) and waits for a numeric reply. The discard option requires typing the branch name to confirm.
+
+**Usage**:
+```
+/worktree-finish                    # Current directory if it is a worktree
+/worktree-finish <worktree-path>
+```
+
+---
+
+## Skills
+
+Skills are packaged capabilities invokable by name (e.g. `/brainstorm`). Each skill installs to `~/.claude/skills/{name}/SKILL.md` and lives under `modules/<name>/skills/<skill>/SKILL.md` in the CCGM source.
+
+Unlike commands, skills may carry supporting assets (sub-docs, scripts, reference material) alongside the `SKILL.md` entry point.
+
+---
+
+### /brainstorm
+
+**Design-before-implementation gate.**
+
+Forbids code, scaffolding, or implementation until a design spec has been written and explicitly approved by the user. Explores context, proposes 2-3 approaches with tradeoffs, writes a spec to `docs/brainstorm-notes/`, self-reviews for TBDs and contradictions, then hands off to `/xplan`. Pairs with `/ideate` to enforce spec-before-plan-before-code separation.
+
+**Usage**:
+```
+/brainstorm "how should we structure the auth layer"
+```
+
+**Installed by**: brainstorm module
+
+---
+
+### /ce-review
+
+**Unified review orchestrator.**
+
+Dispatches tiered reviewer personas (correctness, testing, maintainability, plus conditional security, performance, reliability, api-contract, data-migrations) in parallel, then runs an adversarial/red-team lens with access to the specialists' findings. Merges JSON findings with P0-P3 severity and confidence, routes by `autofix_class` (safe_auto / gated_auto / manual / advisory), and pulls prior learnings from `docs/solutions/` via `learnings-researcher` before dispatch.
+
+**Modes**: interactive, autofix, report-only, headless.
+
+**Usage**:
+```
+/ce-review
+/ce-review mode:autofix
+/ce-review mode:report-only
+```
+
+**Installed by**: ce-review module
+
+---
+
+### /compound
+
+**Capture a durable learning to docs/solutions/.**
+
+After solving a non-trivial problem, writes a team-shared learning to `docs/solutions/{category}/{slug}.md` in the current repo. Two modes: Full (parallel research subagents, strict schema, overlap check) and Lightweight (single-pass, direct from current conversation). Re-injected as grounding context on future `/xplan` and `/review` runs via the `learnings-researcher` agent.
+
+**Usage**:
+```
+/compound
+/compound mode:lightweight
+```
+
+**Installed by**: compound-knowledge module
+
+---
+
+### /compound-refresh
+
+**Maintenance pass over docs/solutions/.**
+
+Walks every doc under `docs/solutions/**/*.md` and classifies each as Keep / Update / Consolidate / Replace / Delete based on staleness, referenced-code existence, and overlap with newer learnings. Run monthly, after a major refactor, or when retrieval feels noisy.
+
+**Modes**: interactive, autofix, report-only.
+
+**Usage**:
+```
+/compound-refresh
+/compound-refresh mode:report-only
+```
+
+**Installed by**: compound-knowledge module
+
+---
+
+### /design-review
+
+**Visual design review for web pages.**
+
+Takes screenshots at multiple viewports via Chrome browser tools, analyzes CSS/HTML source, and runs 6 parallel analysis passes covering spacing, typography, responsive design, visual hierarchy, accessibility, and component consistency. Produces a prioritized list of actionable fixes; `--fix` applies them automatically.
+
+**Usage**:
+```
+/design-review                                         # Current dev server page
+/design-review http://localhost:3000/some/page
+/design-review http://localhost:3000/some/page --fix
+```
+
+**Installed by**: design-review module
+
+---
+
+### /document-review
+
+**Seven-lens plan-quality gate.**
+
+Before a plan, spec, or requirements doc ships to execution, dispatches 7 role-specific reviewer agents (coherence, feasibility, product-lens, scope-guardian, design-lens, security-lens, adversarial) in parallel and merges their structured findings with severity (P0-P3) and confidence. Each lens has tight what-you-flag boundaries so findings do not overlap. For documents, not code - use `/review` or `pr-review-toolkit` for diffs.
+
+**Usage**:
+```
+/document-review <path-to-plan-or-spec>
+```
+
+**Installed by**: document-review module
+
+---
+
+### /editorial-critique
+
+**Deep editorial critique of long-form writing.**
+
+Runs 8 parallel analysis passes covering prose craft, AI-tell detection, argument architecture, sentence-level quality, grammar, data accuracy, structure, and conciseness. Produces a scored, prioritized report. Use for blog posts, essays, reports, or any prose that needs to be sharp.
+
+**Usage**:
+```
+/editorial-critique                              # Most recent .md in content/posts/
+/editorial-critique path/to/file.md
+/editorial-critique path/to/file.md --fix        # Apply fixes automatically
+/editorial-critique path/to/file.md --score-only
+```
+
+**Installed by**: editorial-critique module
+
+---
+
+### /ideate
+
+**Idea refinement through structured interview.**
+
+Takes a loose, half-formed idea and interviews you until the concept is sharp enough to act on. Uses Socratic questioning, progressive refinement, and confidence tracking to reach 95% clarity before confirming. Can delegate to `/deepresearch` for validation and `/xplan` for planning once the idea is locked.
+
+**Usage**:
+```
+/ideate "I want to build an app that helps people track habits"
+/ideate                                          # Asks what you're thinking about
+/ideate --resume                                 # Resume a saved ideation session
+```
+
+**Installed by**: ideate module
+
+---
+
+### /make-interfaces-feel-better
+
+**Design-engineering principles for polished interfaces.**
+
+Reference skill for making interfaces feel polished. Covers concentric border radius, optical alignment, shadows over borders, interruptible animations, typography details (tabular numbers, font smoothing), performance (transition specificity, `will-change`), and micro-interactions. Invoke when building UI components, reviewing frontend code, or polishing visual details.
+
+**Usage**:
+```
+/make-interfaces-feel-better
+```
+
+**Installed by**: make-interfaces-feel-better module
+
+---
+
+### /resolve-pr-feedback
+
+**Structured resolver for PR review comments.**
+
+Fetches unresolved review threads via GraphQL, triages new vs already-handled, and (if 3+ new items arrive) runs cluster analysis across 11 fixed concern categories grouped by spatial proximity. Dispatches parallel `pr-comment-resolver` subagents for unambiguous fixes, posts inline replies via `gh api`, and resolves threads. Taste questions are batched for human decision. Skips cluster overhead when only 1-2 new comments exist.
+
+**Usage**:
+```
+/resolve-pr-feedback
+```
+
+**Installed by**: pr-feedback module
+
+---
+
+### /scope-drift
+
+**Intent-versus-diff audit before code review.**
+
+Compares stated intent (PR body, commit messages, TODOs, plan files) against the actual diff. Classifies every plan item as DONE / PARTIAL / NOT DONE / CHANGED and flags out-of-scope changes. Runs before code-quality review as the first pass of `/ce-review`, or standalone at the start of any PR review.
+
+**Usage**:
+```
+/scope-drift
+```
+
+**Installed by**: pr-review-toolkit module
+
+---
+
+### /todo-create
+
+**Write a todo to .claude/todos/.**
+
+Captures a review finding, PR comment, or tech-debt item as a file under `.claude/todos/` in the current repo. Writes `NNN-{status}-{priority}-{slug}.md` with YAML frontmatter per the schema. Canonical writer - other skills (`/todo-triage`, `/todo-resolve`, `/ce-review`) call this one. Todos start as `status:pending` by default; promote via `/todo-triage`.
+
+**Usage**:
+```
+/todo-create "add tests for the auth middleware"
+```
+
+**Installed by**: todos module
+
+---
+
+### /todo-triage
+
+**Promote pending todos to ready.**
+
+Walks every pending todo in `.claude/todos/` one at a time. For each, confirm / skip / modify / drop, and on confirm, promote to `status:ready` with a concrete Proposed Change section. Runs before `/todo-resolve` so the resolver only sees scoped, agreed-upon items.
+
+**Modes**: interactive, autofix, report-only.
+
+**Usage**:
+```
+/todo-triage
+/todo-triage mode:autofix
+/todo-triage mode:report-only
+```
+
+**Installed by**: todos module
+
+---
+
+### /todo-resolve
+
+**Batch-resolve ready todos.**
+
+Dispatches parallel subagents (one per ready todo) with pass-paths-not-contents, aggregates their fixes, updates each todo's status to complete, and optionally feeds the pattern back into `/compound` for team knowledge. Filter by priority, source, or explicit numbers. Skips todos whose dependencies are not complete.
+
+**Modes**: interactive, autofix, report-only, headless.
+
+**Usage**:
+```
+/todo-resolve
+/todo-resolve mode:autofix
+```
+
+**Installed by**: todos module
+
+---
+
+### /agent-native-audit
+
+**Agent-native architecture audit.**
+
+Scores a codebase against the four agent-native principles (parity, granularity, composability, emergent capability) and returns a report with concrete counts ("agent can do X of Y user actions"), named examples of violations, and concrete first-PR recommendations. Dispatches eight parallel research subagents (two per principle, one measures and one critiques). The report is the output; the skill does not modify code.
+
+**Usage**:
+```
+/agent-native-audit
+```
+
+**Installed by**: agent-native module
