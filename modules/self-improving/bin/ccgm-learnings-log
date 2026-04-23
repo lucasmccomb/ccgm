@@ -9,6 +9,7 @@ Usage:
     ccgm-learnings-log verify <id>                 # bump uses + last_verified
     ccgm-learnings-log contradict <id>             # bump contradictions counter
     ccgm-learnings-log deprecate <id>              # mark deprecated
+    ccgm-learnings-log supersede <old_id> --content "..." [--reason "..."]
     ccgm-learnings-log config cross-project on|off
 
 Fields:
@@ -97,6 +98,35 @@ def _cmd_deprecate(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _cmd_supersede(args: argparse.Namespace) -> int:
+    try:
+        new_entry = ls.supersede_entry(
+            args.old_id,
+            content=args.content,
+            type_=args.new_type,
+            source=args.source or "observed",
+            confidence=args.confidence,
+            tags=args.tag,
+            files=args.file,
+            slug=args.project,
+            reason=args.reason,
+        )
+    except ls.ValidationError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+    if new_entry is None:
+        print(f"error: no entry with id {args.old_id!r}", file=sys.stderr)
+        return 1
+
+    print(json.dumps({
+        "id": new_entry["id"],
+        "supersedes": args.old_id,
+        "slug": new_entry["project"],
+    }))
+    return 0
+
+
 def _cmd_config(args: argparse.Namespace) -> int:
     cfg = ls.load_config()
     if args.setting == "cross-project":
@@ -138,6 +168,24 @@ def build_parser() -> argparse.ArgumentParser:
     dep.add_argument("id")
     dep.add_argument("--project")
     dep.set_defaults(func=_cmd_deprecate)
+
+    sup = sub.add_parser(
+        "supersede",
+        help="replace an entry atomically; links old <-> new via supersedes/superseded_by",
+    )
+    sup.add_argument("old_id", help="id of the entry being superseded")
+    sup.add_argument("--content", required=True)
+    sup.add_argument("--type", dest="new_type", choices=sorted(ls.VALID_TYPES),
+                     help="defaults to inheriting the old entry's type")
+    sup.add_argument("--source", choices=sorted(ls.VALID_SOURCES))
+    sup.add_argument("--confidence", type=int)
+    sup.add_argument("--tag", action="append",
+                     help="repeatable; overrides old tags if provided")
+    sup.add_argument("--file", action="append",
+                     help="repeatable; overrides old files if provided")
+    sup.add_argument("--project")
+    sup.add_argument("--reason", help="free-form note on why the supersede happened")
+    sup.set_defaults(func=_cmd_supersede)
 
     cfg_sub = sub.add_parser("config", help="adjust learnings-store config")
     cfg_sub.add_argument("setting", choices=["cross-project"])
