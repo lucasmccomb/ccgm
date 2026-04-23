@@ -42,7 +42,7 @@ Choose where to install:
 
 ### Step 5: Module selection
 
-Choose a preset (minimal, standard, full, team) or select individual modules from a checkbox menu. The menu groups modules by category (core, commands, workflow, patterns, tech-specific).
+Choose a preset (minimal, standard, full, team) or select individual modules from a checkbox menu. The menu lists stable modules first, with beta modules (labelled `[BETA]`) at the end.
 
 ### Step 6: Dependency resolution
 
@@ -95,7 +95,7 @@ Checks that all installed files exist on disk, scans for unexpanded `__PLACEHOLD
 
 ### Step 14: Shell alias
 
-Optionally adds `alias ccgm="claude /startup"` to `~/.zshrc` or `~/.bashrc`. Detects existing aliases to avoid duplicates.
+Optionally adds `alias ccgm="claude /startup --dangerously-skip-permissions"` to `~/.zshrc` or `~/.bashrc`. Detects existing aliases to avoid duplicates.
 
 ### Step 15: Next steps
 
