@@ -8,6 +8,7 @@ Installs a `ccgm-doctor` CLI. Subcommands:
 
 - `check-resolvable` — reachability audit (hook refs, command descriptions, script refs)
 - `dry` — DRY/overlap audit (pairs of commands whose triggers are lexically similar)
+- `resolver-eval` — run a routing suite of `{intent, expected}` assertions
 
 ### check-resolvable
 
@@ -29,7 +30,31 @@ Compares every pair of command trigger descriptions using Jaccard similarity ove
 |-------|----------|-----------------|
 | `dry-overlap` | warn | two commands whose trigger descriptions share > threshold tokens (default 0.5) |
 
-Lexical overlap is a conservative signal — it catches copy-paste descriptions and near-duplicates, not semantic synonyms. For semantic routing analysis (e.g., "commit my changes" vs "check in these files"), use the resolver eval harness (#386).
+Lexical overlap is a conservative signal — it catches copy-paste descriptions and near-duplicates, not semantic synonyms. For semantic routing analysis, use `resolver-eval` (below) — it is better suited to paraphrase-style overlap.
+
+### resolver-eval
+
+Runs a suite of `{intent, expected}` assertions against the commands dir. For each intent, a keyword-overlap scorer ranks candidate commands by Jaccard similarity between intent tokens and (description + filename stem) tokens. Passes if the expected command appears in the top `k` candidates.
+
+```
+[PASS] stage all my changes and commit them
+       expected: commit
+       top:      commit(0.50)
+[FAIL] debug this failing test
+       expected: debug
+       top:      user-test(0.12)
+```
+
+Suite format (JSON array):
+
+```json
+[
+  {"intent": "stage all my changes and commit them", "expected": "commit"},
+  {"intent": "review this pull request",             "expected": "review"}
+]
+```
+
+The module ships `evals/routing.json` as a default suite covering ~18 common intents. Extend it by pointing at your own file with `--suite`.
 
 ## Usage
 
@@ -44,6 +69,12 @@ ccgm-doctor dry
 ccgm-doctor dry --threshold 0.3          # flag more overlapping pairs
 ccgm-doctor dry --threshold 0.8          # only flag near-duplicates
 ccgm-doctor dry --json
+
+# Routing assertions
+ccgm-doctor resolver-eval                         # uses default bundled suite
+ccgm-doctor resolver-eval --suite my-evals.json   # your own suite
+ccgm-doctor resolver-eval --top-k 3               # pass if expected is in top 3
+ccgm-doctor resolver-eval --json
 ```
 
 Exit codes:
@@ -65,8 +96,7 @@ The checks are pure functions of the filesystem. They run in milliseconds and re
 ### What's not covered (yet)
 
 - **Orphan detection** — "script in `bin/` that no command or hook references". CCGM does not track install provenance, so detecting orphans from source-module removal is non-trivial. Deferred.
-- **Semantic overlap** — two commands whose descriptions are paraphrases of each other but share few exact tokens. Lexical DRY catches copy-paste; semantic routing needs a model. See `#386`.
-- **Resolver routing evals** — does the model actually pick the right command for a given intent? See `#386`.
+- **Model-backed routing** — the current `resolver-eval` is a structural scorer. The model may choose differently, especially on paraphrases or short intents. A future enhancement can invoke `claude -p` or the API to ask the model directly and compare — the eval file format and pass contract stay the same.
 
 ## Manual Installation
 
@@ -86,4 +116,5 @@ cp lib/doctor.py ~/.claude/lib/doctor.py
 |------|-------------|
 | `bin/ccgm-doctor` | Python CLI that dispatches subcommands |
 | `lib/doctor.py` | Pure check functions — take paths, return findings |
-| `tests/test_doctor.py` | 30 unit tests covering all checks with tempdir fixtures |
+| `evals/routing.json` | Default routing suite for `resolver-eval` |
+| `tests/test_doctor.py` | 47 unit tests covering all checks with tempdir fixtures |

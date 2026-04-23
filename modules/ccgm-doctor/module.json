@@ -1,14 +1,15 @@
 {
   "name": "ccgm-doctor",
   "displayName": "CCGM Doctor",
-  "description": "Audit tool for Claude Code installs. Reports dark or broken entries: hooks pointing at missing files, commands with no discoverable trigger description, and command markdown referencing bin scripts that do not exist. First subcommand: check-resolvable. Future work: DRY audit (#385), resolver evals (#386).",
+  "description": "Audit tool for Claude Code installs. Three subcommands: check-resolvable (hook refs, command descriptions, script refs), dry (lexical overlap between command descriptions), and resolver-eval (runs a routing suite of {intent, expected} assertions against keyword-overlap scoring). Ships a default routing suite covering common slash commands.",
   "category": "workflow",
   "scope": ["global"],
   "dependencies": [],
   "files": {
     "bin/ccgm-doctor": { "target": "bin/ccgm-doctor", "type": "script", "template": false },
-    "lib/doctor.py": { "target": "lib/doctor.py", "type": "lib", "template": false }
+    "lib/doctor.py": { "target": "lib/doctor.py", "type": "lib", "template": false },
+    "evals/routing.json": { "target": "evals/routing.json", "type": "doc", "template": false }
   },
-  "tags": ["audit", "health-check", "resolver", "reachability"],
+  "tags": ["audit", "health-check", "resolver", "reachability", "evals"],
   "configPrompts": []
 }
