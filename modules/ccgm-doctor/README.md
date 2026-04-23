@@ -4,7 +4,10 @@ Audit tool for Claude Code installs. Reports dark or broken entries so they can 
 
 ## What It Does
 
-Installs a `ccgm-doctor` CLI. Current subcommand: `check-resolvable`.
+Installs a `ccgm-doctor` CLI. Subcommands:
+
+- `check-resolvable` — reachability audit (hook refs, command descriptions, script refs)
+- `dry` — DRY/overlap audit (pairs of commands whose triggers are lexically similar)
 
 ### check-resolvable
 
@@ -18,17 +21,29 @@ Walks a Claude install and reports three classes of issue:
 
 Each finding includes: check name, severity, path, and a one-line detail.
 
+### dry
+
+Compares every pair of command trigger descriptions using Jaccard similarity over content tokens (stopwords and short tokens filtered out). Pairs above the threshold are flagged as likely ambiguous routing candidates.
+
+| Check | Severity | What it catches |
+|-------|----------|-----------------|
+| `dry-overlap` | warn | two commands whose trigger descriptions share > threshold tokens (default 0.5) |
+
+Lexical overlap is a conservative signal — it catches copy-paste descriptions and near-duplicates, not semantic synonyms. For semantic routing analysis (e.g., "commit my changes" vs "check in these files"), use the resolver eval harness (#386).
+
 ## Usage
 
 ```bash
-# Audit the default ~/.claude install
+# Reachability audit
 ccgm-doctor check-resolvable
-
-# Audit a specific install
 ccgm-doctor check-resolvable --claude-dir /path/to/.claude
-
-# Machine-readable output
 ccgm-doctor check-resolvable --json
+
+# DRY audit
+ccgm-doctor dry
+ccgm-doctor dry --threshold 0.3          # flag more overlapping pairs
+ccgm-doctor dry --threshold 0.8          # only flag near-duplicates
+ccgm-doctor dry --json
 ```
 
 Exit codes:
@@ -50,7 +65,7 @@ The checks are pure functions of the filesystem. They run in milliseconds and re
 ### What's not covered (yet)
 
 - **Orphan detection** — "script in `bin/` that no command or hook references". CCGM does not track install provenance, so detecting orphans from source-module removal is non-trivial. Deferred.
-- **DRY overlap** — two commands whose descriptions overlap semantically. See `#385`.
+- **Semantic overlap** — two commands whose descriptions are paraphrases of each other but share few exact tokens. Lexical DRY catches copy-paste; semantic routing needs a model. See `#386`.
 - **Resolver routing evals** — does the model actually pick the right command for a given intent? See `#386`.
 
 ## Manual Installation
