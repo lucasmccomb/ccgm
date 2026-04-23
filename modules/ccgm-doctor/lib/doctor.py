@@ -339,3 +339,94 @@ def check_dry_overlap(commands_dir: Path, threshold: float = 0.5) -> list[Findin
                     ),
                 })
     return findings
+
+
+# --- Resolver evals ---
+
+def _tokenize_intent(text: str) -> set[str]:
+    """Same tokenizer as _trigger_tokens but over arbitrary text, not a file."""
+    return {tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in _STOPWORDS}
+
+
+def _command_tokens(path: Path, text: str) -> set[str]:
+    """
+    Tokens the scorer uses to rank a command against an intent: the trigger
+    description PLUS the filename stem (since users often hit a command
+    by name). Skill name tokens help disambiguate when descriptions are thin.
+    """
+    tokens = _trigger_tokens(text)
+    stem_tokens = {tok for tok in _TOKEN_RE.findall(path.stem.lower()) if tok not in _STOPWORDS}
+    return tokens | stem_tokens
+
+
+def score_intent_against_commands(
+    intent: str, commands_dir: Path
+) -> list[tuple[str, float]]:
+    """
+    Rank every command in `commands_dir` against `intent` by Jaccard similarity
+    of intent tokens against (description + filename stem) tokens.
+
+    Returns a list of (command_name, score) pairs sorted high-to-low. Ties at
+    score 0 are dropped (no evidence either way).
+    """
+    if not commands_dir.is_dir():
+        return []
+
+    intent_tokens = _tokenize_intent(intent)
+    if not intent_tokens:
+        return []
+
+    scored: list[tuple[str, float]] = []
+    for md in sorted(commands_dir.glob("*.md")):
+        try:
+            text = md.read_text()
+        except OSError:
+            continue
+        cmd_tokens = _command_tokens(md, text)
+        if not cmd_tokens:
+            continue
+        sim = _jaccard(intent_tokens, cmd_tokens)
+        if sim > 0:
+            scored.append((md.stem, sim))
+
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    return scored
+
+
+def run_resolver_evals(
+    suite: list[dict], commands_dir: Path, top_k: int = 1
+) -> list[dict]:
+    """
+    Run every {intent, expected} entry in `suite` against the commands dir.
+
+    Pass rule: `expected` is in the top `top_k` candidates returned by the
+    scorer. Ties at the k-th position are counted as part of the top (a pass
+    should not flip based on an arbitrary tiebreak in sorted()).
+
+    Returns one result dict per entry:
+        intent, expected, top_candidates (list of (name, score)), passed (bool)
+    """
+    results: list[dict] = []
+    for entry in suite:
+        intent = entry["intent"]
+        expected = entry["expected"]
+        ranked = score_intent_against_commands(intent, commands_dir)
+
+        if ranked:
+            cutoff_idx = min(top_k - 1, len(ranked) - 1)
+            cutoff_score = ranked[cutoff_idx][1]
+            # All candidates tied at or above the cutoff score.
+            qualifying = [pair for pair in ranked if pair[1] >= cutoff_score]
+            passed = any(name == expected for name, _ in qualifying)
+            top_candidates = qualifying
+        else:
+            passed = False
+            top_candidates = []
+
+        results.append({
+            "intent": intent,
+            "expected": expected,
+            "top_candidates": top_candidates,
+            "passed": passed,
+        })
+    return results

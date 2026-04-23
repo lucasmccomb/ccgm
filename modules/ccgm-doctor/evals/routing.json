@@ -1,0 +1,20 @@
+[
+  {"intent": "stage all my changes and commit them", "expected": "commit"},
+  {"intent": "commit push and merge this branch", "expected": "cpm"},
+  {"intent": "create a pull request for this work", "expected": "pr"},
+  {"intent": "review this pull request", "expected": "review"},
+  {"intent": "run a comprehensive security review", "expected": "security-review"},
+  {"intent": "debug this failing test", "expected": "debug"},
+  {"intent": "reflect on what I learned in this session", "expected": "reflect"},
+  {"intent": "consolidate and clean up my learnings", "expected": "consolidate"},
+  {"intent": "write a retrospective over the last week", "expected": "retro"},
+  {"intent": "summarize where I left off at session start", "expected": "startup"},
+  {"intent": "remember this capability and turn it into a permanent skill", "expected": "skillify"},
+  {"intent": "do deep research across the web on a topic", "expected": "deepresearch"},
+  {"intent": "audit this codebase for issues", "expected": "audit"},
+  {"intent": "update the project documentation to match the code", "expected": "docupdate"},
+  {"intent": "generate playwright tests for a feature", "expected": "e2e"},
+  {"intent": "check the health of my claude install", "expected": "ccgm-sync"},
+  {"intent": "brainstorm ideas for a new feature", "expected": "brainstorm"},
+  {"intent": "submit this chrome extension to the store", "expected": "cws-submit"}
+]
