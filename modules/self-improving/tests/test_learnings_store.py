@@ -351,9 +351,9 @@ class CompactGuardTests(unittest.TestCase):
         self.assertTrue(ok_loose)
 
     def test_extracts_proper_nouns(self):
-        tokens = ls._extract_fact_tokens("Lucas McComb works on OpenChronicle in Shanghai.")
+        tokens = ls._extract_fact_tokens("Ada Lovelace works on OpenChronicle in Shanghai.")
         # Should grab multi-word proper noun phrases
-        self.assertIn("Lucas McComb", tokens)
+        self.assertIn("Ada Lovelace", tokens)
 
 
 def _cleanup():
