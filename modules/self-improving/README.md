@@ -22,6 +22,8 @@ Includes a reflection checklist, mandatory trigger points, type vocabulary, and 
 - **JSONL per project** at `~/.claude/learnings/{project-slug}/learnings.jsonl`. Append-only; schema-validated; sanitizer neutralizes instruction-like patterns on write.
 - **Confidence decay**: effective confidence = `base * 0.5^(age_days / half_life_days)`, with `uses` boosting and `contradictions` cutting. Default half-life 90 days.
 - **Staleness**: `last_verified` older than 180 days is excluded by default; `files[]` anchors enable filesystem-aware staleness checks.
+- **Supersede chains**: `supersede <old_id>` atomically replaces an entry and links both directions (`supersedes` / `superseded_by`). Default search hides old entries; `--include-superseded` walks the chain.
+- **Compaction guard**: `compact_preserves_facts(old, new)` rejects lossy rewrites that drop more than 5% of fact-bearing tokens (identifiers, proper nouns, quoted strings, dates, versions, acronyms).
 - **Injection filter**: search results are ranked and capped by token budget (default ~2000 tokens) before going into a preamble.
 - **Cross-project search**: opt-in via `ccgm-learnings-log config cross-project on`.
 
@@ -39,8 +41,8 @@ Full schema and model: `rules/learnings-store.md`.
 
 | Tool | Description |
 |------|-------------|
-| `ccgm-learnings-log` | Append a learning, reinforce (`verify`), record contradictions, deprecate, or configure |
-| `ccgm-learnings-search` | Rank + filter + token-cap learnings (formats: preamble, markdown, jsonl) |
+| `ccgm-learnings-log` | Append a learning, reinforce (`verify`), record contradictions, `deprecate`, `supersede <old_id>`, or configure |
+| `ccgm-learnings-search` | Rank + filter + token-cap learnings (formats: preamble, markdown, jsonl; `--include-superseded` to surface chains) |
 
 ### Hooks
 
