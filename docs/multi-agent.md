@@ -61,10 +61,11 @@ The agent ID is also stored in `.env.clone`:
 
 ```bash
 AGENT_ID=agent-w0-c2
-WORKSPACE_NUM=0
-CLONE_NUM=2
-FRONTEND_PORT=3102
-BACKEND_PORT=3103
+WORKSPACE_NUMBER=0
+CLONE_NUMBER=2
+PORT_OFFSET=2
+FRONTEND_PORT=5175
+BACKEND_PORT=8789
 ```
 
 ## Port allocation
@@ -73,25 +74,29 @@ Each clone gets unique ports to prevent dev server collisions.
 
 ### How ports are assigned
 
-Ports are managed in `~/.claude/port-registry.json`:
+Ports are managed in `~/.claude/port-registry.json`. Each repo has separate base ports for its frontend and backend services:
 
 ```json
 {
-  "my-repo": {
-    "basePort": 3100,
-    "clones": 4
+  "repos": {
+    "my-repo": {
+      "frontend": 5173,
+      "backend": 8787
+    }
   }
 }
 ```
 
-Each repo gets a 16-port block. Within that block, each clone gets 2 ports (frontend + backend):
+Each clone receives a `PORT_OFFSET` (workspace-mode: `workspace_number * clones_per_workspace + clone_number`; flat-clone mode: `clone_number`). The clone's ports are computed by adding `PORT_OFFSET` to each base:
 
-| Clone | Frontend | Backend |
-|-------|----------|---------|
-| Clone 0 | basePort + 0 | basePort + 1 |
-| Clone 1 | basePort + 2 | basePort + 3 |
-| Clone 2 | basePort + 4 | basePort + 5 |
-| Clone 3 | basePort + 6 | basePort + 7 |
+| Clone | `PORT_OFFSET` | Frontend | Backend |
+|-------|---------------|----------|---------|
+| Clone 0 | 0 | frontend + 0 | backend + 0 |
+| Clone 1 | 1 | frontend + 1 | backend + 1 |
+| Clone 2 | 2 | frontend + 2 | backend + 2 |
+| Clone 3 | 3 | frontend + 3 | backend + 3 |
+
+Each repo gets a 16-port block per service to support up to 16 clones.
 
 ### Using ports
 

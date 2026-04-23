@@ -76,17 +76,20 @@ Some hooks read values from this file at runtime:
 ```json
 {
   "version": "1.0.0",
-  "timestamp": "2026-03-29T12:00:00Z",
+  "installedAt": "2026-03-29T12:00:00Z",
   "preset": "standard",
   "scope": "global",
   "linkMode": false,
+  "ccgmRoot": "/Users/jane/ccgm",
   "modules": ["autonomy", "git-workflow", "settings", "hooks", "commands-core"],
   "files": [
     "~/.claude/rules/autonomy.md",
     "~/.claude/rules/git-workflow.md",
     "~/.claude/commands/commit.md"
   ],
-  "ccgmRoot": "/Users/jane/ccgm"
+  "backups": [
+    "~/.claude.backup-2026-03-29-120000"
+  ]
 }
 ```
 
