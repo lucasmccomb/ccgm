@@ -303,6 +303,80 @@ class TestCheckScriptRefs(unittest.TestCase):
         self.assertEqual(len(findings), 1)
 
 
+class TestCheckDryOverlap(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="ccgm-doctor-"))
+        self.commands = self.tmp / "commands"
+        self.commands.mkdir()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _make_fm_command(self, name: str, description: str) -> None:
+        (self.commands / f"{name}.md").write_text(
+            f"---\ndescription: {description}\n---\n\nbody\n"
+        )
+
+    def test_distinct_commands_no_findings(self) -> None:
+        self._make_fm_command("alpha", "Fetch and summarize upstream news articles")
+        self._make_fm_command("beta", "Transform JSON logs into Parquet files")
+        findings = doctor.check_dry_overlap(self.commands)
+        self.assertEqual(findings, [])
+
+    def test_near_duplicate_commands_flagged(self) -> None:
+        # Two descriptions that share most content words - obvious DRY problem.
+        self._make_fm_command(
+            "calendar-check",
+            "Check calendar events for scheduling conflicts tomorrow",
+        )
+        self._make_fm_command(
+            "calendar-recall",
+            "Check calendar events for scheduling conflicts historically",
+        )
+        findings = doctor.check_dry_overlap(self.commands, threshold=0.5)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["check"], "dry-overlap")
+        self.assertEqual(findings[0]["severity"], "warn")
+        self.assertIn("calendar", findings[0]["detail"])
+
+    def test_threshold_respected(self) -> None:
+        # Moderate overlap: flagged at low threshold, clean at high.
+        self._make_fm_command("one", "Deploy production web service quickly")
+        self._make_fm_command("two", "Deploy staging web service quickly")
+        findings_low = doctor.check_dry_overlap(self.commands, threshold=0.3)
+        self.assertEqual(len(findings_low), 1)
+        findings_high = doctor.check_dry_overlap(self.commands, threshold=0.95)
+        self.assertEqual(findings_high, [])
+
+    def test_pair_report_uses_basenames(self) -> None:
+        self._make_fm_command("left", "Parse emails for unread thread summaries")
+        self._make_fm_command("right", "Parse emails for unread thread summaries")
+        findings = doctor.check_dry_overlap(self.commands, threshold=0.5)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("left.md", findings[0]["path"])
+        self.assertIn("right.md", findings[0]["path"])
+
+    def test_empty_descriptions_skipped(self) -> None:
+        # Commands with no trigger description are skipped; they're already
+        # flagged by check_command_descriptions and would produce an empty
+        # set intersection.
+        (self.commands / "empty.md").write_text("")
+        self._make_fm_command("real", "A real command with actual content")
+        findings = doctor.check_dry_overlap(self.commands)
+        self.assertEqual(findings, [])
+
+    def test_heading_style_commands_also_audited(self) -> None:
+        # CCGM-style commands use H1 headings, not frontmatter. Still audited.
+        (self.commands / "alpha.md").write_text("# /alpha - parse emails and build thread summaries\n")
+        (self.commands / "beta.md").write_text("# /beta - parse emails and build thread summaries\n")
+        findings = doctor.check_dry_overlap(self.commands, threshold=0.5)
+        self.assertEqual(len(findings), 1)
+
+    def test_no_commands_dir(self) -> None:
+        findings = doctor.check_dry_overlap(self.tmp / "nonexistent")
+        self.assertEqual(findings, [])
+
+
 class TestRunAllChecks(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="ccgm-doctor-"))
