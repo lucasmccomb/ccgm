@@ -112,7 +112,22 @@ bash tests/test-modules.sh
 
 # Check for personal data leaks
 bash tests/test-no-personal-data.sh
+
+# Run per-module unit tests (pytest for Python, bash for shell)
+bash tests/run-unit-tests.sh
+
+# Run everything (structural + unit)
+bash tests/run-all.sh
 ```
+
+If a module ships code (scripts under `bin/`, libraries under `lib/`, or
+hooks), put unit tests under `modules/{name}/tests/`:
+
+- `test_*.py` — runs under `python3 -m pytest`; both `unittest.TestCase`
+  and pytest assertion-style tests are discovered.
+- `test_*.sh` — runs under `bash`; exit non-zero on any failure.
+
+The runner discovers these automatically, so no registration is needed.
 
 ## module.json Schema Reference
 
