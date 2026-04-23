@@ -1,0 +1,14 @@
+{
+  "name": "skillify",
+  "displayName": "Skillify",
+  "description": "Slash command that promotes an ad-hoc session capability into a durable skill: a command file with triggers and rules, optional deterministic helper script, a pinning test, and a learnings-store entry pointing at the new skill. Inspired by the 'skillify' pattern where every repeated failure becomes structurally unreachable by being turned into a tested skill.",
+  "category": "workflow",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "commands/skillify.md": { "target": "commands/skillify.md", "type": "command", "template": false },
+    "bin/ccgm-skillify-check": { "target": "bin/ccgm-skillify-check", "type": "script", "template": false }
+  },
+  "tags": ["skills", "authoring", "durability", "meta-learning"],
+  "configPrompts": []
+}
