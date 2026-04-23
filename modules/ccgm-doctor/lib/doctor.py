@@ -257,3 +257,85 @@ def run_all_checks(claude_dir: Path, user_home: Path | None = None) -> list[Find
         + check_command_descriptions(commands)
         + check_script_refs(commands, claude_dir)
     )
+
+
+# --- DRY / overlap audit ---
+
+# Stopwords for command-trigger tokenization. Words too generic to signal
+# command identity (the, a), common CLI/workflow verbs (run, use, add),
+# and filler. Kept deliberately tight so meaningful nouns like "calendar",
+# "commit", "review" stay in.
+_STOPWORDS = frozenset({
+    "the", "and", "any", "all", "are", "but", "can", "did", "does", "done",
+    "during", "else", "for", "from", "get", "had", "has", "have", "here",
+    "how", "its", "just", "make", "must", "new", "not", "one", "only",
+    "should", "some", "that", "the", "then", "this", "those", "two", "use",
+    "using", "via", "was", "were", "what", "when", "where", "why", "will",
+    "with", "would", "you", "your", "set", "run", "task", "command",
+    "commands", "skill", "workflow", "claude", "code", "agent", "before",
+    "after", "because", "current", "previous", "next", "these",
+})
+
+_TOKEN_RE = re.compile(r'[a-z][a-z0-9]{2,}')
+
+
+def _trigger_tokens(text: str) -> set[str]:
+    """
+    Extract the identity-bearing tokens of a command's trigger description.
+    Lowercase, strip punctuation, drop stopwords and tokens shorter than 3.
+    """
+    desc = _extract_trigger_description(text) or ""
+    return {tok for tok in _TOKEN_RE.findall(desc.lower()) if tok not in _STOPWORDS}
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    intersection = len(a & b)
+    union = len(a | b)
+    return intersection / union if union else 0.0
+
+
+def check_dry_overlap(commands_dir: Path, threshold: float = 0.5) -> list[Finding]:
+    """
+    Flag pairs of commands whose trigger-description tokens overlap above
+    `threshold` (Jaccard similarity). Catches ambiguous routing: two skills
+    the model might plausibly pick for the same intent.
+
+    Commands whose trigger description is empty (already flagged by
+    check_command_descriptions) are skipped so this check stays orthogonal.
+    """
+    findings: list[Finding] = []
+    if not commands_dir.is_dir():
+        return findings
+
+    commands: list[tuple[Path, set[str]]] = []
+    for md in sorted(commands_dir.glob("*.md")):
+        try:
+            text = md.read_text()
+        except OSError:
+            continue
+        tokens = _trigger_tokens(text)
+        if tokens:
+            commands.append((md, tokens))
+
+    # Pairwise comparison. O(n^2) but n is small (dozens, not thousands).
+    for i in range(len(commands)):
+        for j in range(i + 1, len(commands)):
+            path_a, tokens_a = commands[i]
+            path_b, tokens_b = commands[j]
+            sim = _jaccard(tokens_a, tokens_b)
+            if sim >= threshold:
+                shared = sorted(tokens_a & tokens_b)
+                findings.append({
+                    "check": "dry-overlap",
+                    "severity": "warn",
+                    "path": f"{path_a.name} <-> {path_b.name}",
+                    "detail": (
+                        f"Jaccard={sim:.2f} over {len(shared)} shared tokens "
+                        f"({', '.join(shared[:5])}"
+                        f"{'...' if len(shared) > 5 else ''}). "
+                        "Review for merge/deprecate, or sharpen descriptions."
+                    ),
+                })
+    return findings

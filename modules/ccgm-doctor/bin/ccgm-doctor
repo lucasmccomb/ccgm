@@ -4,9 +4,12 @@ ccgm-doctor — audit a Claude Code install for reachability problems.
 
 Subcommands:
     check-resolvable    Report dark/orphaned/broken entries in the install.
+    dry                 Report pairs of commands whose trigger descriptions
+                        overlap (ambiguous routing candidates).
 
 Usage:
     ccgm-doctor check-resolvable [--claude-dir PATH] [--json]
+    ccgm-doctor dry [--claude-dir PATH] [--threshold N] [--json]
 
 Exit codes:
     0   no issues
@@ -27,10 +30,36 @@ sys.path.insert(0, str(_HERE.parent / "lib"))
 import doctor  # noqa: E402
 
 
+def _format_findings(findings: list[dict], scope_label: str) -> None:
+    if not findings:
+        print(f"OK: no issues found in {scope_label}")
+        return
+    by_severity: dict[str, list[dict]] = {}
+    for f in findings:
+        by_severity.setdefault(f["severity"], []).append(f)
+    for sev in ("error", "warn"):
+        items = by_severity.get(sev, [])
+        if not items:
+            continue
+        print(f"{sev.upper()} ({len(items)}):")
+        for f in items:
+            print(f"  [{f['check']}] {f['path']}")
+            print(f"    {f['detail']}")
+    print()
+    print(f"Total: {len(findings)} issue(s) across {scope_label}")
+
+
+def _resolve_claude_dir(raw: str) -> Path | None:
+    path = Path(raw).expanduser().resolve()
+    if not path.is_dir():
+        print(f"error: --claude-dir does not exist: {path}", file=sys.stderr)
+        return None
+    return path
+
+
 def _cmd_check_resolvable(args: argparse.Namespace) -> int:
-    home = Path(args.claude_dir).expanduser().resolve()
-    if not home.is_dir():
-        print(f"error: --claude-dir does not exist: {home}", file=sys.stderr)
+    home = _resolve_claude_dir(args.claude_dir)
+    if home is None:
         return 2
 
     findings = doctor.run_all_checks(home)
@@ -39,22 +68,24 @@ def _cmd_check_resolvable(args: argparse.Namespace) -> int:
         json.dump(findings, sys.stdout, indent=2)
         sys.stdout.write("\n")
     else:
-        if not findings:
-            print(f"OK: no issues found in {home}")
-        else:
-            by_severity = {"error": [], "warn": []}
-            for f in findings:
-                by_severity.setdefault(f["severity"], []).append(f)
-            for sev in ("error", "warn"):
-                items = by_severity.get(sev, [])
-                if not items:
-                    continue
-                print(f"{sev.upper()} ({len(items)}):")
-                for f in items:
-                    print(f"  [{f['check']}] {f['path']}")
-                    print(f"    {f['detail']}")
-            print()
-            print(f"Total: {len(findings)} issue(s) across {home}")
+        _format_findings(findings, str(home))
+
+    return 1 if findings else 0
+
+
+def _cmd_dry(args: argparse.Namespace) -> int:
+    home = _resolve_claude_dir(args.claude_dir)
+    if home is None:
+        return 2
+
+    commands_dir = home / "commands"
+    findings = doctor.check_dry_overlap(commands_dir, threshold=args.threshold)
+
+    if args.json:
+        json.dump(findings, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    else:
+        _format_findings(findings, f"{commands_dir} (threshold={args.threshold})")
 
     return 1 if findings else 0
 
@@ -81,6 +112,28 @@ def main() -> int:
         help="Emit findings as a JSON array instead of a human-readable report.",
     )
     chk.set_defaults(func=_cmd_check_resolvable)
+
+    dry = subs.add_parser(
+        "dry",
+        help="Report command pairs whose trigger descriptions overlap.",
+    )
+    dry.add_argument(
+        "--claude-dir",
+        default="~/.claude",
+        help="Path to the Claude Code install dir (default: ~/.claude)",
+    )
+    dry.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Jaccard similarity threshold for flagging pairs (default: 0.5)",
+    )
+    dry.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit findings as a JSON array instead of a human-readable report.",
+    )
+    dry.set_defaults(func=_cmd_dry)
 
     args = parser.parse_args()
     return args.func(args)
