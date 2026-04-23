@@ -88,6 +88,14 @@ fi
   if [ "$IS_WORKSPACE_ROOT" != true ]; then
     exit 0
   fi
+  # Refresh origin/main in parallel so ahead/behind counts aren't stale.
+  # Read-only: no pull, no rebase. See issue #380.
+  for child in "$PROJECT_DIR"/*-c[0-9]*/; do
+    [ -d "$child" ] || continue
+    git -C "$child" rev-parse --git-dir >/dev/null 2>&1 || continue
+    git -C "$child" fetch origin --quiet 2>/dev/null &
+  done
+  wait
   for child in "$PROJECT_DIR"/*-c[0-9]*/; do
     [ -d "$child" ] || continue
     git -C "$child" rev-parse --git-dir >/dev/null 2>&1 || continue
