@@ -18,7 +18,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 10 hooks, 2 Python libraries, and a settings partial. The **self-improving** module installs 2 additional hooks. Total: 12 hooks across 2 modules.
+The **hooks** module installs 13 hooks, 2 Python libraries, and a settings partial. The **self-improving** module installs 2 additional hooks. Total: 15 hooks across 2 modules.
 
 ---
 
@@ -245,6 +245,42 @@ Reminds Claude to capture unwritten patterns before context compaction compresse
 **When it fires**: Before context compression begins. By the time PostCompact fires, session context is already compressed and learnings may be lost.
 
 **Output**: `<precompact-reflection>` instruction prompting Claude to run the reflection checklist or invoke `/reflect`.
+
+---
+
+### check-careful.py
+
+**Type**: PreToolUse:Bash
+**Module**: hooks
+**Can block**: Yes (returns `permissionDecision: "ask"`)
+
+Pauses destructive Bash commands for confirmation. Catches `rm -rf`, SQL `DROP`/`TRUNCATE`, `git push --force`, `git reset --hard`, `git checkout .`, `kubectl delete`, and `docker rm -f` / `docker system prune`.
+
+**Smart allow-list**: Build-artifact directories (`node_modules`, `dist`, `.next`, `build`, `__pycache__`, `.cache`, `.turbo`, `coverage`) bypass the prompt for `rm -rf`.
+
+---
+
+### check-freeze.py
+
+**Type**: PreToolUse:Edit/Write
+**Module**: hooks
+**Can block**: Yes
+
+Scope-locks file edits to a frozen directory. When `~/.claude/freeze-dir.txt` contains a directory path, any Edit or Write outside that directory is denied. Paths are normalised (symlinks resolved, `..` collapsed) before the containment check.
+
+**Activation**: `/freeze <dir>` to set, `/unfreeze` to clear.
+
+---
+
+### session-start-enforce.py
+
+**Type**: SessionStart
+**Module**: hooks
+**Can block**: No (context injection only)
+
+Experimental (OFF by default). Injects a rule-enforcement meta-instruction at fresh session start, reminding the agent to route through the discipline rules (TDD, systematic-debugging, verification) as real gates.
+
+**Opt in**: Set `CCGM_RULE_ENFORCEMENT=true` in `~/.claude/.ccgm.env`. Fires only on `source == "startup"`, not on resume or compaction.
 
 ---
 
