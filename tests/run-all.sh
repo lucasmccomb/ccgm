@@ -18,6 +18,18 @@ for test_script in "$SCRIPT_DIR"/test-*.sh; do
   fi
 done
 
+# Per-module unit tests (pytest + shell).
+if [[ -x "$SCRIPT_DIR/run-unit-tests.sh" ]]; then
+  echo ""
+  echo "=== Running run-unit-tests.sh ==="
+  if bash "$SCRIPT_DIR/run-unit-tests.sh"; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_TESTS+=("run-unit-tests.sh")
+  fi
+fi
+
 echo ""
 echo "=== Test Summary ==="
 echo "Passed: $PASS"
