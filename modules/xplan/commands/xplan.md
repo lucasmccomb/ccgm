@@ -1,19 +1,31 @@
 ---
 description: Interactive deep research + planning + execution framework for new projects and features
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--light] [--deepen [<plan-dir>]]
+argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--light | --autonomous] [--deepen [<plan-dir>]]
 ---
 
 # xplan - Interactive Project Planning & Execution
 
 A human-in-the-loop planning framework that interviews you upfront, deeply researches your concept, builds a contextual model, proposes tech stack and architecture for your sign-off, creates a parallelized execution plan, reviews it with specialized agents, and then autonomously executes using parallel agents.
 
+**Three Modes:**
+
+| Mode | Interview | Research | Tech Stack | Scope | Reviews | Walkthrough |
+|------|-----------|----------|------------|-------|---------|-------------|
+| **Default** (interactive) | Full Q&A | Full | Approved by user | Approved by user | Configurable | Skipped (user already approved inline) |
+| **`--light`** | Skipped | Reduced (inferred) | Internal default | Internal | Optional | Full section-by-section at end |
+| **`--autonomous`** | Skipped | **Full** | Internal (best-fit) | Internal (best-fit) | **Full (always)** | Structured plan-as-artifact presentation at end |
+
+`--light` is the *fast* path - reduced depth, minimal interaction. `--autonomous` is the *deep* path - maximum depth, zero interruption until the final gate. Pick `--autonomous` when you know exactly what you want to plan and prefer reviewing a finished artifact to answering questions during creation.
+
 **Flags:**
 - `--repo <path>` - Analyze and plan work for an existing repo
 - `--light` - Skip the interactive interview phases; uses minimal clarification + traditional walkthrough at the end (old xplan behavior)
+- `--autonomous` (alias: `-a`) - Skip ALL mid-flow prompts; run the full research + planning + review pipeline end-to-end using best-guess inference, then present the completed plan as a structured artifact for review at the final gate. Mutually exclusive with `--light`.
 - `--deepen [<plan-dir>]` - Skip fresh planning; load an existing plan and run targeted deepening passes on under-specified sections. See "Deepen Mode" below.
 
 **Companion commands:**
+- `/xplana` - Thin alias for `/xplan --autonomous`
 - `/xplan-status` - Check progress on a running or completed plan
 - `/xplan-resume` - Resume an interrupted plan execution
 
@@ -36,7 +48,9 @@ The orchestrator (this session) stays on the current model for all synthesis, ar
 
 ## CRITICAL: Interactive Prompts Are Mandatory
 
-**This skill REQUIRES user interaction to function.** xplan is an interactive framework - the user chose to run `/xplan` precisely because they want the guided research/plan/review experience. Skipping prompts defeats the purpose.
+**This skill REQUIRES user interaction to function** (unless `--autonomous` is set - see below). xplan is an interactive framework - the user chose to run `/xplan` precisely because they want the guided research/plan/review experience. Skipping prompts defeats the purpose.
+
+**Exception - `--autonomous` mode**: When `--autonomous` is active, ALL mid-flow `AskUserQuestion` prompts are skipped by design. The user explicitly opted into no-interruption mode. The ONLY user interaction allowed is the Phase 6.5 Final Execution Gate. Treat any other prompt as a bug when autonomous mode is set. Autonomous mode does NOT disable the final gate - 6.5 always fires.
 
 ### How to Ask the User
 
@@ -98,10 +112,19 @@ Extract from `$ARGUMENTS`:
 - **Main concept/idea**: The core description of what to build
 - **`--repo <path>`**: (Optional) Path to an existing repo to analyze
 - **`--light`**: (Optional) Flag to skip interactive interview phases
+- **`--autonomous`** (alias `-a`): (Optional) Flag to skip ALL mid-flow prompts and run the full pipeline end-to-end. Mutually exclusive with `--light` - if both are set, error and stop.
 - **`--deepen [<plan-dir>]`**: (Optional) Iteratively deepen an existing plan instead of creating a new one. Also triggered when the free-text argument is exactly `deepen` (intent keyword). If a plan directory path follows the flag, use it; otherwise fall back to the current working directory.
-- If no arguments provided, use AskUserQuestion to ask what the user wants to plan
+- If no arguments provided, use AskUserQuestion to ask what the user wants to plan (skipped in autonomous mode - error out instead, since autonomous has no interaction channel to clarify).
 
 Store whether `--light` is active. It affects Phases 0.5, 1.5, 2.5, 2.6, 2.7, and 6.
+
+Store whether `--autonomous` is active. It affects Phases 0.5, 1.5, 2, 2.5, 2.6, 2.7, 4.0, and 6. Autonomous mode implies:
+- All `AskUserQuestion` calls in those phases are skipped
+- Research runs at Full depth (all 7 agents) unconditionally
+- Reviews run at Full (security + architecture + business) unconditionally
+- Tech stack and scope are chosen via best-guess inference and documented in decisions.md
+- The final walkthrough (Phase 6) presents the plan as a completed artifact, not per-section sign-offs
+- The Phase 6.5 Final Gate still fires - it is the single user interaction point
 
 **Semantic distinction** (from CE `ce-plan` skill):
 - **"deepen the plan"** (holistic) → triggers `--deepen` mode. Run targeted deepening passes on under-specified sections of the whole plan.
@@ -271,9 +294,26 @@ After 5.6 passes:
 
 ## Phase 0.5: Discovery Interview
 
-**Skip this phase entirely if `--light` flag is active. Proceed to Phase 1.**
+**Skip this phase entirely if `--light` OR `--autonomous` flag is active.**
+- `--light`: proceed to Phase 1 with no interview.
+- `--autonomous`: proceed to Phase 1 with full-depth research forced (see Inference Rules below). Inferred answers must be written to `decisions.md` so they are visible during the final walkthrough.
 
 **Goal**: Reach 95%+ confidence about what the user wants to build before committing to research and planning. A wrong assumption at this stage cascades into hours of wasted work.
+
+### Inference Rules (autonomous mode only)
+
+When `--autonomous` is active, use these defaults in place of the user's answers. Record every inferred default under a "Phase 0.5 Inferences" block in `decisions.md` so the final walkthrough can surface them for correction.
+
+| Original question | Autonomous default |
+|---|---|
+| Codebase type (new vs existing) | Use `--repo` flag presence. `--repo` set = existing codebase. Otherwise = new project. |
+| Audience | Infer from concept language; default to "Launch as a product" when ambiguous (this enables the business-viability assessment and business-logic review). |
+| V1 scope constraints | None specific - let research + plan decide. |
+| Technical constraints | None - use hard defaults from Phase 2.5.2. |
+| Success criteria | Derive from the concept statement and flag explicitly in the final walkthrough as "assumption to confirm". |
+| Revenue model (if product) | Mark "TBD - address in final walkthrough". Do NOT block. |
+| Timeline | Assume no hard deadline. |
+| Research level | **Full** (all 7 agents, unconditionally). |
 
 ### 0.5.1 Confirm Core Understanding
 
@@ -376,9 +416,11 @@ Store the selection for Phase 1.1. Do not re-ask in Phase 1.0.
 
 ### 1.0 Research Configuration
 
-**If `--light` flag is active**: Ask the research level question here using the same preset table as Phase 0.5.3.
+**If `--autonomous`**: Research level is locked to **Full** - all 7 agents, no question. Proceed to 1.1.
 
-**If not `--light`**: The research level was already confirmed in Phase 0.5.3. Skip this question entirely - do not double-prompt.
+**If `--light`**: Ask the research level question here using the same preset table as Phase 0.5.3.
+
+**If default (interactive)**: The research level was already confirmed in Phase 0.5.3. Skip this question entirely - do not double-prompt.
 
 ### 1.1 Delegate to /deepresearch
 
@@ -416,7 +458,9 @@ If the Sources section is empty, note this but proceed.
 
 ## Phase 1.5: Research Review & Idea Refinement
 
-**Skip this phase entirely if `--light` flag is active. Proceed to Phase 2.**
+**Skip this phase entirely if `--light` OR `--autonomous` flag is active.**
+- `--light`: proceed to Phase 2 with no research review.
+- `--autonomous`: proceed to Phase 2 with no mid-flow review, BUT prepare a condensed "key research findings" summary (top 3-5 insights + business-viability signal if applicable) and stash it for the final walkthrough in Phase 6. Store it as an inline note so Phase 6 does not have to re-derive it.
 
 **Goal**: Present research findings to the user and catch any concept changes before committing to planning. This is the "kill or refine" checkpoint.
 
@@ -477,7 +521,12 @@ Wait for explicit confirmation before proceeding to Phase 2.
 
 ## Phase 2: Naming Ideation (Optional)
 
-After research is confirmed, use AskUserQuestion:
+**Autonomous mode**: Determine naming internally without prompting.
+- If the concept clearly contains or implies a name (e.g., a single proper-noun candidate is obvious from the input), use it directly and skip the naming agent.
+- Otherwise, spawn the naming agent (2.1) silently and auto-select the top-ranked candidate as the working project name for planning. Still write `naming.md` with the full ranked list; the top-5 are surfaced in the Phase 6 final walkthrough so the user can swap the choice before execution.
+- No `AskUserQuestion` fires in this phase under `--autonomous`.
+
+**Interactive / light mode**: Use AskUserQuestion:
 
 ```
 question: "Before I start planning, would you like me to brainstorm project names and check domain availability?"
@@ -514,13 +563,17 @@ Save results to `~/code/plans/{concept-name}/naming.md`:
 
 ### 2.3 Present to User
 
-Show the top 5 names and ask the user to pick one (or provide their own). The chosen name becomes the project name throughout the plan.
+**Interactive / light mode**: Show the top 5 names and ask the user to pick one (or provide their own). The chosen name becomes the project name throughout the plan.
+
+**Autonomous mode**: Do NOT prompt. Auto-select the top-ranked name from `naming.md` as the working project name. Record the auto-selection in `decisions.md` under "Phase 2 Inferences". The top-5 list will be re-presented in the Phase 6 final walkthrough so the user can swap in a different pick before execution.
 
 ---
 
 ## Phase 2.5: Tech Stack Proposal & Sign-off
 
-**Skip this phase entirely if `--light` flag is active. Tech stack is decided internally in Phase 3.1.**
+**Skip user sign-off if `--light` OR `--autonomous` flag is active.** Tech stack is decided internally.
+- `--light`: pick the stack silently in Phase 3.1 from hard defaults + research-informed choices; no table is built at this point.
+- `--autonomous`: still run 2.5.1 (gather existing patterns) and 2.5.2 (propose stack table) so the table exists for the final walkthrough, but **skip 2.5.3 entirely** - the table is considered approved the moment it is written. Record the full table + one-line justification per row in `decisions.md` so the final walkthrough can display it without re-deriving.
 
 **Goal**: Propose the full tech stack with justifications and get user sign-off before writing the plan.
 
@@ -585,7 +638,7 @@ Present as a table:
 | CI/CD | GitHub Actions | ... |
 ```
 
-Then use AskUserQuestion:
+**Interactive mode only**: Use AskUserQuestion:
 
 ```
 question: "Does this tech stack look right?"
@@ -594,7 +647,9 @@ options:
   - "I have changes (I'll describe)"
 ```
 
-### 2.5.3 Iterate Until Approved
+**Autonomous mode**: Do NOT prompt. The proposed table is auto-approved. Skip 2.5.3.
+
+### 2.5.3 Iterate Until Approved (interactive only)
 
 If the user has changes, apply them. For each change, note the tradeoff briefly (e.g., "switching from D1 to Supabase adds managed Postgres but removes the CF-native advantage"). Re-present the updated table and re-confirm with the same AskUserQuestion options until "Looks good" is selected.
 
@@ -606,7 +661,9 @@ Once approved, store the approved stack - it is the canonical stack for Phase 3.
 
 ## Phase 2.6: High-Level Plan Proposal & Sign-off
 
-**Skip this phase entirely if `--light` flag is active. Proceed to Phase 3.**
+**Skip user sign-off if `--light` OR `--autonomous` flag is active.**
+- `--light`: skip entirely; proceed to Phase 3. Scope is inferred during plan creation.
+- `--autonomous`: still build the scope + rough epic proposal (2.6.1) so it exists for the final walkthrough, but **skip 2.6.2 (sign-off gate) entirely**. Infer v1-in / v1-out from the concept + research findings. Record the proposed scope and epic structure in `decisions.md` under "Phase 2.6 Inferences". The final walkthrough will surface both so the user can still redirect before execution.
 
 **Goal**: Propose the overall scope and rough epic structure before writing the full plan. Catch scope misalignment early, not after hours of detailed planning.
 
@@ -642,7 +699,9 @@ Also indicate: "I'm planning [N] parallel agents across [N] waves. With the [wor
 
 ### 2.6.2 Sign-off Gate
 
-Use AskUserQuestion:
+**Skip entirely in `--autonomous` mode.** The scope proposal is auto-approved; the user can still redirect during the final walkthrough.
+
+**Interactive mode**: Use AskUserQuestion:
 
 ```
 question: "Does this scope and epic breakdown feel right?"
@@ -659,11 +718,23 @@ Iterate until the user selects "Looks right". Update the plan direction accordin
 
 ## Phase 2.7: Multi-Agent Setup
 
-**Skip this phase entirely if `--light` flag is active. Use the default 4-clone flat model.**
+**Skip user prompts if `--light` OR `--autonomous` flag is active.**
+- `--light`: use the default 4-clone flat model.
+- `--autonomous`: infer the setup from the scope proposed in 2.6.1. Use this decision table and record it in `decisions.md`:
+
+| Agent-epic count | Autonomous default |
+|---|---|
+| 9+ | Workspace model (isolated groups of 4 clones) |
+| 4-8 | Flat clone model (4 sibling clones) |
+| 1-3 | Single clone (no parallelism) |
+
+If `--repo` is set and a multi-clone setup already exists, use the existing structure. If `--repo` is set without an existing multi-clone setup, apply the table above to decide whether to provision one (as a prerequisite step in the plan).
 
 **Goal**: Decide how parallel agent execution will be structured before creating the plan.
 
 ### 2.7.1 New Codebase
+
+**Skip in `--autonomous` mode** - apply the decision table above.
 
 If this is a new project (no `--repo`), use AskUserQuestion:
 
@@ -686,7 +757,9 @@ ls ~/code/{project}-workspaces/ 2>/dev/null && echo "workspace model exists"
 ls ~/code/{project}-repos/ 2>/dev/null && echo "flat clone model exists"
 ```
 
-**If it already has a workspace/clone setup**: Ask which clone to use as the base, or whether to create new clones for this work.
+**Skip user prompts in `--autonomous` mode** - use the decision table above and document the inference in `decisions.md`.
+
+**If it already has a workspace/clone setup**: Ask which clone to use as the base, or whether to create new clones for this work. (Autonomous mode: default to the lowest-numbered existing clone for the base and note this in decisions.md.)
 
 **If no multi-clone setup exists**: Assess whether the planned scope warrants parallelism (yes if 4+ agent-epics). If yes, use AskUserQuestion:
 
@@ -710,11 +783,13 @@ If "workspace model" is chosen, add workspace migration as a prerequisite step i
 
 ### 3.1 Tech Stack Documentation
 
-**If interactive mode (not --light)**: The tech stack was already approved in Phase 2.5. Use the approved stack as the basis for architecture and epic design. Do not re-propose it.
+**If default interactive mode (neither flag)**: The tech stack was already approved in Phase 2.5. Use the approved stack as the basis for architecture and epic design. Do not re-propose it.
 
-**If --light mode**: Select the optimal tech stack based on research findings and the hard defaults defined in Phase 2.5.2. Document reasoning in decisions.md.
+**If `--autonomous` mode**: Phase 2.5.2 already built and auto-approved the stack table and wrote it to decisions.md. Use that table as the basis for architecture and epic design. Do not re-propose.
 
-Hard constraints apply in both modes:
+**If `--light` mode**: Select the optimal tech stack based on research findings and the hard defaults defined in Phase 2.5.2. Document reasoning in decisions.md.
+
+Hard constraints apply in all modes:
 - **Cloudflare** for hosting/infra
 - **Resend** for email
 - **Google OAuth** for auth
@@ -811,7 +886,9 @@ Include all stack decisions from Phase 2.5 and scope decisions from Phase 2.6.
 
 ### 4.0 Review Configuration
 
-Use AskUserQuestion:
+**In `--autonomous` mode**: Skip the question. Lock the review set to **Full** - Security + Architecture + Business Logic, all three agents, all in parallel. Proceed to 4.1.
+
+**In interactive / light mode**: Use AskUserQuestion:
 
 ```
 question: "What level of plan review should I run before writing the full plan?"
@@ -834,7 +911,7 @@ options:
   - "Business Logic - alignment with research, user needs, epic completeness, edge cases"
 ```
 
-**Note**: If "Skip Review" is selected, Phases 4.1-4.4 are skipped entirely. Proceed directly to Phase 5.
+**Note**: If "Skip Review" is selected, Phases 4.1-4.4 are skipped entirely. Proceed directly to Phase 5. "Skip Review" is NOT available in `--autonomous` mode - the whole point of autonomous is full-depth planning.
 
 ### 4.1 Spawn Review Agents
 
@@ -1139,9 +1216,77 @@ Re-run 5.6.1, 5.6.2, and 5.6.3 after every round of fixes. Do not advance to Pha
 
 ### 6.0 Mode Split
 
+**If `--autonomous` flag is active**: Run the autonomous plan walkthrough (section 6.A below) before the final gate (6.5). This presents the completed plan as a single structured artifact with every inferred default called out so the user can redirect if any assumption was wrong.
+
 **If `--light` flag is active**: Run the full interactive walkthrough (sections 6.1-6.4 below) before the final gate (6.5). This is the traditional pre-execution review.
 
-**If interactive mode (not --light)**: The user has already reviewed research (Phase 1.5), approved the tech stack (Phase 2.5), approved the high-level scope (Phase 2.6), and confirmed the multi-agent setup (Phase 2.7). Skip sections 6.1-6.4. Go directly to 6.5.
+**If default interactive mode (neither flag)**: The user has already reviewed research (Phase 1.5), approved the tech stack (Phase 2.5), approved the high-level scope (Phase 2.6), and confirmed the multi-agent setup (Phase 2.7). Skip sections 6.1-6.4 and 6.A. Go directly to 6.5.
+
+---
+
+### 6.A Autonomous Plan Walkthrough (--autonomous only)
+
+**Goal**: Present the fully-planned project as a single digestible artifact, with every internally-inferred assumption called out so the user can correct anything before execution.
+
+This is NOT section-by-section sign-off. The user reads the completed plan once and then makes one decision at the final gate. Any correction they want to apply goes through `/xplan --deepen` after they stop execution, not through mid-walkthrough edits.
+
+Structure the output in this exact order, as a single message (or a small number of tightly-grouped messages if length demands it):
+
+**1. Executive summary** (3-5 sentences)
+- What this plan builds, in plain language
+- Who it's for (infer from concept; explicitly flagged as an assumption)
+- The single most important decision driving the design
+
+**2. Key research findings** (top 3-5 insights)
+- Pulled from the Phase 1.5 condensed summary stashed earlier
+- Each insight with one line of "this is why it shaped the plan"
+
+**3. Tech stack** (the Phase 2.5.2 table)
+- Render the full table as-is
+- One-line justification per major choice
+- Call out any choice that diverges from the hard defaults
+
+**4. Scope (v1 in / v1 out)**
+- What's included in v1
+- What's explicitly deferred to v2+
+- Any scope decisions driven by research findings
+
+**5. Epic breakdown**
+- Wave structure (names only - full epic specs live in plan.md)
+- Parallel allocation per wave
+- Total agent-epic count, total human-epic count
+- Inferred multi-agent setup (workspace / flat / single) and why
+
+**6. Review findings summary**
+- Critical findings from security review and how the plan addressed them
+- Critical findings from architecture review and how the plan addressed them
+- Critical findings from business-logic review and how the plan addressed them
+- If no critical findings: state that explicitly
+
+**7. Assumptions that might need correction**
+- Render the full Phase 0.5 Inferences block from decisions.md
+- Include the Phase 2 naming auto-selection (with the top-5 alternatives inline so the user can swap)
+- Include the Phase 2.6 scope inference
+- Include the Phase 2.7 multi-agent setup inference
+- Each row: "I assumed X; correct if wrong."
+
+**8. Open questions**
+- Anything the plan could not confidently decide
+- Revenue model (if flagged TBD in 0.5)
+- Success criteria (always flagged for confirmation in autonomous mode)
+- Any unresolved questions from the review agents
+
+**9. Where the full detail lives**
+- `~/code/plans/{concept-name}/plan.md` (full plan)
+- `~/code/plans/{concept-name}/research.md` (research)
+- `~/code/plans/{concept-name}/decisions.md` (decision log + all autonomous inferences)
+- `~/code/plans/{concept-name}/reviews/*.md` (review agent outputs)
+- `~/code/plans/{concept-name}/naming.md` (if generated)
+
+**10. Recommended next step on correction**
+- If the user sees something wrong, recommend `/xplan --deepen ~/code/plans/{concept-name}` to tighten specific sections rather than restarting planning from scratch.
+
+After presenting the walkthrough, proceed to 6.5.
 
 ---
 
@@ -1172,9 +1317,11 @@ If naming was done in Phase 2, confirm the chosen name. If not done, ask if they
 
 ---
 
-### 6.5 Final Execution Gate (MANDATORY - both modes)
+### 6.5 Final Execution Gate (MANDATORY - all modes)
 
-**HARD GATE - NON-BYPASSABLE - MANDATORY REGARDLESS OF PERMISSION MODE**
+**HARD GATE - NON-BYPASSABLE - MANDATORY REGARDLESS OF PERMISSION MODE OR FLAGS**
+
+This gate fires in every mode, including `--autonomous`. Autonomous mode skips every other user prompt, but NOT this one - execution is expensive and irreversible, so the plan-as-artifact presentation in 6.A always precedes an explicit human decision to proceed.
 
 Before asking, re-verify:
 
@@ -1196,6 +1343,8 @@ options:
 ```
 
 **This question is NON-NEGOTIABLE.** Do NOT proceed to Phase 7 without an explicit "Proceed to execution" from the user. No autonomy setting, permission bypass, or global instruction overrides this gate. If the user selects "Stop here", save the plan state and end gracefully.
+
+**Autonomous mode default recommendation**: When a user runs `--autonomous` (or `/xplana`), they haven't been in the loop during creation. Lean toward "save plan, don't execute yet" as the suggested outcome unless the user explicitly asked for "autonomous execution" in the concept itself. If the user picks "Revisit a section", recommend `/xplan --deepen ~/code/plans/{concept-name}` as the tightening path rather than re-running the whole pipeline.
 
 ---
 

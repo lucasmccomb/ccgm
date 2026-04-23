@@ -21,9 +21,22 @@ xplan is a human-in-the-loop planning framework with mandatory confirmation gate
 - **Phase 7** - Create repo, issues, and spawn parallel agents per wave
 - **Phase 8** - Verification, audit, retrospective, optional template generation
 
-**`--light` flag**: Skips Phases 0.5, 1.5, 2.5, 2.6, and 2.7. Uses minimal clarification + traditional section-by-section walkthrough instead of the interview-driven flow. Equivalent to old xplan behavior.
+### Three Modes
+
+| Mode | Interview | Research | Tech Stack | Scope | Reviews | Walkthrough |
+|------|-----------|----------|------------|-------|---------|-------------|
+| Default (interactive) | Full Q&A | Full | Approved by user | Approved by user | Configurable | Skipped (approved inline) |
+| `--light` | Skipped | Reduced (inferred) | Internal default | Internal | Optional | Full section-by-section at end |
+| `--autonomous` (or `/xplana`) | Skipped | **Full** | Internal (best-fit) | Internal (best-fit) | **Full (always)** | Plan-as-artifact presentation at end |
+
+**`--light`**: fast path. Reduced depth, minimal interaction. Skips Phases 0.5, 1.5, 2.5, 2.6, and 2.7. Traditional section-by-section walkthrough at the end.
+
+**`--autonomous`**: deep path. Maximum depth, zero interruption until the final gate. Runs the full research pipeline (all 7 agents), full review (security + architecture + business logic), and the self-review loop. Tech stack, scope, naming, and multi-agent setup are inferred and documented in `decisions.md`. At Phase 6 the completed plan is presented as a single structured artifact with every inferred default called out, then the (non-bypassable) Phase 6.5 final execution gate fires. Pick this when you know exactly what you want to plan and prefer reviewing a finished artifact over answering questions during creation. Correct any wrong inferences with `/xplan --deepen ~/code/plans/{concept-name}` rather than re-running from scratch.
+
+`--light` and `--autonomous` are mutually exclusive.
 
 Companion commands:
+- **/xplana** - Thin alias for `/xplan --autonomous`
 - **/xplan-status** - Check progress on a running or completed plan
 - **/xplan-resume** - Resume an interrupted plan execution from its last checkpoint
 
@@ -32,6 +45,7 @@ Companion commands:
 | File | Type | Description |
 |------|------|-------------|
 | `commands/xplan.md` | command | Main planning and execution command (/xplan) |
+| `commands/xplana.md` | command | Autonomous alias - /xplana invokes /xplan --autonomous |
 | `commands/xplan-status.md` | command | Plan progress dashboard (/xplan-status) |
 | `commands/xplan-resume.md` | command | Resume interrupted execution (/xplan-resume) |
 
@@ -60,6 +74,7 @@ See the [lem-deepresearch README](https://github.com/lucasmccomb/lem-deepresearc
 # Copy command files
 mkdir -p ~/.claude/commands
 cp commands/xplan.md ~/.claude/commands/xplan.md
+cp commands/xplana.md ~/.claude/commands/xplana.md
 cp commands/xplan-status.md ~/.claude/commands/xplan-status.md
 cp commands/xplan-resume.md ~/.claude/commands/xplan-resume.md
 ```
@@ -78,4 +93,8 @@ Optional: Create a templates directory for reusable plan patterns:
 mkdir -p ~/code/plans/_templates
 ```
 
-After installation, invoke with `/xplan <project concept or idea>`, `/xplan <idea> --repo <existing-repo-path>`, or `/xplan <idea> --light` to skip interactive interview phases.
+After installation, invoke with:
+- `/xplan <concept>` - full interactive mode
+- `/xplan <concept> --repo <existing-repo-path>` - plan work against an existing repo
+- `/xplan <concept> --light` - fast path, minimal interaction
+- `/xplan <concept> --autonomous` or `/xplana <concept>` - full-depth pipeline with zero mid-flow prompts; completed plan presented at the end
