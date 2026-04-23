@@ -20,8 +20,14 @@ modules/{name}/
 │   └── {command}.md
 ├── agents/              # Reusable subagent prompts (.md) - invoked by commands/skills
 │   └── {agent}.md
+├── skills/              # Skill definitions (SKILL.md + supporting files)
+│   └── {skill}/SKILL.md
 ├── hooks/               # Hook scripts (.py) - triggered by Claude Code events
 │   └── {hook}.py
+├── lib/                 # Shared libraries used by hooks, commands, or scripts
+│   └── {lib}.{py,sh}
+├── scripts/             # Standalone executables
+│   └── {script}
 ├── settings.base.json   # Settings template (merged into settings.json)
 ├── settings.partial.json # Partial settings (merged into settings.json)
 └── *.md                 # Additional documentation files
@@ -96,6 +102,7 @@ If your module is broadly useful, add its name to the appropriate preset arrays 
 - `standard.json` - Modules most users will want
 - `full.json` - All modules (your module should always be here)
 - `team.json` - Modules useful for team workflows
+- `cloud-agent.json` - Modules needed for remote/cloud agent VMs (includes `agent-manager` and `cloud-dispatch`)
 
 ### 6. Run tests
 
@@ -140,7 +147,7 @@ Each entry in the `files` object maps a source path (relative to the module dire
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `target` | string | yes | Destination path relative to the install root (`~/.claude/` or `.claude/`). |
-| `type` | string | yes | File type: `rule`, `command`, `agent`, `hook`, `config`, or `doc`. |
+| `type` | string | yes | File type: `rule`, `command`, `agent`, `skill`, `skill-reference`, `hook`, `lib`, `script`, `config`, `doc`, or `content`. |
 | `template` | boolean | yes | Whether the file contains `__PLACEHOLDER__` template variables to expand. |
 | `merge` | boolean | no | For `config` type only. If `true`, the file is merged into the target rather than replacing it. Used for settings partials. |
 
@@ -151,9 +158,14 @@ Each entry in the `files` object maps a source path (relative to the module dire
 | `rule` | `.md` | Markdown rules loaded by Claude Code at session start. Shapes behavior and decision-making. |
 | `command` | `.md` | Markdown files that become slash commands in Claude Code. File name becomes the command name. |
 | `agent` | `.md` | Reusable subagent prompts invoked by commands or skills via the Task tool. Installed to `~/.claude/agents/`. Use for prompts shared across two or more callers; keep one-off prompts inline. |
+| `skill` | `.md` | Skill definitions (`SKILL.md`) that provide a packaged capability invocable by name (e.g., `/brainstorm`, `/ce-review`). Installed to `~/.claude/skills/{name}/SKILL.md`. |
+| `skill-reference` | any | Supporting files referenced by a skill (schema, fixtures, prompts). Installed alongside the skill's `SKILL.md` under `~/.claude/skills/{name}/`. |
 | `hook` | `.py` | Python scripts triggered by Claude Code events (PreToolUse, UserPromptSubmit, etc.). |
+| `lib` | any | Shared library code used by hooks, commands, or scripts. Installed to `~/.claude/lib/`. |
+| `script` | any | Standalone executables the user or commands can invoke. Installed to `~/.claude/scripts/` (or a module-specific path). |
 | `config` | `.json` | JSON configuration files (settings, partials). May be merged into existing files. |
 | `doc` | `.md` | Documentation files installed alongside rules. Referenced by rules but not auto-loaded. |
+| `content` | any | Module-specific content files that don't fit the other categories (e.g., prompt templates, preamble text). |
 
 ### Config Prompts
 

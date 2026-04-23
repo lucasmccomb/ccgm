@@ -47,8 +47,6 @@ During installation, CCGM expands placeholder tokens in configuration files. The
 | `__HOME__` | Your home directory path (e.g., `/Users/jane`) | `settings.json` - path patterns in allow/deny lists |
 | `__USERNAME__` | GitHub username (e.g., `janedoe`) | `enforce-git-workflow.py` - direct-to-main repo allowlist |
 | `__CODE_DIR__` | Code workspace directory (e.g., `~/code`) | `settings.json` - path patterns, port registry |
-| `__LOG_REPO__` | Agent log repo name (e.g., `agent-logs`) | Session logging - log file paths |
-| `__TIMEZONE__` | Your timezone (e.g., `America/New_York`) | Session logging documentation |
 | `__DEFAULT_MODE__` | Permission mode: `ask` or `dontAsk` | `settings.json` - `defaultMode` field |
 
 Values are collected during installation and stored in `~/.claude/.ccgm.env`. They are applied via `sed` substitution when files are copied.
