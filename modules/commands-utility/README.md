@@ -45,4 +45,15 @@ Produces `docs/user-test-problems.md` and `docs/user-test-solutions.md` in the p
 cp commands/cws-submit.md ~/.claude/commands/cws-submit.md
 cp commands/ccgm-sync.md ~/.claude/commands/ccgm-sync.md
 cp commands/user-test.md ~/.claude/commands/user-test.md
+
+# Statusline
+cp statusline-command.sh ~/.claude/statusline-command.sh
+chmod +x ~/.claude/statusline-command.sh
+
+# Scripts
+mkdir -p ~/.claude/scripts
+cp scripts/ccgm-sync.sh ~/.claude/scripts/ccgm-sync.sh
+cp scripts/agent-team ~/.claude/scripts/agent-team
+chmod +x ~/.claude/scripts/ccgm-sync.sh
+chmod +x ~/.claude/scripts/agent-team
 ```

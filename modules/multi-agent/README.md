@@ -21,6 +21,10 @@ Key capabilities:
 | `rules/multi-agent.md` | rule | Parallel work preference and port allocation rules |
 | `multi-agent-system.md` | doc | Full multi-agent coordination documentation |
 | `commands/mawf.md` | command | Multi-Agent Workflow command (/mawf) |
+| `commands/workspace-setup.md` | command | Creates a workspace-based multi-clone directory structure (/workspace-setup) |
+| `commands/handoff.md` | command | Writes a handoff note for peer clones (/handoff) |
+| `lib/handoff.py` | lib | Helper library backing the /handoff command |
+| `port-registry.json` | config | Per-repo port allocation registry (template) |
 
 ## Dependencies
 
@@ -38,9 +42,18 @@ cp rules/multi-agent.md ~/.claude/rules/multi-agent.md
 # Copy the documentation
 cp multi-agent-system.md ~/.claude/multi-agent-system.md
 
-# Copy the mawf command
+# Copy the commands
 mkdir -p ~/.claude/commands
 cp commands/mawf.md ~/.claude/commands/mawf.md
+cp commands/workspace-setup.md ~/.claude/commands/workspace-setup.md
+cp commands/handoff.md ~/.claude/commands/handoff.md
+
+# Copy the lib helper
+mkdir -p ~/.claude/lib
+cp lib/handoff.py ~/.claude/lib/handoff.py
+
+# Copy the port registry (template expanded at install time)
+cp port-registry.json ~/.claude/port-registry.json
 ```
 
 ### 2. Set Up Multi-Clone Architecture

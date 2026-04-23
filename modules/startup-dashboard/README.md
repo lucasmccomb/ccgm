@@ -25,6 +25,8 @@ work on next. Deterministic data gather + model-powered summarization.
 | `lib/startup-summary.sh` | lib | Runs the gather → model → markdown summary pipeline with a fallback chain |
 | `lib/startup-summary-prompt.md` | lib | Fixed summary instructions the model receives |
 | `lib/startup-dashboard.sh` | lib | Deterministic plain-text dashboard (fallback / `--raw` mode) |
+| `hooks/auto-startup.py` | hook | SessionStart hook that runs `/startup` automatically on fresh sessions |
+| `settings.partial.json` | config | Hook wiring configuration to merge into settings.json |
 
 ## Dependencies
 

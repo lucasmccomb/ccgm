@@ -16,6 +16,7 @@ Files installed globally to `~/.claude/`:
 | `scripts/extract-metadata.py` | `scripts/extract-metadata.py` | Batch-extract session metadata (branch, cwd, timestamps) |
 | `scripts/recall.py` | `scripts/recall.py` | `/recall` implementation — unified session view across clones |
 | `scripts/repo_detect.py` | `scripts/repo_detect.py` | Canonical repo-name detection + multi-clone project-dir matching |
+| `scripts/add-agents-md-symlinks.sh` | `scripts/add-agents-md-symlinks.sh` | Sets up AGENTS.md symlinks so Codex transcripts share the same rule surface as Claude Code |
 
 Two consumption patterns:
 
@@ -51,6 +52,10 @@ chmod +x ~/.claude/scripts/discover-sessions.sh
 cp modules/session-history/scripts/extract-metadata.py \
    ~/.claude/scripts/extract-metadata.py
 chmod +x ~/.claude/scripts/extract-metadata.py
+
+cp modules/session-history/scripts/add-agents-md-symlinks.sh \
+   ~/.claude/scripts/add-agents-md-symlinks.sh
+chmod +x ~/.claude/scripts/add-agents-md-symlinks.sh
 ```
 
 ## Usage

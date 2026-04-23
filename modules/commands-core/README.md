@@ -25,6 +25,7 @@ Also ships two reusable skills:
 | `commands/pr.md` | command | Push branch and create PR closing an issue |
 | `commands/cpm.md` | command | Commit, create PR, and merge in one shot |
 | `commands/gs.md` | command | Git status dashboard with project info |
+| `lib/gs-gather.sh` | lib | Helper script that gathers git and project info for /gs |
 | `commands/ghi.md` | command | Create GitHub issue with labels |
 | `skills/cpm/SKILL.md` | skill | Sequenced commit-PR-merge workflow |
 | `skills/pr-description/SKILL.md` | skill | Pure PR title and body writer (returns structured output, no publishing) |
@@ -48,6 +49,10 @@ cp commands/pr.md ~/.claude/commands/pr.md
 cp commands/cpm.md ~/.claude/commands/cpm.md
 cp commands/gs.md ~/.claude/commands/gs.md
 cp commands/ghi.md ~/.claude/commands/ghi.md
+
+# Lib helper
+mkdir -p ~/.claude/lib
+cp lib/gs-gather.sh ~/.claude/lib/gs-gather.sh
 
 # Skills
 mkdir -p ~/.claude/skills/cpm ~/.claude/skills/pr-description/references

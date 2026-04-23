@@ -30,6 +30,10 @@ cp commands/unfreeze.md ~/.claude/commands/unfreeze.md
 cp commands/guard.md ~/.claude/commands/guard.md
 cp commands/checkpoint.md ~/.claude/commands/checkpoint.md
 
+# Skill
+mkdir -p ~/.claude/skills/audit
+cp skills/audit/SKILL.md ~/.claude/skills/audit/SKILL.md
+
 # Project-level
 cp commands/audit.md .claude/commands/audit.md
 cp commands/pwv.md .claude/commands/pwv.md
@@ -53,3 +57,4 @@ cp commands/checkpoint.md .claude/commands/checkpoint.md
 | `commands/unfreeze.md` | Clear the freeze scope (deletes `~/.claude/freeze-dir.txt`) |
 | `commands/guard.md` | Compose careful + freeze for focused, safe sessions |
 | `commands/checkpoint.md` | Save or resume a WIP session-state checkpoint under `~/.claude/checkpoints/{repo}/` |
+| `skills/audit/SKILL.md` | Skill definition backing the /audit command (audit methodology and categories) |
