@@ -26,6 +26,16 @@ mkdir -p ~/.claude/agents
 cp agents/implementer.md ~/.claude/agents/implementer.md
 cp agents/spec-compliance-reviewer.md ~/.claude/agents/spec-compliance-reviewer.md
 cp agents/code-quality-reviewer.md ~/.claude/agents/code-quality-reviewer.md
+
+# Hooks
+mkdir -p ~/.claude/hooks
+cp hooks/subagent-stop-check.py ~/.claude/hooks/subagent-stop-check.py
+cp hooks/task-completed-check.py ~/.claude/hooks/task-completed-check.py
+chmod +x ~/.claude/hooks/subagent-stop-check.py
+chmod +x ~/.claude/hooks/task-completed-check.py
+
+# Merge settings.partial.json into ~/.claude/settings.json
+# Add the relevant hook wiring from settings.partial.json
 ```
 
 ## Files
@@ -36,3 +46,6 @@ cp agents/code-quality-reviewer.md ~/.claude/agents/code-quality-reviewer.md
 | `agents/implementer.md` | Reusable prompt template for implementer subagents - enforces scope discipline and four-state status |
 | `agents/spec-compliance-reviewer.md` | Stage 1 reviewer - adversarial stance, verifies deliverables and constraints independently of the implementer's self-report |
 | `agents/code-quality-reviewer.md` | Stage 2 reviewer - refuses to run unless Stage 1 returned DONE; checks project patterns, edge cases, simplicity |
+| `hooks/subagent-stop-check.py` | SubagentStop hook that verifies subagent returns a valid four-state status before returning control |
+| `hooks/task-completed-check.py` | PostToolUse hook that nudges the dispatcher to verify subagent artifacts before accepting DONE |
+| `settings.partial.json` | Hook wiring configuration to merge into settings.json |

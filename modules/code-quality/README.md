@@ -20,9 +20,15 @@ Copy `rules/code-quality.md` into your Claude configuration:
 ```bash
 # Global (all projects)
 cp rules/code-quality.md ~/.claude/rules/code-quality.md
+cp rules/change-philosophy.md ~/.claude/rules/change-philosophy.md
+cp rules/completeness.md ~/.claude/rules/completeness.md
+cp rules/receiving-code-review.md ~/.claude/rules/receiving-code-review.md
 
 # Project-level
 cp rules/code-quality.md .claude/rules/code-quality.md
+cp rules/change-philosophy.md .claude/rules/change-philosophy.md
+cp rules/completeness.md .claude/rules/completeness.md
+cp rules/receiving-code-review.md .claude/rules/receiving-code-review.md
 ```
 
 ## Files

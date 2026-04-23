@@ -34,6 +34,7 @@ Companion commands:
 | `commands/xplan.md` | command | Main planning and execution command (/xplan) |
 | `commands/xplan-status.md` | command | Plan progress dashboard (/xplan-status) |
 | `commands/xplan-resume.md` | command | Resume interrupted execution (/xplan-resume) |
+| `lib/xplan-status-gather.sh` | lib | Helper script that gathers plan progress data for /xplan-status |
 
 ## Dependencies
 
@@ -62,6 +63,10 @@ mkdir -p ~/.claude/commands
 cp commands/xplan.md ~/.claude/commands/xplan.md
 cp commands/xplan-status.md ~/.claude/commands/xplan-status.md
 cp commands/xplan-resume.md ~/.claude/commands/xplan-resume.md
+
+# Copy lib files
+mkdir -p ~/.claude/lib
+cp lib/xplan-status-gather.sh ~/.claude/lib/xplan-status-gather.sh
 ```
 
 ### Plans Directory

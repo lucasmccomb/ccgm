@@ -4,7 +4,7 @@ Python hooks that enforce git workflow rules: issue-first workflow, commit messa
 
 ## What It Does
 
-This module installs twelve Python hooks, two Python libraries, and a settings partial:
+This module installs thirteen Python hooks, two Python libraries, and a settings partial:
 
 | Hook | Event | Purpose |
 |------|-------|---------|
@@ -17,6 +17,7 @@ This module installs twelve Python hooks, two Python libraries, and a settings p
 | `agent-tracking-pre.py` | PreToolUse (Bash) | Warns when claiming an issue already claimed by another agent |
 | `agent-tracking-post.py` | PostToolUse (Bash) | Records issue claims and status transitions in tracking CSV |
 | `check-migration-timestamps.py` | PreToolUse | Validates Supabase migration file timestamps for duplicates before commit |
+| `orphan-process-check.py` | PreToolUse (Bash) | Detects and warns about orphaned background processes (stale dev servers, zombie workers) before running commands that would conflict with them |
 | `check-careful.py` | PreToolUse (Bash) | Prompts before destructive Bash commands (rm -rf, SQL DROP/TRUNCATE, force push, hard reset, kubectl delete, docker prune). Build-artifact directories (node_modules, dist, .next, build, __pycache__, .cache, .turbo, coverage) are whitelisted for `rm -rf` |
 | `check-freeze.py` | PreToolUse (Edit/Write) | Denies Edit/Write outside the frozen directory when `~/.claude/freeze-dir.txt` is set. Pair with `/freeze`, `/unfreeze`, `/guard` from `commands-extra` |
 | `session-start-enforce.py` | SessionStart (startup) | Experimental. Injects an Iron-Law rule-enforcement meta-instruction at fresh session start so discipline rules activate under pressure. OFF by default; opt in via `CCGM_RULE_ENFORCEMENT=true` in `~/.claude/.ccgm.env` |
@@ -43,21 +44,33 @@ During installation, `__USERNAME__/ccgm` in the `DIRECT_TO_MAIN_REPOS` list will
 
 ```bash
 # 1. Copy hooks
+mkdir -p ~/.claude/hooks
 cp hooks/enforce-git-workflow.py ~/.claude/hooks/enforce-git-workflow.py
 cp hooks/enforce-issue-workflow.py ~/.claude/hooks/enforce-issue-workflow.py
 cp hooks/auto-approve-bash.py ~/.claude/hooks/auto-approve-bash.py
 cp hooks/auto-approve-file-ops.py ~/.claude/hooks/auto-approve-file-ops.py
+cp hooks/ccgm-update-check.py ~/.claude/hooks/ccgm-update-check.py
+cp hooks/port-check.py ~/.claude/hooks/port-check.py
+cp hooks/agent-tracking-pre.py ~/.claude/hooks/agent-tracking-pre.py
+cp hooks/agent-tracking-post.py ~/.claude/hooks/agent-tracking-post.py
+cp hooks/check-migration-timestamps.py ~/.claude/hooks/check-migration-timestamps.py
+cp hooks/orphan-process-check.py ~/.claude/hooks/orphan-process-check.py
+cp hooks/check-careful.py ~/.claude/hooks/check-careful.py
+cp hooks/check-freeze.py ~/.claude/hooks/check-freeze.py
+cp hooks/session-start-enforce.py ~/.claude/hooks/session-start-enforce.py
 
-# 2. Make executable
-chmod +x ~/.claude/hooks/enforce-git-workflow.py
-chmod +x ~/.claude/hooks/enforce-issue-workflow.py
-chmod +x ~/.claude/hooks/auto-approve-bash.py
-chmod +x ~/.claude/hooks/auto-approve-file-ops.py
+# 2. Copy libraries
+mkdir -p ~/.claude/lib
+cp lib/agent_tracking.py ~/.claude/lib/agent_tracking.py
+cp lib/agent_sessions.py ~/.claude/lib/agent_sessions.py
 
-# 3. Replace template variable in enforce-git-workflow.py
+# 3. Make hooks executable
+chmod +x ~/.claude/hooks/*.py
+
+# 4. Replace template variable in enforce-git-workflow.py
 # Edit the DIRECT_TO_MAIN_REPOS list to use your GitHub username
 
-# 4. Merge settings.partial.json into ~/.claude/settings.json
+# 5. Merge settings.partial.json into ~/.claude/settings.json
 # Add the "hooks" section from settings.partial.json
 ```
 
@@ -94,6 +107,7 @@ On fresh session start, the hook injects a short reminder that routes tasks thro
 | `hooks/agent-tracking-pre.py` | Pre-execution issue claim warning |
 | `hooks/agent-tracking-post.py` | Post-execution tracking CSV updates |
 | `hooks/check-migration-timestamps.py` | Supabase migration timestamp validation |
+| `hooks/orphan-process-check.py` | Orphaned background process detection before conflicting Bash commands |
 | `hooks/check-careful.py` | Destructive-command warning (careful safety hook) |
 | `hooks/check-freeze.py` | Scope-lock Edit/Write to `~/.claude/freeze-dir.txt` (freeze safety hook) |
 | `hooks/session-start-enforce.py` | Experimental Iron-Law rule-enforcement meta-instruction at session start (opt in via `CCGM_RULE_ENFORCEMENT=true`) |
