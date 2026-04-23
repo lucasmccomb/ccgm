@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""
+ccgm-doctor — audit a Claude Code install for reachability problems.
+
+Subcommands:
+    check-resolvable    Report dark/orphaned/broken entries in the install.
+
+Usage:
+    ccgm-doctor check-resolvable [--claude-dir PATH] [--json]
+
+Exit codes:
+    0   no issues
+    1   issues found
+    2   environment error (e.g., --claude-dir does not exist)
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent / "lib"))
+
+import doctor  # noqa: E402
+
+
+def _cmd_check_resolvable(args: argparse.Namespace) -> int:
+    home = Path(args.claude_dir).expanduser().resolve()
+    if not home.is_dir():
+        print(f"error: --claude-dir does not exist: {home}", file=sys.stderr)
+        return 2
+
+    findings = doctor.run_all_checks(home)
+
+    if args.json:
+        json.dump(findings, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    else:
+        if not findings:
+            print(f"OK: no issues found in {home}")
+        else:
+            by_severity = {"error": [], "warn": []}
+            for f in findings:
+                by_severity.setdefault(f["severity"], []).append(f)
+            for sev in ("error", "warn"):
+                items = by_severity.get(sev, [])
+                if not items:
+                    continue
+                print(f"{sev.upper()} ({len(items)}):")
+                for f in items:
+                    print(f"  [{f['check']}] {f['path']}")
+                    print(f"    {f['detail']}")
+            print()
+            print(f"Total: {len(findings)} issue(s) across {home}")
+
+    return 1 if findings else 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="ccgm-doctor",
+        description="Audit a Claude Code install for reachability problems.",
+    )
+    subs = parser.add_subparsers(dest="subcommand", required=True)
+
+    chk = subs.add_parser(
+        "check-resolvable",
+        help="Report dark/orphaned/broken entries in the install.",
+    )
+    chk.add_argument(
+        "--claude-dir",
+        default="~/.claude",
+        help="Path to the Claude Code install dir (default: ~/.claude)",
+    )
+    chk.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit findings as a JSON array instead of a human-readable report.",
+    )
+    chk.set_defaults(func=_cmd_check_resolvable)
+
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
