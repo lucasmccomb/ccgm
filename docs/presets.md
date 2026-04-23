@@ -50,6 +50,14 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **What you get**: The full suite. Includes multi-agent workflows, planning frameworks, tech-specific patterns (Cloudflare, Supabase, Tailwind, shadcn, MCP development), and specialized commands.
 
+### cloud-agent
+
+**Best for**: Running CCGM on headless cloud VMs that dispatch parallel agents to work on GitHub issues. Includes the agent orchestration modules (`agent-manager`, `cloud-dispatch`) that the standard `full` preset omits.
+
+**Modules (42)**: Most of `full`, plus `agent-manager` (tmux-based agent dashboard) and `cloud-dispatch` (Hetzner Cloud VM provisioning for parallel GitHub-issue work), minus `brainstorm` (interactive design-spec gate — not useful on a headless agent).
+
+**What you get**: The cloud-agent preset with cloud-dispatch commands (`/dispatch`, `/dispatch-status`, `/dispatch-stop`, `/vm-manage`) and the `/agents` TUI. Intended for machines that provision cloud VMs and launch autonomous agents, not day-to-day laptop use.
+
 ## Dependency resolution
 
 When you select a module that depends on other modules, the installer automatically includes the dependencies. For example:
@@ -66,6 +74,7 @@ You don't need to manually track dependencies. The installer resolves them using
 ./start.sh --preset standard
 ./start.sh --preset full
 ./start.sh --preset team
+./start.sh --preset cloud-agent
 ```
 
 Combine with scope and link flags:
