@@ -30,7 +30,10 @@ Schema per entry:
       "last_verified": "<ISO 8601 UTC>",
       "uses": 0,
       "contradictions": 0,
-      "deprecated": false
+      "deprecated": false,
+      "supersedes": "<id of the entry this one replaces, or null>",
+      "superseded_by": "<id of the entry that replaced this one, or null>",
+      "supersede_reason": "<free-form, optional>"
     }
 
 Read path applies:
@@ -283,6 +286,8 @@ def build_entry(
     files: list[str] | None = None,
     project: str | None = None,
     key: str | None = None,
+    supersedes: str | None = None,
+    supersede_reason: str | None = None,
 ) -> dict[str, Any]:
     """
     Build a schema-valid, sanitized entry. Does NOT write.
@@ -303,6 +308,9 @@ def build_entry(
         "uses": 0,
         "contradictions": 0,
         "deprecated": False,
+        "supersedes": supersedes,
+        "superseded_by": None,
+        "supersede_reason": supersede_reason,
     }
     validate_entry(entry)
     return entry
@@ -510,14 +518,15 @@ def search(
     max_results: int | None = None,
     token_budget: int | None = None,
     include_stale: bool = False,
+    include_superseded: bool = False,
     config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Return a ranked, filtered, token-capped list of learnings.
 
     The caller is expected to inject this into a command preamble or skill
-    context. Results are already sanitized; deprecated and stale-below-
-    threshold entries are excluded by default.
+    context. Results are already sanitized; deprecated, superseded, and
+    stale-below-threshold entries are excluded by default.
     """
     cfg = config or load_config()
     half_life = float(cfg.get("half_life_days", DEFAULT_HALF_LIFE_DAYS))
@@ -548,6 +557,9 @@ def search(
     if types:
         wanted = set(types)
         pool = [e for e in pool if e.get("type") in wanted]
+
+    if not include_superseded:
+        pool = [e for e in pool if not e.get("superseded_by")]
 
     pool = dedup_latest(pool)
 
@@ -625,3 +637,112 @@ def update_entry_by_id(
     if found:
         _rewrite_jsonl(target_slug, entries)
     return found
+
+
+# ---------------------------------------------------------------------------
+# Supersede (atomic replace with linked chain)
+# ---------------------------------------------------------------------------
+
+def supersede_entry(
+    old_id: str,
+    *,
+    content: str,
+    type_: str | None = None,
+    source: str = "observed",
+    confidence: int | None = None,
+    tags: list[str] | None = None,
+    files: list[str] | None = None,
+    slug: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any] | None:
+    """
+    Atomically replace one entry with a new one, linking them both ways.
+
+    Creates a NEW entry pointing at `old_id` via `supersedes`, stamps the old
+    entry's `superseded_by` with the new id, and rewrites the JSONL so both
+    records persist. Returns the new entry on success, or None if `old_id`
+    was not found.
+
+    Missing `type_` / `confidence` / `tags` / `files` are inherited from the
+    old entry so a bare `supersede(old_id, content=...)` call does the right
+    thing for the common "same idea, updated wording" case.
+    """
+    target_slug = slug or detect_project_slug()
+    entries = load_all(target_slug)
+    old = next((e for e in entries if e.get("id") == old_id), None)
+    if old is None:
+        return None
+
+    inherited_type = type_ or old.get("type")
+    inherited_conf = confidence if confidence is not None else old.get("confidence", DEFAULT_CONFIDENCE)
+    inherited_tags = tags if tags is not None else list(old.get("tags", []))
+    inherited_files = files if files is not None else list(old.get("files", []))
+
+    new_entry = build_entry(
+        type_=inherited_type,
+        content=content,
+        source=source,
+        confidence=inherited_conf,
+        tags=inherited_tags,
+        files=inherited_files,
+        project=old.get("project") or target_slug,
+        supersedes=old_id,
+        supersede_reason=reason,
+    )
+
+    old["superseded_by"] = new_entry["id"]
+    entries.append(new_entry)
+    _rewrite_jsonl(target_slug, entries)
+    return new_entry
+
+
+# ---------------------------------------------------------------------------
+# Compaction guard (reject lossy rewrites)
+# ---------------------------------------------------------------------------
+
+# Fact-bearing tokens: identifiers, proper nouns, quoted strings, dates,
+# version numbers, acronyms. The regex is intentionally conservative - false
+# positives just mean the guard complains about a rewrite that didn't
+# actually lose meaning, which fails safe.
+_FACT_TOKEN_RE = re.compile(
+    r"""
+    (?P<ident>   [A-Za-z][A-Za-z0-9]*(?:[_.\-][A-Za-z0-9]+)+ )   # foo_bar, Foo.Bar, foo-bar
+  | (?P<proper> \b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+\b )       # Proper Noun Phrases (handles McComb, iPhone-free)
+  | (?P<quoted> "[^"\n]{2,}" | '[^'\n]{2,}' )                    # "quoted" or 'quoted'
+  | (?P<date>   \b\d{4}(?:-\d{2}(?:-\d{2})?)?\b )                # 2026 or 2026-04-23
+  | (?P<ver>    \b\d+(?:\.\d+){1,}\b )                           # 1.2.3
+  | (?P<acr>    \b[A-Z]{2,}\b )                                  # ACRONYMS
+    """,
+    re.VERBOSE,
+)
+
+
+def _extract_fact_tokens(text: str) -> set[str]:
+    """Extract the set of fact-bearing tokens from a block of prose."""
+    return {m.group(0) for m in _FACT_TOKEN_RE.finditer(text or "")}
+
+
+def compact_preserves_facts(
+    old_text: str,
+    new_text: str,
+    *,
+    threshold: float = 0.05,
+) -> tuple[bool, list[str]]:
+    """
+    Check that a rewrite preserves the bulk of fact-bearing tokens.
+
+    Extracts identifiers, proper nouns, quoted strings, dates, version
+    numbers, and acronyms from both texts. Returns `(ok, dropped)` where
+    `ok` is True if at most `threshold` of unique old tokens are missing
+    from the new text. `dropped` is the sorted list of tokens lost.
+
+    Use to guard against lossy model-driven compaction: if the check fails,
+    do not commit the rewrite - flag for human review.
+    """
+    old_tokens = _extract_fact_tokens(old_text)
+    if not old_tokens:
+        return True, []
+    new_tokens = _extract_fact_tokens(new_text)
+    dropped = sorted(old_tokens - new_tokens)
+    loss = len(dropped) / len(old_tokens)
+    return loss <= threshold, dropped

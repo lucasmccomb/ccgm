@@ -87,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--max", type=int, dest="max_results")
     p.add_argument("--budget", type=int, dest="token_budget")
     p.add_argument("--include-stale", action="store_true")
+    p.add_argument("--include-superseded", action="store_true",
+                   help="surface entries that have been replaced via supersede")
     p.add_argument("--format", choices=["jsonl", "markdown", "preamble"], default="preamble")
     p.add_argument("--list-projects", action="store_true")
     args = p.parse_args(argv)
@@ -105,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         max_results=args.max_results,
         token_budget=args.token_budget,
         include_stale=args.include_stale,
+        include_superseded=args.include_superseded,
     )
 
     if args.format == "jsonl":

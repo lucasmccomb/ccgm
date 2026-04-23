@@ -54,6 +54,9 @@ Each line is a JSON object:
 | `uses` | integer | no | Increments on verify |
 | `contradictions` | integer | no | Increments on contradict |
 | `deprecated` | bool | no | Hard-excluded from reads when true |
+| `supersedes` | string | no | Id of the entry this one replaces (set on the new entry) |
+| `superseded_by` | string | no | Id of the entry that replaced this one (set on the old entry) |
+| `supersede_reason` | string | no | Free-form note on why the replacement happened |
 
 ### Type vocabulary
 
@@ -81,6 +84,45 @@ effective = base * 0.5 ^ (age_days / half_life_days)
 - `deprecated: true` zeros effective confidence unconditionally.
 
 Entries whose effective confidence falls below the deprecate threshold (default 2.0) are skipped at read time without being deleted from the JSONL. This keeps the audit trail intact.
+
+---
+
+## Supersede Chains
+
+When a learning needs to be explicitly replaced (same topic, updated guidance), use `supersede` instead of `deprecate` + new entry. Supersede is atomic and bidirectional:
+
+- The **new** entry gets `supersedes: <old_id>` and a `supersede_reason`.
+- The **old** entry gets `superseded_by: <new_id>`.
+- `search()` hides the old entry by default. Pass `include_superseded=True` (CLI: `--include-superseded`) to walk the chain.
+
+Unlike `deprecate`, which tells the reader "this is wrong," supersede says "this was replaced by X." The chain is the audit trail: reading old → follow `superseded_by` → reach current state.
+
+Missing `type_`, `confidence`, `tags`, or `files` are inherited from the old entry — the common "refine the wording" case is `supersede <old_id> --content "..."` with no other flags.
+
+Supersede is the right tool when:
+- A pattern evolved (old version still worked, new version is better).
+- A preference changed (user now prefers X over Y).
+- An architecture fact was refined (was "runs at 5s", is now "runs at 2s").
+
+Use `deprecate` (not supersede) when:
+- The learning is outright wrong and has no replacement.
+- The pattern was abandoned; there is no "new version."
+
+---
+
+## Compaction Guard
+
+When a compaction pass (e.g., `/consolidate`) rewrites a learning's content to reduce tokens, call `compact_preserves_facts(old, new, threshold=0.05)` before committing the rewrite. The guard extracts fact-bearing tokens from both texts — identifiers (`foo_bar`, `Foo.Bar`), proper nouns, quoted strings, dates, version numbers, acronyms — and rejects the rewrite if more than `threshold` (default 5%) of unique old tokens go missing.
+
+Intent: model-driven compaction can silently drop facts. The guard is a cheap regex-based backstop that catches the common "rewrote the prose but lost the `users` table name" failure mode. It is not semantic; false positives are fine (they fail safe), false negatives are possible (the guard can only see tokens it recognizes).
+
+```python
+from learnings_store import compact_preserves_facts
+ok, dropped = compact_preserves_facts(old_content, new_content)
+if not ok:
+    # Flag for human review; do not overwrite the original.
+    log_unsafe_rewrite(old_id, dropped)
+```
 
 ---
 
@@ -146,6 +188,23 @@ ccgm-learnings-log verify <id>       # Bumps uses + last_verified
 ccgm-learnings-log contradict <id>   # Bumps contradictions counter
 ccgm-learnings-log deprecate <id>    # Hard-excludes from reads
 ```
+
+### Supersede (atomic replace)
+
+```bash
+# Refine the wording, keep type/tags/files from the old entry
+ccgm-learnings-log supersede <old_id> \
+  --content "Updated guidance..." \
+  --reason "clarified based on 2026-04-22 incident"
+
+# Change tags as well
+ccgm-learnings-log supersede <old_id> \
+  --content "..." \
+  --tag workflow --tag git \
+  --reason "broader scope"
+```
+
+Old entry's `superseded_by` is set atomically; both rows persist in the JSONL. Default search hides the old row; `ccgm-learnings-search --include-superseded` surfaces the chain.
 
 ### Config
 
