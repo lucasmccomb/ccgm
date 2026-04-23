@@ -417,5 +417,120 @@ class TestRunAllChecks(unittest.TestCase):
         self.assertEqual(checks_seen, {"hook-refs", "command-descriptions", "script-refs"})
 
 
+class TestScoreIntentAgainstCommands(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="ccgm-doctor-"))
+        self.commands = self.tmp / "commands"
+        self.commands.mkdir()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _fm(self, name: str, description: str) -> None:
+        (self.commands / f"{name}.md").write_text(
+            f"---\ndescription: {description}\n---\n\nbody\n"
+        )
+
+    def test_ranks_best_match_first(self) -> None:
+        self._fm("commit", "Stage all changes and commit with conventional format")
+        self._fm("reflect", "Run the self-improving reflection loop over the session")
+        self._fm("debug", "Deep root-cause debugging with Opus")
+        ranked = doctor.score_intent_against_commands(
+            "stage and commit my changes", self.commands
+        )
+        self.assertTrue(ranked, "expected at least one match")
+        self.assertEqual(ranked[0][0], "commit")
+
+    def test_filename_stem_contributes_to_match(self) -> None:
+        # Description is vague but the filename stem is the signal.
+        self._fm("calendar-recall", "Historical data lookup")
+        self._fm("reflect", "Run the self-improving reflection loop")
+        ranked = doctor.score_intent_against_commands(
+            "what did my calendar look like in 2020", self.commands
+        )
+        self.assertTrue(ranked)
+        self.assertEqual(ranked[0][0], "calendar-recall")
+
+    def test_empty_intent_returns_empty(self) -> None:
+        self._fm("whatever", "Something happens here")
+        ranked = doctor.score_intent_against_commands("", self.commands)
+        self.assertEqual(ranked, [])
+
+    def test_no_match_returns_empty(self) -> None:
+        self._fm("deploy", "Push the application to production servers")
+        ranked = doctor.score_intent_against_commands(
+            "bake cookies for lunch", self.commands
+        )
+        self.assertEqual(ranked, [])
+
+    def test_missing_commands_dir(self) -> None:
+        ranked = doctor.score_intent_against_commands(
+            "anything", self.tmp / "nope"
+        )
+        self.assertEqual(ranked, [])
+
+
+class TestRunResolverEvals(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="ccgm-doctor-"))
+        self.commands = self.tmp / "commands"
+        self.commands.mkdir()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _fm(self, name: str, description: str) -> None:
+        (self.commands / f"{name}.md").write_text(
+            f"---\ndescription: {description}\n---\n\nbody\n"
+        )
+
+    def test_pass_when_expected_is_top(self) -> None:
+        self._fm("commit", "Stage changes and commit with conventional format")
+        self._fm("reflect", "Run reflection loop over the session")
+        suite = [{"intent": "stage and commit my changes", "expected": "commit"}]
+        results = doctor.run_resolver_evals(suite, self.commands)
+        self.assertTrue(results[0]["passed"])
+
+    def test_fail_when_expected_not_top(self) -> None:
+        self._fm("commit", "Stage changes and commit with conventional format")
+        self._fm("reflect", "Run reflection loop over the session")
+        # "reflect" is the expected, but the intent scores higher on "commit".
+        suite = [{"intent": "stage and commit my changes", "expected": "reflect"}]
+        results = doctor.run_resolver_evals(suite, self.commands)
+        self.assertFalse(results[0]["passed"])
+
+    def test_top_k_widens_pass(self) -> None:
+        self._fm("commit", "Stage changes and commit conventional format")
+        self._fm("review", "Code review for a pull request with feedback")
+        self._fm("pr", "Open a pull request that closes an issue")
+        # "review this pull request" will rank pr or review highest; with top_k=2
+        # the other one still passes.
+        suite = [{"intent": "review this pull request", "expected": "review"}]
+        top1 = doctor.run_resolver_evals(suite, self.commands, top_k=1)
+        top2 = doctor.run_resolver_evals(suite, self.commands, top_k=2)
+        # We don't care which one wins at top-1; we care that top-2 includes both.
+        self.assertTrue(top2[0]["passed"])
+        # Top-2 top_candidates should contain both pr and review.
+        names = {n for n, _ in top2[0]["top_candidates"]}
+        self.assertIn("review", names)
+        self.assertIn("pr", names)
+
+    def test_no_candidates_fails(self) -> None:
+        self._fm("deploy", "Push application to production servers")
+        suite = [{"intent": "bake cookies for lunch", "expected": "deploy"}]
+        results = doctor.run_resolver_evals(suite, self.commands)
+        self.assertFalse(results[0]["passed"])
+        self.assertEqual(results[0]["top_candidates"], [])
+
+    def test_result_shape(self) -> None:
+        self._fm("commit", "Stage and commit changes")
+        suite = [{"intent": "commit my changes", "expected": "commit"}]
+        results = doctor.run_resolver_evals(suite, self.commands)
+        self.assertEqual(len(results), 1)
+        r = results[0]
+        self.assertEqual(set(r.keys()), {"intent", "expected", "top_candidates", "passed"})
+        self.assertIsInstance(r["top_candidates"], list)
+
+
 if __name__ == "__main__":
     unittest.main()
