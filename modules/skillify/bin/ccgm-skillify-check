@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# ccgm-skillify-check — scan user + project command dirs for skill-name collisions.
+#
+# Usage:
+#   ccgm-skillify-check <name>
+#
+# Exit codes:
+#   0  no collisions
+#   1  exact collision found (do not create a new skill with this name)
+#   2  fuzzy match found (warn; review before creating)
+#   3  invalid usage
+
+set -u
+
+PROG=$(basename "$0")
+
+die_usage() {
+    echo "usage: $PROG <skill-name>" >&2
+    echo "       name must be kebab-case (lowercase, hyphen-separated)" >&2
+    exit 3
+}
+
+if [ $# -ne 1 ]; then
+    die_usage
+fi
+
+NAME=$1
+
+# Validate kebab-case: [a-z][a-z0-9]*(-[a-z0-9]+)*
+if ! printf '%s' "$NAME" | grep -Eq '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'; then
+    echo "error: '$NAME' is not kebab-case" >&2
+    die_usage
+fi
+
+# Search paths (stable order). Only those that exist contribute hits.
+SEARCH_DIRS=(
+    "$HOME/.claude/commands"
+    ".claude/commands"
+)
+
+EXACT_HITS=()
+FUZZY_HITS=()
+
+for dir in "${SEARCH_DIRS[@]}"; do
+    [ -d "$dir" ] || continue
+
+    # Exact match: {name}.md in the commands directory.
+    if [ -f "$dir/$NAME.md" ]; then
+        EXACT_HITS+=("$dir/$NAME.md")
+    fi
+
+    # Fuzzy match: any .md whose basename shares a token with $NAME.
+    # Split name on '-' and look for any token as a substring in other filenames.
+    while IFS='-' read -ra TOKENS; do
+        for tok in "${TOKENS[@]}"; do
+            [ ${#tok} -ge 4 ] || continue  # skip short tokens to limit noise
+            while IFS= read -r -d '' file; do
+                base=$(basename "$file" .md)
+                [ "$base" = "$NAME" ] && continue
+                FUZZY_HITS+=("$file (shares '$tok')")
+            done < <(find -L "$dir" -maxdepth 1 \( -type f -o -type l \) -name "*${tok}*.md" -print0 2>/dev/null)
+        done
+    done <<< "$NAME"
+done
+
+# De-duplicate fuzzy hits (a single file matching multiple tokens would appear twice).
+if [ ${#FUZZY_HITS[@]} -gt 0 ]; then
+    UNIQUE_FUZZY=()
+    while IFS= read -r line; do
+        UNIQUE_FUZZY+=("$line")
+    done < <(printf '%s\n' "${FUZZY_HITS[@]}" | sort -u)
+    FUZZY_HITS=("${UNIQUE_FUZZY[@]}")
+fi
+
+if [ ${#EXACT_HITS[@]} -gt 0 ]; then
+    echo "EXACT collision: a skill named '$NAME' already exists."
+    for hit in "${EXACT_HITS[@]}"; do
+        echo "  - $hit"
+    done
+    echo ""
+    echo "Choose another name or update the existing skill instead."
+    exit 1
+fi
+
+if [ ${#FUZZY_HITS[@]} -gt 0 ]; then
+    echo "FUZZY matches for '$NAME' (review before creating a new skill):"
+    for hit in "${FUZZY_HITS[@]}"; do
+        echo "  - $hit"
+    done
+    echo ""
+    echo "If any of these cover the same capability, extend that skill rather than creating a new one."
+    exit 2
+fi
+
+echo "OK: no skill named '$NAME' or close variants found."
+exit 0
