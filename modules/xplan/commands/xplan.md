@@ -1216,11 +1216,101 @@ Re-run 5.6.1, 5.6.2, and 5.6.3 after every round of fixes. Do not advance to Pha
 
 ### 6.0 Mode Split
 
+**First, attempt the web review (section 6.W below) as the default review surface.** If the web server launches successfully and the user interacts with it, use its result (the `comments.json` it writes) to drive the next step:
+- If the user clicked **Submit for deepening** and `comments.json` contains non-empty comments: run Deepen Mode D.5-D.7 against the commented sections (treat each comment as a pre-selected gap, skipping D.3 and D.4), then loop back through 6.W once more so the user can review the patched plan.
+- If the user clicked **Accept as-is**: the plan is approved as reviewed. Proceed to 6.5.
+- If the web server fails to launch (see 6.W fallback conditions): fall through to the mode-specific text walkthroughs below.
+
+**Fallback mode split (when web UI is unavailable):**
+
 **If `--autonomous` flag is active**: Run the autonomous plan walkthrough (section 6.A below) before the final gate (6.5). This presents the completed plan as a single structured artifact with every inferred default called out so the user can redirect if any assumption was wrong.
 
 **If `--light` flag is active**: Run the full interactive walkthrough (sections 6.1-6.4 below) before the final gate (6.5). This is the traditional pre-execution review.
 
 **If default interactive mode (neither flag)**: The user has already reviewed research (Phase 1.5), approved the tech stack (Phase 2.5), approved the high-level scope (Phase 2.6), and confirmed the multi-agent setup (Phase 2.7). Skip sections 6.1-6.4 and 6.A. Go directly to 6.5.
+
+Regardless of which path is taken, **Phase 6.5 always fires** - the web review and the text walkthroughs are the *review* mechanisms; 6.5 is the non-bypassable execution gate.
+
+---
+
+### 6.W Web Review Walkthrough (default review surface, all modes)
+
+**Goal**: Render the completed plan in the user's browser with section-level comment support. Comments drive a targeted Deepen Mode pass; "Accept as-is" proceeds to the final gate.
+
+**Launch preconditions** (ALL must hold; if any fails, skip 6.W and fall through to the text walkthrough for the current mode):
+- `plan.md` exists at `~/code/plans/{concept-name}/plan.md` (Phase 5 + 5.6 complete)
+- Env var `XPLAN_NO_WEB` is NOT set to `1`
+- On Linux, `$DISPLAY` is set (macOS always passes this check)
+- The helper script `~/.claude/lib/xplan-web-review.py` is executable
+
+Announce before launching: "Opening the plan in your browser for review. Add comments on any sections you want deepened, then click Submit or Accept."
+
+#### 6.W.1 Launch the server
+
+Run the helper (foreground; it blocks until the user submits or accepts):
+
+```bash
+python3 ~/.claude/lib/xplan-web-review.py ~/code/plans/{concept-name}
+```
+
+The script:
+- Picks a free port on 127.0.0.1
+- Opens the default browser to the review UI
+- Waits for the user to click **Submit for deepening** or **Accept as-is**
+- Writes `~/code/plans/{concept-name}/comments.json` with the user's action and any comments
+- Prints a single JSON line to stdout: `{"action": "deepen"|"accept", "comment_count": N}`
+- Exits 0 on user action, 1 on launch failure (caller should fall back)
+
+If exit code is non-zero, fall through to the mode-specific text walkthrough below (6.A / 6.1-6.4).
+
+#### 6.W.2 Handle the result
+
+Read `~/code/plans/{concept-name}/comments.json`. It contains:
+
+```json
+{
+  "action": "deepen" | "accept",
+  "ts": "...",
+  "concept": "...",
+  "comments": [
+    {
+      "anchor": "plan.md::2. Scope",
+      "file": "plan.md",
+      "section_title": "2. Scope",
+      "text": "the user's comment",
+      "ts": "...",
+      "status": "pending"
+    }
+  ]
+}
+```
+
+**If `action == "accept"`**: Record "User accepted plan via web review" in `decisions.md` and proceed to Phase 6.5.
+
+**If `action == "deepen"`** and `comments` is non-empty: treat each comment as a pre-selected deepening gap and run Deepen Mode D.5-D.7 **without** asking D.3's gap categorization or D.4's user selection - the user already selected by commenting. For each comment:
+
+- The "target section" for D.5 is the comment's `section_title` in the comment's `file`.
+- The "gap description" is the comment's `text`.
+- Derive the gap bucket heuristically: ambiguity / pattern / test / tech-assumption based on the comment's wording; default to ambiguity if unclear. This feeds the D.5 agent prompt.
+- Dispatch one Task agent per comment (model: sonnet), in parallel when comments target different sections, serialized when they touch the same section.
+
+After the deepening agents return, integrate their results into plan.md via D.6 **without** re-prompting the user per section (the user already stated their intent in the comment - applying the proposed replacement is the direct implementation of that intent). If a deepening pass produces ambiguous or conflicting output, fall back to D.6's interactive AskUserQuestion for that single comment only.
+
+Append a Deepen Pass block to `decisions.md` per D.6's format, noting that the source was web review.
+
+Re-run Phase 5.6 (self-review) against the updated plan, as D.7 requires.
+
+#### 6.W.3 Second-round review
+
+After the deepening pass lands and 5.6 passes clean, **re-launch the web server once** (second round) so the user can verify the patches. Cap at one deepening round per run to avoid loops - on the second round, only **Accept as-is** meaningfully proceeds. If the user submits more comments on the second round, apply them if resource budget allows, otherwise save them to `comments.json` and surface them at the 6.5 gate as "deferred deepening - use `/xplan --deepen` to address."
+
+After the second round (or after a first-round Accept), proceed to Phase 6.5.
+
+#### 6.W.4 Fallback
+
+If 6.W cannot launch (exit code 1), or if the user closes the tab without submitting (the script blocks indefinitely; user can CTRL+C the script to signal "skip"), the orchestrator falls through to the mode-specific text walkthrough for the current mode (6.A for `--autonomous`, 6.1-6.4 for `--light`, straight to 6.5 for default interactive).
+
+Log the fallback reason to `decisions.md` so later debugging can see whether the web path ran.
 
 ---
 

@@ -17,7 +17,7 @@ xplan is a human-in-the-loop planning framework with mandatory confirmation gate
 - **Phase 3** - Create parallelized plan with epics and dependency waves
 - **Phase 4** - Peer review by security, architecture, and business logic agents
 - **Phase 5** - Write comprehensive plan.md
-- **Phase 6** - Final confirmation gate before execution
+- **Phase 6** - Web review (default surface) + final confirmation gate before execution
 - **Phase 7** - Create repo, issues, and spawn parallel agents per wave
 - **Phase 8** - Verification, audit, retrospective, optional template generation
 
@@ -35,6 +35,23 @@ xplan is a human-in-the-loop planning framework with mandatory confirmation gate
 
 `--light` and `--autonomous` are mutually exclusive.
 
+### Web Review (Phase 6)
+
+Phase 6's default review surface is a local browser UI served by stdlib `http.server` on 127.0.0.1. xplan renders `plan.md` with `marked.js` (CDN) and attaches a comment button to every `##` and `###` heading. The user can:
+
+- **Submit for deepening** — xplan reads the comments, runs a targeted Deepen Mode pass on each commented section, re-renders the patched plan for a second review round, then proceeds to the Phase 6.5 gate.
+- **Accept as-is** — proceed directly to the Phase 6.5 gate.
+
+The web UI activates when `plan.md` exists and the environment is not headless. Fallbacks to the terminal walkthrough (6.A / 6.1-6.4) when:
+- `XPLAN_NO_WEB=1` is set
+- No `$DISPLAY` on Linux
+- The server cannot bind a loopback port
+- The helper script `~/.claude/lib/xplan-web-review.py` is missing
+
+The Phase 6.5 final execution gate always fires afterward, web or not. The web UI is the review mechanism; 6.5 is the go/no-go.
+
+Comments are persisted to `~/code/plans/{concept-name}/comments.json` before the server shuts down — safe to close the tab or CTRL+C the script after clicking Submit.
+
 Companion commands:
 - **/xplana** - Thin alias for `/xplan --autonomous`
 - **/xplan-status** - Check progress on a running or completed plan
@@ -49,6 +66,7 @@ Companion commands:
 | `commands/xplan-status.md` | command | Plan progress dashboard (/xplan-status) |
 | `commands/xplan-resume.md` | command | Resume interrupted execution (/xplan-resume) |
 | `lib/xplan-status-gather.sh` | lib | Helper script that gathers plan progress data for /xplan-status |
+| `lib/xplan-web-review.py` | lib | Local web server that renders plan.md in browser with section-level comment support for Phase 6 review |
 
 ## Dependencies
 
@@ -82,6 +100,8 @@ cp commands/xplan-resume.md ~/.claude/commands/xplan-resume.md
 # Copy lib files
 mkdir -p ~/.claude/lib
 cp lib/xplan-status-gather.sh ~/.claude/lib/xplan-status-gather.sh
+cp lib/xplan-web-review.py ~/.claude/lib/xplan-web-review.py
+chmod +x ~/.claude/lib/xplan-web-review.py
 ```
 
 ### Plans Directory
