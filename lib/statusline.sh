@@ -24,15 +24,16 @@ esac
 cwd=$(echo "$input" | jq -r '.cwd // ""')
 cwd_display="${cwd##*/}"
 
-# --- Effort level (env > project local > project > user settings)
-# Statusline stdin does not expose effort, so read the same sources Claude Code uses.
-# /effort max is session-only unless set via CLAUDE_CODE_EFFORT_LEVEL, so the
-# displayed value reflects the last persisted setting when max is a live override.
+# --- Effort level (stdin > env > project local > project > user settings)
+# Claude Code (>=2.1.x) passes the live session effort level via stdin under
+# `.effort.level`. This reflects in-session overrides like `/effort max` that
+# never touch settings.json, so it must win over the persisted sources.
 read_effort_from() {
   [ -f "$1" ] || return 1
   jq -r '.effortLevel // empty' "$1" 2>/dev/null
 }
-effort_raw="${CLAUDE_CODE_EFFORT_LEVEL:-}"
+effort_raw=$(echo "$input" | jq -r '.effort.level // empty')
+[ -z "$effort_raw" ] && effort_raw="${CLAUDE_CODE_EFFORT_LEVEL:-}"
 if [ -z "$effort_raw" ] && [ -n "$cwd" ]; then
   effort_raw=$(read_effort_from "$cwd/.claude/settings.local.json")
   [ -z "$effort_raw" ] && effort_raw=$(read_effort_from "$cwd/.claude/settings.json")
