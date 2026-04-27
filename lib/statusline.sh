@@ -95,7 +95,16 @@ sections=()
 # Model with tier indicators + optional effort suffix
 if [ -n "$model_abbr" ]; then
   effort_suffix=""
-  [ -n "$effort_abbr" ] && effort_suffix="$(printf " ${DIM}%s${RESET}" "$effort_abbr")"
+  if [ -n "$effort_abbr" ]; then
+    case "$effort_abbr" in
+      Max) effort_color="$RED" ;;
+      XH)  effort_color="$ORANGE" ;;
+      H)   effort_color="$YELLOW" ;;
+      M)   effort_color="$GREEN" ;;
+      *)   effort_color="$DIM" ;;
+    esac
+    effort_suffix="$(printf " ${effort_color}%s${RESET}" "$effort_abbr")"
+  fi
   case "$model_tier" in
     opus-best)
       sections+=("$(printf "${BLUE}🧠 %s${RESET}%s" "$model_abbr" "$effort_suffix")")
