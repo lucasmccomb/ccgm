@@ -676,7 +676,7 @@ Eight documented anti-patterns extracted from real mistakes.
 5. **Premature solutions** - check linter configs and existing patterns first
 6. **Git multi-clone confusion** - branch from `origin/main`, check sibling clones
 7. **Cloudflare Pages vs Workers** - know which product to use
-8. **CF Pages without Git integration** - always connect for auto-deploy
+8. **CF Pages without Git integration** - must be created with Git integration at inception (cannot be retrofitted)
 
 **Dependencies**: None
 
@@ -793,9 +793,9 @@ Cloudflare Pages and Workers deployment guide.
 **What it does**: Prevents common Cloudflare deployment mistakes:
 
 - **Pages vs Workers**: Comparison table for choosing the right product
-- **Git integration**: Always connect Pages projects to GitHub for auto-deploy
+- **Git integration**: Pages projects MUST be created via Connect-to-Git at inception — Cloudflare cannot retrofit Git integration onto an existing direct-upload project
 - **Red flags**: How to detect a misconfigured Pages project
-- **Fix steps**: What to do when Git integration is missing
+- **Migration**: The destructive remediation procedure if you inherit a Pages project without Git integration
 
 **Dependencies**: None
 

@@ -13,7 +13,7 @@ This module installs a rules file that teaches Claude to avoid these common mist
 5. **Premature Solutions** - Proposing fixes without understanding the full codebase
 6. **Git Multi-Clone Issues** - Forgetting to branch from origin/main in multi-clone setups
 7. **Cloudflare Pages vs Workers** - Choosing the wrong product for the use case
-8. **Missing Git Integration** - Creating Cloudflare Pages without auto-deploy
+8. **Missing Git Integration** - Creating Cloudflare Pages without Git integration at inception (cannot be added later)
 
 ## Manual Installation
 

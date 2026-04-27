@@ -28,34 +28,50 @@ Determine the correct product:
 
 ---
 
-## Pages: Always Connect to Git for Auto-Deploy
+## Pages: MUST Be Created With Git Integration At Inception (CRITICAL)
 
-**Always connect CF Pages projects to GitHub (or GitLab) for auto-deploy.** Manual or CI-based `wrangler pages deploy` is a fallback, not the default.
+**A Cloudflare Pages project MUST be created via the GitHub integration flow at the moment of creation. You CANNOT add Git integration to an existing direct-upload Pages project later — Cloudflare does not support that conversion.** The only "fix" for a wrong-creation is to delete the project and recreate it with Git integration, which means migrating custom domains, environment variables, and bindings. This is multi-session work that affects production traffic.
 
-### When Creating a New CF Pages Project
+This is the single most expensive Cloudflare mistake. Multiple agents have wasted multiple sessions on it. The root cause is always the same: an agent ran `wrangler pages deploy <new-project-name>` to "make progress" and unintentionally created a direct-upload project that can never auto-deploy.
 
-1. **Preferred: Connect to GitHub** via the Cloudflare dashboard (Settings > Builds & Deployments > Git integration). This gives you:
-   - Auto-deploy on push to production branch
-   - Preview deployments on PRs
-   - Deploy status checks on GitHub
-2. **Fallback: CI-based deploy** if Git integration isn't possible (e.g., monorepo build complexity). Add `wrangler pages deploy` to CI with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets.
-3. **Never rely on manual CLI deploys** as the only deploy mechanism.
+**~99% of the time the intended outcome is a Pages project that auto-deploys from a GitHub repo.** Treat that as the default. The exceptions (deployable artifact lives outside Git, build complexity Cloudflare's environment cannot handle) are rare and should be confirmed with the user before going down the direct-upload path.
 
-### Red Flags for Missing Git Integration
+### Creating a New CF Pages Project (the ONLY correct path)
 
-- CF Pages dashboard shows "Git Provider: No" - project will NOT auto-deploy
-- Last deployment timestamp is hours/days old despite recent merges
-- Only one deployment ever exists (the initial manual deploy)
+1. Push the project to GitHub first (the repo must exist before you create the Pages project).
+2. In the Cloudflare dashboard: **Workers & Pages > Create > Pages > Connect to Git**.
+3. Authorize the GitHub repo and select the branch (typically `main`).
+4. Configure build command + output directory.
+5. Cloudflare provisions the project AND the GitHub integration in a single creation flow. Auto-deploy on push, preview deploys on PRs, and deploy status checks on GitHub all work from this point on.
 
-### How to Check
+The dashboard step requires the user's browser session. **If you are an agent and cannot complete it yourself, stop and ask the user to create the project this way.** Do NOT fall back to `wrangler pages deploy <new-name>` to "get something live" — that creates a direct-upload project that Cloudflare cannot later convert.
 
-```bash
-# In the dashboard: Pages project > Settings > Builds & Deployments
-# Look for "Git Provider" - should show GitHub/GitLab, NOT "No"
-```
+### Acceptable exceptions to inception-time Git integration
 
-### Fix Steps if Discovered Without Integration
+The only legitimate reasons to create a direct-upload Pages project:
+- The deployable artifact is genuinely not in a Git repo (rare; usually means reconsider the architecture).
+- Build complexity that cannot run in Cloudflare's build environment AND cannot be solved by adding a CI step that runs `wrangler pages deploy` against a Git-connected project.
 
-1. **Immediate fix**: Deploy via CLI (`wrangler pages deploy`) to get current code live
-2. **Permanent fix**: Either connect to GitHub in the CF dashboard, or add CI-based deploy step
-3. **Tell the user** so they can connect Git integration in the dashboard (requires browser session)
+If neither applies — and they almost never do — the project goes through the Connect-to-Git creation flow.
+
+### How to Tell a Pages Project Was Created Wrong
+
+- Cloudflare dashboard > Pages project > Settings > Builds & Deployments shows **"Git Provider: No"** — project will never auto-deploy
+- Last deployment is days old despite recent merges to main
+- Only one deployment ever exists (the initial CLI upload)
+- The project page is missing the **Production / Preview** branch separator
+- `wrangler pages project list` shows the project, but the dashboard shows no connected repo
+
+### If You Inherit a Pages Project Without Git Integration
+
+There is no in-place fix. Remediation is destructive:
+
+1. **Confirm the gap with the user** — show `wrangler pages project list` output or a dashboard screenshot
+2. **Inventory what must migrate**: custom domains, environment variables, KV/D1/R2 bindings, build settings, access policies
+3. **Create a replacement project via Connect-to-Git** (steps above), using a temporary name if the production hostname is in use
+4. **Move custom domains** from the old project to the new one once the new project is deploying cleanly
+5. **Delete the old direct-upload project**
+
+This affects production traffic. Do not start it without explicit user authorization.
+
+**Stopgap until migration:** keep deploying via `wrangler pages deploy <existing-project-name>` so the site does not go stale. This buys time, not a fix.
