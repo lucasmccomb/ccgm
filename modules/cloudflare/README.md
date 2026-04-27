@@ -8,9 +8,9 @@ This module installs a rules file that instructs Claude to:
 
 - Correctly distinguish between Cloudflare Pages (static sites, SPAs) and Workers (serverless functions, APIs)
 - Choose the right product based on the project's needs
-- Always connect Pages projects to GitHub for automatic deployments
+- Create Pages projects via Connect-to-Git at inception (Cloudflare cannot retrofit Git integration onto an existing direct-upload project)
 - Detect red flags that indicate a misconfigured Pages project
-- Follow proper fix steps when a Pages project lacks Git integration
+- Follow the destructive migration procedure if a Pages project was created without Git integration
 
 ## Manual Installation
 

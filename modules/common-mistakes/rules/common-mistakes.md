@@ -184,40 +184,15 @@ Key reminders:
 
 ---
 
-## 8. Cloudflare Pages Without Git Integration (No Auto-Deploy)
+## 8. Cloudflare Pages Created Without Git Integration
 
-**Problem**: A CF Pages project was created without connecting it to GitHub. Pushes to main didn't trigger deploys, so the production site went stale after merges. The only way to deploy was manually via `wrangler pages deploy`.
+**Problem**: An agent runs `wrangler pages deploy <new-project-name>` to "get something live", which creates a direct-upload Pages project. The project never auto-deploys from GitHub — pushes to main are silently ignored, and the production site goes stale after every merge. **Cloudflare does not support retrofitting Git integration onto an existing direct-upload project.** The only fix is to delete the project and recreate it with Git integration, which means migrating custom domains, env vars, and bindings — multi-session production work. This mistake recurs across projects and burns hours every time it happens.
 
-**Rule**: **Always connect CF Pages projects to GitHub for auto-deploy.** Manual or CI-based `wrangler pages deploy` is a fallback, not the default.
+**Rule**: **Cloudflare Pages projects MUST be created via the Connect-to-Git flow at inception.** Workers & Pages > Create > Pages > Connect to Git, in the Cloudflare dashboard. Never via `wrangler pages deploy <new-name>` for a project that should auto-deploy from a repo (which is ~99% of cases).
 
-### When Creating a New CF Pages Project
+If the dashboard step requires the user's browser session and you are an agent, **stop and ask the user** to create the project. Do NOT fall back to direct-upload "to make progress" — you are creating a project the user will have to throw away later.
 
-1. **Preferred: Connect to GitHub** via the Cloudflare dashboard (Settings > Builds & Deployments > Git integration). This gives you:
-   - Auto-deploy on push to production branch
-   - Preview deployments on PRs
-   - Deploy status checks on GitHub
-2. **Fallback: CI-based deploy** if Git integration isn't possible (e.g., monorepo build complexity). Add `wrangler pages deploy` to CI with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets.
-3. **Never rely on manual CLI deploys** as the only deploy mechanism.
-
-### How to Check if a Pages Project Has Git Integration
-
-```bash
-# Check the CF Pages project settings
-# In the dashboard: Pages project > Settings > Builds & Deployments
-# Look for "Git Provider" - should show GitHub/GitLab, NOT "No"
-```
-
-### Red Flags
-
-- CF Pages dashboard shows "Git Provider: No" - project will NOT auto-deploy
-- Last deployment timestamp is hours/days old despite recent merges
-- Only one deployment ever exists (the initial manual deploy)
-
-### If You Discover a Pages Project Without Git Integration
-
-1. **Immediate fix**: Deploy via CLI (`wrangler pages deploy`) to get current code live
-2. **Permanent fix**: Either connect to GitHub in the CF dashboard, or add CI-based deploy step
-3. **Tell the user** so they can connect Git integration in the dashboard (requires browser session)
+See `modules/cloudflare/rules/cloudflare.md` for the full creation procedure, red flags, and the destructive remediation steps if you inherit a broken project.
 
 ---
 

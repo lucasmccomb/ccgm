@@ -50,7 +50,7 @@ Only involve the user when you **genuinely cannot proceed** without them:
 |---|---|
 | Update application code | Rebuild and restart the dev server or app so the user can test |
 | Add new environment variables | Set them via CLI (`wrangler secret put`, `.env` files, etc.) |
-| Change Cloudflare config | Run `wrangler deploy` or `wrangler pages deploy` to apply |
+| Change Cloudflare Workers config | Run `wrangler deploy` to apply (Pages projects auto-deploy on push to the connected GitHub branch — `wrangler pages deploy` is only for the rare CI-driven path against an existing Git-connected project, never to create a new project) |
 | Fix a bug in a running app | Restart the app so the fix is live |
 | Update a macOS app's code | Rebuild, kill the old process (`pkill` or `killall`), relaunch it |
 | Add a new dependency | Run the install command (`pnpm install`, `npm install`, etc.) |
