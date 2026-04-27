@@ -42,7 +42,7 @@ Only involve the user when you **genuinely cannot proceed** without them:
 
 # Predictive Completion
 
-**After making changes, anticipate what the user needs next and do it.** Don't wait to be asked. Think one step ahead.
+**After making changes, finish the full round trip so the user can test immediately.** A feature or fix is not done at "code edited" or "build succeeded" - it is done when the rebuilt app is running again. Whatever platform it runs on (web, macOS, iOS, browser extension, daemon, CLI), stop the old instance, rebuild from your edits, and relaunch it before reporting the work as complete. Anticipate what the user needs next, do it, think one step ahead.
 
 ## Common Sequences to Execute Automatically
 
@@ -68,7 +68,7 @@ Before reporting a task as done, ask yourself: **if a senior engineer made these
 - Fixed a bug but left the old broken version still running? Unfinished.
 - Updated a config but didn't deploy it? Unfinished.
 
-**The user should be able to immediately test or use your changes without any manual steps.**
+**The user should be able to immediately test your changes without doing anything themselves - no rebuild, no relaunch, no "open the app", no "reload the simulator". "Build succeeded" is not the finish line; the relaunched, running app is.**
 
 ---
 
