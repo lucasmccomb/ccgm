@@ -198,7 +198,7 @@ The installer sets up SearXNG, Ollama, the Python environment, and copies the co
 |------|-----|
 | Personal rules | Create `~/.claude/rules/personal.md` - CCGM won't overwrite it |
 | Settings overrides | Use `~/.claude/settings.local.json` (native Claude Code feature) |
-| MCP servers | Configure in `~/.claude/mcp.json` (not managed by CCGM) |
+| MCP servers | Add via `claude mcp add --scope user ...` (writes to `~/.claude.json`, not managed by CCGM) |
 
 ### Template variables
 

@@ -1196,6 +1196,21 @@ TMPL
   fi
 
   # ===========================================================
+  # Step 14b: Migrate legacy ~/.claude/mcp.json (issue #427)
+  # Pre-#427 docs told users to hand-edit ~/.claude/mcp.json. Current
+  # Claude Code reads ~/.claude.json (managed by `claude mcp` CLI).
+  # Re-register each entry; idempotent (skips on no legacy file or
+  # already-registered names).
+  # ===========================================================
+  if [ -f "${HOME}/.claude/mcp.json" ] && [ -x "${CCGM_ROOT}/lib/mcp-migrate.sh" ]; then
+    ui_header "Legacy MCP Migration"
+    ui_info "Re-registering entries via 'claude mcp add-json --scope user'."
+    echo ""
+    bash "${CCGM_ROOT}/lib/mcp-migrate.sh" "${HOME}/.claude/mcp.json" || ui_warn "Some entries failed; see output above."
+    echo ""
+  fi
+
+  # ===========================================================
   # Step 15: Next steps
   # ===========================================================
   ui_header "Installation Complete!"

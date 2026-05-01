@@ -1,7 +1,7 @@
 {
   "name": "deepresearch",
   "displayName": "Deep Research (Exa MCP)",
-  "description": "/deepresearch - Multi-query semantic research using the Exa MCP server. Claude generates diverse queries from your topic, fans them out via parallel Exa MCP tool calls, and synthesizes a structured research.md from full page contents. Requires the Exa MCP server in mcp.json and an Exa API key.",
+  "description": "/deepresearch - Multi-query semantic research using the Exa MCP server. Claude generates diverse queries from your topic, fans them out via parallel Exa MCP tool calls, and synthesizes a structured research.md from full page contents. Requires the Exa MCP server registered via `claude mcp add` and an Exa API key.",
   "category": "commands",
   "scope": ["global"],
   "dependencies": [],
@@ -12,7 +12,7 @@
   "configPrompts": [
     {
       "key": "exaMcpAcknowledged",
-      "prompt": "/deepresearch needs the Exa MCP server (free tier: 1000 searches/mo at https://exa.ai). Step-by-step Exa + mcp.json setup: modules/deepresearch/README.md. Continue?",
+      "prompt": "/deepresearch needs the Exa MCP server (free tier: 1000 searches/mo at https://exa.ai). Step-by-step setup (Exa signup + `claude mcp add`): modules/deepresearch/README.md. Continue?",
       "default": "yes",
       "options": ["yes", "no"]
     }

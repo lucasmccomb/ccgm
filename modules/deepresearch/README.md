@@ -33,7 +33,7 @@ Topic -> Claude generates N diverse queries
   - Free tier: 1000 searches/mo
   - Pro tier: ~$10/mo for 10k searches
 - **`EXA_API_KEY`** set in the shell environment.
-- **Exa MCP server** registered in `~/.claude/mcp.json`.
+- **Exa MCP server** registered with the `claude mcp` CLI (writes to `~/.claude.json`).
 - **Node + npx** available on `PATH` (the MCP server runs via `npx -y exa-mcp-server`).
 
 ## Setup
@@ -44,18 +44,12 @@ Topic -> Claude generates N diverse queries
    echo 'export EXA_API_KEY=your_key_here' >> ~/.zshrc
    source ~/.zshrc
    ```
-3. Add the Exa MCP server to `~/.claude/mcp.json` under `mcpServers`:
-   ```json
-   "exa": {
-     "command": "npx",
-     "args": ["-y", "exa-mcp-server"],
-     "env": {
-       "EXA_API_KEY": "${EXA_API_KEY}"
-     }
-   }
+3. Register the Exa MCP server (note the `--` before the server name; without it the CLI parses `exa` as a value to `--env`):
+   ```bash
+   claude mcp add --scope user --env EXA_API_KEY="$EXA_API_KEY" -- exa npx -y exa-mcp-server
    ```
 4. **Restart Claude Code** so the MCP server loads.
-5. Verify the tools are present - in a Claude Code session, the `web_search_exa` tool (and friends) should be callable. If they are not, the MCP server did not load; check `claude mcp` output.
+5. Verify with `claude mcp get exa` - expect `Status: ✓ Connected`. In a fresh Claude Code session, the `web_search_exa` tool (and friends) should be callable.
 
 ## Usage
 
@@ -78,11 +72,12 @@ The earlier draft of this module shipped a Python CLI that called the Exa REST A
 - No shell-out, no Python venv dependency, no JSON-handshake between CLI and skill
 - Parallel fan-out is native (Claude issues N tool calls in one message)
 - Specialized Exa endpoints (papers, GitHub, companies, Wikipedia) are exposed as separate tools the skill can route to per topic-type
-- Auth flows through `mcp.json` env block; no separate env-var checks in our code
+- Auth flows through the MCP server's env block (registered via `claude mcp add --env`); no separate env-var checks in our code
 
 ## Troubleshooting
 
-- **Skill says "Exa MCP tools unavailable."** The MCP server did not load. Check that the `exa` block exists in `~/.claude/mcp.json`, that `EXA_API_KEY` is set in the shell that started Claude Code, and that you restarted Claude Code after the change.
+- **Skill says "Exa MCP tools unavailable."** The MCP server did not load. Verify with `claude mcp get exa` (expect `Status: ✓ Connected`). If it's not registered, run the `claude mcp add` command from Setup. Confirm `EXA_API_KEY` is set in the shell that started Claude Code, and that you restarted Claude Code after the change.
+- **Stale `~/.claude/mcp.json` from old CCGM docs.** Pre-#427 docs told you to hand-edit `~/.claude/mcp.json`, but current Claude Code reads `~/.claude.json` (managed by the `claude mcp` CLI). Run `bash lib/mcp-migrate.sh` from the CCGM checkout to re-register every entry, or re-run `./start.sh` (the installer migrates on update).
 - **Tool call returns 401 / unauthorized.** API key invalid or revoked. Generate a new one at https://exa.ai/dashboard, update your shell rc, restart Claude Code.
 - **All queries return zero results.** Topic may be too narrow or oddly phrased; try `--depth lite` to confirm the path works, then revise the topic.
 - **`exa-mcp-server` install fails on first run.** `npx -y` downloads on first invocation. Confirm `node` and `npm` are on `PATH`. Check network access.
