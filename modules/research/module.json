@@ -1,7 +1,7 @@
 {
   "name": "research",
   "displayName": "Research",
-  "description": "/research - multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, and Reddit. Zero external dependencies. For deeper research with a local pipeline, see lem-deepresearch.",
+  "description": "/research - multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, and Reddit. Zero external dependencies. For deeper research backed by Exa neural search, see the deepresearch module.",
   "category": "commands",
   "scope": ["global"],
   "dependencies": [],

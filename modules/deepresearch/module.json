@@ -1,0 +1,18 @@
+{
+  "name": "deepresearch",
+  "displayName": "Deep Research (Exa MCP)",
+  "description": "/deepresearch - Multi-query semantic research using the Exa MCP server. Claude generates diverse queries from your topic, fans them out via parallel Exa MCP tool calls, and synthesizes a structured research.md from full page contents. Requires the Exa MCP server in mcp.json and an Exa API key.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "commands/deepresearch.md": { "target": "commands/deepresearch.md", "type": "command", "template": false }
+  },
+  "tags": ["commands", "research", "web-search", "exa", "mcp", "external-api"],
+  "configPrompts": [
+    {
+      "key": "exaMcpSetup",
+      "prompt": "/deepresearch requires the Exa MCP server. Sign up at https://exa.ai (free tier: 1000 searches/mo; Pro ~$10/mo). Then: (1) add `export EXA_API_KEY=...` to your shell rc and reload; (2) add this entry to ~/.claude/mcp.json under \"mcpServers\": `\"exa\": {\"command\": \"npx\", \"args\": [\"-y\", \"exa-mcp-server\"], \"env\": {\"EXA_API_KEY\": \"${EXA_API_KEY}\"}}`. Restart Claude Code for the MCP server to load. The skill expects `web_search_exa` (and optionally specialized tools like `research_paper_search_exa`, `github_search_exa`) to be available."
+    }
+  ]
+}
