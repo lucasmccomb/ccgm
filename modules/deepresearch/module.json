@@ -1,0 +1,19 @@
+{
+  "name": "deepresearch",
+  "displayName": "Deep Research (Exa)",
+  "description": "/deepresearch - Multi-query semantic research using Exa neural search. Claude generates diverse queries, Exa returns top-K results with full page contents in one call, Claude synthesizes a structured research.md. Requires an Exa API key (free tier covers most usage).",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "commands/deepresearch.md": { "target": "commands/deepresearch.md", "type": "command", "template": false },
+    "bin/deepresearch-cli.py": { "target": "bin/deepresearch-cli.py", "type": "script", "template": false }
+  },
+  "tags": ["commands", "research", "web-search", "exa", "external-api"],
+  "configPrompts": [
+    {
+      "key": "exaApiKey",
+      "prompt": "/deepresearch requires an Exa API key. Sign up at https://exa.ai (free tier: 1000 searches/mo; Pro tier ~$10/mo for 10k). After signup, add `export EXA_API_KEY=...` to your shell rc (e.g. ~/.zshrc) and reload. The skill checks for this at runtime and fails with instructions if unset."
+    }
+  ]
+}
