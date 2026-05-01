@@ -1,12 +1,12 @@
 ---
-description: Deep multi-channel research using Exa neural search across many sources
-allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion
+description: Deep multi-query research using parallel Exa MCP tool calls
+allowed-tools: Read, Write, Glob, Grep, AskUserQuestion
 argument-hint: <topic> [--depth full|standard|lite] [--output <path>] [--plan-dir <path>] [--extend <prior-research-path>]
 ---
 
-# /deepresearch - Deep Multi-Query Research (Exa)
+# /deepresearch - Deep Multi-Query Research (Exa MCP)
 
-Generates diverse search queries from a topic, fans them out in parallel through Exa's neural search API, and synthesizes the results (with full page contents, not snippets) into a structured `research.md`.
+Generate diverse search queries from a topic, run them in parallel via the Exa MCP server, and synthesize the results (with full page contents, not snippets) into a structured `research.md`.
 
 **Can be used:**
 - Standalone: `/deepresearch "dark mode browser extensions"` writes to `~/code/docs/research/`
@@ -14,8 +14,18 @@ Generates diverse search queries from a topic, fans them out in parallel through
 - From any skill that needs deep research
 
 **Prerequisites:**
-- `EXA_API_KEY` set in the shell environment. Sign up at https://exa.ai (free tier: 1000 searches/mo).
-- Python 3 with `httpx`. The CLI prefers `~/.research-tools-venv/bin/python` if present, otherwise system `python3`.
+- Exa MCP server registered in `mcp.json`. The expected entry is:
+  ```json
+  "exa": {
+    "command": "npx",
+    "args": ["-y", "exa-mcp-server"],
+    "env": { "EXA_API_KEY": "${EXA_API_KEY}" }
+  }
+  ```
+- `EXA_API_KEY` set in the shell environment (https://exa.ai - free tier covers 1000 searches/mo).
+- After adding the entry, restart Claude Code so the MCP server loads.
+
+If the Exa MCP tools (`web_search_exa` etc.) are not available in this session, stop immediately and tell the user how to set them up. Do not fall back to `/research` or `WebSearch` silently.
 
 ---
 
@@ -29,12 +39,12 @@ $ARGUMENTS
 
 ## Phase 0: Parse Arguments
 
-Extract from arguments:
+Extract from `$ARGUMENTS`:
 - **Topic** (required): the research subject
 - **`--depth <preset>`**: `lite` (3 queries), `standard` (5 queries, default), or `full` (7 queries)
 - **`--output <path>`**: custom output path for `research.md` (must end in `.md`)
 - **`--plan-dir <path>`**: when called from `/xplan`, the plan directory; `research.md` is written there
-- **`--extend <path>`**: accepted for compat, gracefully ignored
+- **`--extend <path>`**: accepted for compatibility, gracefully ignored
 
 If no topic is provided, use `AskUserQuestion` to ask what to research.
 
@@ -58,116 +68,64 @@ Otherwise, ask the user with `AskUserQuestion`:
 
 | Option | Queries | Time | Best for |
 |--------|---------|------|----------|
-| Standard (recommended) | 5 | ~1-2 min | Most research tasks |
-| Full | 7 | ~2-3 min | New domains, comparative research |
-| Lite | 3 | ~1 min | Quick scoping |
+| Standard (recommended) | 5 | ~30s-1m | Most research tasks |
+| Full | 7 | ~1-2m | New domains, comparative research |
+| Lite | 3 | ~20s | Quick scoping |
 
 ---
 
-## Phase 2: Generate Diverse Search Queries
+## Phase 2: Generate Diverse Queries
 
-You generate the queries directly. Do NOT call a separate model for this. Write `N` diverse queries (where `N` is the depth count) that approach the topic from different angles. Mix:
+Generate `N` diverse queries directly (where `N` is the depth count). Mix angles:
 - A broad overview query
 - A technical / how-it-works query
 - A competitive / comparison query
 - A practical / tutorial query
-- A risk / pitfall query (for `standard` and above)
-- A pricing / business-model query (for topics where commercial context matters)
-- An academic / paper query (for technical / research topics, in `full` only)
+- A risk / pitfall query (`standard` and above)
+- A pricing / business-model query (when commercial context matters)
+- An academic / paper query (technical/research topics, `full` only)
 
-Each query should be a self-contained sentence or noun phrase that a search engine would handle well. Avoid overlong compound queries (>120 chars) — Exa handles natural language but tighter queries return better results.
+Each query should be a self-contained sentence or noun phrase. Avoid overlong compound queries (>120 chars) - tighter queries return better results from Exa.
 
-Example for topic "browser-based presentation apps":
-```
-1. browser-based presentation apps comparison
-2. how SPA presentation apps handle slide rendering and export to PDF
-3. Reveal.js vs Slidev vs Spectacle technical tradeoffs
-4. building a presentation editor with React and PDF export
-5. accessibility issues in browser-based slide tools
-```
-
-Hold these in memory. Pass each as a `--query` flag in the next phase.
+Hold these queries; pass each to the MCP search tool in the next phase.
 
 ---
 
-## Phase 3: Run the Exa Pipeline
+## Phase 3: Run Parallel Exa MCP Searches
 
-Run the CLI with each generated query as a `--query` argument. Use a Bash timeout of 120000ms (2 minutes); Exa is fast.
+Issue **all `N` Exa MCP tool calls in a single assistant message** so they run concurrently. The expected tool name is `web_search_exa` (the default exposed by `exa-mcp-server`). Use `numResults: 5` per query.
 
-The CLI prefers `~/.research-tools-venv/bin/python` if it exists; otherwise use system `python3`.
+For topic types where Exa exposes specialized tools, route accordingly:
 
-**Standalone mode:**
+| Topic shape | Tool to use | Notes |
+|-------------|-------------|-------|
+| General research | `web_search_exa` | Default for most queries |
+| Academic / scientific | `research_paper_search_exa` | If `full` depth on a research-heavy topic, route 1-2 of the queries here |
+| Open-source / dev tooling | `github_search_exa` | Optional supplement; do not replace `web_search_exa` |
+| Specific company / product | `company_research_exa` | When the topic is a single named company |
+| Encyclopedic background | `wikipedia_search_exa` | Optional - Exa already indexes Wikipedia; only use when you specifically need Wikipedia framing |
 
-```bash
-PYTHON=~/.research-tools-venv/bin/python
-[ -x "$PYTHON" ] || PYTHON=python3
-"$PYTHON" ~/.claude/bin/deepresearch-cli.py \
-  --topic "TOPIC" \
-  --output "OUTPUT_PATH" \
-  --depth DEPTH \
-  --query "Q1" \
-  --query "Q2" \
-  --query "Q3"
-```
+**If the Exa MCP tools are unavailable** in this session (the tools do not appear in the available tool list), STOP and tell the user the MCP server is not loaded. Reference the prerequisites above. Do not silently fall back.
 
-**xplan mode (with `--plan-dir`):**
+For each result that comes back, you have:
+- `url`, `title`, `text` (full page content), `publishedDate`, `score`
 
-```bash
-"$PYTHON" ~/.claude/bin/deepresearch-cli.py \
-  --topic "TOPIC" \
-  --output "OUTPUT_PATH" \
-  --plan-dir "PLAN_DIR" \
-  --depth DEPTH \
-  --query "Q1" \
-  --query "Q2" ...
-```
-
-**Bash tool configuration:**
-- `timeout: 120000` (2 minutes)
-- If exit code is non-zero, surface the stderr to the user verbatim. Common failures are listed below.
-
-**Expected stderr (informational):**
-```
-[start] deepresearch-cli.py (Exa)
-[start] Topic:  ...
-[start] Depth:  standard (5 queries)
-[search] Running 5 parallel Exa queries...
-[search] Retrieved 25 results across 5 queries.
-[done] Pipeline complete in 3.4s (5 queries, 25 results, 23 sources)
-```
-
-**Failure modes:**
-- `ERROR: EXA_API_KEY not set` — tell the user to set it in their shell rc per `~/.claude/commands/deepresearch.md` setup. Do not retry.
-- `ERROR: Exa rejected the API key (401)` — key invalid or revoked. Tell the user to regenerate at https://exa.ai/dashboard. Do not retry.
-- `WARN: Exa HTTP 429 ...` — rate limited. The CLI continues with partial results. Tell the user.
-- `WARN: Exa timed out ...` — the CLI returns partial results. Surface the warning but continue with synthesis.
-
-**Expected stdout: a JSON envelope** with these fields:
-- `topic` — the research topic
-- `queries` — the list of queries that were run
-- `batches` — list of `{query, results: [{url, title, text, score, ...}], error}` per query
-- `sources` — deduplicated list of `- title - url` entries
-- `depth` — depth preset
-- `total_results` — count of valid results across all queries
-- `output_path` — resolved path where `research.md` should be written
-- `plan_dir` — resolved plan directory or null
-- `elapsed_seconds` — pipeline duration
-- `engine` — `"exa"`
+Aggregate the results in memory across queries.
 
 ---
 
 ## Phase 4: Synthesize research.md
 
-Parse the JSON from stdout. For each batch, the `results[].text` field contains up to 6000 characters of clean, full page content (not a 200-char snippet). Synthesize aggressively across batches: cross-reference claims, note contradictions, weight by source quality, and call out high-confidence findings.
+Cross-reference claims across queries. Note contradictions. Weight by source quality (official docs > peer-reviewed > industry > blogs). Call out high-confidence findings explicitly.
 
-Write the file at `output_path` using this exact structure:
+Write the file at the resolved `output_path` using this exact structure:
 
 ```markdown
 # Research: {topic}
 
 ## Executive Summary
 {2-3 paragraphs synthesizing the key findings. Lead with the most important insight.
-Note overall confidence based on source quality and corroboration across batches.}
+Note overall confidence based on source quality and corroboration.}
 
 ## Contextual Model
 {The mental framework for thinking about this problem. Key principles that should guide decisions.}
@@ -191,7 +149,7 @@ Note overall confidence based on source quality and corroboration across batches
 {At least 3 rows covering technical, market, and execution risks}
 
 ## Sources
-{Bulleted list of all source URLs from the JSON `sources` array. Group by credibility:
+{Bulleted list of all source URLs deduplicated across queries. Group by credibility:
 Official/Academic first, then Industry/News, then Blogs/Community.}
 ```
 
@@ -203,8 +161,8 @@ After writing `research.md`, report to the user:
 - Output path
 - Executive Summary (2-3 sentences)
 - Key Insights list (numbered)
-- Number of sources collected
-- Pipeline time (`elapsed_seconds`)
+- Number of unique sources collected
+- Approximate elapsed time
 
-If standalone (not called from xplan), suggest:
+If standalone (not called from `/xplan`), suggest:
 - "Run `/xplan` with this research to plan an implementation"

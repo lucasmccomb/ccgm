@@ -1,22 +1,22 @@
-# Deep Research (Exa)
+# Deep Research (Exa MCP)
 
-Multi-query semantic research bundled as a CCGM module. Claude generates diverse queries from your topic, Exa runs each query and returns top-K results with full clean page contents, then Claude synthesizes a structured `research.md`.
+Multi-query semantic research bundled as a CCGM module. Claude generates diverse queries from your topic, fans them out via parallel Exa MCP tool calls, and synthesizes a structured `research.md` from the full page contents Exa returns.
 
-This module supersedes the standalone `lem-deepresearch` repo (Ollama + SearXNG pipeline). The local pipeline degraded over time as SearXNG's scraped engines (Google, DuckDuckGo, Brave) hit CAPTCHAs and rate limits. Exa is purpose-built for AI agents and returns reliable, semantically-relevant results.
+Supersedes the standalone `lem-deepresearch` repo (Ollama + SearXNG pipeline). The local pipeline degraded over time as SearXNG's scraped engines (Google, DuckDuckGo, Brave) hit CAPTCHAs and rate limits. Exa's neural search returns reliable, semantically-relevant results without scraping.
 
 ## How it works
 
 ```
 Topic -> Claude generates N diverse queries
-      -> deepresearch-cli.py fans out to Exa in parallel
+      -> Claude issues N parallel Exa MCP tool calls (web_search_exa, research_paper_search_exa, etc.)
       -> Exa returns top-K results per query with full page text
-      -> Claude synthesizes research.md from the structured JSON
+      -> Claude synthesizes research.md from the aggregated results
 ```
 
 | Step | Where | Notes |
 |------|-------|-------|
 | Query generation | Claude (the skill) | No separate model required |
-| Web search + content fetch | Exa `/search` with `contents.text=true` | Single round-trip per query |
+| Web search + content fetch | Exa MCP server (`web_search_exa`) | Single tool call per query, parallel fan-out |
 | Synthesis | Claude (the skill) | Reads full page contents, writes structured research.md |
 
 ## Depth presets
@@ -29,43 +29,60 @@ Topic -> Claude generates N diverse queries
 
 ## Prerequisites
 
-- An Exa API key. Sign up at https://exa.ai.
+- **Exa account.** Sign up at https://exa.ai.
   - Free tier: 1000 searches/mo
   - Pro tier: ~$10/mo for 10k searches
-- Python 3 with `httpx` available. The CLI uses the standard `~/.research-tools-venv` if it exists, otherwise system Python.
+- **`EXA_API_KEY`** set in the shell environment.
+- **Exa MCP server** registered in `~/.claude/mcp.json`.
+- **Node + npx** available on `PATH` (the MCP server runs via `npx -y exa-mcp-server`).
 
 ## Setup
 
-1. Install this module via the CCGM installer (`./start.sh`)
-2. Set `EXA_API_KEY` in your shell environment:
+1. Install this module via the CCGM installer (`./start.sh`) and pick the `full` preset, or add `deepresearch` explicitly.
+2. Set `EXA_API_KEY` in your shell:
    ```bash
    echo 'export EXA_API_KEY=your_key_here' >> ~/.zshrc
    source ~/.zshrc
    ```
-3. Verify:
-   ```bash
-   curl -s -H "x-api-key: $EXA_API_KEY" -H "Content-Type: application/json" \
-     -d '{"query":"test","numResults":1,"contents":{"text":true}}' \
-     https://api.exa.ai/search | head -c 200
+3. Add the Exa MCP server to `~/.claude/mcp.json` under `mcpServers`:
+   ```json
+   "exa": {
+     "command": "npx",
+     "args": ["-y", "exa-mcp-server"],
+     "env": {
+       "EXA_API_KEY": "${EXA_API_KEY}"
+     }
+   }
    ```
+4. **Restart Claude Code** so the MCP server loads.
+5. Verify the tools are present - in a Claude Code session, the `web_search_exa` tool (and friends) should be callable. If they are not, the MCP server did not load; check `claude mcp` output.
 
 ## Usage
 
-```bash
+```
 /deepresearch "dark mode browser extensions"
 /deepresearch "SaaS pricing strategies" --depth full
 /deepresearch "React vs Vue" --depth lite --output ~/notes/react-vue.md
 ```
 
-The skill writes to `~/code/docs/research/{slug}/research.md` by default, or to the path you pass via `--output`.
+The skill writes to `~/code/docs/research/{slug}/research.md` by default, or to the path passed via `--output`.
 
 ## Cost estimate
 
 At 100 research runs/month with `--depth standard` (5 queries × 5 results = 25 search calls), expected cost is ~$3-5/mo on the Pro tier. The free tier (1000 searches/mo) covers ~40 runs.
 
+## Why MCP rather than a CLI
+
+The earlier draft of this module shipped a Python CLI that called the Exa REST API directly. The MCP architecture is strictly better for a Claude Code skill:
+
+- No shell-out, no Python venv dependency, no JSON-handshake between CLI and skill
+- Parallel fan-out is native (Claude issues N tool calls in one message)
+- Specialized Exa endpoints (papers, GitHub, companies, Wikipedia) are exposed as separate tools the skill can route to per topic-type
+- Auth flows through `mcp.json` env block; no separate env-var checks in our code
+
 ## Troubleshooting
 
-- `ERROR: EXA_API_KEY not set` - Set the env var per the Setup section above.
-- `ERROR: Exa returned 401` - Key invalid or rotated. Generate a new one at https://exa.ai/dashboard.
-- `ERROR: Exa returned 429` - You hit the rate limit on your tier. Wait or upgrade.
-- All queries return zero results - Check that your topic is searchable, or try `--depth lite` to confirm the API path works before committing to a full run.
+- **Skill says "Exa MCP tools unavailable."** The MCP server did not load. Check that the `exa` block exists in `~/.claude/mcp.json`, that `EXA_API_KEY` is set in the shell that started Claude Code, and that you restarted Claude Code after the change.
+- **Tool call returns 401 / unauthorized.** API key invalid or revoked. Generate a new one at https://exa.ai/dashboard, update your shell rc, restart Claude Code.
+- **All queries return zero results.** Topic may be too narrow or oddly phrased; try `--depth lite` to confirm the path works, then revise the topic.
+- **`exa-mcp-server` install fails on first run.** `npx -y` downloads on first invocation. Confirm `node` and `npm` are on `PATH`. Check network access.
