@@ -42,16 +42,11 @@ Deep verification of one or more specific brand name candidates. Checks everythi
 
 ## MCP Server (Optional)
 
-The installer can add the **Instant Domain Search** MCP server to your `mcp.json`:
+The installer's config prompt can guide you through adding the **Instant Domain Search** MCP server. Register it with:
 
-```json
-{
-  "mcpServers": {
-    "instant-domain-search": {
-      "url": "https://instantdomainsearch.com/mcp/sse"
-    }
-  }
-}
+```bash
+claude mcp add-json --scope user instant-domain-search '{"type":"sse","url":"https://instantdomainsearch.com/mcp/sse"}'
+claude mcp get instant-domain-search   # expect: Status: ✓ Connected
 ```
 
 - Free, no authentication required
@@ -80,9 +75,10 @@ cp commands/brand.md ~/.claude/commands/brand.md
 cp commands/brand-check.md ~/.claude/commands/brand-check.md
 ```
 
-Optionally add the MCP server to `~/.claude/mcp.json`:
+Optionally register the MCP server:
 
 ```bash
-# Add instant-domain-search to your mcp.json mcpServers object:
-# "instant-domain-search": { "url": "https://instantdomainsearch.com/mcp/sse" }
+claude mcp add-json --scope user instant-domain-search '{"type":"sse","url":"https://instantdomainsearch.com/mcp/sse"}'
 ```
+
+Restart Claude Code for the MCP server to load.

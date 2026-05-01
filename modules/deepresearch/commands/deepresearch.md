@@ -14,16 +14,12 @@ Generate diverse search queries from a topic, run them in parallel via the Exa M
 - From any skill that needs deep research
 
 **Prerequisites:**
-- Exa MCP server registered in `mcp.json`. The expected entry is:
-  ```json
-  "exa": {
-    "command": "npx",
-    "args": ["-y", "exa-mcp-server"],
-    "env": { "EXA_API_KEY": "${EXA_API_KEY}" }
-  }
+- Exa MCP server registered via the `claude mcp` CLI (writes to `~/.claude.json`). Register with:
+  ```bash
+  claude mcp add --scope user --env EXA_API_KEY="$EXA_API_KEY" -- exa npx -y exa-mcp-server
   ```
 - `EXA_API_KEY` set in the shell environment (https://exa.ai - free tier covers 1000 searches/mo).
-- After adding the entry, restart Claude Code so the MCP server loads.
+- Restart Claude Code after registering so the MCP server loads. Verify with `claude mcp get exa`.
 
 If the Exa MCP tools (`web_search_exa` etc.) are not available in this session, stop immediately and tell the user how to set them up. Do not fall back to `/research` or `WebSearch` silently.
 

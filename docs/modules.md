@@ -194,7 +194,7 @@ Research tools for naming products, companies, or projects.
 
 Commands use a sub-agent model for parallel word exploration and verification phases, optimized for throughput across the multi-source checks.
 
-**Config prompts**: Whether to add the Instant Domain Search MCP server to `mcp.json`
+**Config prompts**: Whether to register the Instant Domain Search MCP server via `claude mcp add --scope user`
 
 **Dependencies**: None
 

@@ -262,9 +262,36 @@ _offer_reinstall() {
 }
 
 # ============================================================
+# Helper: Migrate legacy ~/.claude/mcp.json (issue #427)
+# Current Claude Code reads MCP config from ~/.claude.json (managed by the
+# `claude mcp` CLI), not ~/.claude/mcp.json. Pre-#427 CCGM docs told users
+# to hand-edit the legacy file; entries there are silently ignored.
+# This re-registers each entry via `claude mcp add-json --scope user`.
+# ============================================================
+_migrate_legacy_mcp_json() {
+  local legacy="${HOME}/.claude/mcp.json"
+  [ ! -f "$legacy" ] && return 0
+
+  local migrate_script="${CCGM_ROOT}/lib/mcp-migrate.sh"
+  if [ ! -x "$migrate_script" ]; then
+    return 0
+  fi
+
+  ui_header "Legacy MCP Migration"
+  ui_info "Found ${legacy} - current Claude Code reads ~/.claude.json instead."
+  ui_info "Re-registering entries via 'claude mcp add-json --scope user'."
+  echo ""
+  bash "$migrate_script" "$legacy" || ui_warn "Some entries failed; see output above."
+  echo ""
+}
+
+# ============================================================
 # Main
 # ============================================================
 main() {
+  # Step 0: Migrate legacy MCP config if present (idempotent; skips on empty)
+  _migrate_legacy_mcp_json
+
   # Step 1: Check for CCGM repo updates
   ui_header "CCGM Update Check"
 

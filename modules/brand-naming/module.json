@@ -14,7 +14,7 @@
   "configPrompts": [
     {
       "key": "addMcp",
-      "prompt": "Add Instant Domain Search MCP server to mcp.json? (Recommended - free, no auth, 800+ TLDs, sub-25ms checks)",
+      "prompt": "Register Instant Domain Search MCP server via `claude mcp add --scope user`? (Recommended - free, no auth, 800+ TLDs, sub-25ms checks)",
       "default": "yes",
       "options": ["yes", "no"]
     }

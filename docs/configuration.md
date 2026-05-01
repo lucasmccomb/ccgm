@@ -36,7 +36,23 @@ This file takes precedence over `settings.json` for the keys it defines. CCGM do
 
 ## MCP servers
 
-MCP (Model Context Protocol) server configuration lives in `~/.claude/mcp.json`, which is not managed by CCGM. Configure your MCP servers there independently.
+MCP (Model Context Protocol) server configuration is managed by the `claude mcp` CLI and stored in `~/.claude.json`. CCGM does not write this file directly. Add servers with:
+
+```bash
+# stdio server with env vars (note the `--` before name)
+claude mcp add --scope user --env KEY=value -- <name> <command> <args...>
+
+# stdio server without env vars
+claude mcp add --scope user -- <name> <command> <args...>
+
+# complex/JSON config
+claude mcp add-json --scope user <name> '<json>'
+
+# verify
+claude mcp get <name>
+```
+
+> **Migrating from `~/.claude/mcp.json`?** Older Claude Code versions (and old CCGM docs) used `~/.claude/mcp.json`. Current Claude Code does not read that file. If you have one, run `bash lib/mcp-migrate.sh` from the CCGM checkout to re-register every entry via the `claude mcp` CLI.
 
 ## Template variables
 
@@ -100,7 +116,7 @@ Some modules ask questions during installation that affect their behavior:
 | **settings** | Permission mode | `ask` / `dontAsk` | Controls whether Claude asks before running tools or auto-approves |
 | **hooks** | Protected branches | Custom list | Additional branch names to protect from direct commits |
 | **hooks** | Auto update check | yes / no | Whether to check for CCGM updates once daily |
-| **brand-naming** | Add MCP server | yes / no | Whether to add Instant Domain Search MCP server to `mcp.json` |
+| **brand-naming** | Add MCP server | yes / no | Whether to register Instant Domain Search MCP server via `claude mcp add --scope user` |
 
 ## Customizing hooks
 
