@@ -45,7 +45,7 @@ Deep verification of one or more specific brand name candidates. Checks everythi
 The installer's config prompt can guide you through adding the **Instant Domain Search** MCP server. Register it with:
 
 ```bash
-claude mcp add-json --scope user instant-domain-search '{"type":"sse","url":"https://instantdomainsearch.com/mcp/sse"}'
+claude mcp add --transport http --scope user instant-domain-search https://api.instantdomainsearch.com/mcp/streamable-http
 claude mcp get instant-domain-search   # expect: Status: ✓ Connected
 ```
 
@@ -78,7 +78,7 @@ cp commands/brand-check.md ~/.claude/commands/brand-check.md
 Optionally register the MCP server:
 
 ```bash
-claude mcp add-json --scope user instant-domain-search '{"type":"sse","url":"https://instantdomainsearch.com/mcp/sse"}'
+claude mcp add --transport http --scope user instant-domain-search https://api.instantdomainsearch.com/mcp/streamable-http
 ```
 
 Restart Claude Code for the MCP server to load.
