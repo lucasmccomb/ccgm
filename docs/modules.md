@@ -308,7 +308,7 @@ Multi-channel research using parallel agents.
 
 **What it does**: Spawns up to 7 parallel research agents that each investigate a topic from a different angle (domain, technical, competitive, adjacent, UX, infrastructure, monetization). Decomposes topics into targeted sub-questions, runs iterative multi-round searches, and synthesizes into a structured research.md. Zero external dependencies.
 
-For higher-quality results, install [/deepresearch](https://github.com/lucasmccomb/lem-deepresearch) - a local pipeline that's faster, cheaper, and more reliable.
+For higher-quality results, install the bundled `deepresearch` module - same fan-out shape, but backed by the Exa MCP server (semantic search with full page contents) instead of WebSearch snippets. See `modules/deepresearch/README.md`.
 
 **Dependencies**: None
 
@@ -325,8 +325,6 @@ Structured root-cause debugging with Opus delegation.
 | `/debug` | Structured root-cause debugging with Opus - reproduce, hypothesize, instrument, diagnose, fix, verify |
 
 **What it does**: Enforces a disciplined debugging workflow (reproduce, hypothesize, instrument, diagnose, fix, verify) using Opus for deep root-cause analysis. Invoked automatically by the `systematic-debugging` module's routing rule.
-
-For `/deepresearch`, see [lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch) (installed separately).
 
 **Dependencies**: None
 
