@@ -1,0 +1,17 @@
+{
+  "name": "docs-for-agents",
+  "displayName": "Docs for Agents (AGENTS.md)",
+  "description": "Rule and template for shipping machine-readable docs alongside human docs. Any project an agent will install, build, test, deploy, or debug should have an AGENTS.md with copy-pasteable command blocks — not prose, not dashboard instructions.",
+  "category": "patterns",
+  "scope": ["global", "project"],
+  "dependencies": [],
+  "files": {
+    "rules/docs-for-agents.md": {
+      "target": "rules/docs-for-agents.md",
+      "type": "rule",
+      "template": false
+    }
+  },
+  "tags": ["documentation", "agents", "dx", "AGENTS.md", "llms.txt"],
+  "configPrompts": []
+}
