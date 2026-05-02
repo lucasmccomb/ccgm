@@ -315,6 +315,14 @@ When `--autonomous` is active, use these defaults in place of the user's answers
 | Timeline | Assume no hard deadline. |
 | Research level | **Full** (all 7 agents, unconditionally). |
 
+### 0.5.0 Menu-Gen Test
+
+Before confirming what to build, ask whether it needs to exist at all. See `modules/code-quality/rules/menu-gen-test.md` for the full rule.
+
+Forcing question: **Could this be a single prompt + multimodal call instead of an app/script/feature? If yes, why are we building anything?**
+
+Ask the user to answer in one paragraph, or answer on their behalf in `--autonomous` mode using the concept statement. If the dissolvability score is 4-5, surface it explicitly in the final walkthrough and require a named justification before execution begins.
+
 ### 0.5.1 Confirm Core Understanding
 
 Summarize what you understand from the initial input, then use AskUserQuestion:
