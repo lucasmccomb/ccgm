@@ -476,6 +476,35 @@ Commands installed:
 
 ---
 
+### youtube-transcripts
+
+`/transcript <url>` - extract a YouTube transcript AND analyze it against your project memory in one invocation.
+
+**Installs**: 1 command file, 1 rule file, 1 shell script (`lib/grab-transcript.sh`), 1 prompt template (`lib/analyze-transcript.md`)
+
+**What it does**: One slash command runs the full pipeline:
+
+- **Phase 1 (deterministic)**: `lib/grab-transcript.sh` calls `yt-dlp` to pull captions, then awk/sed clean the VTT into prose with `>>` speaker turns. Writes `~/code/docs/transcripts/<slug>-<upload_date>.md` with YAML frontmatter (title, source, url, uploader, upload_date, duration, type, caption_source, note).
+- **Phase 2 (latent)**: dispatches a subagent in headless mode that reads the saved transcript + your `MEMORY.md` + workspace `CLAUDE.md`, follows the analysis template, and writes an opinionated 6-section implications doc to `~/code/docs/transcript-analysis/<same-slug>-<upload_date>.md`.
+
+Both filenames share the same slug + upload-date so the pair correlates by name. The analysis is intentionally opinionated and project-specific — it names files, names projects from `MEMORY.md`, and explicitly flags low-confidence claims.
+
+`--no-analysis` skips Phase 2. `mode:headless` suppresses prompts and emits paths only.
+
+The Phase 1 script is callable directly from a shell (`~/.claude/lib/grab-transcript.sh <url>`) for extraction without analysis.
+
+Commands installed:
+
+| Command | Description |
+|---------|-------------|
+| `/transcript <url>` | Extract YouTube transcript + dispatch analysis subagent |
+
+**Requirements**: `yt-dlp` (`brew install yt-dlp` or `pipx install yt-dlp`)
+
+**Dependencies**: None
+
+---
+
 ### test-vision
 
 Vision-driven e2e test suite generation using multi-agent orchestration.

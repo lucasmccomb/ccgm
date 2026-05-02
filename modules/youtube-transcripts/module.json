@@ -1,0 +1,16 @@
+{
+  "name": "youtube-transcripts",
+  "displayName": "YouTube Transcripts",
+  "description": "/transcript <url> grabs a YouTube transcript via yt-dlp AND dispatches a subagent to produce an opinionated implications doc against your project memory. Saves both files with matching slug+date so the pair correlates by name. --no-analysis flag for extraction only.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "rules/youtube-transcripts.md": { "target": "rules/youtube-transcripts.md", "type": "rule", "template": false },
+    "commands/transcript.md": { "target": "commands/transcript.md", "type": "command", "template": false },
+    "lib/grab-transcript.sh": { "target": "lib/grab-transcript.sh", "type": "lib", "template": false },
+    "lib/analyze-transcript.md": { "target": "lib/analyze-transcript.md", "type": "lib", "template": false }
+  },
+  "tags": ["commands", "youtube", "transcripts", "analysis", "subagent"],
+  "configPrompts": []
+}

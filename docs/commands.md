@@ -560,6 +560,47 @@ Reads Playwright vision specs from `e2e/tests/{feature}/`, iteratively builds ap
 
 ---
 
+## YouTube Transcript commands
+
+Installed by the **youtube-transcripts** module.
+
+---
+
+### /transcript
+
+**Extract a YouTube transcript and dispatch a subagent to analyze it against your project memory.**
+
+One slash command runs both phases:
+
+1. **Phase 1 (deterministic)** - `~/.claude/lib/grab-transcript.sh` calls `yt-dlp`, cleans the VTT into prose with `>>` speaker turns, and writes `~/code/docs/transcripts/<slug>-<upload_date>.md` with YAML frontmatter.
+2. **Phase 2 (latent)** - dispatches a subagent in headless mode to read the transcript + your `MEMORY.md` + workspace `CLAUDE.md`, then write an opinionated 6-section implications doc to `~/code/docs/transcript-analysis/<same-slug>-<upload_date>.md`.
+
+Both filenames share the same slug + upload-date so the pair correlates by name.
+
+**Usage**:
+```
+/transcript https://www.youtube.com/watch?v=96jN2OCOfLs
+/transcript https://www.youtube.com/watch?v=96jN2OCOfLs --no-analysis
+/transcript https://www.youtube.com/watch?v=96jN2OCOfLs --name karpathy-sequoia --force
+/transcript mode:headless https://youtu.be/abc123
+```
+
+**Flags**:
+- `--no-analysis` - Phase 1 only, transcript path printed
+- `--out-transcripts <dir>` / `--out-analysis <dir>` - override default output dirs
+- `--name <slug>` - override the auto-derived slug
+- `--lang <code>` - default `en`, falls back to first available
+- `--force` - overwrite existing output files
+- `mode:headless` - no prompts; exactly the saved paths on stdout, errors to stderr
+
+**Requirements**: `yt-dlp` installed (`brew install yt-dlp` or `pipx install yt-dlp`)
+
+**Direct script invocation**: `~/.claude/lib/grab-transcript.sh <url>` runs Phase 1 only without the slash command.
+
+**Installed by**: youtube-transcripts module
+
+---
+
 ## Test Vision commands
 
 Installed by the **test-vision** module.
