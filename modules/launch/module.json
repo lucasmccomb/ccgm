@@ -1,0 +1,22 @@
+{
+  "name": "launch",
+  "displayName": "Launch (one-prompt spec to deployed CF Pages)",
+  "description": "A /launch skill that takes a one-page spec and reaches a deployed Cloudflare Pages site without further human input — except for the unavoidable Connect-to-Git dashboard step, which the skill stops to ask for. Inspired by Karpathy's Sequoia talk: 'I would hope that I could give a prompt to an LLM, build menu gen, and then I didn't have to touch anything and it's deployed in that same way on the internet.' The skill is the forcing function that surfaces every place CCGM/CF infra is still human-shaped.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["cloudflare", "git-workflow", "docs-for-agents"],
+  "files": {
+    "skills/launch/SKILL.md": {
+      "target": "skills/launch/SKILL.md",
+      "type": "skill",
+      "template": false
+    },
+    "examples/sample-spec.md": {
+      "target": "skills/launch/examples/sample-spec.md",
+      "type": "content",
+      "template": false
+    }
+  },
+  "tags": ["skills", "deployment", "cloudflare-pages", "agent-native", "one-prompt", "spec-driven"],
+  "configPrompts": []
+}
