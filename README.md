@@ -10,6 +10,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 - [What is CCGM?](#what-is-ccgm)
 - [Requirements](#requirements)
+- [Install via agent (paste this)](#install-via-agent-paste-this)
 - [Install](#install)
 - [Module Catalog](#module-catalog)
   - [Companion module: /deepresearch](#companion-module-deepresearch)
@@ -37,6 +38,43 @@ CCGM places files into `~/.claude/` (global) or `.claude/` (project-level):
 | `agents/*.md` | Subagent prompts | Reusable prompts invoked by commands and skills via the Task tool |
 | `hooks/*.py` | Workflow hooks | Triggered on Claude Code events |
 | `settings.json` | Permissions | Controls tool access and auto-approval |
+
+## Install via agent (paste this)
+
+Paste the block below into a fresh Claude Code session. The agent detects your environment, picks a preset, runs the installer, and reports what was installed. No flags, no shell environment to configure first.
+
+```
+Install CCGM (Claude Code God Mode) for me.
+
+Steps:
+1. Detect my OS (uname -s), shell ($SHELL), and home directory ($HOME).
+2. Clone the repo if it does not already exist:
+     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm-repos/ccgm-1
+   If it already exists, pull the latest main:
+     cd ~/code/ccgm-repos/ccgm-1 && git fetch origin && git checkout main && git pull --ff-only origin main
+3. Read the available presets: ls ~/code/ccgm-repos/ccgm-1/presets/
+   Available presets and what they include:
+     - minimal  : global-claude-md, autonomy, git-workflow
+     - standard : the above + identity, hooks, settings, commands-core, commands-utility
+     - team     : standard core + github-protocols, code-quality, systematic-debugging, verification
+     - cloud-agent : large set for power users running autonomous agents
+     - full     : every stable module
+   Based on what you know about my workflow, recommend one preset. Ask me to confirm or pick a different one before continuing. (One question only — do not ask anything else.)
+4. Check what is already installed by looking at ~/.claude/rules/, ~/.claude/commands/, ~/.claude/hooks/. List any CCGM files already present and note you will skip overwriting them.
+5. Read ~/.claude/settings.json if it exists and note its content. The installer will merge non-destructively — it will not delete keys that are already there.
+6. Run the installer:
+     cd ~/code/ccgm-repos/ccgm-1
+     CCGM_NON_INTERACTIVE=1 \
+       CCGM_USERNAME="$(gh api user --jq '.login' 2>/dev/null || echo '')" \
+       ./start.sh --preset <chosen-preset>
+7. Verify the install succeeded by checking that these paths exist:
+     ~/.claude/rules/
+     ~/.claude/CLAUDE.md   (if global-claude-md was in the preset)
+   List the files now present in ~/.claude/rules/ and ~/.claude/commands/.
+8. Report: which preset was installed, which modules were skipped (already present), and any errors.
+```
+
+For blocks pre-selecting a specific preset, and for how to dry-run this safely, see [docs/install-via-agent.md](docs/install-via-agent.md).
 
 ## Requirements
 
@@ -278,6 +316,7 @@ The `docs/` directory contains comprehensive documentation:
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
+| [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
 | [Module Catalog](docs/modules.md) | Detailed reference for all 56 modules |
 | [Commands Reference](docs/commands.md) | All 36 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 13 hooks explained - what they do and when they fire |
