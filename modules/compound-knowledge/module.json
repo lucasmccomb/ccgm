@@ -25,6 +25,11 @@
       "target": "agents/learnings-researcher.md",
       "type": "agent",
       "template": false
+    },
+    "skills/compound-reproject/SKILL.md": {
+      "target": "skills/compound-reproject/SKILL.md",
+      "type": "skill",
+      "template": false
     }
   },
   "tags": ["knowledge", "learnings", "compound", "team", "docs-solutions", "review", "planning"],
