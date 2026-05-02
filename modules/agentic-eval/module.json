@@ -1,0 +1,17 @@
+{
+  "name": "agentic-eval",
+  "displayName": "Agentic Engineering Evaluation Rubric",
+  "description": "Rubric for evaluating agentic engineering portfolios using the Twitter-clone-for-agents format. The candidate builds a small social-feed system whose surface satisfies the four agent-native principles, then N parallel red-team agents try to break it. Derived from the Karpathy hiring format described in the Sequoia interview (2026-04-29).",
+  "category": "patterns",
+  "scope": ["global"],
+  "dependencies": ["agent-native", "subagent-patterns"],
+  "files": {
+    "rules/agentic-eval-rubric.md": {
+      "target": "rules/agentic-eval-rubric.md",
+      "type": "rule",
+      "template": false
+    }
+  },
+  "tags": ["agentic-engineering", "evaluation", "hiring", "red-team", "agent-native", "portfolio"],
+  "configPrompts": []
+}
