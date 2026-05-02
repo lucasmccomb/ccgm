@@ -25,6 +25,11 @@ Edit this file to match your preferences. The sections below are a starting fram
 <!-- How should the AI approach problems and make decisions?
      Example: "Understand before acting. Evidence before claims. Simplest viable approach first." -->
 
+<!-- Anchor: outsource thinking, never understanding.
+     The agent fills in blanks — research, boilerplate, refactoring, synthesis.
+     The human stays in charge of why we are doing this and whether the answer makes sense.
+     Delegation without comprehension is how a codebase becomes unknowable to its owner. -->
+
 ## Core Values
 
 <!-- What matters most? What should guide every decision?
