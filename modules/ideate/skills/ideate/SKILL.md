@@ -266,6 +266,14 @@ Present with AskUserQuestion:
 
 ---
 
+### Phase 3.5: Menu-Gen Test
+
+Before proceeding to next steps, apply the Menu-Gen Test. See `modules/code-quality/rules/menu-gen-test.md`.
+
+Forcing question: **Could this concept be accomplished with a single prompt + multimodal call instead of an app/script/feature? If yes, why are we building anything?**
+
+Ask the user to answer in one sentence or short paragraph. If the dissolvability score is 4-5, add an "Existence Justification" field to `concept.md` and require the user to name the specific reason before the concept advances to `/xplan`. If score is 0-3, note it and proceed without interruption.
+
 ### Phase 4: Next Steps
 
 Once the concept is confirmed, update `session.md` status to `confirmed` and ask:

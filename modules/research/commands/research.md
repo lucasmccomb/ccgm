@@ -41,6 +41,14 @@ Extract from arguments:
 
 If no topic is provided, use AskUserQuestion to ask what to research.
 
+### Menu-Gen Test (standalone mode only)
+
+When `/research` is invoked directly by the user (not called from xplan or another skill), apply the Menu-Gen Test before beginning research. See `modules/code-quality/rules/menu-gen-test.md`.
+
+Forcing question: **Could this be a single prompt + multimodal call instead of an app/script/feature?**
+
+If the research topic is clearly exploratory (no build decision implied), skip this check. If the user is scoping a build, ask them to answer the forcing question in one paragraph before proceeding. Note the answer in the output's Executive Summary under a "Build Justification" heading.
+
 ### Cross-Session Continuity (--extend)
 
 If `--extend` is provided, read the prior research.md and use it as context:
