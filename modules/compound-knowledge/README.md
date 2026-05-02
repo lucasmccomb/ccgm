@@ -27,6 +27,7 @@ Files installed globally to `~/.claude/`:
 | `skills/compound/SKILL.md` | `skills/compound/SKILL.md` | `/compound` - capture a new learning |
 | `skills/compound/references/schema.yaml` | `skills/compound/references/schema.yaml` | YAML schema for doc frontmatter |
 | `skills/compound-refresh/SKILL.md` | `skills/compound-refresh/SKILL.md` | `/compound-refresh` - maintenance pass |
+| `skills/compound-reproject/SKILL.md` | `skills/compound-reproject/SKILL.md` | `/compound-reproject` - re-project existing entries |
 | `agents/learnings-researcher.md` | `agents/learnings-researcher.md` | Retrieval agent for `/xplan`, `/review` |
 
 ## Manual Installation
@@ -36,6 +37,7 @@ Files installed globally to `~/.claude/`:
 
 mkdir -p ~/.claude/skills/compound/references
 mkdir -p ~/.claude/skills/compound-refresh
+mkdir -p ~/.claude/skills/compound-reproject
 mkdir -p ~/.claude/agents
 
 cp modules/compound-knowledge/skills/compound/SKILL.md \
@@ -46,6 +48,9 @@ cp modules/compound-knowledge/skills/compound/references/schema.yaml \
 
 cp modules/compound-knowledge/skills/compound-refresh/SKILL.md \
    ~/.claude/skills/compound-refresh/SKILL.md
+
+cp modules/compound-knowledge/skills/compound-reproject/SKILL.md \
+   ~/.claude/skills/compound-reproject/SKILL.md
 
 cp modules/compound-knowledge/agents/learnings-researcher.md \
    ~/.claude/agents/learnings-researcher.md
@@ -82,6 +87,34 @@ The `/compound` skill runs a Discoverability Check on every invocation and offer
 Run after shipping a non-trivial fix or confirming a durable pattern. The skill interviews the session, classifies the problem, scores overlap with existing docs, and writes or updates the corresponding file.
 
 Full mode (default) dispatches four parallel research subagents (Context Analyzer, Solution Extractor, Related Docs Finder, Session Historian). Lightweight mode skips the fan-out and writes directly from the current conversation.
+
+### Re-project the store
+
+```
+/compound-reproject type:qa
+/compound-reproject type:contradictions
+/compound-reproject type:summary
+/compound-reproject type:outline
+```
+
+Run when the corpus has grown large enough that the raw docs are hard to navigate (roughly 20+ entries). Re-projection generates a single derived markdown artifact from existing entries without mutating them. Output goes to `docs/solutions/_reprojections/{type}-{timestamp}.md` in the working repo.
+
+Four projection types:
+
+- **qa** — Q&A pairs phrased as a developer would ask them, each answer grounded in and citing a specific source entry. Useful for study, onboarding, or surfacing gaps.
+- **contradictions** — pairs of entries whose claims disagree, with the tension stated explicitly and a likely resolution. Useful after a `/compound-refresh` finds no staleness but the corpus still has internal friction.
+- **summary** — restructured thematic summary grouping related entries under synthesized headings. Useful when handing off a subsystem or writing documentation.
+- **outline** — narrative outline tracing how the team's understanding developed, with a current-consensus section and open-questions list. Useful for milestone reviews or onboarding a new agent to a domain.
+
+Optional filters narrow the source set:
+
+```
+/compound-reproject type:qa tag:supabase tag:migrations
+/compound-reproject type:outline topic:authentication n:20
+/compound-reproject type:contradictions tag:deployment
+```
+
+All re-projections include a `source_ids` frontmatter field listing the exact source entry paths. No source entry is modified. Writing re-projections back as new `docs/solutions/` entries (`--ingest`) is not implemented in v1.
 
 ### Maintain the store
 
