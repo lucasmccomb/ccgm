@@ -101,7 +101,7 @@ Read the current CCGM module list for comparison:
 
 ```bash
 # List all CCGM modules
-ls ~/code/ccgm-repos/ccgm-1/modules/ 2>/dev/null || ls modules/ 2>/dev/null
+ls ~/code/ccgm/modules/ 2>/dev/null || ls modules/ 2>/dev/null
 
 # List all CCGM rule files
 find ~/.claude/rules/ -name "*.md" 2>/dev/null | sort
