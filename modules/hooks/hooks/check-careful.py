@@ -109,10 +109,11 @@ def check_careful(command: str) -> tuple[bool, str]:
     if re.search(r"\bTRUNCATE\s+(TABLE\s+)?\w+", cmd, re.IGNORECASE):
         return (True, "Destructive SQL: TRUNCATE empties a table. Confirm target and environment.")
 
-    # git push --force (any form except --force-with-lease to a remote ref).
-    # Block --force, --force-with-lease, -f. The safer --force-with-lease still
-    # rewrites remote history, so we still prompt.
-    if re.search(r"\bgit\s+push\s+[^\|&;]*(--force\b|--force-with-lease\b|-f\b)", cmd):
+    # git push --force / -f. The safer --force-with-lease only rewrites the
+    # remote when our local ref still matches it, which is the recommended
+    # flow in git-workflow.md when rebasing a feature branch onto main.
+    # Don't prompt on --force-with-lease.
+    if re.search(r"\bgit\s+push\s+[^\|&;]*(--force\b(?!-with-lease)|-f\b)", cmd):
         return (True, "History-rewriting: `git push --force` overwrites remote commits. Confirm the branch is yours.")
 
     # git reset --hard (any target). Even `origin/main` can discard uncommitted work.
