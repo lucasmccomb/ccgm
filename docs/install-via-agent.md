@@ -20,10 +20,10 @@ Install CCGM (Claude Code God Mode) for me.
 Steps:
 1. Detect my OS (uname -s), shell ($SHELL), and home directory ($HOME).
 2. Clone the repo if it does not already exist:
-     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm-repos/ccgm-1
+     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm
    If it already exists, pull the latest main:
-     cd ~/code/ccgm-repos/ccgm-1 && git fetch origin && git checkout main && git pull --ff-only origin main
-3. Read the available presets: ls ~/code/ccgm-repos/ccgm-1/presets/
+     cd ~/code/ccgm && git fetch origin && git checkout main && git pull --ff-only origin main
+3. Read the available presets: ls ~/code/ccgm/presets/
    Available presets and what they include:
      - minimal  : global-claude-md, autonomy, git-workflow
      - standard : the above + identity, hooks, settings, commands-core, commands-utility
@@ -34,7 +34,7 @@ Steps:
 4. Check what is already installed by looking at ~/.claude/rules/, ~/.claude/commands/, ~/.claude/hooks/. List any CCGM files already present and note you will skip overwriting them.
 5. Read ~/.claude/settings.json if it exists and note its content. The installer will merge non-destructively — it will not delete keys that are already there.
 6. Run the installer:
-     cd ~/code/ccgm-repos/ccgm-1
+     cd ~/code/ccgm
      CCGM_NON_INTERACTIVE=1 \
        CCGM_USERNAME="$(gh api user --jq '.login' 2>/dev/null || echo '')" \
        ./start.sh --preset <chosen-preset>
@@ -59,13 +59,13 @@ Install CCGM (Claude Code God Mode) with the minimal preset.
 Steps:
 1. Detect my OS (uname -s), shell ($SHELL), and home directory ($HOME).
 2. Clone the repo if it does not already exist:
-     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm-repos/ccgm-1
+     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm
    If it already exists, pull the latest main:
-     cd ~/code/ccgm-repos/ccgm-1 && git fetch origin && git checkout main && git pull --ff-only origin main
+     cd ~/code/ccgm && git fetch origin && git checkout main && git pull --ff-only origin main
 3. Check what is already installed: ls ~/.claude/rules/ ~/.claude/commands/ 2>/dev/null
 4. Read ~/.claude/settings.json if it exists and note its content.
 5. Run the installer:
-     cd ~/code/ccgm-repos/ccgm-1
+     cd ~/code/ccgm
      CCGM_NON_INTERACTIVE=1 \
        CCGM_USERNAME="$(gh api user --jq '.login' 2>/dev/null || echo '')" \
        ./start.sh --preset minimal
@@ -83,13 +83,13 @@ Install CCGM (Claude Code God Mode) with the standard preset.
 Steps:
 1. Detect my OS (uname -s), shell ($SHELL), and home directory ($HOME).
 2. Clone the repo if it does not already exist:
-     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm-repos/ccgm-1
+     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm
    If it already exists, pull the latest main:
-     cd ~/code/ccgm-repos/ccgm-1 && git fetch origin && git checkout main && git pull --ff-only origin main
+     cd ~/code/ccgm && git fetch origin && git checkout main && git pull --ff-only origin main
 3. Check what is already installed: ls ~/.claude/rules/ ~/.claude/commands/ 2>/dev/null
 4. Read ~/.claude/settings.json if it exists and note its content.
 5. Run the installer:
-     cd ~/code/ccgm-repos/ccgm-1
+     cd ~/code/ccgm
      CCGM_NON_INTERACTIVE=1 \
        CCGM_USERNAME="$(gh api user --jq '.login' 2>/dev/null || echo '')" \
        ./start.sh --preset standard
@@ -107,13 +107,13 @@ Install CCGM (Claude Code God Mode) with the team preset.
 Steps:
 1. Detect my OS (uname -s), shell ($SHELL), and home directory ($HOME).
 2. Clone the repo if it does not already exist:
-     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm-repos/ccgm-1
+     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm
    If it already exists, pull the latest main:
-     cd ~/code/ccgm-repos/ccgm-1 && git fetch origin && git checkout main && git pull --ff-only origin main
+     cd ~/code/ccgm && git fetch origin && git checkout main && git pull --ff-only origin main
 3. Check what is already installed: ls ~/.claude/rules/ ~/.claude/commands/ ~/.claude/hooks/ 2>/dev/null
 4. Read ~/.claude/settings.json if it exists and note its content.
 5. Run the installer:
-     cd ~/code/ccgm-repos/ccgm-1
+     cd ~/code/ccgm
      CCGM_NON_INTERACTIVE=1 \
        CCGM_USERNAME="$(gh api user --jq '.login' 2>/dev/null || echo '')" \
        ./start.sh --preset team
@@ -131,13 +131,13 @@ Install CCGM (Claude Code God Mode) with the cloud-agent preset.
 Steps:
 1. Detect my OS (uname -s), shell ($SHELL), and home directory ($HOME).
 2. Clone the repo if it does not already exist:
-     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm-repos/ccgm-1
+     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm
    If it already exists, pull the latest main:
-     cd ~/code/ccgm-repos/ccgm-1 && git fetch origin && git checkout main && git pull --ff-only origin main
+     cd ~/code/ccgm && git fetch origin && git checkout main && git pull --ff-only origin main
 3. Check what is already installed: ls ~/.claude/rules/ ~/.claude/commands/ ~/.claude/hooks/ ~/.claude/agents/ 2>/dev/null
 4. Read ~/.claude/settings.json if it exists and note its content.
 5. Run the installer:
-     cd ~/code/ccgm-repos/ccgm-1
+     cd ~/code/ccgm
      CCGM_NON_INTERACTIVE=1 \
        CCGM_USERNAME="$(gh api user --jq '.login' 2>/dev/null || echo '')" \
        ./start.sh --preset cloud-agent
@@ -155,13 +155,13 @@ Install CCGM (Claude Code God Mode) with the full preset (every stable module).
 Steps:
 1. Detect my OS (uname -s), shell ($SHELL), and home directory ($HOME).
 2. Clone the repo if it does not already exist:
-     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm-repos/ccgm-1
+     git clone https://github.com/lucasmccomb/ccgm.git ~/code/ccgm
    If it already exists, pull the latest main:
-     cd ~/code/ccgm-repos/ccgm-1 && git fetch origin && git checkout main && git pull --ff-only origin main
+     cd ~/code/ccgm && git fetch origin && git checkout main && git pull --ff-only origin main
 3. Check what is already installed: ls ~/.claude/rules/ ~/.claude/commands/ ~/.claude/hooks/ ~/.claude/agents/ 2>/dev/null
 4. Read ~/.claude/settings.json if it exists and note its content.
 5. Run the installer:
-     cd ~/code/ccgm-repos/ccgm-1
+     cd ~/code/ccgm
      CCGM_NON_INTERACTIVE=1 \
        CCGM_USERNAME="$(gh api user --jq '.login' 2>/dev/null || echo '')" \
        ./start.sh --preset full
@@ -197,7 +197,7 @@ Spin up a clean Linux VM or Docker container, install Claude Code, and paste the
 The paste-block runs `./start.sh --preset <name>`. You can test that step standalone without the agent scaffolding:
 
 ```bash
-cd ~/code/ccgm-repos/ccgm-1
+cd ~/code/ccgm
 CCGM_NON_INTERACTIVE=1 ./start.sh --preset minimal
 ```
 

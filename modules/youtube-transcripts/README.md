@@ -28,7 +28,7 @@ This module installs:
 Install via the standard CCGM flow:
 
 ```bash
-cd ~/code/ccgm-repos/ccgm-1
+cd ~/code/ccgm
 ./start.sh
 # select youtube-transcripts in the module picker
 ```

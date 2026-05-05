@@ -20,7 +20,7 @@ set -u
 CODE_DIR="${CODE_DIR:-$HOME/code}"
 
 DEFAULT_TARGETS=(
-  "$CODE_DIR/ccgm-repos/ccgm-1"
+  "$CODE_DIR/ccgm"
   "$CODE_DIR/voxstr-repos/voxstr-0"
   "$CODE_DIR/voxstr-site-repos/voxstr-site-0"
   "$CODE_DIR/habitpro-ai-workspaces/habitpro-ai-w0/habitpro-ai-w0-c0"
