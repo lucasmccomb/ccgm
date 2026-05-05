@@ -81,6 +81,11 @@
       "type": "hook",
       "template": false
     },
+    "hooks/sync-ccgm-canonical.py": {
+      "target": "hooks/sync-ccgm-canonical.py",
+      "type": "hook",
+      "template": false
+    },
     "settings.partial.json": {
       "target": "settings.json",
       "type": "config",

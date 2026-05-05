@@ -36,6 +36,11 @@
             "type": "command",
             "command": "python3 $HOME/.claude/hooks/agent-tracking-post.py",
             "timeout": 15000
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/sync-ccgm-canonical.py",
+            "timeout": 35000
           }
         ]
       }

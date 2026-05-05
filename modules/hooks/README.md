@@ -4,7 +4,7 @@ Python hooks that enforce git workflow rules: issue-first workflow, commit messa
 
 ## What It Does
 
-This module installs thirteen Python hooks, two Python libraries, and a settings partial:
+This module installs fourteen Python hooks, two Python libraries, and a settings partial:
 
 | Hook | Event | Purpose |
 |------|-------|---------|
@@ -21,6 +21,7 @@ This module installs thirteen Python hooks, two Python libraries, and a settings
 | `check-careful.py` | PreToolUse (Bash) | Prompts before destructive Bash commands (rm -rf, SQL DROP/TRUNCATE, force push, hard reset, kubectl delete, docker prune). Build-artifact directories (node_modules, dist, .next, build, __pycache__, .cache, .turbo, coverage) are whitelisted for `rm -rf` |
 | `check-freeze.py` | PreToolUse (Edit/Write) | Denies Edit/Write outside the frozen directory when `~/.claude/freeze-dir.txt` is set. Pair with `/freeze`, `/unfreeze`, `/guard` from `commands-extra` |
 | `session-start-enforce.py` | SessionStart (startup) | Experimental. Injects an Iron-Law rule-enforcement meta-instruction at fresh session start so discipline rules activate under pressure. OFF by default; opt in via `CCGM_RULE_ENFORCEMENT=true` in `~/.claude/.ccgm.env` |
+| `sync-ccgm-canonical.py` | PostToolUse (Bash) | After `gh pr merge` succeeds in the CCGM repo, fast-forwards the canonical CCGM clone (the symlink source for `~/.claude/`) so it never drifts. Default canonical dir: `~/code/ccgm`; override with `CCGM_CANONICAL_DIR` env var. No-op if the dir doesn't exist or the merge wasn't in a CCGM clone |
 
 The `settings.partial.json` wires these hooks into your `~/.claude/settings.json`.
 
@@ -58,6 +59,7 @@ cp hooks/orphan-process-check.py ~/.claude/hooks/orphan-process-check.py
 cp hooks/check-careful.py ~/.claude/hooks/check-careful.py
 cp hooks/check-freeze.py ~/.claude/hooks/check-freeze.py
 cp hooks/session-start-enforce.py ~/.claude/hooks/session-start-enforce.py
+cp hooks/sync-ccgm-canonical.py ~/.claude/hooks/sync-ccgm-canonical.py
 
 # 2. Copy libraries
 mkdir -p ~/.claude/lib
@@ -111,6 +113,7 @@ On fresh session start, the hook injects a short reminder that routes tasks thro
 | `hooks/check-careful.py` | Destructive-command warning (careful safety hook) |
 | `hooks/check-freeze.py` | Scope-lock Edit/Write to `~/.claude/freeze-dir.txt` (freeze safety hook) |
 | `hooks/session-start-enforce.py` | Experimental Iron-Law rule-enforcement meta-instruction at session start (opt in via `CCGM_RULE_ENFORCEMENT=true`) |
+| `hooks/sync-ccgm-canonical.py` | Auto-pull `~/code/ccgm` after CCGM PR merges so symlinked runtime never drifts (override path via `CCGM_CANONICAL_DIR`) |
 | `lib/agent_tracking.py` | Python library for tracking CSV operations |
 | `lib/agent_sessions.py` | Python library for live session detection |
 | `settings.partial.json` | Hook wiring configuration to merge into settings.json |
