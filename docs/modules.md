@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 56 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 64 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -346,6 +346,66 @@ Analyze external Claude Code configuration repos to find useful patterns worth a
 
 ---
 
+### ce-review
+
+Unified code-review orchestrator that composes scope-drift, learnings, and tiered reviewer personas.
+
+**Installs**: `skills/ce-review/`, `agents/reviewers/{correctness,testing,maintainability,project-standards,security,performance,reliability,api-contract,data-migrations,adversarial}-reviewer.md`
+
+**What it does**: Runs a tiered review against changes — baseline specialists (correctness, testing, maintainability, project-standards) plus conditional specialists (security, performance, reliability, api-contract, data-migrations) chosen by the diff shape — then runs an adversarial/red-team reviewer with access to the specialists' findings. Confidence-gated autofix routing classifies each finding as safe_auto, gated_auto, manual, or advisory. Modes: interactive, autofix, report-only, headless.
+
+**Dependencies**: compound-knowledge, pr-review-toolkit, subagent-patterns
+
+---
+
+### deepresearch
+
+Multi-query semantic research using the Exa MCP server.
+
+**Installs**: `commands/deepresearch.md`
+
+**What it does**: `/deepresearch` generates diverse queries from your topic, fans them out via parallel Exa MCP tool calls, and synthesizes a structured `research.md` from full page contents. Requires the Exa MCP server registered via `claude mcp add` and an Exa API key.
+
+**Dependencies**: None
+
+---
+
+### onboarding
+
+Generates a structured ONBOARDING.md for any repository.
+
+**Installs**: `commands/onboarding.md`, `scripts/inventory.mjs`, `skills/onboarding/`
+
+**What it does**: `/onboarding` runs a language-aware inventory script to build a structural map of the repo, then reads only the files that map surfaces and writes prose covering architecture, dev setup, key commands, test workflow, and a glossary. Strict voice rules keep the output reading like a knowledgeable teammate rather than generated documentation.
+
+**Dependencies**: None
+
+---
+
+### pr-review-toolkit
+
+Augments the external pr-review-toolkit plugin with scope-drift detection and a Fix-First output format.
+
+**Installs**: `rules/fix-first-review.md`, `skills/scope-drift/`
+
+**What it does**: Scope-drift compares a PR's stated intent (title, body, linked issue) against the actual diff and flags work that wasn't asked for. Fix-First splits review output into AUTO-FIXED (already addressed in the diff) vs NEEDS INPUT (requires a decision). Ported from garrytan/gstack.
+
+**Dependencies**: None
+
+---
+
+### ship-readiness
+
+At-a-glance dashboard of what gates a merge on the current branch.
+
+**Installs**: `commands/ship-ready.md`
+
+**What it does**: `/ship-ready` surfaces failing tests, open PR count, stale branches, outdated deps, merge velocity, review freshness, and unresolved risks from `docs/solutions/`. Reads ce-review envelopes for commit-hash staleness detection so a finding from N commits ago is flagged as potentially stale.
+
+**Dependencies**: None
+
+---
+
 ## Category: workflow
 
 Development workflow patterns and coordination systems.
@@ -641,6 +701,138 @@ Commands installed:
 
 ---
 
+### ccgm-doctor
+
+Audit tool for Claude Code installs.
+
+**Installs**: `bin/ccgm-doctor`, `lib/doctor.py`, `evals/routing.json`
+
+**What it does**: Three subcommands: `check-resolvable` verifies hook references, command descriptions, and script paths point to real files; `dry` measures lexical overlap between command descriptions to spot ambiguous routing; `resolver-eval` runs a routing suite of `{intent, expected}` assertions against keyword-overlap scoring. Ships a default routing suite covering common slash commands.
+
+**Dependencies**: None
+
+---
+
+### commands-preamble
+
+Experimental UserPromptSubmit hook that injects iron-law principles before slash commands run.
+
+**Installs**: `hooks/inject-preamble.py`, `preamble/preamble.md`, `settings.partial.json`
+
+**What it does**: Injects a compact preamble (Confusion Protocol, Completeness, Evidence Before Claims, Root Cause Before Fix) at the start of slash-command invocations. Opt-in, disabled by default. Useful for ensuring agents internalize the discipline rules even when a specific command file doesn't explicitly reference them.
+
+**Dependencies**: settings, autonomy, code-quality
+
+---
+
+### compound-knowledge
+
+Team-shared learnings persisted in `docs/solutions/` and re-injected as grounding into later runs.
+
+**Installs**: `skills/compound/`, `skills/compound-refresh/`, `skills/compound-reproject/`, `agents/learnings-researcher.md`
+
+**What it does**: After solving a non-trivial problem, `/compound` writes a structured markdown doc with YAML frontmatter to `docs/solutions/`. Later `/xplan` and `/review` runs use the learnings-researcher agent to find relevant entries and inject them as grounding. Counterpart to self-improving's personal MEMORY.md — compound-knowledge is committed and code-reviewed, self-improving stays on your machine.
+
+**Dependencies**: skill-authoring
+
+---
+
+### document-review
+
+Seven-lens plan-quality gate before a spec ships to execution.
+
+**Installs**: `skills/document-review/`, `agents/{coherence,feasibility,product-lens,scope-guardian,design-lens,security-lens,adversarial-document}-reviewer.md`
+
+**What it does**: `/document-review` fans out to seven role-specific reviewer agents (coherence, feasibility, product-lens, scope-guardian, design-lens, security-lens, adversarial) and merges structured JSON findings with severity and confidence. Each lens has tight "what you flag" boundaries so they don't overlap.
+
+**Dependencies**: skill-authoring, subagent-patterns
+
+---
+
+### git-worktrees
+
+Solo-agent worktree-based isolation for feature work.
+
+**Installs**: `rules/git-worktrees.md`, `commands/worktree-start.md`, `commands/worktree-finish.md`
+
+**What it does**: Lighter alternative to the multi-clone setup when only one agent is active. `/worktree-start` creates a new worktree for a feature branch; `/worktree-finish` merges and cleans up. Uses git's native worktree command so the main checkout stays on whatever branch you want.
+
+**Dependencies**: None
+
+---
+
+### launch
+
+One-prompt spec to deployed Cloudflare Pages site.
+
+**Installs**: `skills/launch/`, `examples/sample-spec.md`
+
+**What it does**: `/launch` takes a one-page spec and reaches a deployed Cloudflare Pages site without further human input — except for the unavoidable Connect-to-Git dashboard step, which the skill stops to ask for. Inspired by Karpathy's Sequoia talk on shrinking the prompt-to-production loop. Doubles as a forcing function for surfacing every place the infra is still human-shaped.
+
+**Dependencies**: cloudflare, git-workflow, docs-for-agents
+
+---
+
+### pr-feedback
+
+Structured resolver for PR review comments with clustering.
+
+**Installs**: `skills/resolve-pr-feedback/`, `agents/pr-comment-resolver.md`, `scripts/get-pr-comments`
+
+**What it does**: `/resolve-pr-feedback` fetches unresolved review threads via GraphQL, triages new vs already-handled, and (above a threshold) runs cluster analysis — categorizes each into 11 fixed concern categories and groups by category + spatial proximity. Clusters surface systemic issues instead of dispatching 10 one-off fixes. Parallel pr-comment-resolver subagents apply unambiguous fixes, post inline replies, and resolve threads; taste questions are batched for human decision.
+
+**Dependencies**: skill-authoring, subagent-patterns
+
+---
+
+### session-history
+
+Cross-platform session historian agent for surfacing institutional knowledge from prior sessions.
+
+**Installs**: `agents/session-historian.md`, `commands/recall.md`, `scripts/{discover-sessions.sh,extract-metadata.py,recall.py,repo_detect.py,add-agents-md-symlinks.sh}`
+
+**What it does**: Searches prior Claude Code and Codex session transcripts on the same repo for what was tried, what failed, and what was decided. `/recall` runs the search directly; other skills (`/compound`, `/xplan`, `/debug`) invoke the agent to ground their work in earlier sessions a fresh agent cannot see.
+
+**Dependencies**: None
+
+---
+
+### session-lifecycle
+
+Structured session shutdown via `/sds`.
+
+**Installs**: `commands/sds.md`, `lib/sds-broadcast.sh`
+
+**What it does**: `/sds` runs an autonomous end-of-session wrap-up sweep — commits dirty work, updates referenced issues, runs `/reflect`, writes a handoff via `handoff.py`, broadcasts a session-ended event to sibling clones, then terminates the Claude Code session (`kill -TERM $PPID`). Bookend to `/startup`. Composes existing primitives rather than duplicating them.
+
+**Dependencies**: multi-agent, self-improving, git-workflow
+
+---
+
+### skillify
+
+Slash command that promotes an ad-hoc session capability into a durable skill.
+
+**Installs**: `commands/skillify.md`, `bin/ccgm-skillify-check`
+
+**What it does**: Inspired by the pattern where every repeated failure becomes structurally unreachable by being turned into a tested skill. `/skillify` takes a capability the agent demonstrated this session, generates a command file with triggers and rules, an optional deterministic helper script, a pinning test, and a learnings-store entry pointing at the new skill.
+
+**Dependencies**: None
+
+---
+
+### todos
+
+File-based review-finding tracker for things that don't merit a GitHub issue.
+
+**Installs**: `skills/todo-create/`, `skills/todo-triage/`, `skills/todo-resolve/`
+
+**What it does**: Review findings, PR nitpicks, and tech debt that fall between "fix immediately" and "cut a full issue" go to `.claude/todos/NNN-{status}-{priority}-{description}.md` with YAML frontmatter. Three skills compose — `/todo-create` (canonical writer), `/todo-triage` (interactive pending→ready transition), `/todo-resolve` (batch-resolve ready todos via parallel subagents).
+
+**Dependencies**: skill-authoring, subagent-patterns
+
+---
+
 ## Category: patterns
 
 Reusable development patterns and methodologies.
@@ -800,6 +992,66 @@ Evidence-before-claims methodology for confirming work is done.
 - **Evidence table**: What evidence to provide for each claim type (bug fix, feature, deployment, etc.)
 - **Fresh-run requirement**: Always re-execute verification commands rather than relying on earlier output
 - **Honest reporting**: If verification fails, say so - never claim success without evidence
+
+**Dependencies**: None
+
+---
+
+### agent-native
+
+Principles for designing applications where an agent is a first-class user — alongside humans.
+
+**Installs**: `rules/agent-native.md`, `skills/agent-native-audit/`, `agents/reviewers/agent-native-reviewer.md`
+
+**What it does**: Defines four principles — parity (every UI action has a programmable equivalent), granularity (composable primitives), composability (operations chain into workflows), and emergent capability (combinations exceed the sum). Ships `/agent-native-audit` which scores a codebase against the principles with concrete counts, and a reviewer persona that plugs into the unified review orchestrator.
+
+**Dependencies**: subagent-patterns
+
+---
+
+### agentic-eval
+
+Hiring-format rubric for evaluating agentic engineering portfolios.
+
+**Installs**: `rules/agentic-eval-rubric.md`
+
+**What it does**: Describes the Twitter-clone-for-agents evaluation format from the Karpathy/Sequoia interview (2026-04-29): the candidate builds a small social-feed system whose surface satisfies the four agent-native principles, then N parallel red-team agents try to break it. The rubric is the scoring framework.
+
+**Dependencies**: agent-native, subagent-patterns
+
+---
+
+### docs-for-agents
+
+Convention for shipping machine-readable docs alongside human docs.
+
+**Installs**: `rules/docs-for-agents.md`
+
+**What it does**: Any project an agent will install, build, test, deploy, or debug should have an `AGENTS.md` next to its `README.md` — copy-pasteable command blocks, not prose, not "open the dashboard and click..." steps. The rule explains what to include and what to leave out.
+
+**Dependencies**: None
+
+---
+
+### rule-authoring
+
+TDD-style discipline for writing rules that hold up under pressure.
+
+**Installs**: `rules/rule-authoring.md`, `rules/pressure-testing.md`, `commands/pressure-test.md`
+
+**What it does**: Treats rule authoring as test-driven development — pressure-test a candidate rule with adversarial scenarios, capture the rationalizations agents use to bypass it, and rewrite until the rule closes those loopholes. The `/pressure-test` command runs the loop interactively.
+
+**Dependencies**: None
+
+---
+
+### skill-authoring
+
+Discipline for writing skills and slash commands that stay efficient, portable, and context-safe.
+
+**Installs**: `rules/skill-authoring.md`
+
+**What it does**: Covers reference-file inclusion (vs. inlining), conditional content extraction, tool selection (when to spawn a subagent vs. handle inline), and writing style for skill markdown. Aimed at avoiding skills that bloat context or hide important behavior in opaque scripts.
 
 **Dependencies**: None
 
