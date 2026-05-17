@@ -178,6 +178,8 @@ Sibling state:
 Next: <one line — "exiting session now" or "consider running /sds in dirty sibling X">
 ```
 
+The status lines stop at Phase 6 by design. Do NOT add a "Phase 7 — Summary:" or "Phase 8 — Exit:" line — Phase 7 IS this summary text, and Phase 8 IS the kill tool call that follows it. They are not items inside the report; they are the report and what happens after it.
+
 ### Phase 8 — Exit the session
 
 This is the terminal action of `/sds`. Skip entirely if `--no-exit` or `--dry-run` was passed.
@@ -188,7 +190,9 @@ kill -TERM $PPID
 
 `$PPID` from inside the Bash tool resolves to the parent `claude` process. SIGTERM gives it a chance to flush transcripts and run `SessionEnd` hooks before dying — equivalent to the user typing `/exit`.
 
-**Order matters**: render the Phase 7 summary as plain text in your response FIRST, then issue the kill as your final tool call. If you bundle the summary into a heredoc inside the kill command, the user will not see it before the process dies. If the kill bash call returns at all (race condition), do not print anything further — the session is going down regardless.
+**No narration between Phase 7 and the kill.** After the Phase 7 summary's "Next:" line, the next thing in your output MUST be the Bash tool call running `kill -TERM $PPID`. Do not print a "Phase 8 — Exit:" header, do not print "Exiting now" or any farewell, do not bundle the summary into a heredoc inside the kill command. The Phase 7 summary is the last text the user sees; the kill is the last tool call. If you find yourself about to type anything after the "Next:" line, stop and issue the kill instead.
+
+If the kill bash call returns at all (race condition), do not print anything further — the session is going down regardless.
 
 If `--no-exit` was passed, replace the kill with a one-line text reminder: `Run /exit when ready.`
 

@@ -35,9 +35,11 @@ File format (markdown with YAML frontmatter):
 
 This module provides:
     write_handoff(body, repo, agent, ...): persist a handoff file
-    list_peer_handoffs(repo, this_agent, days=7): recent handoffs from OTHER agents
+    list_peer_handoffs(repo, this_agent, days=7, include_self=False): recent handoffs
+        (peers by default; pass include_self=True for self-continuity, e.g. /sds → /startup)
     prune_old_handoffs(repo=None, days=30): delete handoffs older than the window
-    summarize_for_startup(repo, this_agent, max_items=5): compact text block for context injection
+    summarize_for_startup(repo, this_agent, max_items=5, include_self=False): compact text
+        block for context injection
 
 Import-safe: stdlib only, no side effects at import time.
 """
@@ -134,10 +136,17 @@ def list_peer_handoffs(
     repo: str,
     this_agent: str,
     days: int = 7,
+    include_self: bool = False,
 ) -> list[dict]:
-    """Return recent handoffs for `repo` authored by agents OTHER than `this_agent`.
+    """Return recent handoffs for `repo`.
 
-    Each dict has: path, agent, timestamp, body (first ~60 lines).
+    By default, returns only handoffs from agents OTHER than `this_agent`
+    (the sibling-coordination case). Pass `include_self=True` to also include
+    handoffs written by `this_agent` itself — used for self-continuity flows
+    like /sds → /startup, where the writer wants the next session to see
+    what they handed off to "future-me".
+
+    Each dict has: path, agent, timestamp, body, is_self.
     Sorted newest-first.
     """
     repo_dir = _repo_dir(repo)
@@ -154,7 +163,8 @@ def list_peer_handoffs(
         ts, agent = parsed
         if ts < cutoff:
             continue
-        if agent == this_agent_safe:
+        is_self = agent == this_agent_safe
+        if is_self and not include_self:
             continue
         try:
             body = p.read_text()
@@ -165,6 +175,7 @@ def list_peer_handoffs(
             "agent": agent,
             "timestamp": ts,
             "body": body,
+            "is_self": is_self,
         })
     out.sort(key=lambda d: d["timestamp"], reverse=True)
     return out
@@ -207,28 +218,40 @@ def summarize_for_startup(
     max_items: int = 5,
     days: int = 7,
     body_lines: int = 4,
+    include_self: bool = False,
 ) -> str | None:
-    """Build a compact context block summarizing peer handoffs, or None if none.
+    """Build a compact context block summarizing handoffs, or None if none.
+
+    By default surfaces peer handoffs only (sibling coordination). Pass
+    `include_self=True` to also include the writer's own handoffs — needed
+    by self-continuity flows like /sds → /startup. Self entries are marked
+    `(you)` after the agent name so the source is unambiguous.
 
     Returns a string suitable for injecting into session context. Each entry
     shows agent, age, title (from frontmatter) or first heading, and the
     first `body_lines` of the body.
     """
-    peers = list_peer_handoffs(repo, this_agent, days=days)
-    if not peers:
+    items = list_peer_handoffs(repo, this_agent, days=days, include_self=include_self)
+    if not items:
         return None
 
-    peers = peers[:max_items]
+    items = items[:max_items]
     now = _ts_now()
-    lines = ["<peer-handoffs>", f"Recent handoffs from other {repo} clones (last {days}d):"]
-    for h in peers:
+    has_self = any(h.get("is_self") for h in items)
+    if include_self and has_self:
+        header = f"Recent {repo} handoffs (you + peers, last {days}d):"
+    else:
+        header = f"Recent handoffs from other {repo} clones (last {days}d):"
+    lines = ["<peer-handoffs>", header]
+    for h in items:
         age = now - h["timestamp"]
         age_str = _human_age(age)
         fm, rest = _split_frontmatter(h["body"])
         title = fm.get("title") or _first_heading(rest) or "(no title)"
         preview = _first_lines(rest, body_lines)
+        self_marker = " (you)" if h.get("is_self") else ""
         lines.append(f"")
-        lines.append(f"- **{h['agent']}** ({age_str}): {title}")
+        lines.append(f"- **{h['agent']}{self_marker}** ({age_str}): {title}")
         if preview:
             for pl in preview.splitlines():
                 lines.append(f"  {pl}")
@@ -453,7 +476,13 @@ def _cli_summary(args) -> int:
     if not repo:
         return 0
     agent = args.agent or detect_agent()
-    s = summarize_for_startup(repo, agent, max_items=args.max, days=args.days)
+    s = summarize_for_startup(
+        repo,
+        agent,
+        max_items=args.max,
+        days=args.days,
+        include_self=getattr(args, "include_self", False),
+    )
     if s:
         print(s)
     return 0
@@ -497,6 +526,11 @@ def main(argv: list[str] | None = None) -> int:
     su.add_argument("--agent")
     su.add_argument("--days", type=int, default=7)
     su.add_argument("--max", type=int, default=5)
+    su.add_argument(
+        "--include-self",
+        action="store_true",
+        help="Include handoffs written by the current agent (self-continuity, e.g. /sds → /startup)",
+    )
     su.set_defaults(func=_cli_summary)
 
     # Default subcommand: write
