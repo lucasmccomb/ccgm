@@ -1,0 +1,14 @@
+{
+  "name": "session-lifecycle",
+  "displayName": "Session Lifecycle",
+  "description": "Structured session shutdown via /sds. Autonomous wrap-up sweep: commit dirty work, update referenced issues, run /reflect, write a handoff, broadcast to sibling clones. Complements /startup at the other end of the session.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["multi-agent", "self-improving", "git-workflow"],
+  "files": {
+    "commands/sds.md": { "target": "commands/sds.md", "type": "command", "template": false },
+    "lib/sds-broadcast.sh": { "target": "lib/sds-broadcast.sh", "type": "lib", "template": false }
+  },
+  "tags": ["session", "shutdown", "handoff", "workflow"],
+  "configPrompts": []
+}
