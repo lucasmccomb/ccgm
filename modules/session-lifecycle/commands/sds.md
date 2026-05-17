@@ -1,16 +1,17 @@
 ---
-description: Shutdown Sequence - autonomous end-of-session wrap-up (commit, issues, reflect, handoff, broadcast)
+description: Shutdown Sequence - autonomous end-of-session wrap-up (commit, issues, reflect, handoff, broadcast, exit)
 ---
 
 # /sds — Shutdown Sequence
 
-Autonomous end-of-session wrap-up. Commits dirty work, updates referenced issues, runs `/reflect`, writes a handoff, broadcasts to sibling clones. The bookend to `/startup`.
+Autonomous end-of-session wrap-up. Commits dirty work, updates referenced issues, runs `/reflect`, writes a handoff, broadcasts to sibling clones, and **terminates the Claude Code session**. The bookend to `/startup`.
 
 ## Usage
 
 ```
-/sds              Run the full shutdown sequence
-/sds --dry-run    Show what would happen without doing anything
+/sds              Run the full shutdown sequence and exit the session
+/sds --no-exit    Run the wrap-up but leave the session open
+/sds --dry-run    Show what would happen without doing anything (implies --no-exit)
 ```
 
 ## Principles
@@ -158,7 +159,7 @@ For each sibling with `dirty: true` on a feature branch, note it in the final su
 
 ### Phase 7 — Final summary
 
-Print a one-screen report. Format:
+Print a one-screen report. **The summary must be plain text in your response, NOT inside a Bash heredoc**, so the user sees it before Phase 8 terminates the process. Format:
 
 ```
 /sds complete — agent-<id> on <branch>
@@ -174,14 +175,29 @@ Sibling state:
 - agent-w0-c1 on <branch> (clean | dirty)
 - ...
 
-Next: <one line — "safe to exit" or "consider running /sds in dirty sibling X">
+Next: <one line — "exiting session now" or "consider running /sds in dirty sibling X">
 ```
+
+### Phase 8 — Exit the session
+
+This is the terminal action of `/sds`. Skip entirely if `--no-exit` or `--dry-run` was passed.
+
+```bash
+kill -TERM $PPID
+```
+
+`$PPID` from inside the Bash tool resolves to the parent `claude` process. SIGTERM gives it a chance to flush transcripts and run `SessionEnd` hooks before dying — equivalent to the user typing `/exit`.
+
+**Order matters**: render the Phase 7 summary as plain text in your response FIRST, then issue the kill as your final tool call. If you bundle the summary into a heredoc inside the kill command, the user will not see it before the process dies. If the kill bash call returns at all (race condition), do not print anything further — the session is going down regardless.
+
+If `--no-exit` was passed, replace the kill with a one-line text reminder: `Run /exit when ready.`
 
 ## Failure handling
 
 - Any phase that fails should report the failure and stop the sequence. Do not continue past a broken phase silently.
+- **Crucially: if any earlier phase failed, DO NOT execute Phase 8 (exit).** Leave the session open so the user can address the failure.
 - The only phase where partial completion is acceptable is Phase 3 (Issues) — a failed comment on one issue doesn't prevent commenting on another. Report per-issue.
-- If the git push in Phase 2 fails (auth, branch protection), commit locally and report the push failure — don't roll back the commit.
+- If the git push in Phase 2 fails (auth, branch protection), commit locally and report the push failure — don't roll back the commit, and skip Phase 8.
 
 ## When NOT to use
 

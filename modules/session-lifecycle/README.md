@@ -1,8 +1,8 @@
 # session-lifecycle
 
-`/sds` (Shutdown Sequence) — autonomous end-of-session wrap-up. Commits dirty work, updates referenced issues, runs `/reflect`, writes a handoff, and broadcasts to sibling clones.
+`/sds` (Shutdown Sequence) — autonomous end-of-session wrap-up. Commits dirty work, updates referenced issues, runs `/reflect`, writes a handoff, broadcasts to sibling clones, then **terminates the Claude Code session**.
 
-Pairs with `/startup` at the other end of the session: where `/startup` orients you on session entry, `/sds` captures and disseminates context on session exit.
+Pairs with `/startup` at the other end of the session: where `/startup` orients you on session entry, `/sds` captures and disseminates context on session exit, then closes the door behind you.
 
 ## What This Module Does
 
@@ -18,7 +18,9 @@ Pairs with `/startup` at the other end of the session: where `/startup` orients 
 3. **Issue updates** — comment on referenced issues with session summary; auto-close only when commit body has `closes/fixes #N` AND PR merged
 4. **Reflect** — invoke the `/reflect` workflow inline to capture non-obvious learnings to the JSONL store
 5. **Handoff** — write a structured handoff via `handoff.py write` to `~/.claude/handoffs/{repo}/`, where `auto-startup.py` will auto-inject it into the next session
-6. **Sibling broadcast** — append a `session-ended` marker to `tracking.csv` so sibling clones in the same workspace see this clone has wrapped
+6. **Sibling broadcast** — append a `session-ended` event to `~/.claude/sessions/{repo}/events.jsonl` and surface dirty-sibling state
+7. **Final summary** — one-screen report of what each phase did
+8. **Exit** — `kill -TERM $PPID` terminates the parent `claude` process, equivalent to typing `/exit`. SessionEnd hooks still fire. Skipped if `--no-exit` or `--dry-run`.
 
 ## Files
 
@@ -49,8 +51,9 @@ chmod +x ~/.claude/lib/sds-broadcast.sh
 ## Usage
 
 ```
-/sds              Run the full shutdown sequence autonomously
-/sds --dry-run    Show what would happen without doing anything
+/sds              Run the full shutdown sequence and exit the session
+/sds --no-exit    Run the wrap-up but leave the session open (for testing or chaining)
+/sds --dry-run    Show what would happen without doing anything (implies --no-exit)
 ```
 
 ## Design Notes
@@ -59,3 +62,4 @@ chmod +x ~/.claude/lib/sds-broadcast.sh
 - **Composes existing primitives.** This module does not duplicate the handoff, reflection, or tracking infrastructure — it orchestrates them.
 - **Passive sibling coordination.** Sibling clones are not directly invoked; they see a `session-ended` row in tracking.csv on their next interaction. Active push (e.g., `tmux send-keys`) is intentionally deferred.
 - **Conservative issue closing.** Only auto-closes issues when the commit body explicitly says `closes #N` or `fixes #N` AND the PR has merged. GitHub already does this on merge; the phase is a safety net.
+- **Process exit, not a tool call.** Claude Code does not expose a programmatic `/exit` to the model. Phase 8 uses `kill -TERM $PPID` because `$PPID` from inside the Bash tool resolves to the parent `claude` process. SIGTERM lets it flush transcripts and run `SessionEnd` hooks before dying. If you don't want this behavior, pass `--no-exit`.
