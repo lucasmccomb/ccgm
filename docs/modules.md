@@ -434,7 +434,7 @@ Issue-first workflow, PR conventions, label taxonomy, and code review standards.
 
 Plain-text `/startup` dashboard for Claude Code sessions.
 
-**Installs**: `commands/startup.md`, `lib/startup-gather.sh`, `lib/startup-dashboard.sh`
+**Installs**: `commands/startup.md`, `lib/startup-gather.sh`, `lib/startup-summary.sh`, `lib/startup-summary-prompt.md`, `lib/startup-dashboard.sh`, `hooks/auto-startup.py`
 
 **What it does**: Emits a single-screen dashboard at session start:
 
@@ -442,6 +442,7 @@ Plain-text `/startup` dashboard for Claude Code sessions.
 - **Live sessions**: other Claude Code processes on the machine
 - **Open PRs and tracking.csv claims** for the current repo
 - **Sibling branches** across clones in the same workspace
+- **Last handoff**: recent handoffs from peer clones (and from the same clone's previous `/sds` run, marked `(you)`) so the next session picks up where the last one stopped
 - **Recent activity**: last 7 days of session transcripts across every clone of the repo, powered by the `session-history` module's `/recall`
 - **Update banner** when a new Claude Code release is available
 
@@ -457,7 +458,7 @@ There are no agent-discipline logging rules, no log repo writes, and no triggers
 
 Multi-clone architecture for running multiple Claude agents in parallel on the same repo.
 
-**Installs**: `rules/multi-agent.md`, `multi-agent-system.md` (reference doc), `commands/mawf.md`, `commands/workspace-setup.md`, `port-registry.json`
+**Installs**: `rules/multi-agent.md`, `multi-agent-system.md` (reference doc), `commands/mawf.md`, `commands/workspace-setup.md`, `commands/handoff.md`, `lib/handoff.py`, `port-registry.json`
 
 **What it does**: Enables parallel development with multiple Claude Code instances:
 

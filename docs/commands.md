@@ -902,6 +902,33 @@ Runs on demand at the start of a session. Prints a plain-text dashboard with eve
 
 ---
 
+### /sds
+
+**Session shutdown sequence — autonomous end-of-session wrap-up.**
+
+Bookend to `/startup`. Composes existing primitives instead of duplicating them.
+
+**What it does** (8 phases):
+1. Detects agent identity and sibling state via `sds-broadcast.sh`
+2. Checks for active background tasks (TaskList); waits or asks if stalled
+3. Commits dirty work as a WIP commit and pushes (feature branches only; asks on `main`)
+4. Comments on referenced issues with a session summary; auto-closes only when a merged PR's body has `closes/fixes/resolves #N`
+5. Runs `/reflect` inline to capture learnings via `ccgm-learnings-log`
+6. Writes a handoff via `handoff.py write` (auto-picked up by the next `/startup` thanks to the HANDOFFS section)
+7. Appends a `session-ended` event to `~/.claude/sessions/{repo}/events.jsonl` and reports sibling state
+8. Prints a one-screen summary, then exits the session with `kill -TERM $PPID`
+
+**Usage**:
+```
+/sds              Run the full shutdown sequence and exit the session
+/sds --no-exit    Run the wrap-up but leave the session open
+/sds --dry-run    Show what would happen without doing anything (implies --no-exit)
+```
+
+**Installed by**: session-lifecycle module
+
+---
+
 ## Remote server commands
 
 Installed by the **remote-server** module.
