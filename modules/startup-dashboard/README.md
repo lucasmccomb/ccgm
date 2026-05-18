@@ -12,6 +12,7 @@ work on next. Deterministic data gather + model-powered summarization.
   Next up.
 - **Gather pipeline**: collects git state, open PRs, 48h merges, priority
   issues, `tracking.csv` claims, live Claude Code sessions, sibling branches,
+  recent handoffs (peer + self via `handoff.py summary --include-self`),
   orphan processes, release info, and recent session activity in parallel.
 - **Recent Activity**: unified 7-day view of session transcripts across every
   clone of the current repo, powered by the `session-history` module's `/recall`.
