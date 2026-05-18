@@ -2,6 +2,15 @@
 """
 PreToolUse hook that enforces Bash permissions from settings.json.
 
+Classification (plan.md §5 Epic 1): bypass-suppressible for allow/deny pattern
+matching; smart-rules block runs OUTSIDE the bypass short-circuit so the
+destructive-reset rule survives bypass mode via `hook_utils.hard_block()`.
+
+Execution order in main():
+  1. smart-rules (always run; destructive-reset → hard_block, bypass-proof)
+  2. bypass-mode short-circuit (exit 0)
+  3. settings.json allow/deny pattern matching
+
 This hook exists because Claude Code's built-in permission system has bugs:
 - Issue #15921: VSCode extension ignores Bash permissions
 - Issue #13340: Piped commands bypass permission allowlist
@@ -15,6 +24,9 @@ import os
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
+import hook_utils  # noqa: E402
 
 # Settings file locations in precedence order (highest first)
 SETTINGS_FILES = [
@@ -78,11 +90,14 @@ def pattern_matches_command(pattern: str, command: str) -> bool:
 def check_smart_rules(command: str) -> tuple[str | None, str | None]:
     """
     Context-aware rules for commands that are safe in some forms but dangerous in others.
-    These run BEFORE the settings.json deny/allow patterns.
+    These run BEFORE settings.json patterns AND before the bypass-mode short-circuit.
 
-    Returns: (decision, reason) or (None, None) to fall through to pattern matching.
+    Returns: (decision, reason) where decision is:
+      - "allow": auto-approve (e.g. reset to a remote ref)
+      - "hard_block": destroy-loca-history pattern; main() promotes to hard_block()
+      - None: fall through to bypass / pattern matching
     """
-    # git reset --hard: allow when targeting a remote ref, block otherwise
+    # git reset --hard: allow when targeting a remote ref, hard-block otherwise.
     # Safe: git reset --hard origin/main, git reset --hard origin/development
     # Dangerous: git reset --hard (bare), git reset --hard HEAD~3, git reset --hard <local-ref>
     reset_match = re.search(r'\bgit\s+reset\s+--hard\b', command)
@@ -92,23 +107,25 @@ def check_smart_rules(command: str) -> tuple[str | None, str | None]:
         # Also allow git -C <path> reset --hard origin/
         if re.search(r'\bgit\s+-C\s+\S+\s+reset\s+--hard\s+origin/', command):
             return ("allow", "git reset --hard to remote ref in subdir (safe)")
-        return ("deny", "git reset --hard without remote ref is blocked. Use 'git reset --hard origin/<branch>' to reset to a remote ref, or 'git pull --ff-only' to sync.")
+        return (
+            "hard_block",
+            "git reset --hard without remote ref is blocked. "
+            "Use 'git reset --hard origin/<branch>' to reset to a remote ref, "
+            "or 'git pull --ff-only' to sync.",
+        )
 
     return (None, None)
 
 
-def check_command(command: str, allow_patterns: list[str], deny_patterns: list[str]) -> tuple[str | None, str | None]:
+def check_pattern_decision(command: str, allow_patterns: list[str], deny_patterns: list[str]) -> tuple[str | None, str | None]:
     """
-    Check if a command should be allowed or denied.
+    Allow/deny decision from settings.json patterns.
 
-    Returns: (decision, reason)
-        decision: "allow", "deny", or None (let default system handle)
+    Smart-rules are NOT consulted here — main() runs them first so the
+    destructive-reset hard_block fires bypass-proof.
+
+    Returns: (decision, reason) where decision is "allow", "deny", or None.
     """
-    # Smart context-aware rules run first (before pattern matching)
-    decision, reason = check_smart_rules(command)
-    if decision:
-        return (decision, reason)
-
     # Check deny patterns first (deny takes priority)
     for pattern in deny_patterns:
         if pattern_matches_command(pattern, command):
@@ -119,15 +136,11 @@ def check_command(command: str, allow_patterns: list[str], deny_patterns: list[s
         if pattern_matches_command(pattern, command):
             return ("allow", f"Command matches allow pattern: {pattern}")
 
-    # No match - let the default permission system handle it
-    # Return None to not output anything and exit 0
     return (None, None)
 
+
 def main() -> None:
-    try:
-        input_data = json.load(sys.stdin)
-    except json.JSONDecodeError:
-        sys.exit(0)  # Non-blocking exit on invalid input
+    input_data = hook_utils.read_hook_input()
 
     tool_name = input_data.get("tool_name", "")
     tool_input = input_data.get("tool_input", {})
@@ -140,21 +153,27 @@ def main() -> None:
     if not command:
         sys.exit(0)
 
-    # Load patterns from settings
-    allow_patterns, deny_patterns = load_settings()
+    # 1. Smart-rules run first and OUTSIDE the bypass short-circuit so
+    #    destructive-reset hard-blocks even in bypass mode.
+    smart_decision, smart_reason = check_smart_rules(command)
+    if smart_decision == "hard_block":
+        hook_utils.hard_block(smart_reason or "destructive smart-rule matched")
+    if smart_decision == "allow":
+        hook_utils.emit_decision("allow", smart_reason or "smart-rule allow")
+    # "deny" via smart-rule is unused now (legacy path).
 
-    # Check the command
-    decision, reason = check_command(command, allow_patterns, deny_patterns)
+    # 2. Bypass mode: skip pattern matching. The session has opted out
+    #    of permission noise, and smart-rule hard-blocks have already
+    #    fired for the genuinely dangerous cases.
+    if hook_utils.is_bypass_mode(input_data):
+        sys.exit(0)
+
+    # 3. Pattern matching against settings.json allow/deny lists.
+    allow_patterns, deny_patterns = load_settings()
+    decision, reason = check_pattern_decision(command, allow_patterns, deny_patterns)
 
     if decision:
-        output = {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": decision,
-                "permissionDecisionReason": reason
-            }
-        }
-        print(json.dumps(output))
+        hook_utils.emit_decision(decision, reason or "")
 
     sys.exit(0)
 

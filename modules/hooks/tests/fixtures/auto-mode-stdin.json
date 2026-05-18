@@ -1,0 +1,7 @@
+{
+  "session_id": "test-session-auto",
+  "tool_name": "Bash",
+  "tool_input": {"command": "git status"},
+  "permission_mode": "auto",
+  "cwd": "/tmp/test-cwd"
+}

@@ -2,10 +2,14 @@
 """
 PreToolUse:Bash hook to prevent duplicate Supabase migration timestamps.
 
-BLOCKS git commit when migration files have duplicate numeric prefixes.
-Duplicate timestamps break `supabase db push` because the CLI can't distinguish
-files that share the same timestamp - one gets applied and the other gets stuck
-as "local only" permanently.
+Classification (plan.md §5 Epic 1): bypass-retained. This is a data-integrity
+check, not permission noise — a duplicate timestamp leaves a migration
+permanently stuck as "local only" in Supabase, which is hard to recover from.
+Block uses `hook_utils.hard_block()` so it survives bypass mode.
+
+BLOCKS git commit (via hard_block, bypass-proof) when migration files have
+duplicate numeric prefixes. Duplicate timestamps break `supabase db push`
+because the CLI cannot distinguish files that share the same timestamp.
 
 Only runs when:
 1. The command is a git commit
@@ -14,19 +18,17 @@ Only runs when:
 
 from __future__ import annotations
 
-import json
 import os
 import re
-import subprocess
 import sys
 from collections import Counter
 
+sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
+import hook_utils  # noqa: E402
+
 
 def main() -> None:
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, EOFError):
-        return
+    data = hook_utils.read_hook_input()
 
     # Only handle Bash commands
     if data.get("tool_name", "") != "Bash":
@@ -85,13 +87,7 @@ def main() -> None:
         "(e.g., 20260325900000 -> 20260325900001)."
     )
 
-    json.dump({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": error_msg
-        }
-    }, sys.stdout)
+    hook_utils.hard_block(error_msg)
 
 
 if __name__ == "__main__":

@@ -56,6 +56,16 @@
       "type": "lib",
       "template": false
     },
+    "lib/hook_utils.py": {
+      "target": "lib/hook_utils.py",
+      "type": "lib",
+      "template": false
+    },
+    "lib/sched_platform.py": {
+      "target": "lib/sched_platform.py",
+      "type": "lib",
+      "template": false
+    },
     "hooks/check-migration-timestamps.py": {
       "target": "hooks/check-migration-timestamps.py",
       "type": "hook",

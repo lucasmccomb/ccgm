@@ -2,7 +2,12 @@
 """
 PreToolUse:Bash hook to enforce GitHub Issues workflow.
 
-BLOCKS:
+Classification (plan.md §5 Epic 1): bypass-retained. Protected-branch
+protections are NOT permission noise — they are the workflow contract.
+`deny()` migrated to `hook_utils.hard_block()` (exit 2) so the rules
+survive bypass mode. `ALLOW_MAIN_COMMIT=1` is the explicit escape hatch.
+
+BLOCKS (via hard_block, bypass-proof):
 1. Commits on protected branches (must use feature branch)
 2. Commit messages without issue number prefix (^#\d+:)
 3. Direct pushes to protected branches (must use PR workflow)
@@ -21,6 +26,9 @@ import os
 import re
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
+import hook_utils  # noqa: E402
 
 # ─── Protected branches ──────────────────────────────────────────────
 # Any branch matching one of these names (case-insensitive) is blocked
@@ -175,16 +183,14 @@ def validate_commit_message_format(message: str | None) -> bool:
 
 
 def deny(reason: str) -> None:
-    """Return a deny decision."""
-    output = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }
-    }
-    print(json.dumps(output))
-    sys.exit(0)
+    """Bypass-proof hard block. Exits 2 with reason on stderr.
+
+    `permissionDecision: deny` from a PreToolUse hook is silently
+    overridden by any later `ask` decision (GitHub issue #39344). The
+    only signal Claude Code honors regardless of `permission_mode` is
+    `exit 2`. `hook_utils.hard_block()` wraps that primitive.
+    """
+    hook_utils.hard_block(reason)
 
 
 def check_commit(command: str, branch: str) -> None:
@@ -304,10 +310,7 @@ def check_push(command: str, branch: str) -> None:
 
 
 def main() -> None:
-    try:
-        input_data = json.load(sys.stdin)
-    except json.JSONDecodeError:
-        sys.exit(0)
+    input_data = hook_utils.read_hook_input()
 
     tool_name = input_data.get("tool_name", "")
     tool_input = input_data.get("tool_input", {})

@@ -2,11 +2,19 @@
 """
 PreToolUse hook that pauses on destructive Bash commands.
 
-Inspects Bash commands and returns permissionDecision:"ask" with a warning for
-destructive patterns that commonly cause data loss or history destruction:
+Classification (plan.md §5 Epic 1): bypass-suppressible. In bypass-mode
+sessions (bypassPermissions / dontAsk / auto) the routine "ask" decisions
+short-circuit to exit 0 — the user already opted out of permission noise.
+
+The exception is force-push-to-`main`: that case is migrated to
+`hook_utils.hard_block()` so it survives bypass mode. Pushing over a
+protected branch's history is the kind of destructive op `ALLOW_MAIN_COMMIT`
+exists to gate, not a permission-noise prompt.
+
+Inspects Bash commands for destructive patterns:
   - rm -rf (with smart whitelist for build artifacts)
   - SQL DROP / TRUNCATE
-  - git push --force (and --force-with-lease)
+  - git push --force (and --force-with-lease) — escalates to hard_block on `main`
   - git reset --hard (history destroying)
   - git checkout . (dirty discard)
   - kubectl delete
@@ -21,9 +29,12 @@ hook style (JSON stdin/stdout, consistent with auto-approve-bash.py).
 """
 from __future__ import annotations
 
-import json
+import os
 import re
 import sys
+
+sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
+import hook_utils  # noqa: E402
 
 # Build-artifact directory names that are safe to `rm -rf` without asking.
 # If every path on an rm -rf line matches one of these (exactly or as a
@@ -147,14 +158,34 @@ def check_careful(command: str) -> tuple[bool, str]:
     return (False, "")
 
 
-def main() -> None:
-    try:
-        input_data = json.load(sys.stdin)
-    except json.JSONDecodeError:
-        sys.exit(0)
+def _is_force_push_to_main(command: str) -> bool:
+    """Specifically: `git push --force[-f|--force-with-lease] ... main` (and refs that resolve to it).
 
-    tool_name = input_data.get("tool_name", "")
-    tool_input = input_data.get("tool_input", {})
+    Distinct from `_is_force_push_to_branch` because main is the one branch
+    a bypass-mode session should NOT be able to overwrite without an explicit
+    `ALLOW_MAIN_COMMIT=1` escape hatch.
+    """
+    if not re.search(r"\bgit\s+push\b", command):
+        return False
+    if not re.search(r"(--force\b|--force-with-lease\b|\s-f\b)", command):
+        return False
+    # Match: git push --force origin main, git push -f origin main,
+    # git push --force-with-lease origin main, git push origin +main,
+    # git push origin HEAD:main, git push origin main:main, etc.
+    if re.search(r"\b(origin\s+\+?main\b|main:main\b|HEAD:main\b|\s\+main\b)", command):
+        return True
+    # `git push --force` with no remote/refspec defaults to current branch.
+    # Catch that when the current branch is main via env var, but the
+    # hook can't reliably know the branch — leave that case to
+    # enforce-git-workflow.py which DOES read the branch.
+    return False
+
+
+def main() -> None:
+    data = hook_utils.read_hook_input()
+
+    tool_name = data.get("tool_name", "")
+    tool_input = data.get("tool_input", {})
 
     if tool_name != "Bash":
         sys.exit(0)
@@ -163,19 +194,26 @@ def main() -> None:
     if not command:
         sys.exit(0)
 
+    # Bypass-proof: force-push to main is a hard block regardless of mode.
+    # `ALLOW_MAIN_COMMIT=1` opens the explicit emergency channel.
+    if _is_force_push_to_main(command) and os.environ.get("ALLOW_MAIN_COMMIT") != "1":
+        hook_utils.hard_block(
+            "BLOCKED: force-pushing to `main` overwrites shared history. "
+            "If this is truly intended (recovering from a bad merge, etc.), "
+            "re-run with `ALLOW_MAIN_COMMIT=1` set."
+        )
+
     is_destructive, reason = check_careful(command)
     if not is_destructive:
         sys.exit(0)
 
-    output = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "ask",
-            "permissionDecisionReason": reason,
-        }
-    }
-    print(json.dumps(output))
-    sys.exit(0)
+    # In bypass mode the user has explicitly opted out of permission noise.
+    # Routine `ask` decisions are suppressed; the hard-block path above
+    # still fires for genuinely dangerous ops.
+    if hook_utils.is_bypass_mode(data):
+        sys.exit(0)
+
+    hook_utils.emit_decision("ask", reason)
 
 
 if __name__ == "__main__":

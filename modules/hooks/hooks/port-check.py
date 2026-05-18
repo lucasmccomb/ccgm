@@ -3,6 +3,11 @@
 PreToolUse:Bash hook that intercepts dev server commands and ensures correct
 port allocation based on the port registry and .env.clone identity.
 
+Classification (plan.md §5 Epic 1): bypass-suppressible. Warnings are advisory
+only — they never block. In bypass-mode sessions the hook short-circuits to
+keep dev-server launches quiet. Outside bypass mode it prints to stderr (not
+as a permission decision) so the agent can see the warning without blocking.
+
 DETECTS: Commands that launch dev servers (vite, wrangler dev, npm run dev,
 pnpm dev, next dev, browser-sync, etc.)
 
@@ -24,6 +29,9 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
+import hook_utils  # noqa: E402
 
 REGISTRY_PATH = Path.home() / ".claude" / "port-registry.json"
 
@@ -167,10 +175,22 @@ def determine_service_type(command: str) -> str:
 
 
 def main() -> None:
-    try:
-        tool_input = json.loads(sys.stdin.read())
-    except (json.JSONDecodeError, EOFError, ValueError):
-        return  # Silently allow on invalid input
+    # The earlier shape passed only `tool_input` here; the modern Claude
+    # Code shape passes the full hook envelope (tool_name + tool_input +
+    # permission_mode). Read both for compatibility.
+    data = hook_utils.read_hook_input()
+
+    # Accept either shape: the modern envelope (with tool_input nested)
+    # or the older direct-tool-input payload some tests may still send.
+    if "tool_input" in data:
+        tool_input = data.get("tool_input", {})
+    else:
+        tool_input = data
+
+    # Bypass mode: stay completely silent. The user has opted out of
+    # permission noise, and port checks are advisory not safety.
+    if hook_utils.is_bypass_mode(data):
+        return
 
     command = tool_input.get("command", "")
 
@@ -242,12 +262,9 @@ def main() -> None:
         )
 
     if messages:
-        # Output as a structured warning
-        output = {
-            "decision": "warn",
-            "reason": " | ".join(messages)
-        }
-        print(json.dumps(output))
+        # Warnings go to stderr so the agent sees them in tool output;
+        # this hook never blocks via a permission decision (advisory only).
+        print("PORT-CHECK: " + " | ".join(messages), file=sys.stderr)
     # If no messages, silently allow
 
 
