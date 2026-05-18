@@ -8,9 +8,24 @@ This module provides a `settings.base.json` that gets merged into `~/.claude/set
 
 - **Allow list**: ~800 Bash command prefixes covering git, package managers, build tools, languages, editors, system utilities, cloud CLIs, databases, and more
 - **File operation permissions**: Read/Edit/Write permissions for your code directory, Claude config, and temp files
-- **Deny list**: Dangerous operations blocked by default (rm -rf, force push to main, docker rm, DROP/TRUNCATE/DELETE SQL)
+- **Deny list**: 13 entries for dangerous operations (rm -rf, force push to main, docker rm, DROP/TRUNCATE/DELETE SQL). Several legacy entries were pruned in #474 once the `hooks` module gained bypass-proof `hard_block()` enforcement — see "Deny list rationale" below.
 - **Tool permissions**: WebFetch, WebSearch, Skill, Glob, Grep, and Supabase MCP tools pre-approved
 - **Plugin configuration**: Common Claude Code plugins enabled
+
+### Deny list rationale (13 entries)
+
+Each entry survives a specific test: would removing it create a real new risk after Epic 1 of #473 wired `hooks/check-careful.py`, `hooks/enforce-git-workflow.py`, `hooks/auto-approve-bash.py`, and `hooks/check-migration-timestamps.py` to use `hook_utils.hard_block()` (bypass-proof `exit 2`)?
+
+- `Bash(rm -rf:*)` / `Bash(rm -r:*)` — paired-with `check-careful.py` which prompts in non-bypass mode and short-circuits in bypass. Deny is the belt to the hook's suspenders for the bypass-mode case where the hook intentionally stays silent.
+- `Bash(git reset --hard:*)` — `auto-approve-bash.py` smart-rule hard-blocks the non-remote-ref form and explicitly allows the remote-ref form. The deny entry catches anything the smart-rule misses.
+- `Bash(git push --force origin main:*)` — kept as a single canonical deny. The variant forms (`-f main`, `--force main`, `--force-with-lease origin main`, `-f origin main`) were pruned because `check-careful.py:_is_force_push_to_main()` matches all of them and hard-blocks; the surviving deny is defense-in-depth for the most-typed form.
+- `Bash(git clean:*)` — `check-careful.py` prompts. Deny matters in bypass + no `ALLOW_MAIN_COMMIT` flow.
+- `Bash(git branch -D:*)` — no hook covers branch deletion.
+- `Bash(docker rm:*)`, `Bash(docker rmi:*)`, `Bash(docker system prune:*)` — hook only fires for `-f` variants; deny catches the bare forms.
+- `Bash(kubectl delete:*)`, `Bash(DROP:*)`, `Bash(TRUNCATE:*)`, `Bash(DELETE FROM:*)` — SQL/k8s blast radius. Hooks ask but deny is the harder stop in non-bypass.
+
+Removed in #474 (now redundant with hook hard-blocks):
+- `Bash(git push --force main:*)`, `Bash(git push -f main:*)`, `Bash(git push --force-with-lease origin main:*)`, `Bash(git push -f origin main:*)` — all subsumed by `check-careful.py:_is_force_push_to_main()`.
 
 ## Template Variables
 
