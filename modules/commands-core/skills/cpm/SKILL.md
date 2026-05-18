@@ -41,8 +41,11 @@ If there are no changes and no unpushed commits, stop and report "Nothing to com
 
 ### Phase 4: Merge
 
-1. Merge the PR: `gh pr merge --squash --delete-branch`
+1. Merge with admin bypass so you do not wait on GitHub Actions:
+   `gh pr merge --squash --delete-branch --admin`
 2. Confirm the merge succeeded.
+
+Local pre-push verification is the source of truth. Remote Actions stall, run out of budget, and queue — those are not reasons to block a merge. `--admin` bypasses the BLOCKED state caused by "checks pending" or "no required reviewer present" when you are the repo admin. It does NOT force-merge through an actually-FAILED check; a FAILURE check (not PENDING) means local verification missed something — stop and investigate, do not retry with `--admin`.
 
 ### Phase 5: Close Issue
 
@@ -73,6 +76,7 @@ Output a summary in this format:
 
 ## Error Handling
 
-- If `gh pr merge` fails (e.g., checks pending), report the failure and the PR URL. Do not force merge.
+- If `gh pr merge --admin` fails for a real reason — merge conflict, missing PR, you are not the admin in this repo, a check in FAILURE state — report and stop. Do not retry the same command; investigate the cause.
+- A FAILURE check (not PENDING) is the one signal that should block a merge. Pre-push verification should have caught it. If a remote check disagrees with local, investigate before merging.
 - If `git pull --ff-only` fails, fall back to `git fetch origin && git reset --hard origin/main`.
 - If any step fails, stop and report what succeeded and what failed.

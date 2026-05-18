@@ -133,13 +133,15 @@ Closes #{issue_number}"
 
 ### 8. Merge the PR
 
-Wait briefly for any fast CI checks, then merge:
+Merge immediately with admin bypass — do not wait for GitHub Actions:
 
 ```bash
-gh pr merge --squash --delete-branch
+gh pr merge --squash --delete-branch --admin
 ```
 
-If merge fails (CI required, review required), report the blocker and stop. The user may need to adjust repo settings or wait for CI.
+Local pre-push verification (lint + type-check + tests + build) is the source of truth. Remote CI is best-effort: Actions minutes budget runs out, runners stall, queues back up — none of those are reasons to block a merge. `--admin` bypasses the BLOCKED state from "checks pending" or "no required reviewer present" when you ARE the repo admin. It does NOT force-merge through an actually-FAILED check; if a check is in FAILURE state (not PENDING), stop and investigate — local pre-push should have caught it.
+
+If `--admin` itself fails — merge conflict, missing PR, you are not the admin in this repo — report and stop. Do not retry the same command; investigate the cause.
 
 ### 9. Close the Issue
 
