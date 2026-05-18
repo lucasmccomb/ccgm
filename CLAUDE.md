@@ -87,6 +87,18 @@ bash tests/test-installer.sh
 5. Add to relevant presets in `presets/`
 6. Run tests
 
+### Editing Module Files via Symlinks
+
+CCGM module files are installed at `~/.claude/{commands,lib,hooks,rules}/` as **symlinks** pointing at `~/code/ccgm/modules/.../`. The Edit tool tracks reads by absolute path and does NOT follow symlinks — reading an installed copy does not satisfy Edit's read-gate for the workspace source path.
+
+When editing a module file from a workspace clone:
+
+- Source (edit here): `modules/{name}/.../file` under the current workspace clone
+- Installed symlink: `~/.claude/lib/file.py` or similar — fine to Read for inspection, but does NOT count toward the Edit gate for the workspace source path
+- Canonical clone: `~/code/ccgm/modules/...` — same: do not edit here, do not rely on its read state
+
+Habit: always Read the workspace `modules/` path before any Edit, even if you read the installed copy first.
+
 ## Commit Message Format
 
 ```
