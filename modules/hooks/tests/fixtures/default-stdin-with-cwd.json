@@ -1,0 +1,7 @@
+{
+  "session_id": "test-session-cwd",
+  "tool_name": "Bash",
+  "tool_input": {"command": "git status"},
+  "permission_mode": "default",
+  "cwd": "FIXTURE_CWD_PLACEHOLDER"
+}
