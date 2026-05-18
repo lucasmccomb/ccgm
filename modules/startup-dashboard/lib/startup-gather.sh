@@ -169,6 +169,18 @@ fi
   python3 ~/.claude/hooks/orphan-process-check.py 2>/dev/null || true
 ) > "$TMPDIR/orphans" 2>/dev/null &
 
+# 6b. Recent handoffs (peer + self, last 3d)
+# Surfaces handoffs the previous session wrote via /sds or /handoff so the
+# next /startup picks them up. --include-self covers the /sds → /startup
+# self-continuity case; peer handoffs from sibling clones come along too.
+(
+  if [ -z "$REPO_NAME" ] || [ "$REPO_NAME" = "unknown" ]; then
+    exit 0
+  fi
+  python3 ~/.claude/lib/handoff.py summary \
+    --repo "$REPO_NAME" --include-self --max 3 --days 3 2>/dev/null || true
+) > "$TMPDIR/handoffs" 2>/dev/null &
+
 # 7. Release check
 (
   CURRENT=$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
@@ -263,6 +275,9 @@ $(cat "$TMPDIR/sessions")
 
 === SIBLINGS ===
 $(cat "$TMPDIR/siblings")
+
+=== HANDOFFS ===
+$(cat "$TMPDIR/handoffs")
 
 === ORPHANS ===
 $(cat "$TMPDIR/orphans")
