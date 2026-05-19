@@ -102,7 +102,8 @@ if [ ! -f "${AUTOHEAL_DIR}/config.json" ]; then
     "claude-opus-4-7":    {"input_per_million": 15,   "output_per_million": 75},
     "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4}
   },
-  "daily_cost_cap_usd": 0.50,
+  "max_input_tokens": 200000,
+  "daily_cost_cap_usd": 1.00,
   "retention_gzip_days": 30,
   "retention_delete_days": 60
 }
@@ -139,12 +140,23 @@ if "cost_pricing" not in cfg or not isinstance(cfg.get("cost_pricing"), dict):
 if "default_model" not in cfg:
     cfg["default_model"] = cfg.get("model", "claude-sonnet-4-6")
     dirty = True
+# Issue #517: backfill the new max_input_tokens key without overriding
+# a value the user has already chosen.
+if "max_input_tokens" not in cfg:
+    cfg["max_input_tokens"] = 200000
+    dirty = True
+# Issue #517: bump default cost cap from $0.50 to $1.00, but only when
+# the existing value is the legacy default (don't silently rewrite a
+# user-customized cap).
+if cfg.get("daily_cost_cap_usd") in (0.5, 0.50):
+    cfg["daily_cost_cap_usd"] = 1.00
+    dirty = True
 
 if dirty:
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=2)
         fh.write("\n")
-    print(f"autoheal-install: merged cost_pricing/default_model into {path}")
+    print(f"autoheal-install: merged cost_pricing/default_model/max_input_tokens into {path}")
 PY
 fi
 
