@@ -1,4 +1,49 @@
 {
-  "_description": "Epic 10: content TBD — high-confidence security patterns for the realtime scanner. See plan.md §3.6. Patterns are: github_pat_in_commit_or_echo, aws_key_in_command, anthropic_key_in_command, force_push_main_without_bypass, rm_rf_absolute_root, sudo_destructive, drop_production_db.",
-  "patterns": []
+  "_description": "Epic 10: high-confidence security patterns for the realtime scanner. See plan.md §3.6. Patterns target Bash command strings; the scanner is OPT-IN via realtime_alerts_enabled in ~/.claude/autoheal/config.json (default false). On match the scanner logs a realtime_security_alert event AND exits 2 with a <autoheal-security-alert> system reminder.",
+  "patterns": [
+    {
+      "name": "github_pat_in_commit_or_echo",
+      "regex": "(ghp_|gho_|ghu_|ghs_|ghr_)[a-zA-Z0-9]{36,}",
+      "context": "command",
+      "severity": "critical"
+    },
+    {
+      "name": "aws_key_in_command",
+      "regex": "AKIA[0-9A-Z]{16}",
+      "context": "command",
+      "severity": "critical"
+    },
+    {
+      "name": "anthropic_key_in_command",
+      "regex": "sk-ant-(api03-)?[a-zA-Z0-9_\\-]+",
+      "context": "command",
+      "severity": "critical"
+    },
+    {
+      "name": "force_push_main_without_bypass",
+      "regex": "git push.*(--force|-f).*(origin/)?main\\b",
+      "context": "command",
+      "guard": "ALLOW_MAIN_COMMIT_unset",
+      "severity": "critical"
+    },
+    {
+      "name": "rm_rf_absolute_root",
+      "regex": "\\brm\\s+(-[rRf]*[rRfd]+)\\s+/",
+      "context": "command",
+      "severity": "critical"
+    },
+    {
+      "name": "sudo_destructive",
+      "regex": "\\bsudo\\s+(rm|dd|shutdown|reboot|halt|init|kill|killall)\\b",
+      "context": "command",
+      "severity": "high"
+    },
+    {
+      "name": "drop_production_db",
+      "regex": "\\bDROP\\s+(TABLE|DATABASE|SCHEMA)\\b",
+      "context": "command",
+      "guard": "production_connection_string",
+      "severity": "critical"
+    }
+  ]
 }

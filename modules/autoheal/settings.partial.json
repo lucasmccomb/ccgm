@@ -16,7 +16,9 @@
           {
             "type": "command",
             "command": "python3 $HOME/.claude/hooks/realtime-security-scanner.py",
-            "timeout": 5000
+            "timeout": 5000,
+            "async": true,
+            "asyncRewake": true
           }
         ]
       }
