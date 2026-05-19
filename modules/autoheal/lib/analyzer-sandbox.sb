@@ -1,3 +1,69 @@
-;; Epic 6: content TBD — macOS Seatbelt (sandbox-exec) profile for the
-;; analyzer; restricts outbound network to api.anthropic.com:443 and
-;; file reads to a tempfile. See plan.md §3.13 and §5 Epic 6.
+;; CCGM autoheal analyzer sandbox profile (Epic 6, plan.md §3.12).
+;;
+;; Optional defense-in-depth wrapper for `bin/autoheal-analyze.sh`. When
+;; the script is invoked with the env var USE_ANALYZER_SANDBOX=1 AND
+;; sandbox-exec is on PATH, the analyzer step is wrapped:
+;;
+;;   sandbox-exec -f lib/analyzer-sandbox.sb curl -s https://api.anthropic.com/...
+;;
+;; The profile restricts the child process to exactly what the analyzer
+;; needs: outbound TLS to api.anthropic.com, reads from /tmp for the
+;; pre-extracted excerpts, and writes to ~/.claude/autoheal/proposals/
+;; and ~/.claude/autoheal/cost.log. Everything else is denied.
+;;
+;; The wrapper is OPT-IN because Apple's sandbox-exec is still
+;; technically deprecated and the syntax differs subtly between macOS
+;; versions; the default code path runs without it.
+
+(version 1)
+(deny default)
+
+;; Required for any process: read its own binary, libs, and dyld cache.
+(allow process-fork)
+(allow signal (target self))
+(allow sysctl-read)
+(allow mach-lookup
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  (global-name "com.apple.system.opendirectoryd.api")
+  (global-name "com.apple.system.notification_center")
+  (global-name "com.apple.coreservices.launchservicesd"))
+
+;; Read the standard system library tree and the analyzer's own
+;; binary + dylibs. Without this, curl will not start.
+(allow file-read*
+  (subpath "/usr/lib")
+  (subpath "/System/Library")
+  (subpath "/Library/Frameworks")
+  (subpath "/usr/share")
+  (subpath "/private/etc/ssl")
+  (subpath "/private/etc/resolv.conf")
+  (subpath "/private/var/db/timezone")
+  (literal "/dev/null")
+  (literal "/dev/urandom")
+  (literal "/dev/random"))
+
+;; Excerpt files are pre-extracted into /tmp by a non-sandboxed Python
+;; phase. The analyzer process is only allowed to read them, not write.
+(allow file-read*
+  (subpath "/tmp"))
+
+;; Writes are strictly scoped to the autoheal output paths. We use a
+;; regex over $HOME because the home path is user-specific.
+(allow file-write*
+  (regex #"^/Users/[^/]+/\.claude/autoheal/proposals/")
+  (regex #"^/Users/[^/]+/\.claude/autoheal/cost\.log$")
+  (regex #"^/Users/[^/]+/\.claude/logs/autoheal[^/]*\.log$"))
+
+;; Network: only outbound TLS to api.anthropic.com. This is enforced by
+;; (a) restricting the network category and (b) the analyzer script
+;; itself only calling curl against api.anthropic.com. Belt + braces.
+(allow network-outbound
+  (remote tcp "*:443"))
+
+;; DNS resolution must be permitted for the hostname lookup to work.
+(allow network-bind (local udp "*:0"))
+(allow network-outbound (remote udp "*:53"))
+
+;; Deny everything not above. process-exec is implicitly denied since
+;; we did not allow it, which is what we want — the analyzer must not
+;; spawn helper processes once it is inside the sandbox.

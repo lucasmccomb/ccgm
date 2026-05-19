@@ -1,0 +1,17 @@
+{
+  "id": "msg_test_01",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-6",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 240
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"proposals\": [{\"id\": \"prop_testaccept\", \"kind\": \"settings_allow_add\", \"title\": \"Auto-approve git diff --staged\", \"rationale\": \"Three independent sessions asked permission for `git diff --staged` over the past 24h. The current allow list covers `git diff` but not `--staged`. Narrowest possible widening is the literal `Bash(git diff --staged)`.\", \"confidence\": 9, \"breadth_score\": 1, \"occurrence_count\": 3, \"session_ids\": [\"s-aaa\", \"s-bbb\", \"s-ccc\"], \"proposed_diff_target\": \"modules/settings/settings.partial.json\", \"proposed_diff\": \"+ Bash(git diff --staged)\", \"fingerprint\": \"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2\", \"originating_clone\": \"ccgm-w1-c0\", \"generated_at\": \"2026-05-18T08:00:00+00:00\"}]}"
+    }
+  ]
+}
