@@ -192,6 +192,44 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 5. Symlinked hooks dir (installer creates ~/.claude/hooks/*.py as symlinks).
+# ---------------------------------------------------------------------------
+#
+# Regression: find -type f (without -L) skips symlinks, so the hooks table came
+# out empty when run against the default installed path. find -L follows
+# symlinks during traversal so -type f matches the symlinked target.
+
+SYMLINK_TMP="$(mktemp -d -t permission-audit-symlinks.XXXXXX)"
+REAL_DIR="${SYMLINK_TMP}/real"
+SYMLINK_DIR="${SYMLINK_TMP}/symlinks"
+mkdir -p "${REAL_DIR}" "${SYMLINK_DIR}"
+
+# One real hook (legacy classification — uses neither helper).
+cat > "${REAL_DIR}/symlinked-hook.py" <<'EOF'
+#!/usr/bin/env python3
+"""A fake hook that lives behind a symlink."""
+print("hello from a symlinked hook")
+EOF
+
+ln -s "${REAL_DIR}/symlinked-hook.py" "${SYMLINK_DIR}/symlinked-hook.py"
+
+SYMLINK_OUTPUT="$(bash "${AUDIT}" --hooks-dir "${SYMLINK_DIR}" --settings-file "${FIXTURE_SETTINGS}" --format text 2>&1)"
+SYMLINK_EXIT=$?
+assert_eq "${SYMLINK_EXIT}" "0" "symlink run exits 0"
+
+# The symlinked hook MUST be classified, not silently skipped.
+assert_contains "${SYMLINK_OUTPUT}" "symlinked-hook.py" "symlink run mentions symlinked-hook.py"
+
+sym_line="$(printf '%s\n' "${SYMLINK_OUTPUT}" | grep '^symlinked-hook.py' || true)"
+assert_contains "${sym_line}" "legacy" "symlinked-hook.py classified (legacy)"
+
+# JSON form confirms the hook count is 1, not 0.
+SYMLINK_JSON="$(bash "${AUDIT}" --hooks-dir "${SYMLINK_DIR}" --settings-file "${FIXTURE_SETTINGS}" --format json 2>&1)"
+assert_eq "$(printf '%s' "${SYMLINK_JSON}" | jq '.hooks | length')" "1" "symlink json hooks[] length=1"
+
+rm -rf "${SYMLINK_TMP}"
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 
