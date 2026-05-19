@@ -194,6 +194,98 @@ echo 'not even valid json {{{' | python3 "${HOOK}"
 rc=$?
 assert_eq "${rc}" "0" "malformed stdin exits 0"
 
+# 8. transcript_path is captured when present in stdin envelope.
+rm -f "$(events_file)"
+run_hook '{"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp/repo","transcript_path":"/tmp/fake/transcript-abc.jsonl"}'
+tp=$(python3 -c "
+import json
+print(json.loads(open('$(events_file)').readline())['transcript_path'])
+")
+assert_eq "${tp}" "/tmp/fake/transcript-abc.jsonl" "transcript_path captured from stdin"
+
+# 9. transcript_path is null when stdin omits it (backward compatible).
+rm -f "$(events_file)"
+run_hook '{"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp/repo"}'
+tp=$(python3 -c "
+import json
+rec = json.loads(open('$(events_file)').readline())
+print('present' if 'transcript_path' in rec else 'absent', rec.get('transcript_path'))
+")
+assert_eq "${tp}" "present None" "transcript_path is null when stdin omits it"
+
+# 10. transcript_path is null when stdin provides a non-string (defensive).
+rm -f "$(events_file)"
+run_hook '{"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp/repo","transcript_path":42}'
+tp=$(python3 -c "
+import json
+rec = json.loads(open('$(events_file)').readline())
+print(rec['transcript_path'])
+")
+assert_eq "${tp}" "None" "transcript_path is null when stdin provides non-string"
+
+# 11. transcript_path is captured by the PostToolUseFailure path too.
+rm -f "$(events_file)"
+run_hook '{"hook_event_name":"PostToolUseFailure","session_id":"s1","tool_name":"Bash","tool_input":{"command":"false"},"exit_code":1,"stderr":"boom","cwd":"/tmp/repo","transcript_path":"/tmp/fake/transcript-fail.jsonl"}'
+tp=$(python3 -c "
+import json
+print(json.loads(open('$(events_file)').readline())['transcript_path'])
+")
+assert_eq "${tp}" "/tmp/fake/transcript-fail.jsonl" "transcript_path captured on PostToolUseFailure"
+
+# 12. transcript_path is captured by the PermissionRequest path too.
+rm -f "$(events_file)"
+run_hook '{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git push --force feat-x"},"cwd":"/tmp/repo","transcript_path":"/tmp/fake/transcript-perm.jsonl"}'
+tp=$(python3 -c "
+import json
+print(json.loads(open('$(events_file)').readline())['transcript_path'])
+")
+assert_eq "${tp}" "/tmp/fake/transcript-perm.jsonl" "transcript_path captured on PermissionRequest"
+
+# 13. Schema accepts records with transcript_path string, null, and absent.
+#
+# Minimal hand-rolled validator: read the schema and verify that
+# (a) transcript_path is a declared property, (b) it accepts string|null,
+# (c) records produced above satisfy the additionalProperties constraint.
+SCHEMA_PATH="${MODULE_ROOT}/lib/event-schema.json"
+validate_ok=$(python3 <<PY
+import json
+with open("${SCHEMA_PATH}") as fh:
+    schema = json.load(fh)
+
+props = schema.get("properties", {})
+add_props = schema.get("additionalProperties", True)
+
+# (a) transcript_path declared.
+assert "transcript_path" in props, "transcript_path missing from schema properties"
+# (b) accepts string|null.
+tp_type = props["transcript_path"].get("type")
+assert tp_type == ["string", "null"] or set(tp_type) == {"string", "null"}, \
+    f"transcript_path type unexpected: {tp_type!r}"
+
+# (c) Verify three on-disk record shapes are structurally schema-conforming.
+declared = set(props.keys())
+required = set(schema.get("required", []))
+
+# Build three sample records:
+samples = [
+    # transcript_path = string
+    {"kind":"tool_use","timestamp":"2026-05-18T00:00:00+00:00","session_id":"s","tool_name":"Bash","transcript_path":"/tmp/x.jsonl"},
+    # transcript_path = null
+    {"kind":"tool_use","timestamp":"2026-05-18T00:00:00+00:00","session_id":"s","tool_name":"Bash","transcript_path":None},
+    # transcript_path absent (backward compat)
+    {"kind":"tool_use","timestamp":"2026-05-18T00:00:00+00:00","session_id":"s","tool_name":"Bash"},
+]
+for rec in samples:
+    missing = required - set(rec.keys())
+    assert not missing, f"required fields missing: {missing}"
+    if add_props is False:
+        extra = set(rec.keys()) - declared
+        assert not extra, f"undeclared fields present: {extra}"
+print("ok")
+PY
+)
+assert_eq "${validate_ok}" "ok" "schema accepts transcript_path string|null|absent"
+
 echo ""
 echo "test-event-logging.sh: ${PASS} passed, ${FAIL} failed"
 [ "${FAIL}" -eq 0 ] || exit 1
