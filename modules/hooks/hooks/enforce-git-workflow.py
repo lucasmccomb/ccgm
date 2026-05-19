@@ -175,6 +175,21 @@ def is_sync_commit(message: str | None) -> bool:
     return bool(re.match(r"^sync:", message, re.IGNORECASE))
 
 
+def is_auto_commit(message: str | None) -> bool:
+    """Check if this is an autoheal apply-path commit (`#auto:` prefix).
+
+    autoheal's `lib/apply-proposal.py` (and the future /autoheal-apply
+    command) write commits with `#auto: apply autoheal proposal {id}`
+    when a proposal is mechanically applied to a feature branch. These
+    are not issue commits and never run on main; the format is
+    distinguishable enough to allow without weakening the issue-number
+    rule for human commits.
+    """
+    if not message:
+        return False
+    return bool(re.match(r"^#auto:", message))
+
+
 def validate_commit_message_format(message: str | None) -> bool:
     """Check if commit message starts with issue number: '#42: description'."""
     if not message:
@@ -222,14 +237,20 @@ def check_commit(command: str, branch: str) -> None:
     if is_merge_commit(command) or is_amend_without_message(command):
         return
 
-    # Rule 2: Commit message must have issue number prefix (or sync: prefix)
+    # Rule 2: Commit message must have issue number prefix (or sync: / #auto: prefix)
     message = extract_commit_message(command)
-    if message and not is_sync_commit(message) and not validate_commit_message_format(message):
+    if (
+        message
+        and not is_sync_commit(message)
+        and not is_auto_commit(message)
+        and not validate_commit_message_format(message)
+    ):
         deny(
             f'Commit message must start with issue number.\n'
             f'  Required format: "#{{issue_number}}: {{description}}"\n'
             f'  Example: "#42: Fix the login bug"\n'
             f'  Also allowed: "sync: update session log"\n'
+            f'  Also allowed (autoheal apply path): "#auto: apply autoheal proposal {{id}}"\n'
             f'  Your message: "{message}"'
         )
 
