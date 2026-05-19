@@ -2,3 +2,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .DS_Store
+
+# autoheal: never commit user-specific config or per-repo overrides
+modules/autoheal/config.json
+**/.autoheal/config.json
