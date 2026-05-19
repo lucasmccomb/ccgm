@@ -24,7 +24,9 @@
 #   CCGM_AUTOHEAL_SENT_DIR         default ~/.claude/autoheal/sent
 #   CCGM_AUTOHEAL_LOGS_DIR         default ~/.claude/logs
 #   CCGM_AUTOHEAL_CONFIG           default ~/.claude/autoheal/config.json
-#   CCGM_AUTOHEAL_TODAY            default $(date +%Y-%m-%d)
+#   CCGM_AUTOHEAL_TODAY            default $(date -u +%Y-%m-%d). UTC-keyed
+#                                  to match digests/{date}.md written by
+#                                  autoheal-digest.sh (issue #520).
 #   CCGM_AUTOHEAL_RESEND_URL       default https://api.resend.com/emails
 #                                  (tests point at a local mock server)
 #   CCGM_AUTOHEAL_FROM             default "autoheal@ccgm.local"
@@ -49,7 +51,7 @@ DIGESTS_DIR="${CCGM_AUTOHEAL_DIGESTS_DIR:-${HOME}/.claude/autoheal/digests}"
 SENT_DIR="${CCGM_AUTOHEAL_SENT_DIR:-${HOME}/.claude/autoheal/sent}"
 LOGS_DIR="${CCGM_AUTOHEAL_LOGS_DIR:-${HOME}/.claude/logs}"
 CONFIG_FILE="${CCGM_AUTOHEAL_CONFIG:-${HOME}/.claude/autoheal/config.json}"
-TODAY="${CCGM_AUTOHEAL_TODAY:-$(date +%Y-%m-%d)}"
+TODAY="${CCGM_AUTOHEAL_TODAY:-$(date -u +%Y-%m-%d)}"
 RESEND_URL="${CCGM_AUTOHEAL_RESEND_URL:-https://api.resend.com/emails}"
 FROM_ADDR="${CCGM_AUTOHEAL_FROM:-autoheal@ccgm.local}"
 ERR_LOG="${CCGM_AUTOHEAL_ERR_LOG:-${LOGS_DIR}/autoheal.err.log}"

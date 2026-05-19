@@ -34,7 +34,9 @@
 #   CCGM_AUTOHEAL_DIGESTS_DIR      default $CCGM_AUTOHEAL_DIR/digests
 #   CCGM_AUTOHEAL_PUBLISHED_DIR    default $CCGM_AUTOHEAL_DIR/published
 #   CCGM_AUTOHEAL_LOGS_DIR         default ~/.claude/logs
-#   CCGM_AUTOHEAL_TODAY            default $(date +%Y-%m-%d)
+#   CCGM_AUTOHEAL_TODAY            default $(date -u +%Y-%m-%d). UTC-keyed
+#                                  to match the events/proposals/digests
+#                                  date-named files (issue #520).
 #   CCGM_AUTOHEAL_MACHINE_ID       default `hostname`
 #
 # Exit codes:
@@ -54,7 +56,7 @@ EVENTS_DIR="${CCGM_AUTOHEAL_EVENTS_DIR:-${AUTOHEAL_DIR}/events}"
 DIGESTS_DIR="${CCGM_AUTOHEAL_DIGESTS_DIR:-${AUTOHEAL_DIR}/digests}"
 PUBLISHED_DIR="${CCGM_AUTOHEAL_PUBLISHED_DIR:-${AUTOHEAL_DIR}/published}"
 LOGS_DIR="${CCGM_AUTOHEAL_LOGS_DIR:-${HOME}/.claude/logs}"
-TODAY="${CCGM_AUTOHEAL_TODAY:-$(date +%Y-%m-%d)}"
+TODAY="${CCGM_AUTOHEAL_TODAY:-$(date -u +%Y-%m-%d)}"
 
 PUBLISH_LOG="${LOGS_DIR}/autoheal-publish-${TODAY}.log"
 CURSOR_FILE="${PUBLISHED_DIR}/${TODAY}.last"
