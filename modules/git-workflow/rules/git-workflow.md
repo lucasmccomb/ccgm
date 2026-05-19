@@ -87,3 +87,11 @@ git pull origin main --ff-only
 ```
 
 This ensures the working directory reflects the latest merged state and avoids stale branch confusion.
+
+---
+
+# Pathspecs Resolve From cwd, Not Repo Root
+
+**`git add packages/foo/...` will fail with exit 128 ("pathspec did not match any files") if you run it from inside another sub-package directory.** Git resolves pathspecs relative to the current working directory, not the repository root. This bites in monorepos when you start in a package subdir and stage paths from sibling packages.
+
+**Fix**: `cd` to the repo root first, or use `git -C <repo-root> add <paths>`. Same rule applies to every git subcommand that takes pathspecs (`add`, `rm`, `restore`, `checkout -- <paths>`, etc.).
