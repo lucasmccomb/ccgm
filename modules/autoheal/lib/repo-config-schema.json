@@ -1,3 +1,66 @@
 {
-  "_description": "Epic 12: content TBD — JSON schema for per-repo .autoheal/config.json. See plan.md §3.4 (per-repo overrides) and §5 Epic 12."
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Autoheal Per-Repo Config",
+  "description": "Optional per-repository override file at <repo-root>/.autoheal/config.json. Loaded by hook_utils.load_repo_config() during analyzer/digest runs. The merge rule (plan.md §3.4): repo config overrides global for keys it sets; missing keys fall through to global. Security constraint (plan.md §R21 — risk table): `additional_allow_patterns` is the only ADDITIVE mutating field. Per-repo config CANNOT remove deny entries — that would let an attacker who lands a .autoheal/config.json into a repo widen permissions. Deny lists live only in the canonical ~/.claude/settings.json layer.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "additional_allow_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Claude Code permission pattern (e.g. 'Bash(supabase:*)', 'Bash(wrangler:*)'). Format follows the same shape as settings.json `permissions.allow` entries."
+      },
+      "default": [],
+      "description": "Extra allow patterns appended (NOT subtracted) to the global allow list when working inside this repo. The only ADDITIVE field — cannot remove from the global deny list."
+    },
+    "calibration_days": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Per-repo override of the analyzer calibration window (in days). 0 disables calibration; analyzer treats all events as production-quality."
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "confidence_min": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Minimum analyzer confidence required for a proposal sourced from this repo to be retained. Higher = stricter."
+        },
+        "occurrence_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Minimum occurrence count required for a proposal from this repo. Higher = stricter."
+        }
+      },
+      "description": "Per-repo overrides for the global proposal thresholds. Either field may be set independently; unset fields fall through to global."
+    },
+    "kind_filters": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "settings_allow_add",
+          "settings_deny_remove",
+          "hook_narrow",
+          "new_command",
+          "rule_update",
+          "command_doc_tweak"
+        ]
+      },
+      "uniqueItems": true,
+      "description": "Whitelist of proposal kinds to retain for this repo. Empty array means 'no proposals from this repo'. Missing field means 'all kinds permitted'. Enum mirrors proposal-schema.json `kind`."
+    },
+    "realtime_alerts_enabled": {
+      "type": "boolean",
+      "description": "Per-repo override of the global realtime_alerts_enabled flag."
+    },
+    "auto_apply_enabled": {
+      "type": "boolean",
+      "description": "Per-repo override of the global auto_apply_enabled flag."
+    }
+  }
 }
