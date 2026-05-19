@@ -1,0 +1,50 @@
+{
+  "_description": "User-correction phrases that the UserPromptSubmit detector flags. Mirror the regex set inlined in hooks/user-correction-detector.py. The hook loads this file at module import; tests override the path via CCGM_CORRECTION_PATTERNS. Order matters only for disambiguation when two patterns could match the same string; the first match wins. Patterns are case-insensitive and word-bounded where it makes sense. False positives are acceptable -- the analyzer's threshold logic is the second line of defense.",
+  "patterns": [
+    {
+      "name": "no_not_like_that",
+      "regex": "\\bno,?\\s+not\\s+like\\s+that\\b",
+      "description": "User says 'no, not like that' -- direct rejection of the agent's last action."
+    },
+    {
+      "name": "stop_doing",
+      "regex": "\\bstop\\s+doing\\b",
+      "description": "User says 'stop doing X' -- imperative halt on the current pattern of behavior."
+    },
+    {
+      "name": "dont_do_that",
+      "regex": "\\b(?:don'?t|do\\s+not)\\s+(?:do\\s+that|do\\s+this)\\b",
+      "description": "User says 'don't do that' / 'do not do this' -- explicit prohibition."
+    },
+    {
+      "name": "i_told_you",
+      "regex": "\\bI\\s+told\\s+you\\b",
+      "description": "User says 'I told you ...' -- references a prior instruction the agent failed to follow."
+    },
+    {
+      "name": "wait_no",
+      "regex": "\\bwait,?\\s+no\\b",
+      "description": "User says 'wait, no' -- interrupts the agent mid-action with a reversal."
+    },
+    {
+      "name": "actually_correction",
+      "regex": "\\bactually,?\\s+(?:no|that's\\s+wrong|that\\s+is\\s+wrong|do)\\b",
+      "description": "User says 'actually, no' / 'actually, that's wrong' / 'actually, do ...' -- soft correction."
+    },
+    {
+      "name": "instead",
+      "regex": "\\b(?:do\\s+\\w+\\s+)?instead\\b",
+      "description": "User says '... instead' -- proposes an alternative to the agent's chosen approach."
+    },
+    {
+      "name": "thats_wrong",
+      "regex": "\\bthat'?s\\s+(?:wrong|not\\s+right|incorrect)\\b",
+      "description": "User says 'that's wrong' / 'that's not right' / 'that's incorrect' -- direct judgement."
+    },
+    {
+      "name": "undo",
+      "regex": "\\b(?:undo|revert)\\s+(?:that|this|what\\s+you\\s+did)\\b",
+      "description": "User says 'undo that' / 'revert this' / 'revert what you did' -- requests rollback."
+    }
+  ]
+}

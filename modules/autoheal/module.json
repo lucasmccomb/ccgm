@@ -176,6 +176,11 @@
       "type": "lib",
       "template": false
     },
+    "lib/correction-patterns.json": {
+      "target": "lib/correction-patterns.json",
+      "type": "lib",
+      "template": false
+    },
     "lib/repo-config-schema.json": {
       "target": "lib/repo-config-schema.json",
       "type": "lib",

@@ -15,6 +15,7 @@ MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 HOOK="${MODULE_ROOT}/hooks/user-correction-detector.py"
 HOOKS_MODULE="$(cd "${MODULE_ROOT}/../hooks" && pwd)"
 HOOK_LIB="${HOOKS_MODULE}/lib"
+PATTERNS_FILE="${MODULE_ROOT}/lib/correction-patterns.json"
 
 PASS=0
 FAIL=0
@@ -40,6 +41,11 @@ cp "${HOOK_LIB}/hook_utils.py" "${TMP_HOME}/.claude/lib/hook_utils.py"
 
 export HOME="${TMP_HOME}"
 export CCGM_AUTOHEAL_DIR="${TMP_HOME}/autoheal"
+# Point the hook at the in-repo patterns JSON. The hook normally reads
+# ~/.claude/lib/correction-patterns.json after the module installer
+# copies the file; the env override mirrors the realtime-security
+# scanner's CCGM_REALTIME_PATTERNS hook.
+export CCGM_CORRECTION_PATTERNS="${PATTERNS_FILE}"
 
 today() {
     python3 -c "import datetime; print(datetime.datetime.now(datetime.timezone.utc).date().isoformat())"
@@ -208,6 +214,50 @@ esac
 echo 'not json {{{' | python3 "${HOOK}"
 rc=$?
 assert_eq "${rc}" "0" "malformed stdin exits 0"
+
+# 6. correction-patterns.json exists and is the source of truth.
+[ -f "${PATTERNS_FILE}" ] && PASS=$((PASS + 1)) || {
+    FAIL=$((FAIL + 1))
+    echo "FAIL: ${PATTERNS_FILE} does not exist"
+}
+
+# 7. The hook loads patterns from JSON (not inlined). Verify the JSON
+#    pattern count matches the number of distinct correction events the
+#    hook emitted for the 9 test prompts above. If the hook silently fell
+#    back to an empty list (file not loaded), only 0 events would have
+#    been emitted and assertion 1 would already have failed -- but we
+#    also assert the count here for explicitness.
+JSON_COUNT=$(python3 -c "
+import json
+with open('${PATTERNS_FILE}') as fh:
+    data = json.load(fh)
+print(len(data['patterns']))
+")
+assert_eq "${JSON_COUNT}" "9" "correction-patterns.json contains 9 patterns"
+
+# 8. The hook source loads patterns from the JSON file (no inlined
+#    regex list). Grep for the load function name and the env override
+#    to lock in the contract.
+if grep -q '_load_correction_patterns' "${HOOK}" && \
+   grep -q 'CCGM_CORRECTION_PATTERNS' "${HOOK}" && \
+   ! grep -q 'no_not_like_that.*re\.compile' "${HOOK}"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: hook source must load patterns from JSON, not inline them"
+fi
+
+# 9. Graceful degradation: when the patterns file is missing, the hook
+#    becomes a no-op (no event written) instead of crashing.
+CCGM_CORRECTION_PATTERNS_BACKUP="${CCGM_CORRECTION_PATTERNS}"
+export CCGM_CORRECTION_PATTERNS="/nonexistent/path/never-here.json"
+before_missing=$(correction_count)
+run_correction "no, not like that"
+rc=$?
+after_missing=$(correction_count)
+assert_eq "${rc}" "0" "missing patterns file: hook still exits 0"
+assert_eq "${before_missing}" "${after_missing}" "missing patterns file: no event emitted"
+export CCGM_CORRECTION_PATTERNS="${CCGM_CORRECTION_PATTERNS_BACKUP}"
 
 echo ""
 echo "test-correction-detection.sh: ${PASS} passed, ${FAIL} failed"
