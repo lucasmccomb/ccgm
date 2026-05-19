@@ -160,6 +160,10 @@ def main() -> None:
         )
         context_ids = _recent_tool_use_ids(events_path)
 
+        transcript_path = data.get("transcript_path")
+        if not isinstance(transcript_path, str):
+            transcript_path = None
+
         record = {
             "kind": "user_correction",
             "timestamp": _now_iso(),
@@ -173,6 +177,7 @@ def main() -> None:
             "clone_path": data.get("cwd"),
             "correction_pattern_matched": pattern,
             "context_event_ids": context_ids,
+            "transcript_path": transcript_path,
         }
         hook_utils.file_locked_append(events_path, json.dumps(record))
     except Exception:

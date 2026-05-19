@@ -86,6 +86,10 @@ def _build_failure_record(data: dict) -> dict:
     if not isinstance(exit_code, int):
         exit_code = None
 
+    transcript_path = data.get("transcript_path")
+    if not isinstance(transcript_path, str):
+        transcript_path = None
+
     return {
         "kind": "tool_failure",
         "timestamp": _now_iso(),
@@ -97,6 +101,7 @@ def _build_failure_record(data: dict) -> dict:
         "permission_decision": None,
         "cwd": data.get("cwd"),
         "clone_path": data.get("cwd"),
+        "transcript_path": transcript_path,
     }
 
 

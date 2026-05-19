@@ -110,6 +110,10 @@ def _build_record(data: dict, kind: str) -> dict:
         if isinstance(decision, str):
             permission_decision = decision
 
+    transcript_path = data.get("transcript_path")
+    if not isinstance(transcript_path, str):
+        transcript_path = None
+
     return {
         "kind": kind,
         "timestamp": _now_iso(),
@@ -121,6 +125,7 @@ def _build_record(data: dict, kind: str) -> dict:
         "permission_decision": permission_decision,
         "cwd": data.get("cwd"),
         "clone_path": data.get("cwd"),
+        "transcript_path": transcript_path,
     }
 
 
