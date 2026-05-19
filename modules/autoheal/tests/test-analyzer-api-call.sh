@@ -202,6 +202,13 @@ with open(path, "w", encoding="utf-8") as fh:
     for i in range(count):
         rec = {
             "kind": "permission_request",
+            # `permission_decision: "ask"` keeps these as friction
+            # post-fix (issue #519); friction events are NOT clustered,
+            # so 1000 of them at ~250 chars each genuinely overflow the
+            # tight 5K cap even at window=0. Without the decision field
+            # the events would cluster down to a single record and the
+            # cap would never be hit.
+            "permission_decision": "ask",
             "timestamp": (now - dt.timedelta(seconds=i)).isoformat(),
             "session_id": f"s-{i}",
             "tool_name": "Bash",

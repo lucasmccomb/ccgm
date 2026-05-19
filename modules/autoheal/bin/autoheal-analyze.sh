@@ -452,19 +452,26 @@ sandbox_prefix() {
 # ---------------------------------------------------------------------
 
 rejected_count_for_day() {
+    # Counts prior rejections for `day` that match the CURRENT analyzer
+    # version. A new analyzer (different short SHA) always starts the
+    # retry counter at 0 — when a clustering / cap bug is fixed, days
+    # rejected under the old code get a fresh chance under the new code
+    # instead of being skipped forever. See issue #519 review.
     local day="$1"
+    local version="$2"
     local path
     path="$(rejected_days_path)"
     if [ ! -f "${path}" ]; then
         printf '0\n'
         return 0
     fi
-    REJ_DAY="${day}" REJ_PATH="${path}" python3 - <<'PY'
+    REJ_DAY="${day}" REJ_VERSION="${version}" REJ_PATH="${path}" python3 - <<'PY'
 import json
 import os
 
 path = os.environ["REJ_PATH"]
 day = os.environ["REJ_DAY"]
+version = os.environ["REJ_VERSION"]
 n = 0
 with open(path, "r", encoding="utf-8") as fh:
     for line in fh:
@@ -475,7 +482,7 @@ with open(path, "r", encoding="utf-8") as fh:
             rec = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(rec, dict) and rec.get("date") == day:
+        if isinstance(rec, dict) and rec.get("date") == day and rec.get("analyzer_version") == version:
             n += 1
 print(n)
 PY
@@ -681,9 +688,16 @@ def excerpt_transcript(transcript_path, around_ts, window=3):
 
 def is_friction(ev):
     """An event is "friction" if it represents a stuck moment worth
-    keeping as a full record. Routine successes are clustered instead."""
+    keeping as a full record. Routine successes are clustered instead.
+
+    `permission_request` events are special: the bypass-suppress hook
+    stamps auto-allows with `permission_decision: "allow"`, and those
+    are the routine high-volume class — they MUST cluster, not get
+    promoted to friction by virtue of their kind. Only deny/ask
+    permission requests are friction (this matches the contract
+    documented in analyzer-prompt.md §Event shape)."""
     kind = ev.get("kind")
-    if kind in ("tool_failure", "permission_request", "user_correction", "realtime_security_alert"):
+    if kind in ("tool_failure", "user_correction", "realtime_security_alert"):
         return True
     exit_code = ev.get("exit_code")
     if isinstance(exit_code, int) and exit_code != 0:
@@ -889,10 +903,11 @@ PY
         version="$(analyzer_version)"
         record_rejection "${day_iso}" "${est_tokens:-0}" "${MAX_INPUT_TOKENS}" "${version}"
         local prior
-        prior="$(rejected_count_for_day "${day_iso}")"
+        prior="$(rejected_count_for_day "${day_iso}" "${version}")"
         # `prior` already includes this run's record (record_rejection
         # appended before the count). Anything >= threshold means we've
-        # rejected this day enough times to give up.
+        # rejected this day enough times under THIS analyzer version to
+        # give up. A future analyzer version starts the counter fresh.
         if [ "${prior}" -ge "${REJECT_GIVEUP_THRESHOLD}" ]; then
             echo "autoheal-analyze: GIVE_UP day=${day_iso} rejected ${prior} times; bumping past it." >&2
             GIVE_UP_DAYS="${GIVE_UP_DAYS}${day_iso}
