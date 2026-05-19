@@ -11,6 +11,7 @@ This module installs a rules file that instructs Claude to:
 - Always sync with remote before running history-altering git commands
 - Use rebase by default when updating feature branches from main
 - Return to a clean main branch state after PR merges
+- Run pathspec-bearing git commands from the repo root (or `git -C`), not from a sub-package directory
 
 ## Manual Installation
 

@@ -54,7 +54,7 @@ Git conventions covering sync safety, branching strategy, commit attribution, an
 
 **Installs**: `rules/git-workflow.md`
 
-**What it does**: Establishes six critical rules:
+**What it does**: Establishes seven critical rules:
 
 1. **No AI attribution** - never add Co-Authored-By trailers or "Generated with Claude" to commits, PRs, or git metadata
 2. **PR template detection** - before creating PRs, check the repo and org for PR templates and use them
@@ -62,6 +62,7 @@ Git conventions covering sync safety, branching strategy, commit attribution, an
 4. **Rebase by default** - use rebase instead of merge for feature branches
 5. **Never stash** - commit instead; stashes are invisible and easy to lose
 6. **Return to main after merge** - checkout main and pull after PRs are merged
+7. **Pathspecs resolve from cwd** - run `git add`/`rm`/`restore` from the repo root (or with `git -C`), not from a sub-package subdir
 
 **Dependencies**: None
 
