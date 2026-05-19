@@ -1,0 +1,17 @@
+{
+  "_description": "Reference fixture for per-repo .autoheal/config.json. Used by test-repo-config-merge.sh and as an example for users authoring their own repo-level overrides. Schema in lib/repo-config-schema.json.",
+  "additional_allow_patterns": [
+    "Bash(supabase:*)",
+    "Bash(supabase db:*)",
+    "Bash(supabase migration:*)"
+  ],
+  "calibration_days": 14,
+  "thresholds": {
+    "confidence_min": 8,
+    "occurrence_min": 2
+  },
+  "kind_filters": [
+    "settings_allow_add",
+    "command_doc_tweak"
+  ]
+}
