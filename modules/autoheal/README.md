@@ -13,7 +13,7 @@ Self-healing observability loop for Claude Code. Captures permission events, too
 
 - **Real-time security alerts: OFF.** Enable with `/autoheal-toggle realtime on` (or `realtime_alerts_enabled: true` in config).
 - **Auto-apply: OFF.** Enable with `/autoheal-toggle autoapply on` (or `auto_apply_enabled: true` in config).
-- **Email digest: OFF.** Local digest is always-on; opt into Resend with `digest_email` and `email_enabled: true` + `RESEND_API_KEY` in your shell env.
+- **Email digest: OFF.** Local digest is always-on; opt into Resend with `digest_email` and `email_enabled: true` + `RESEND_API_KEY` in `~/.claude/autoheal/.env` (NOT shell rc — see "API keys" below).
 - **Webhook publisher: OFF.** Set `webhook_url` in config to enable.
 
 ## Config
@@ -21,6 +21,14 @@ Self-healing observability loop for Claude Code. Captures permission events, too
 User-global config lives at `~/.claude/autoheal/config.json`. Per-repo overrides live in `.autoheal/config.json` at the repo root.
 
 See `rules/autoheal.md` for the full config-key table and merge rules.
+
+## API keys
+
+Autoheal reads `ANTHROPIC_API_KEY` (analyzer) and `RESEND_API_KEY` (email) from `~/.claude/autoheal/.env` (mode 0600). The daily LaunchAgent's entrypoint sources this file; it never sources your shell rc.
+
+**Do not export `ANTHROPIC_API_KEY` from `~/.zshrc`.** Anthropic SDK clients (anthropic-python, the `claude` CLI, custom scripts) auto-detect it from env and would bill against the API key instead of your Claude Max subscription. The scoped `.env` keeps it invisible to interactive shells.
+
+`autoheal-install.sh` creates an empty `.env` template on first run with usage notes inline.
 
 ## Cross-references
 

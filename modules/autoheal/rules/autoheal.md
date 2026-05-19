@@ -29,6 +29,14 @@ Autoheal is a CCGM module that observes how you and your agents interact with Cl
 
 Per-repo overrides live in `.autoheal/config.json` at the repo root. The merge rule is "missing keys fall through to global"; see `hook_utils.load_repo_config()`.
 
+## API keys: `~/.claude/autoheal/.env` (NOT shell rc)
+
+Autoheal reads `ANTHROPIC_API_KEY` (analyzer) and `RESEND_API_KEY` (email) from a **scoped env file**, not from `~/.zshrc` / `~/.bash_profile`. The file lives at `~/.claude/autoheal/.env` with mode 0600. The daily LaunchAgent's entrypoint sources it just before running the chain — its environment never reaches your interactive shells.
+
+**Do not put `ANTHROPIC_API_KEY` in your shell rc.** Every Anthropic SDK client running in any interactive shell (`anthropic-python`, the `claude` CLI, custom scripts) auto-picks it up from env, which bills against the API key instead of your Claude Max subscription. The scoped `.env` keeps the key visible to autoheal only.
+
+To enable the analyzer: add `ANTHROPIC_API_KEY=sk-ant-...` to `~/.claude/autoheal/.env`. To enable the email digest: also add `RESEND_API_KEY=re_...` and flip `/autoheal-toggle email on`. An empty `.env` is fine — the analyzer logs `ANTHROPIC_API_KEY not set; skipping` and the rest of the chain proceeds normally.
+
 ## Slash commands
 
 - `/permission-fix [event-id|latest]` — in-session root-cause sub-agent. Proposes a fix; can apply via `lib/apply-proposal.py`.

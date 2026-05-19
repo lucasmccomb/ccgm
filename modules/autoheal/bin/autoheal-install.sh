@@ -37,6 +37,44 @@ if [ ! -f "${AUTOHEAL_DIR}/snoozed.json" ]; then
 fi
 
 # ---------------------------------------------------------------------
+# Scoped API-key env file.
+#
+# We deliberately do NOT source the user's shell rc (~/.zshrc etc.)
+# at LaunchAgent fire time — putting ANTHROPIC_API_KEY in shell rc
+# leaks it to every Anthropic SDK client running in the user's
+# interactive shells (anthropic-python, claude CLI, etc.) which would
+# bill against the API key instead of the Claude Max subscription.
+#
+# Instead, the daily entrypoint sources THIS file. Mode 0600 keeps it
+# out of other users' read paths on shared machines. Empty by default
+# so a fresh install never accidentally enables billing.
+# ---------------------------------------------------------------------
+
+ENV_FILE="${AUTOHEAL_DIR}/.env"
+if [ ! -f "${ENV_FILE}" ]; then
+    cat > "${ENV_FILE}" <<'EOF'
+# autoheal API keys — scoped to the autoheal LaunchAgent ONLY.
+#
+# Do NOT export these from ~/.zshrc / ~/.bash_profile / ~/.profile —
+# the Anthropic SDK auto-picks up ANTHROPIC_API_KEY from env and would
+# bill against the API key instead of your Claude Max subscription.
+#
+# Uncomment + populate the keys you want autoheal to use. Empty values
+# mean the corresponding step (analyzer / email) skips with a clean
+# log entry. Mode 0600 — owner read/write only.
+
+# ANTHROPIC_API_KEY=sk-ant-...
+# RESEND_API_KEY=re_...
+EOF
+    chmod 0600 "${ENV_FILE}"
+    echo "autoheal-install: wrote scoped env template to ${ENV_FILE} (mode 0600)"
+else
+    # Tighten permissions on an existing file if they are loose. We do
+    # not touch the contents — those are user-authored.
+    chmod 0600 "${ENV_FILE}" 2>/dev/null || true
+fi
+
+# ---------------------------------------------------------------------
 # Default config.json.
 #
 # `webhook_token` is a 32-hex random — present so a future
@@ -114,42 +152,48 @@ fi
 # Daily wrapper script entrypoint.
 #
 # The launchd plist points at ~/.claude/autoheal/autoheal-daily.sh.
-# That file is a thin entrypoint that (a) sources the user's shell rc
-# so RESEND_API_KEY / ANTHROPIC_API_KEY flow at runtime (the plist
-# deliberately omits them), then (b) execs the canonical module's full
-# chain wrapper (analyze -> auto-apply -> digest -> email -> publish ->
-# retention).
+# That file is a thin entrypoint that:
+#   (a) sources ~/.claude/autoheal/.env for API keys — scoped to
+#       autoheal only, NOT the user's interactive shell rc (which
+#       would bill against the API key for every SDK client)
+#   (b) execs the canonical module's full chain wrapper (analyze ->
+#       auto-apply -> digest -> email -> publish -> retention)
 #
 # Idempotent: writes the entrypoint if missing OR if the existing file
-# is a stale Epic 6 stub (matched by header marker text).
-#
-# NOTE: we explicitly do NOT use `set -u` inside the entrypoint —
-# zsh-flavored rc files sourced under bash frequently reference
-# unbound variables, and `set -u` would wedge the daily run.
+# is a stale shim (matched by header marker text — both the Epic 6 stub
+# and the pre-#513 rc-sourcing variant).
 # ---------------------------------------------------------------------
 
 DAILY_PATH="${AUTOHEAL_DIR}/autoheal-daily.sh"
 DAILY_IS_STALE=0
-if [ -f "${DAILY_PATH}" ] && head -3 "${DAILY_PATH}" 2>/dev/null | grep -q "Epic 6 install shim"; then
-    DAILY_IS_STALE=1
+if [ -f "${DAILY_PATH}" ]; then
+    HEAD3="$(head -5 "${DAILY_PATH}" 2>/dev/null || true)"
+    case "${HEAD3}" in
+        *"Epic 6 install shim"*|*"rc so RESEND_API_KEY"*)
+            DAILY_IS_STALE=1
+            ;;
+    esac
 fi
 if [ ! -f "${DAILY_PATH}" ] || [ "${DAILY_IS_STALE}" = "1" ]; then
     cat > "${DAILY_PATH}" <<'EOF'
 #!/usr/bin/env bash
 # autoheal daily entrypoint (called by launchd LaunchAgent).
 #
-# Re-sources the user's shell rc so RESEND_API_KEY / ANTHROPIC_API_KEY
-# from ~/.zshrc are available — the launchd plist deliberately omits
-# them. Then execs the module's full chain wrapper:
-# analyze -> auto-apply -> digest -> email -> publish -> retention.
+# Sources ~/.claude/autoheal/.env for API keys (scoped to autoheal
+# only — never via the user's shell rc, which would leak the key to
+# every Anthropic SDK client and bill against the API key instead of
+# the Claude Max subscription). Then execs the module's full chain
+# wrapper: analyze -> auto-apply -> digest -> email -> publish ->
+# retention.
 
-for rc in "${HOME}/.zshrc" "${HOME}/.bash_profile" "${HOME}/.profile"; do
-    if [ -r "${rc}" ]; then
-        # shellcheck disable=SC1090
-        . "${rc}" >/dev/null 2>&1 || true
-        break
-    fi
-done
+ENV_FILE="${HOME}/.claude/autoheal/.env"
+if [ -r "${ENV_FILE}" ]; then
+    # `set -a` exports every variable defined in the sourced file.
+    set -a
+    # shellcheck disable=SC1090
+    . "${ENV_FILE}"
+    set +a
+fi
 
 CCGM_AUTOHEAL_BIN="${CCGM_AUTOHEAL_BIN:-${HOME}/code/ccgm/modules/autoheal/bin}"
 exec "${CCGM_AUTOHEAL_BIN}/autoheal-daily.sh"
