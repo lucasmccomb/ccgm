@@ -1,3 +1,15 @@
-# Epic 6 (Linux v2): content TBD — crontab entry for the daily wrapper.
-# Present as architectural seam; Linux scheduling is not built in v1
-# (lib/platform.py raises NotImplementedError on Linux). See plan.md §3.11.
+# Linux scheduling deferred to v2 — see sched_platform.py NotImplementedError.
+#
+# This file exists as an architectural seam (plan.md §3.11). The macOS
+# launchd path lives in `com.__USERNAME__.ccgm.autoheal.daily.plist.template`
+# and is the only scheduling implementation built in v1.
+#
+# When Linux support is added in v2, the cron line will look like:
+#
+#   # m  h  dom mon dow  command
+#   0  9  *   *   *    $HOME/.claude/autoheal/autoheal-daily.sh
+#
+# Until then, `modules/hooks/lib/sched_platform.py` raises
+# NotImplementedError when `install_scheduled_job` is called on Linux,
+# pointing the agent at this file. The Linux installer path is a
+# single-file change away.

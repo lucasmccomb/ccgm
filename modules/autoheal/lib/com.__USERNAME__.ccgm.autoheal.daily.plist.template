@@ -1,6 +1,62 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Epic 6: content TBD — launchd LaunchAgent plist template. Fires
-     bin/autoheal-daily.sh at 08:00 local; next-wake firing. NEVER
-     include RESEND_API_KEY or ANTHROPIC_API_KEY in EnvironmentVariables
-     (they are read from the shell env at runtime). See plan.md §5 Epic
-     6. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  CCGM autoheal daily LaunchAgent template (Epic 6).
+
+  __USERNAME__ is substituted at module-install time by CCGM's normal
+  template mechanism. The substituted plist installs to
+  ~/Library/LaunchAgents/com.__USERNAME__.ccgm.autoheal.daily.plist
+  and is bootstrapped via `launchctl bootstrap gui/$UID`.
+
+  Schedule: fires once daily at 09:00 local time. `RunAtLoad` is false
+  so a fresh `launchctl bootstrap` does NOT immediately replay the
+  daily run.
+
+  Environment policy: PATH is whitelisted; secret keys (RESEND_API_KEY,
+  ANTHROPIC_API_KEY) are deliberately ABSENT here. They must come from
+  the user's shell environment via the launched wrapper script (which
+  re-sources ~/.zshrc or ~/.bash_profile to pick them up). Embedding
+  secrets in the plist would put them in plain text inside a
+  user-readable directory, which is the failure mode this design
+  exists to avoid.
+
+  Logs land in ~/.claude/logs/ rather than stderr so the user can
+  inspect them between runs without scraping launchd's system logs.
+-->
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.__USERNAME__.ccgm.autoheal.daily</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/sh</string>
+      <string>-lc</string>
+      <string>$HOME/.claude/autoheal/autoheal-daily.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+      <key>Hour</key>
+      <integer>9</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.claude/logs/autoheal.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.claude/logs/autoheal.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+  </dict>
+</plist>
