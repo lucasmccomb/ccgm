@@ -22,49 +22,59 @@ sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
 import hook_utils  # noqa: E402
 
 
-# Each tuple: (pattern_name, compiled_regex). Order matters only for
-# disambiguation when two patterns could match the same string; the first
-# match wins. Patterns are case-insensitive and word-bounded where it
-# makes sense. False positives are acceptable — the analyzer's threshold
-# logic is the second line of defense.
-_CORRECTION_PATTERNS: list[tuple[str, "re.Pattern[str]"]] = [
-    (
-        "no_not_like_that",
-        re.compile(r"\bno,?\s+not\s+like\s+that\b", re.IGNORECASE),
-    ),
-    (
-        "stop_doing",
-        re.compile(r"\bstop\s+doing\b", re.IGNORECASE),
-    ),
-    (
-        "dont_do_that",
-        re.compile(r"\b(?:don'?t|do\s+not)\s+(?:do\s+that|do\s+this)\b", re.IGNORECASE),
-    ),
-    (
-        "i_told_you",
-        re.compile(r"\bI\s+told\s+you\b", re.IGNORECASE),
-    ),
-    (
-        "wait_no",
-        re.compile(r"\bwait,?\s+no\b", re.IGNORECASE),
-    ),
-    (
-        "actually_correction",
-        re.compile(r"\bactually,?\s+(?:no|that's\s+wrong|that\s+is\s+wrong|do)\b", re.IGNORECASE),
-    ),
-    (
-        "instead",
-        re.compile(r"\b(?:do\s+\w+\s+)?instead\b", re.IGNORECASE),
-    ),
-    (
-        "thats_wrong",
-        re.compile(r"\bthat'?s\s+(?:wrong|not\s+right|incorrect)\b", re.IGNORECASE),
-    ),
-    (
-        "undo",
-        re.compile(r"\b(?:undo|revert)\s+(?:that|this|what\s+you\s+did)\b", re.IGNORECASE),
-    ),
-]
+# Default location of the patterns file once installed. Tests override
+# via CCGM_CORRECTION_PATTERNS so they can point at the in-repo source.
+# Mirrors the realtime-security-scanner.py loading pattern.
+_DEFAULT_PATTERNS_PATH = os.path.expanduser(
+    "~/.claude/lib/correction-patterns.json"
+)
+
+
+def _patterns_path() -> str:
+    override = os.environ.get("CCGM_CORRECTION_PATTERNS")
+    if override:
+        return override
+    return _DEFAULT_PATTERNS_PATH
+
+
+def _load_correction_patterns() -> list[tuple[str, "re.Pattern[str]"]]:
+    """Load (name, compiled_regex) pairs from the patterns JSON file.
+
+    Order matters only for disambiguation when two patterns could match
+    the same string; the first match wins. Patterns are case-insensitive
+    and word-bounded where it makes sense. False positives are acceptable
+    -- the analyzer's threshold logic is the second line of defense.
+
+    Falls back to an empty list if the file is missing or malformed
+    (graceful degradation: the hook becomes a no-op rather than crashing
+    the prompt pipeline).
+    """
+    try:
+        with open(_patterns_path(), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return []
+    raw = data.get("patterns") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return []
+    out: list[tuple[str, "re.Pattern[str]"]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        regex_src = entry.get("regex")
+        if not isinstance(name, str) or not isinstance(regex_src, str):
+            continue
+        try:
+            compiled = re.compile(regex_src, re.IGNORECASE)
+        except re.error:
+            # Bad regex in the patterns file is a config bug. Skip it.
+            continue
+        out.append((name, compiled))
+    return out
+
+
+_CORRECTION_PATTERNS: list[tuple[str, "re.Pattern[str]"]] = _load_correction_patterns()
 
 _MAX_RECENT_CONTEXT = 3  # how many recent tool_use events to attach as context
 
