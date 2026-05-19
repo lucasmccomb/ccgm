@@ -99,6 +99,48 @@ When editing a module file from a workspace clone:
 
 Habit: always Read the workspace `modules/` path before any Edit, even if you read the installed copy first.
 
+## Autoheal Module
+
+The `modules/autoheal/` directory holds CCGM's self-healing observability loop. It captures permission events, tool failures, and user-correction signals to a local JSONL log, runs a daily analyzer via direct Anthropic API call, and surfaces a digest of proposed configuration improvements.
+
+### Bring-up
+
+```bash
+bash start.sh --add autoheal                         # install hooks/commands/rules/scripts
+bash modules/autoheal/bin/autoheal-install.sh        # register the macOS LaunchAgent (Epic 6)
+```
+
+See `plan.md §9.1` for the full per-wave bring-up runbook.
+
+### Config flags (`~/.claude/autoheal/config.json`)
+
+All four are **default OFF**. Autoheal stays observation-only until you opt in.
+
+| Key | Default | What it gates |
+|-----|---------|---------------|
+| `realtime_alerts_enabled` | `false` | Mid-session `<autoheal-security-alert>` blocks on high-confidence patterns (`ghp_*` in commits, `rm -rf /`, force-push to main) |
+| `auto_apply_enabled` | `false` | Confidence-gated auto-apply (confidence ≥9, breadth ≤1, `settings_allow_add` only). Creates feature branch; never pushes |
+| `email_enabled` | `false` | Resend-backed email digest (requires `digest_email` + `RESEND_API_KEY`) |
+| `webhook_url` | `null` | When set, daily run POSTs proposals/events/digests to `${webhook_url}/v1/ingest`. **Future-integration point for `dev.lem.work`** — receiver lives outside this repo. `webhook_token` (32-char Bearer) is generated at install time |
+
+Per-repo overrides live in `.autoheal/config.json` at the repo root. Both files are gitignored.
+
+### Slash commands
+
+| Command | Purpose |
+|---------|---------|
+| `/autoheal` | Help + status |
+| `/autoheal-digest [date]` | Render today's (or a date's) digest |
+| `/autoheal-toggle [pause\|resume\|status\|realtime\|autoapply\|webhook]` | Flip config flags |
+| `/autoheal-snooze <id> [days]` | Snooze a proposal for N days (default 7) |
+| `/autoheal-apply [id\|list]` | Formal apply path; feature branch + validation tests + audit |
+| `/permission-fix [event-id\|latest]` | In-session root-cause sub-agent for a permission failure |
+| `/permission-audit` | Static audit of installed hooks + settings against the classification table |
+
+### Posture
+
+Autoheal is opt-in by design. The default install only captures events and surfaces a local digest. Nothing alerts mid-session, nothing auto-applies, no network calls leave the machine. Each opt-in is a deliberate `/autoheal-toggle` away.
+
 ## Commit Message Format
 
 ```
