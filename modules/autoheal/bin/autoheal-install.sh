@@ -103,7 +103,7 @@ if [ ! -f "${AUTOHEAL_DIR}/config.json" ]; then
     "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4}
   },
   "max_input_tokens": 200000,
-  "daily_cost_cap_usd": 1.00,
+  "daily_cost_cap_usd": 10.00,
   "retention_gzip_days": 30,
   "retention_delete_days": 60
 }
@@ -145,11 +145,11 @@ if "default_model" not in cfg:
 if "max_input_tokens" not in cfg:
     cfg["max_input_tokens"] = 200000
     dirty = True
-# Issue #517: bump default cost cap from $0.50 to $1.00, but only when
-# the existing value is the legacy default (don't silently rewrite a
-# user-customized cap).
-if cfg.get("daily_cost_cap_usd") in (0.5, 0.50):
-    cfg["daily_cost_cap_usd"] = 1.00
+# Issue #529: bump default cost cap to $10.00 from prior legacy
+# defaults ($0.50, $1.00), but only when the existing value is one of
+# those legacy defaults (don't silently rewrite a user-customized cap).
+if cfg.get("daily_cost_cap_usd") in (0.5, 0.50, 1.0, 1.00):
+    cfg["daily_cost_cap_usd"] = 10.00
     dirty = True
 
 if dirty:
