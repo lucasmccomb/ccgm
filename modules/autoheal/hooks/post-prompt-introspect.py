@@ -39,6 +39,9 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
+import hook_utils  # noqa: E402
+
 # Locked friction kinds. permission_request fires when the user is asked
 # to approve a tool call; tool_failure fires on a non-zero exit from a
 # PostToolUseFailure event. Both indicate a tool call did not glide
@@ -153,11 +156,7 @@ def _load_seen(path: str) -> set[str]:
 def _mark_seen(path: str, signature: str) -> None:
     """Append a signature to the seen file. Best-effort: never raises."""
     try:
-        parent = os.path.dirname(path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(signature + "\n")
+        hook_utils.file_locked_append(path, signature)
     except OSError:
         # Dedup is a nice-to-have; failing to record a seen entry just
         # means the next Stop fires the same suggestion again. That is
