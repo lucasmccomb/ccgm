@@ -547,6 +547,8 @@ PY
             "${day_iso}" \
             "$(cost_log_path)" \
             "${TODAY_ISO}" \
+            "$(config_path)" \
+            "${DEFAULT_MODEL}" \
         <<'PY'
 import datetime as dt
 import json
@@ -562,6 +564,8 @@ calibration_mode = sys.argv[6] == "true"
 day_iso = sys.argv[7]
 cost_log_path = sys.argv[8]
 today_iso = sys.argv[9]
+config_path = sys.argv[10]
+fallback_model = sys.argv[11]
 
 
 def load_schema(path):
@@ -697,9 +701,51 @@ def log_rejection(path, prop, reason):
     append_locked(path, json.dumps(record, ensure_ascii=False))
 
 
-def append_cost(path, today, input_tokens, output_tokens, cost_usd):
-    line = f"{today}\t{input_tokens}\t{output_tokens}\t{cost_usd:.6f}"
+def append_cost(path, today, input_tokens, output_tokens, cost_usd, model):
+    # `model` is appended as a 5th tab-separated field. Older cost.log
+    # lines lacking this field still parse (today_cost_cents only reads
+    # parts[0..3]); see issue #497.
+    line = f"{today}\t{input_tokens}\t{output_tokens}\t{cost_usd:.6f}\t{model}"
     append_locked(path, line)
+
+
+# Per-model pricing fallback. Matches autoheal-install.sh defaults; the
+# install step is the source of truth, this dict only fires when the
+# config file is unreadable or its cost_pricing block is missing entirely.
+FALLBACK_PRICING = {
+    "claude-sonnet-4-6": {"input_per_million": 3.0, "output_per_million": 15.0},
+    "claude-opus-4-7": {"input_per_million": 15.0, "output_per_million": 75.0},
+    "claude-haiku-4-5": {"input_per_million": 0.80, "output_per_million": 4.0},
+}
+SONNET_FALLBACK = FALLBACK_PRICING["claude-sonnet-4-6"]
+
+
+def load_cfg(path):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(cfg, dict):
+        return {}
+    return cfg
+
+
+def resolve_pricing(cfg, fallback_model):
+    """Return (model_id, pricing_dict). Emits a stderr warning when the
+    configured model has no cost_pricing entry."""
+    model = cfg.get("default_model") or cfg.get("model") or fallback_model
+    pricing_map = cfg.get("cost_pricing")
+    if not isinstance(pricing_map, dict):
+        pricing_map = FALLBACK_PRICING
+    pricing = pricing_map.get(model)
+    if not isinstance(pricing, dict) or "input_per_million" not in pricing or "output_per_million" not in pricing:
+        sys.stderr.write(
+            f"WARNING: no cost_pricing for model {model}; "
+            f"falling back to claude-sonnet-4-6 pricing\n"
+        )
+        pricing = SONNET_FALLBACK
+    return model, pricing
 
 
 schema = load_schema(schema_path)
@@ -717,10 +763,14 @@ if isinstance(usage, dict):
 else:
     in_tok = 0
     out_tok = 0
-# Sonnet 4 pricing: $3/M in, $15/M out. Conservative — we under-report
-# if the model id ever changes; tune in config if needed.
-cost = (in_tok * 3.0 + out_tok * 15.0) / 1_000_000.0
-append_cost(cost_log_path, today_iso, in_tok, out_tok, cost)
+
+cfg = load_cfg(config_path)
+model_id, pricing = resolve_pricing(cfg, fallback_model)
+cost = (
+    in_tok * float(pricing["input_per_million"])
+    + out_tok * float(pricing["output_per_million"])
+) / 1_000_000.0
+append_cost(cost_log_path, today_iso, in_tok, out_tok, cost, model_id)
 
 text = extract_assistant_text(response)
 proposals = parse_proposals(text)

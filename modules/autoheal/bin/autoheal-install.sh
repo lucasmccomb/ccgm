@@ -58,12 +58,56 @@ if [ ! -f "${AUTOHEAL_DIR}/config.json" ]; then
   "webhook_kinds": ["proposal", "event", "digest"],
   "webhook_max_per_run": 100,
   "model": "claude-sonnet-4-6",
+  "default_model": "claude-sonnet-4-6",
+  "cost_pricing": {
+    "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
+    "claude-opus-4-7":    {"input_per_million": 15,   "output_per_million": 75},
+    "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4}
+  },
   "daily_cost_cap_usd": 0.50,
   "retention_gzip_days": 30,
   "retention_delete_days": 60
 }
 EOF
     echo "autoheal-install: wrote default config to ${AUTOHEAL_DIR}/config.json"
+else
+    # Idempotent merge: ensure cost_pricing + default_model exist in an
+    # already-installed config without clobbering user customizations.
+    python3 - "${AUTOHEAL_DIR}/config.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+
+DEFAULT_PRICING = {
+    "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
+    "claude-opus-4-7":    {"input_per_million": 15,   "output_per_million": 75},
+    "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4},
+}
+
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        cfg = json.load(fh)
+except (OSError, json.JSONDecodeError):
+    sys.exit(0)
+
+if not isinstance(cfg, dict):
+    sys.exit(0)
+
+dirty = False
+if "cost_pricing" not in cfg or not isinstance(cfg.get("cost_pricing"), dict):
+    cfg["cost_pricing"] = DEFAULT_PRICING
+    dirty = True
+if "default_model" not in cfg:
+    cfg["default_model"] = cfg.get("model", "claude-sonnet-4-6")
+    dirty = True
+
+if dirty:
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, indent=2)
+        fh.write("\n")
+    print(f"autoheal-install: merged cost_pricing/default_model into {path}")
+PY
 fi
 
 # ---------------------------------------------------------------------

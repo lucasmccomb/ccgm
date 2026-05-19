@@ -317,6 +317,176 @@ assert_contains "${ANALYZER_SRC}" "fcntl.flock" "locked-append: analyzer uses fc
 assert_contains "${ANALYZER_SRC}" "append_locked(path" "locked-append: log_rejection/append_cost route through append_locked"
 
 # ---------------------------------------------------------------------
+# Test 7 — per-model cost pricing (issue #497).
+# Fixture usage block is {input: 1200, output: 240}. Verify:
+#   - sonnet default config -> $3/M in + $15/M out
+#       cost = (1200*3 + 240*15) / 1e6 = (3600 + 3600) / 1e6 = 0.007200
+#   - opus default_model -> $15/M in + $75/M out
+#       cost = (1200*15 + 240*75) / 1e6 = (18000 + 18000) / 1e6 = 0.036000
+#   - unknown model -> stderr warning + sonnet fallback (0.007200)
+#   - cost.log lines include the model id as the 5th tab-separated field
+# ---------------------------------------------------------------------
+
+write_config() {
+    # write_config <path> <default_model> [include_pricing]
+    local path="$1"
+    local default_model="$2"
+    local include_pricing="${3:-1}"
+    mkdir -p "$(dirname "${path}")"
+    if [ "${include_pricing}" = "1" ]; then
+        cat > "${path}" <<EOF
+{
+  "default_model": "${default_model}",
+  "cost_pricing": {
+    "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
+    "claude-opus-4-7":    {"input_per_million": 15,   "output_per_million": 75},
+    "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4}
+  }
+}
+EOF
+    else
+        cat > "${path}" <<EOF
+{
+  "default_model": "${default_model}"
+}
+EOF
+    fi
+}
+
+read_cost_field() {
+    # read_cost_field <cost.log path> <today> <0-based field index>
+    python3 - "$1" "$2" "$3" <<'PY'
+import sys
+path, today, idx = sys.argv[1], sys.argv[2], int(sys.argv[3])
+with open(path, "r", encoding="utf-8") as fh:
+    for line in fh:
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        parts = line.split("\t")
+        if parts and parts[0] == today:
+            print(parts[idx] if idx < len(parts) else "")
+            break
+PY
+}
+
+# Test 7a — sonnet default pricing.
+T7A_HOME=$(mktemp -d -t autoheal_t7a.XXXXXX)
+T7A_DIR="${T7A_HOME}/autoheal"
+mk_state "${T7A_DIR}"
+write_events "${T7A_DIR}/events/${YESTERDAY}.jsonl" 1
+write_config "${T7A_DIR}/config.json" "claude-sonnet-4-6"
+
+env \
+    HOME="${T7A_HOME}" \
+    CCGM_AUTOHEAL_DIR="${T7A_DIR}" \
+    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
+    CCGM_AUTOHEAL_TODAY="${TODAY}" \
+    ANTHROPIC_API_KEY="x" \
+    bash "${ANALYZER}" >"${T7A_HOME}/run.out" 2>"${T7A_HOME}/run.err"
+RC=$?
+assert_eq "${RC}" "0" "pricing sonnet: analyzer exits 0"
+
+T7A_COST_VAL=$(read_cost_field "${T7A_DIR}/cost.log" "${TODAY}" 3)
+assert_eq "${T7A_COST_VAL}" "0.007200" "pricing sonnet: cost matches \$3/M + \$15/M"
+T7A_MODEL_VAL=$(read_cost_field "${T7A_DIR}/cost.log" "${TODAY}" 4)
+assert_eq "${T7A_MODEL_VAL}" "claude-sonnet-4-6" "pricing sonnet: model id recorded in cost.log"
+
+T7A_ERR=$(cat "${T7A_HOME}/run.err")
+case "${T7A_ERR}" in
+    *"no cost_pricing"*)
+        FAIL=$((FAIL + 1))
+        echo "FAIL: pricing sonnet: should not emit unknown-model warning"
+        ;;
+    *)
+        PASS=$((PASS + 1))
+        ;;
+esac
+
+# Test 7b — opus default_model uses opus pricing.
+T7B_HOME=$(mktemp -d -t autoheal_t7b.XXXXXX)
+T7B_DIR="${T7B_HOME}/autoheal"
+mk_state "${T7B_DIR}"
+write_events "${T7B_DIR}/events/${YESTERDAY}.jsonl" 1
+write_config "${T7B_DIR}/config.json" "claude-opus-4-7"
+
+env \
+    HOME="${T7B_HOME}" \
+    CCGM_AUTOHEAL_DIR="${T7B_DIR}" \
+    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
+    CCGM_AUTOHEAL_TODAY="${TODAY}" \
+    ANTHROPIC_API_KEY="x" \
+    bash "${ANALYZER}" >"${T7B_HOME}/run.out" 2>"${T7B_HOME}/run.err"
+RC=$?
+assert_eq "${RC}" "0" "pricing opus: analyzer exits 0"
+
+T7B_COST_VAL=$(read_cost_field "${T7B_DIR}/cost.log" "${TODAY}" 3)
+assert_eq "${T7B_COST_VAL}" "0.036000" "pricing opus: cost matches \$15/M + \$75/M"
+T7B_MODEL_VAL=$(read_cost_field "${T7B_DIR}/cost.log" "${TODAY}" 4)
+assert_eq "${T7B_MODEL_VAL}" "claude-opus-4-7" "pricing opus: model id recorded in cost.log"
+
+# Test 7c — unknown model falls back to sonnet pricing AND warns.
+T7C_HOME=$(mktemp -d -t autoheal_t7c.XXXXXX)
+T7C_DIR="${T7C_HOME}/autoheal"
+mk_state "${T7C_DIR}"
+write_events "${T7C_DIR}/events/${YESTERDAY}.jsonl" 1
+write_config "${T7C_DIR}/config.json" "claude-mystery-9-9"
+
+env \
+    HOME="${T7C_HOME}" \
+    CCGM_AUTOHEAL_DIR="${T7C_DIR}" \
+    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
+    CCGM_AUTOHEAL_TODAY="${TODAY}" \
+    ANTHROPIC_API_KEY="x" \
+    bash "${ANALYZER}" >"${T7C_HOME}/run.out" 2>"${T7C_HOME}/run.err"
+RC=$?
+assert_eq "${RC}" "0" "pricing unknown: analyzer exits 0"
+
+T7C_COST_VAL=$(read_cost_field "${T7C_DIR}/cost.log" "${TODAY}" 3)
+assert_eq "${T7C_COST_VAL}" "0.007200" "pricing unknown: cost falls back to sonnet (\$3/M + \$15/M)"
+T7C_MODEL_VAL=$(read_cost_field "${T7C_DIR}/cost.log" "${TODAY}" 4)
+assert_eq "${T7C_MODEL_VAL}" "claude-mystery-9-9" "pricing unknown: configured model id still recorded for traceability"
+
+T7C_ERR=$(cat "${T7C_HOME}/run.err")
+assert_contains "${T7C_ERR}" "no cost_pricing for model claude-mystery-9-9" "pricing unknown: stderr warning emitted"
+assert_contains "${T7C_ERR}" "falling back" "pricing unknown: stderr explains fallback"
+
+# Test 7d — back-compat: a cost.log written by older code (no model
+# field) parses cleanly when summing today's spend (cap check).
+T7D_HOME=$(mktemp -d -t autoheal_t7d.XXXXXX)
+T7D_DIR="${T7D_HOME}/autoheal"
+mk_state "${T7D_DIR}"
+write_events "${T7D_DIR}/events/${YESTERDAY}.jsonl" 1
+# Legacy 4-field line (no model). Sum is 0.40, well below the 50c cap so
+# the analyzer must proceed. If today_cost_cents() crashes on a missing
+# 5th field, the analyzer exits 1 instead of 0.
+printf '%s\t100000\t5000\t0.400000\n' "${TODAY}" > "${T7D_DIR}/cost.log"
+
+env \
+    HOME="${T7D_HOME}" \
+    CCGM_AUTOHEAL_DIR="${T7D_DIR}" \
+    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
+    CCGM_AUTOHEAL_TODAY="${TODAY}" \
+    ANTHROPIC_API_KEY="x" \
+    bash "${ANALYZER}" >"${T7D_HOME}/run.out" 2>"${T7D_HOME}/run.err"
+RC=$?
+assert_eq "${RC}" "0" "pricing back-compat: legacy 4-field cost.log still parses"
+
+# After the run, a new 5-field line should sit alongside the legacy one.
+LEGACY_LINE_COUNT=$(grep -c "^${TODAY}" "${T7D_DIR}/cost.log" || true)
+if [ "${LEGACY_LINE_COUNT}" -ge 2 ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: pricing back-compat: expected legacy + new cost.log lines, got ${LEGACY_LINE_COUNT}"
+fi
+
+# Cleanup test 7 dirs.
+for d in "${T7A_HOME}" "${T7B_HOME}" "${T7C_HOME}" "${T7D_HOME}"; do
+    rm -rf "${d}"
+done
+
+# ---------------------------------------------------------------------
 # Summary.
 # ---------------------------------------------------------------------
 
