@@ -196,7 +196,7 @@ while IFS= read -r hook_path; do
     HOOK_HAS_UTILS+=("${has_utils}")
     HOOK_BYPASS+=("${bypass_aware}")
     HOOK_HARDBLOCK+=("${has_hard_block}")
-done < <(find "${HOOKS_DIR}" -maxdepth 1 -name "*.py" -type f 2>/dev/null | sort)
+done < <(find -L "${HOOKS_DIR}" -maxdepth 1 -name "*.py" -type f 2>/dev/null | sort)
 
 HOOK_COUNT=${#HOOK_NAMES[@]}
 
