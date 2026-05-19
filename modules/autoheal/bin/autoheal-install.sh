@@ -111,27 +111,38 @@ PY
 fi
 
 # ---------------------------------------------------------------------
-# Daily wrapper script shim.
+# Daily wrapper script entrypoint.
 #
-# autoheal-daily.sh is Epic 7's responsibility, but the LaunchAgent
-# needs SOMETHING at ~/.claude/autoheal/autoheal-daily.sh today. We
-# install a thin shim that calls the analyzer directly; Epic 7 will
-# replace it with the full chain. Idempotent: only writes if absent or
-# if the existing file is the shim placeholder.
+# The launchd plist points at ~/.claude/autoheal/autoheal-daily.sh.
+# That file is a thin entrypoint that (a) sources the user's shell rc
+# so RESEND_API_KEY / ANTHROPIC_API_KEY flow at runtime (the plist
+# deliberately omits them), then (b) execs the canonical module's full
+# chain wrapper (analyze -> auto-apply -> digest -> email -> publish ->
+# retention).
+#
+# Idempotent: writes the entrypoint if missing OR if the existing file
+# is a stale Epic 6 stub (matched by header marker text).
+#
+# NOTE: we explicitly do NOT use `set -u` inside the entrypoint —
+# zsh-flavored rc files sourced under bash frequently reference
+# unbound variables, and `set -u` would wedge the daily run.
 # ---------------------------------------------------------------------
 
 DAILY_PATH="${AUTOHEAL_DIR}/autoheal-daily.sh"
-if [ ! -f "${DAILY_PATH}" ] || head -2 "${DAILY_PATH}" 2>/dev/null | grep -q "Epic 6 install shim"; then
+DAILY_IS_STALE=0
+if [ -f "${DAILY_PATH}" ] && head -3 "${DAILY_PATH}" 2>/dev/null | grep -q "Epic 6 install shim"; then
+    DAILY_IS_STALE=1
+fi
+if [ ! -f "${DAILY_PATH}" ] || [ "${DAILY_IS_STALE}" = "1" ]; then
     cat > "${DAILY_PATH}" <<'EOF'
 #!/usr/bin/env bash
-# Epic 6 install shim. Epic 7 replaces this with the full wrapper that
-# orchestrates analyze -> auto-apply -> digest -> email -> publish ->
-# retention. Until then, just run the analyzer so the daily job is not
-# a no-op.
-set -u
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Re-source the user's shell so RESEND/ANTHROPIC keys exposed in
-# ~/.zshrc are picked up; the launchd plist does NOT carry them.
+# autoheal daily entrypoint (called by launchd LaunchAgent).
+#
+# Re-sources the user's shell rc so RESEND_API_KEY / ANTHROPIC_API_KEY
+# from ~/.zshrc are available — the launchd plist deliberately omits
+# them. Then execs the module's full chain wrapper:
+# analyze -> auto-apply -> digest -> email -> publish -> retention.
+
 for rc in "${HOME}/.zshrc" "${HOME}/.bash_profile" "${HOME}/.profile"; do
     if [ -r "${rc}" ]; then
         # shellcheck disable=SC1090
@@ -139,10 +150,12 @@ for rc in "${HOME}/.zshrc" "${HOME}/.bash_profile" "${HOME}/.profile"; do
         break
     fi
 done
-exec "${SCRIPT_DIR}/autoheal-analyze.sh"
+
+CCGM_AUTOHEAL_BIN="${CCGM_AUTOHEAL_BIN:-${HOME}/code/ccgm/modules/autoheal/bin}"
+exec "${CCGM_AUTOHEAL_BIN}/autoheal-daily.sh"
 EOF
     chmod +x "${DAILY_PATH}"
-    echo "autoheal-install: wrote daily-runner shim to ${DAILY_PATH}"
+    echo "autoheal-install: wrote daily entrypoint to ${DAILY_PATH}"
 fi
 
 # Symlink the analyzer into ~/.claude/autoheal/ so the shim above can
