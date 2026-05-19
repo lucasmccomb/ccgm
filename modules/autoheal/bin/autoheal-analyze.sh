@@ -129,13 +129,17 @@ MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # days (700+ events from cross-clone activity) were the most likely to
 # contain proposal-worthy friction but were also the only ones that
 # blew the previous 40K cap. 200K input @ Sonnet pricing is $0.60/day
-# ceiling — well within the $1.00 daily_cost_cap_usd. Override via the
+# ceiling — well within the $10.00 daily_cost_cap_usd. Override via the
 # config.json `max_input_tokens` key.
+#
+# Issue #529 bumped the daily cost cap default from $1.00 to $10.00 so
+# catch-up days, manual `--force-day` reruns, and potential Opus
+# upgrades (5× Sonnet pricing) fit without blowing the cap.
 # ---------------------------------------------------------------------
 
 MAX_INPUT_TOKENS_DEFAULT=200000     # Hard input cap (rough char/4 estimate).
 MAX_INPUT_TOKENS="${MAX_INPUT_TOKENS_DEFAULT}"
-DAILY_COST_CAP_CENTS_DEFAULT=100    # $1.00/day in cents.
+DAILY_COST_CAP_CENTS_DEFAULT=1000   # $10.00/day in cents (issue #529).
 DAILY_COST_CAP_CENTS="${DAILY_COST_CAP_CENTS_DEFAULT}"
 DEFAULT_MODEL="claude-sonnet-4-6"   # Configurable in config.json.
 DEFAULT_MAX_OUTPUT_TOKENS=4096
