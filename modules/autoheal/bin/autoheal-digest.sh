@@ -19,7 +19,9 @@
 #   CCGM_AUTOHEAL_DIGESTS_DIR      default ~/.claude/autoheal/digests
 #   CCGM_AUTOHEAL_SENT_DIR         default ~/.claude/autoheal/sent
 #   CCGM_AUTOHEAL_CONFIG           default ~/.claude/autoheal/config.json
-#   CCGM_AUTOHEAL_TODAY            default $(date +%Y-%m-%d)
+#   CCGM_AUTOHEAL_TODAY            default $(date -u +%Y-%m-%d). UTC-keyed
+#                                  to match proposals/{date}.jsonl written
+#                                  by the analyzer (issue #520).
 #   CCGM_AUTOHEAL_LIB_DIR          default to in-tree modules/hooks/lib (when
 #                                  running from the CCGM checkout), else
 #                                  ~/.claude/lib (the installed copy).
@@ -64,7 +66,7 @@ PROPOSALS_DIR="${CCGM_AUTOHEAL_PROPOSALS_DIR:-${HOME}/.claude/autoheal/proposals
 DIGESTS_DIR="${CCGM_AUTOHEAL_DIGESTS_DIR:-${HOME}/.claude/autoheal/digests}"
 SENT_DIR="${CCGM_AUTOHEAL_SENT_DIR:-${HOME}/.claude/autoheal/sent}"
 CONFIG_FILE="${CCGM_AUTOHEAL_CONFIG:-${HOME}/.claude/autoheal/config.json}"
-TODAY="${CCGM_AUTOHEAL_TODAY:-$(date +%Y-%m-%d)}"
+TODAY="${CCGM_AUTOHEAL_TODAY:-$(date -u +%Y-%m-%d)}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." 2>/dev/null && pwd || echo "")"
@@ -146,7 +148,7 @@ while [ ${i} -le 7 ]; do
     past_date="$(CCGM_OFFSET="${i}" python3 -c "
 import datetime, os
 offset = int(os.environ['CCGM_OFFSET'])
-today_str = os.environ.get('CCGM_AUTOHEAL_TODAY', '') or datetime.date.today().isoformat()
+today_str = os.environ.get('CCGM_AUTOHEAL_TODAY', '') or datetime.datetime.now(datetime.timezone.utc).date().isoformat()
 today = datetime.date.fromisoformat(today_str)
 print((today - datetime.timedelta(days=offset)).isoformat())
 " CCGM_AUTOHEAL_TODAY="${TODAY}")"

@@ -19,7 +19,9 @@
 #
 # Env overrides (for tests):
 #   CCGM_AUTOHEAL_LOGS_DIR   default ~/.claude/logs
-#   CCGM_AUTOHEAL_TODAY      default $(date +%Y-%m-%d)
+#   CCGM_AUTOHEAL_TODAY      default $(date -u +%Y-%m-%d). UTC-keyed to
+#                            match the event/proposal/digest file naming
+#                            written by the hooks (issue #520).
 #   CCGM_AUTOHEAL_BIN_DIR    default to dirname of this script
 
 set -u
@@ -27,7 +29,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${CCGM_AUTOHEAL_BIN_DIR:-${SCRIPT_DIR}}"
 LOGS_DIR="${CCGM_AUTOHEAL_LOGS_DIR:-${HOME}/.claude/logs}"
-TODAY="${CCGM_AUTOHEAL_TODAY:-$(date +%Y-%m-%d)}"
+TODAY="${CCGM_AUTOHEAL_TODAY:-$(date -u +%Y-%m-%d)}"
 
 mkdir -p "${LOGS_DIR}"
 DAILY_LOG="${LOGS_DIR}/autoheal-daily-${TODAY}.log"
