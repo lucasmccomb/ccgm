@@ -726,6 +726,18 @@ Experimental UserPromptSubmit hook that injects iron-law principles before slash
 
 ---
 
+### autoheal
+
+Continuous self-improvement loop: capture hook events, daily transcript analysis via direct Anthropic API, local digest plus optional Resend email, opt-in real-time security alerts, opt-in confidence-gated auto-apply, cross-clone file locking, per-repo overrides, retention sweep, and a webhook publisher seam pre-built for future dev.lem.work integration.
+
+**Installs**: 6 hooks (`permission-event-logger.py`, `failure-logger.py`, `user-correction-detector.py`, `permission-request-suppress.py`, `post-prompt-introspect.py`, `realtime-security-scanner.py`), 7 commands (`/autoheal`, `/autoheal-apply`, `/autoheal-digest`, `/autoheal-snooze`, `/autoheal-toggle`, `/permission-audit`, `/permission-fix`), 10 bin scripts under `~/.claude/autoheal/`, `rules/autoheal.md`, JSONL schemas, redaction patterns, and a LaunchAgent installer.
+
+**What it does**: Four event-capture hooks (`PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `UserPromptSubmit`) record permission requests, tool failures, and user-correction phrases to `~/.claude/autoheal/events/{date}.jsonl` (cross-clone fcntl-locked). A daily `launchd` LaunchAgent runs `autoheal-analyze.sh` (direct `curl` to Anthropic — no claude -p, no exec-escape surface), which proposes small hook/settings fixes filtered by a privilege-escalation gate. Proposals render to a local markdown digest, optionally email via Resend (multi-recipient with per-recipient idempotency keys), and feed into `/permission-fix` (in-session) and `/autoheal-apply` (manual or auto-applied via the strict confidence-9 / breadth-1 / settings-only gate). Default OFF for the three opt-in surfaces (real-time alerts, auto-apply, email/webhook).
+
+**Dependencies**: hooks
+
+---
+
 ### compound-knowledge
 
 Team-shared learnings persisted in `docs/solutions/` and re-injected as grounding into later runs.
