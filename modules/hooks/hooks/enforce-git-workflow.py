@@ -9,7 +9,7 @@ survive bypass mode. `ALLOW_MAIN_COMMIT=1` is the explicit escape hatch.
 
 BLOCKS (via hard_block, bypass-proof):
 1. Commits on protected branches (must use feature branch)
-2. Commit messages without issue number prefix (^#\d+:)
+2. Commit messages without issue number prefix (^#\\d+:)
 3. Direct pushes to protected branches (must use PR workflow)
 
 ALLOWS:
