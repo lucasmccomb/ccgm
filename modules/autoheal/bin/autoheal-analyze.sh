@@ -104,9 +104,12 @@ USAGE
     esac
 done
 
-# Validate --force-day format if set.
+# Validate --force-day format if set. We pass via sys.argv (not shell
+# interpolation into the Python source string) to keep the invocation
+# style consistent with the rest of this file and remove an injection
+# foot-gun even where the value would otherwise be validated upstream.
 if [ -n "${FORCE_DAY}" ]; then
-    if ! python3 -c "import datetime as dt; dt.date.fromisoformat('${FORCE_DAY}')" 2>/dev/null; then
+    if ! python3 -c "import datetime as dt, sys; dt.date.fromisoformat(sys.argv[1])" "${FORCE_DAY}" 2>/dev/null; then
         echo "autoheal-analyze: --force-day value '${FORCE_DAY}' is not a valid YYYY-MM-DD date" >&2
         exit 1
     fi
@@ -547,9 +550,10 @@ analyzer_version() {
 }
 
 # Holds days rejected in this run (newline-separated). The outer loop
-# uses this to gate the last-analyzed bump.
+# uses this to gate the last-analyzed bump. Days that hit the give-up
+# threshold are NOT appended to REJECTED_DAYS — they fall through to
+# the "no rejections" path so last-analyzed bumps past them.
 REJECTED_DAYS=""
-GIVE_UP_DAYS=""
 
 # ---------------------------------------------------------------------
 # Per-day processing.
@@ -812,8 +816,6 @@ except OSError as exc:
 # at which point the events themselves are too many for the configured
 # budget.
 final_window = None
-final_runtime_ctx = None
-final_events_list = None
 serialized = None
 est_tokens = None
 
@@ -828,8 +830,6 @@ for try_window in (3, 1, 0):
     et = char_total // 4
     if et <= max_input_tokens:
         final_window = try_window
-        final_runtime_ctx = rt_ctx
-        final_events_list = ev_list
         serialized = s
         est_tokens = et
         break
@@ -909,9 +909,9 @@ PY
         # rejected this day enough times under THIS analyzer version to
         # give up. A future analyzer version starts the counter fresh.
         if [ "${prior}" -ge "${REJECT_GIVEUP_THRESHOLD}" ]; then
+            # Give up: leave this day OUT of REJECTED_DAYS so the
+            # bottom-of-script logic bumps last-analyzed past it.
             echo "autoheal-analyze: GIVE_UP day=${day_iso} rejected ${prior} times; bumping past it." >&2
-            GIVE_UP_DAYS="${GIVE_UP_DAYS}${day_iso}
-"
         else
             REJECTED_DAYS="${REJECTED_DAYS}${day_iso}
 "
@@ -1273,14 +1273,19 @@ if [ -n "${FORCE_DAY}" ]; then
 elif [ -z "${REJECTED_DAYS}" ]; then
     printf '%s\n' "${TODAY_ISO}" > "$(last_analyzed_path)"
 else
-    # Pick the earliest still-retriable rejection.
+    # Pick the earliest still-retriable rejection. Pass via sys.argv
+    # rather than splicing into the Python source string — consistent
+    # with the rest of this file and avoids any shell-interpolation
+    # foot-gun if rejected-day values ever stop being date-validated
+    # upstream.
     EARLIEST_REJECTED="$(printf '%s' "${REJECTED_DAYS}" | grep -v '^$' | sort | head -n 1)"
     if [ -n "${EARLIEST_REJECTED}" ]; then
         NEW_LAST="$(python3 -c "
 import datetime as dt
-d = dt.date.fromisoformat('${EARLIEST_REJECTED}') - dt.timedelta(days=1)
+import sys
+d = dt.date.fromisoformat(sys.argv[1]) - dt.timedelta(days=1)
 print(d.isoformat())
-")"
+" "${EARLIEST_REJECTED}")"
         # If the earliest rejection is at/before our existing last-analyzed
         # we leave the file alone (would otherwise step backwards).
         CURRENT_LAST=""
