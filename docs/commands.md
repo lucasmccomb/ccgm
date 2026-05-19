@@ -739,6 +739,84 @@ Synthesizes what shipped in a time window by walking the git log, surfacing hots
 
 ---
 
+## Autoheal commands
+
+Installed by the **autoheal** module. The autoheal pipeline observes hook events, runs a daily transcript analyzer, and surfaces actionable proposals through these commands.
+
+---
+
+### /autoheal
+
+**Help / overview for the autoheal pipeline.**
+
+Lists every autoheal subcommand, the config flags (`realtime_alerts_enabled`, `auto_apply_enabled`, `email_enabled`, `webhook_url`), and the default-OFF posture for the three opt-in surfaces (real-time alerts, auto-apply, webhook publisher).
+
+**Installed by**: autoheal module
+
+---
+
+### /autoheal-digest
+
+**Render today's autoheal digest (or one from a past date).**
+
+Reads `~/.claude/autoheal/digests/{date}.md` rendered by `autoheal-digest.sh` from that day's proposals (capped at 5 per day; backfill summary lists unemailed past days). Secrets in proposal rationale are redacted via the 17-pattern set before render.
+
+**Usage**: `/autoheal-digest` (today) or `/autoheal-digest 2026-05-18`.
+
+**Installed by**: autoheal module
+
+---
+
+### /autoheal-toggle
+
+**Flip an autoheal config flag without editing `~/.claude/autoheal/config.json` directly.**
+
+Subcommands cover the opt-in surfaces — `pause | resume | status | realtime | autoapply | email | digest | webhook`. The webhook variant accepts a URL setter (`/autoheal-toggle webhook url https://dev.lem.work/v1/ingest`).
+
+**Installed by**: autoheal module
+
+---
+
+### /autoheal-snooze
+
+**Suppress a specific proposal fingerprint for N days (default 30).**
+
+Writes to `~/.claude/autoheal/snoozed.json` keyed by the proposal's fingerprint. Useful when the analyzer keeps re-proposing a change you have already decided against.
+
+**Installed by**: autoheal module
+
+---
+
+### /autoheal-apply
+
+**Apply a confidence-gated autoheal proposal to canonical CCGM source.**
+
+`/autoheal-apply` lists pending proposals from the past 8 days (skips snoozed + already-applied). `/autoheal-apply <id>` runs the shared apply path (`lib/apply-proposal.py`): resolves the canonical clone, creates branch `autoheal/{id}`, applies the diff, runs `tests/test-modules.sh` + `tests/test-no-personal-data.sh`, commits with `#auto:` prefix, prints diff + undo + `gh pr create` suggestion. Never auto-merges.
+
+**Installed by**: autoheal module
+
+---
+
+### /permission-fix
+
+**In-session fix proposal for permission friction in the current turn.**
+
+`/permission-fix latest` finds the most recent `permission_request` or `tool_failure` event in today's events and proposes a minimal hook/settings change (paraphrased, breadth-filtered). `/permission-fix apply <id>` routes through the same shared apply logic as `/autoheal-apply`. Triggered automatically by the `post-prompt-introspect.py` Stop-hook when the same friction signature fires ≥2 times in one session.
+
+**Installed by**: autoheal module
+
+---
+
+### /permission-audit
+
+**Read-only static audit of the hook + deny-list alignment.**
+
+Classifies each `modules/hooks/hooks/*.py` as bypass-suppressible / bypass-retained / legacy by inspection (does it import `hook_utils`? does it use `is_bypass_mode`? does it use `hard_block`?), counts deny entries, and flags overlaps where a deny rule is now redundant with a hook hard_block. Supports `--hooks-dir` and `--settings-file` overrides for testing on fixture trees; `--format json` for programmatic consumption.
+
+**Installed by**: autoheal module
+
+---
+
 ## Workflow commands
 
 Installed by the **xplan**, **multi-agent**, and **startup-dashboard** modules.

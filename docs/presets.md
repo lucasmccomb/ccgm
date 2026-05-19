@@ -33,22 +33,23 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **Best for**: Teams with shared repositories who want consistent practices across contributors.
 
-**Modules (10)**:
+**Modules**:
 - Everything in **standard** (minus `identity` and `commands-utility`), plus:
 - `github-protocols` - issue-first workflow, PR conventions, label taxonomy, code review standards
 - `code-quality` - code standards, testing requirements, error handling, security, build verification
 - `systematic-debugging` - structured 4-phase debugging methodology
 - `verification` - evidence-before-claims, fresh execution requirement
+- `autoheal` - continuous self-improvement loop with multi-recipient digest support
 
-**What you get**: Everything in standard (with a team-focused selection), plus rules that enforce consistent development practices across a team.
+**What you get**: Everything in standard (with a team-focused selection), plus rules that enforce consistent development practices across a team. The autoheal module's multi-recipient digest (`digest_email: ["a@b", "c@d"]`) is particularly useful for sharing weekly insights with teammates.
 
 ### full
 
 **Best for**: Power users who want the complete CCGM experience, including multi-agent coordination, brand research, and tech-specific guides.
 
-**Modules (46)**: All stable modules. The `agent-manager` (beta) and `cloud-dispatch` modules are not included by default; install them individually via the module selector (or use the `cloud-agent` preset).
+**Modules**: All stable modules including **autoheal** (continuous self-improvement; opt-in real-time alerts and auto-apply). The `agent-manager` (beta) and `cloud-dispatch` modules are not included by default; install them individually via the module selector (or use the `cloud-agent` preset).
 
-**What you get**: The full suite. Includes multi-agent workflows, planning frameworks, tech-specific patterns (Cloudflare, Supabase, Tailwind, shadcn, MCP development), and specialized commands.
+**What you get**: The full suite. Includes multi-agent workflows, planning frameworks, tech-specific patterns (Cloudflare, Supabase, Tailwind, shadcn, MCP development), specialized commands, and the autoheal observability loop with three opt-in toggles (`/autoheal-toggle realtime|autoapply|webhook`).
 
 ### cloud-agent
 

@@ -284,6 +284,60 @@ Experimental (OFF by default). Injects a rule-enforcement meta-instruction at fr
 
 ---
 
+## Autoheal hooks
+
+Installed by the **autoheal** module. They are registered alongside the core hooks but emit/log only — they do NOT enforce. Three opt-in surfaces (real-time alerts, auto-apply, webhook publisher) are gated by config flags in `~/.claude/autoheal/config.json` and default OFF.
+
+### permission-event-logger.py
+
+**Type**: PostToolUse + PostToolUseFailure + PermissionRequest (no matcher)
+**Module**: autoheal
+**Can block**: No (observational)
+
+Appends one JSONL record per event to `~/.claude/autoheal/events/{date}.jsonl`, cross-clone safe via `hook_utils.file_locked_append`. Commands are redacted via the 17-pattern set BEFORE truncation, so secrets never enter the log even when the truncation point falls mid-token.
+
+### failure-logger.py
+
+**Type**: PostToolUseFailure (no matcher)
+**Module**: autoheal
+**Can block**: No
+
+Specialization of the event logger for tool failures — captures `exit_code` and a redacted `stderr_excerpt` (≤200 chars) for analyzer context.
+
+### user-correction-detector.py
+
+**Type**: UserPromptSubmit (no matcher)
+**Module**: autoheal
+**Can block**: No
+
+Pattern-matches 9 user-correction phrases ("no, not like that", "stop doing", "actually", "wait, no", etc.) in the submitted prompt. On match: logs a `user_correction` event with the last 3 tool-use event IDs as context. Never modifies the prompt.
+
+### permission-request-suppress.py
+
+**Type**: PermissionRequest (no matcher)
+**Module**: autoheal
+**Can block**: Yes (auto-allow only)
+
+Conservative auto-allow gate: fires only when ALL hold — `is_bypass_mode()` is True, the `(tool, command-prefix)` signature has ≥3 prior approvals across ≥2 distinct sessions, and the signature is not in `~/.claude/autoheal/snoozed.json`. Otherwise exits silently.
+
+### post-prompt-introspect.py
+
+**Type**: Stop
+**Module**: autoheal
+**Can block**: No (emits suggestion to stderr)
+
+Session-level dedup'd Stop hook. When ≥2 same-signature `permission_request` or `tool_failure` events fire in the current session, emits an `<autoheal-suggestion>` block on stderr suggesting `/permission-fix latest`. One suggestion per signature per session.
+
+### realtime-security-scanner.py
+
+**Type**: PostToolUse with `async: true, asyncRewake: true` (no matcher)
+**Module**: autoheal
+**Can block**: Yes (`exit 2` wakes Claude mid-session)
+
+Strictly opt-in. Reads `~/.claude/autoheal/config.json` → if `realtime_alerts_enabled` is false or missing, exits 0 immediately without touching the patterns file. When enabled: applies 7 regexes (GitHub/AWS/Anthropic tokens in commit/echo; force-push-to-main without `ALLOW_MAIN_COMMIT`; `rm -rf /…`; `sudo` destructive; `DROP TABLE` against prod-tagged connection strings). On match: logs `realtime_security_alert` event and `exit 2` with an `<autoheal-security-alert>` envelope.
+
+---
+
 ## Agent tracking library
 
 The hooks module also installs `lib/agent_tracking.py`, a Python module and CLI tool used by the tracking hooks.
