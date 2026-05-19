@@ -23,6 +23,30 @@ If everything in the slice looks routine and there is nothing worth
 proposing, return `{"proposals": []}`. An empty response is the right
 answer when the day's events show no recurring friction.
 
+## Event shape
+
+Each record in `events` is one of two shapes — weight them differently:
+
+1. **Friction records** — full event with optional `excerpts`. These are
+   the records worth most of your attention: tool failures, permission
+   prompts, user corrections, anything with a non-zero exit code or a
+   permission_decision of "deny"/"ask". Cluster signal here means there
+   was repeated friction with a specific tool or command — usually
+   proposal-worthy.
+
+2. **Cluster records** — `{"kind": "cluster", "tool_name", "redacted_command_prefix", "count", "first_seen", "last_seen", "sample_session_id"}`.
+   These represent routine tool calls grouped by `(tool_name, command
+   prefix)`. They never carry excerpts. Treat them as **noisy routine
+   activity** — proposal-worthy only when a single signature fires
+   hundreds of times in a way that suggests genuine automation friction
+   (e.g. the same `Bash(git diff)` got 400 approvals — narrow rule
+   candidate). Do NOT generate proposals just because a cluster's count
+   is high; high counts on a routine tool are normal.
+
+The runtime context's `event_summary` reports how many of each shape
+are present; if `friction_events` is 0, the day is almost certainly
+proposal-free — say `{"proposals": []}`.
+
 ## What to propose
 
 Each proposal is a JSON object matching `proposal-schema.json`:

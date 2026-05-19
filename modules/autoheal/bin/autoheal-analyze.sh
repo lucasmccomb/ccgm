@@ -40,6 +40,15 @@
 #   USE_ANALYZER_SANDBOX         If 1 and sandbox-exec exists, wraps the
 #                                 curl call in the seatbelt profile.
 #
+# CLI flags:
+#   --force-day YYYY-MM-DD       Re-process exactly that day, ignoring
+#                                 last-analyzed. Does not bump
+#                                 last-analyzed. Useful when the cap was
+#                                 raised or a clustering bug was fixed
+#                                 and a previously-rejected day should
+#                                 be retried.
+#   --help                        Print usage and exit.
+#
 # Exit codes:
 #   0  success (including "nothing to do" cases)
 #   1  fatal config/setup error
@@ -52,6 +61,61 @@ set -u
 set -o pipefail
 
 # ---------------------------------------------------------------------
+# CLI parsing.
+# ---------------------------------------------------------------------
+
+FORCE_DAY=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --force-day)
+            shift
+            if [ "$#" -eq 0 ]; then
+                echo "autoheal-analyze: --force-day requires YYYY-MM-DD" >&2
+                exit 1
+            fi
+            FORCE_DAY="$1"
+            shift
+            ;;
+        --force-day=*)
+            FORCE_DAY="${1#--force-day=}"
+            shift
+            ;;
+        --help|-h)
+            cat <<'USAGE'
+Usage: autoheal-analyze.sh [--force-day YYYY-MM-DD]
+
+Daily autoheal analyzer. By default processes every unanalyzed day in
+the lookback window (default 7 days), bounded by ~/.claude/autoheal/last-analyzed.
+
+Options:
+  --force-day YYYY-MM-DD   Re-process exactly that day, ignoring
+                           last-analyzed. Does not bump last-analyzed.
+  --help                   Show this message.
+
+See modules/autoheal/bin/autoheal-analyze.sh for full env-var docs.
+USAGE
+            exit 0
+            ;;
+        *)
+            echo "autoheal-analyze: unknown argument: $1" >&2
+            echo "Run with --help for usage." >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Validate --force-day format if set. We pass via sys.argv (not shell
+# interpolation into the Python source string) to keep the invocation
+# style consistent with the rest of this file and remove an injection
+# foot-gun even where the value would otherwise be validated upstream.
+if [ -n "${FORCE_DAY}" ]; then
+    if ! python3 -c "import datetime as dt, sys; dt.date.fromisoformat(sys.argv[1])" "${FORCE_DAY}" 2>/dev/null; then
+        echo "autoheal-analyze: --force-day value '${FORCE_DAY}' is not a valid YYYY-MM-DD date" >&2
+        exit 1
+    fi
+fi
+
+# ---------------------------------------------------------------------
 # Resolve module paths.
 # ---------------------------------------------------------------------
 
@@ -60,14 +124,25 @@ MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ---------------------------------------------------------------------
 # Tunables (overridable via config; defaults match plan.md §3.7).
+#
+# The hard cap default rose from 40K to 200K in issue #517. Heavy event
+# days (700+ events from cross-clone activity) were the most likely to
+# contain proposal-worthy friction but were also the only ones that
+# blew the previous 40K cap. 200K input @ Sonnet pricing is $0.60/day
+# ceiling — well within the $1.00 daily_cost_cap_usd. Override via the
+# config.json `max_input_tokens` key.
 # ---------------------------------------------------------------------
 
-MAX_INPUT_TOKENS=40000              # Hard input cap (rough char/4 estimate).
-DAILY_COST_CAP_CENTS=50             # $0.50/day in cents.
+MAX_INPUT_TOKENS_DEFAULT=200000     # Hard input cap (rough char/4 estimate).
+MAX_INPUT_TOKENS="${MAX_INPUT_TOKENS_DEFAULT}"
+DAILY_COST_CAP_CENTS_DEFAULT=100    # $1.00/day in cents.
+DAILY_COST_CAP_CENTS="${DAILY_COST_CAP_CENTS_DEFAULT}"
 DEFAULT_MODEL="claude-sonnet-4-6"   # Configurable in config.json.
 DEFAULT_MAX_OUTPUT_TOKENS=4096
 LOOKBACK_DAYS=7                     # Walk back at most this many days.
 CALIBRATION_WINDOW_DAYS=7
+REJECT_GIVEUP_THRESHOLD=7           # After N rejections of the same day,
+                                    # give up and bump past it.
 
 # ---------------------------------------------------------------------
 # Path helpers (env-overridable for tests).
@@ -117,6 +192,67 @@ logs_dir() {
     printf '%s\n' "${HOME}/.claude/logs"
 }
 
+rejected_days_path() {
+    printf '%s\n' "$(autoheal_dir)/rejected-days.jsonl"
+}
+
+# ---------------------------------------------------------------------
+# Config-driven tunables (max_input_tokens, daily_cost_cap_usd).
+#
+# Reads ~/.claude/autoheal/config.json (or CCGM_AUTOHEAL_CONFIG). Missing
+# file, malformed JSON, or missing keys fall back to defaults. Both
+# values must be positive numbers; anything else is treated as missing.
+# ---------------------------------------------------------------------
+
+load_runtime_tunables() {
+    local cfg
+    cfg="$(config_path)"
+    if [ ! -f "${cfg}" ]; then
+        return 0
+    fi
+    local parsed
+    parsed=$(
+        CONFIG_PATH="${cfg}" \
+        DEFAULT_MAX="${MAX_INPUT_TOKENS_DEFAULT}" \
+        DEFAULT_CAP_CENTS="${DAILY_COST_CAP_CENTS_DEFAULT}" \
+        python3 - <<'PY'
+import json
+import os
+
+path = os.environ["CONFIG_PATH"]
+default_max = int(os.environ["DEFAULT_MAX"])
+default_cap_cents = int(os.environ["DEFAULT_CAP_CENTS"])
+
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        cfg = json.load(fh)
+except (OSError, json.JSONDecodeError):
+    cfg = {}
+
+if not isinstance(cfg, dict):
+    cfg = {}
+
+mit = cfg.get("max_input_tokens")
+if isinstance(mit, (int, float)) and mit > 0:
+    mit_out = int(mit)
+else:
+    mit_out = default_max
+
+cap_usd = cfg.get("daily_cost_cap_usd")
+if isinstance(cap_usd, (int, float)) and cap_usd > 0:
+    cap_cents = int(round(float(cap_usd) * 100))
+else:
+    cap_cents = default_cap_cents
+
+print(f"{mit_out}\t{cap_cents}")
+PY
+    )
+    if [ -n "${parsed}" ]; then
+        MAX_INPUT_TOKENS="$(printf '%s' "${parsed}" | cut -f1)"
+        DAILY_COST_CAP_CENTS="$(printf '%s' "${parsed}" | cut -f2)"
+    fi
+}
+
 # ---------------------------------------------------------------------
 # Setup: ensure dirs and dependencies exist.
 # ---------------------------------------------------------------------
@@ -132,6 +268,9 @@ if ! command -v curl >/dev/null 2>&1; then
     echo "autoheal-analyze: curl not found on PATH" >&2
     exit 1
 fi
+
+# Apply config-driven tunables now that paths are resolved.
+load_runtime_tunables
 
 # ---------------------------------------------------------------------
 # API-key + fixture handling.
@@ -195,12 +334,27 @@ export LAST_PATH="$(last_analyzed_path)"
 export LOOKBACK_DAYS
 export TODAY_ISO
 export EVENTS_DIR="$(events_dir)"
-DAYS_TO_ANALYZE="$(compute_days)"
+
+if [ -n "${FORCE_DAY}" ]; then
+    # --force-day: process exactly this one day, ignoring last-analyzed.
+    # Require an events file to exist for the day (otherwise there is
+    # literally nothing to analyze).
+    if [ ! -f "$(events_dir)/${FORCE_DAY}.jsonl" ]; then
+        echo "autoheal-analyze: --force-day ${FORCE_DAY}: no events file at $(events_dir)/${FORCE_DAY}.jsonl" >&2
+        exit 0
+    fi
+    DAYS_TO_ANALYZE="${FORCE_DAY}"
+    echo "autoheal-analyze: --force-day ${FORCE_DAY}: ignoring last-analyzed, will NOT bump it." >&2
+else
+    DAYS_TO_ANALYZE="$(compute_days)"
+fi
 
 if [ -z "${DAYS_TO_ANALYZE}" ]; then
     echo "autoheal-analyze: no unanalyzed event days in the last ${LOOKBACK_DAYS} days." >&2
-    # Still bump last-analyzed so we don't keep re-scanning empty space.
-    printf '%s\n' "${TODAY_ISO}" > "$(last_analyzed_path)"
+    if [ -z "${FORCE_DAY}" ]; then
+        # Still bump last-analyzed so we don't keep re-scanning empty space.
+        printf '%s\n' "${TODAY_ISO}" > "$(last_analyzed_path)"
+    fi
     exit 0
 fi
 
@@ -288,6 +442,120 @@ sandbox_prefix() {
 }
 
 # ---------------------------------------------------------------------
+# Rejection bookkeeping.
+#
+# When a day is rejected for size (rc=3 from pre-extract), append a
+# record to ~/.claude/autoheal/rejected-days.jsonl and DO NOT bump
+# last-analyzed past it. A subsequent run with a higher cap (or after
+# the underlying clustering improves) will re-process the day.
+#
+# Days rejected >= REJECT_GIVEUP_THRESHOLD times are marked
+# "give up" — the outer loop bumps past them so the analyzer doesn't
+# loop indefinitely on a permanently-broken day.
+# ---------------------------------------------------------------------
+
+rejected_count_for_day() {
+    # Counts prior rejections for `day` that match the CURRENT analyzer
+    # version. A new analyzer (different short SHA) always starts the
+    # retry counter at 0 — when a clustering / cap bug is fixed, days
+    # rejected under the old code get a fresh chance under the new code
+    # instead of being skipped forever. See issue #519 review.
+    local day="$1"
+    local version="$2"
+    local path
+    path="$(rejected_days_path)"
+    if [ ! -f "${path}" ]; then
+        printf '0\n'
+        return 0
+    fi
+    REJ_DAY="${day}" REJ_VERSION="${version}" REJ_PATH="${path}" python3 - <<'PY'
+import json
+import os
+
+path = os.environ["REJ_PATH"]
+day = os.environ["REJ_DAY"]
+version = os.environ["REJ_VERSION"]
+n = 0
+with open(path, "r", encoding="utf-8") as fh:
+    for line in fh:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(rec, dict) and rec.get("date") == day and rec.get("analyzer_version") == version:
+            n += 1
+print(n)
+PY
+}
+
+record_rejection() {
+    local day="$1"
+    local est_tokens="$2"
+    local cap="$3"
+    local version="$4"
+    local path
+    path="$(rejected_days_path)"
+    mkdir -p "$(dirname "${path}")"
+    REJ_DAY="${day}" \
+    REJ_EST="${est_tokens}" \
+    REJ_CAP="${cap}" \
+    REJ_VERSION="${version}" \
+    REJ_PATH="${path}" \
+    python3 - <<'PY'
+import datetime as dt
+import fcntl
+import json
+import os
+
+path = os.environ["REJ_PATH"]
+rec = {
+    "date": os.environ["REJ_DAY"],
+    "rejected_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+    "est_tokens": int(os.environ.get("REJ_EST") or 0),
+    "max_input_tokens": int(os.environ.get("REJ_CAP") or 0),
+    "analyzer_version": os.environ.get("REJ_VERSION") or "1",
+}
+parent = os.path.dirname(path)
+if parent:
+    os.makedirs(parent, exist_ok=True)
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+try:
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        os.write(fd, (json.dumps(rec, ensure_ascii=False) + "\n").encode("utf-8"))
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+finally:
+    os.close(fd)
+PY
+}
+
+analyzer_version() {
+    # Best-effort: short git SHA for the current commit. Falls back to
+    # "1" when not running inside a git checkout. The version label
+    # exists so a future run can decide whether to retry a previously-
+    # rejected day (i.e. the analyzer has changed since the rejection).
+    local sha=""
+    if command -v git >/dev/null 2>&1; then
+        sha="$(git -C "${MODULE_ROOT}" rev-parse --short HEAD 2>/dev/null || true)"
+    fi
+    if [ -z "${sha}" ]; then
+        printf '1\n'
+    else
+        printf '%s\n' "${sha}"
+    fi
+}
+
+# Holds days rejected in this run (newline-separated). The outer loop
+# uses this to gate the last-analyzed bump. Days that hit the give-up
+# threshold are NOT appended to REJECTED_DAYS — they fall through to
+# the "no rejections" path so last-analyzed bumps past them.
+REJECTED_DAYS=""
+
+# ---------------------------------------------------------------------
 # Per-day processing.
 # ---------------------------------------------------------------------
 
@@ -337,7 +605,16 @@ max_output_tokens = int(sys.argv[9])
 
 
 def load_events(path):
+    """Load events with dedup on (session_id, timestamp, kind).
+
+    The double-write contract — see hooks/failure-logger.py:8-12 — is that
+    `failure-logger.py` and `permission-event-logger.py` both write a
+    tool_failure record on the failure surface as redundancy guards. The
+    analyzer dedupes here using the exact key the docstring promises.
+    """
     out = []
+    seen = set()
+    n_dup = 0
     with open(path, "r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -347,16 +624,33 @@ def load_events(path):
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if isinstance(rec, dict):
-                out.append(rec)
+            if not isinstance(rec, dict):
+                continue
+            key = (
+                rec.get("session_id") or "",
+                rec.get("timestamp") or "",
+                rec.get("kind") or "",
+            )
+            # Treat all-empty keys as non-deduppable (e.g. malformed rows).
+            if key != ("", "", "") and key in seen:
+                n_dup += 1
+                continue
+            if key != ("", "", ""):
+                seen.add(key)
+            out.append(rec)
+    print(
+        f"loaded {len(out)} unique events ({n_dup} duplicates skipped)",
+        file=sys.stderr,
+    )
     return out
 
 
 def excerpt_transcript(transcript_path, around_ts, window=3):
     """Return up to `window` turns before and after `around_ts` from
-    the user's session JSONL. Returns [] when the file is unreadable
-    or the field is missing (the current event schema does not include
-    `transcript_path`; this is forward-compatible scaffolding)."""
+    the user's session JSONL. Returns [] when the file is unreadable,
+    the field is missing, or `window <= 0`."""
+    if window <= 0:
+        return []
     if not transcript_path:
         return []
     if not isinstance(transcript_path, str):
@@ -396,20 +690,118 @@ def excerpt_transcript(transcript_path, around_ts, window=3):
     return turns[lo:hi]
 
 
-events = load_events(events_file)
+def is_friction(ev):
+    """An event is "friction" if it represents a stuck moment worth
+    keeping as a full record. Routine successes are clustered instead.
 
-# Build per-event excerpt list (best-effort; tolerates missing schema
-# field — schema is owned by Epic 3 and may grow later).
-event_records = []
-for ev in events:
-    excerpts = excerpt_transcript(
-        ev.get("transcript_path"),
-        ev.get("timestamp") or ev.get("ts") or "",
-    )
-    event_records.append({
-        "event": ev,
-        "excerpts": excerpts,
-    })
+    `permission_request` events are special: the bypass-suppress hook
+    stamps auto-allows with `permission_decision: "allow"`, and those
+    are the routine high-volume class — they MUST cluster, not get
+    promoted to friction by virtue of their kind. Only deny/ask
+    permission requests are friction (this matches the contract
+    documented in analyzer-prompt.md §Event shape)."""
+    kind = ev.get("kind")
+    if kind in ("tool_failure", "user_correction", "realtime_security_alert"):
+        return True
+    exit_code = ev.get("exit_code")
+    if isinstance(exit_code, int) and exit_code != 0:
+        return True
+    decision = ev.get("permission_decision")
+    if decision in ("deny", "ask"):
+        return True
+    stderr = ev.get("stderr_excerpt")
+    if isinstance(stderr, str) and stderr:
+        return True
+    return False
+
+
+def signature(ev):
+    """(tool_name, first 80 chars of redacted_command) for clustering."""
+    tool = ev.get("tool_name") or ""
+    cmd = ev.get("redacted_command") or ""
+    if not isinstance(cmd, str):
+        cmd = ""
+    return (tool, cmd[:80])
+
+
+def build_payload(events, window):
+    """Return (runtime_context, events_list) for a given excerpt window.
+
+    Friction events first (chronological by timestamp), then cluster
+    records descending by `count`. Excerpts only attach to friction
+    events; cluster records never carry transcript context."""
+    friction_evs = [ev for ev in events if is_friction(ev)]
+    routine_evs = [ev for ev in events if not is_friction(ev)]
+
+    # Friction events: chronological, full record + adaptive excerpts.
+    friction_evs.sort(key=lambda e: e.get("timestamp") or "")
+    friction_records = []
+    for ev in friction_evs:
+        rec = {
+            "kind": ev.get("kind"),
+            "event": ev,
+        }
+        excerpts = excerpt_transcript(
+            ev.get("transcript_path"),
+            ev.get("timestamp") or ev.get("ts") or "",
+            window=window,
+        )
+        if excerpts:
+            rec["excerpts"] = excerpts
+        friction_records.append(rec)
+
+    # Routine events: group by signature; emit one cluster record per group
+    # (including singletons — keeps shape consistent).
+    groups = {}
+    for ev in routine_evs:
+        sig = signature(ev)
+        g = groups.setdefault(sig, {
+            "tool_name": sig[0],
+            "redacted_command_prefix": sig[1],
+            "count": 0,
+            "first_seen": None,
+            "last_seen": None,
+            "sample_session_id": None,
+        })
+        g["count"] += 1
+        ts = ev.get("timestamp") or ""
+        if ts:
+            if g["first_seen"] is None or ts < g["first_seen"]:
+                g["first_seen"] = ts
+            if g["last_seen"] is None or ts > g["last_seen"]:
+                g["last_seen"] = ts
+        if g["sample_session_id"] is None:
+            g["sample_session_id"] = ev.get("session_id") or ""
+
+    clusters = []
+    for sig, g in groups.items():
+        clusters.append({
+            "kind": "cluster",
+            "tool_name": g["tool_name"],
+            "redacted_command_prefix": g["redacted_command_prefix"],
+            "count": g["count"],
+            "first_seen": g["first_seen"],
+            "last_seen": g["last_seen"],
+            "sample_session_id": g["sample_session_id"],
+        })
+    # Clusters descending by count (noisiest patterns first).
+    clusters.sort(key=lambda c: c["count"], reverse=True)
+
+    runtime_ctx = {
+        "date": day_iso,
+        "originating_clone": clone_id,
+        "calibration_mode": calibration_mode,
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "event_summary": {
+            "friction_events": len(friction_records),
+            "cluster_records": len(clusters),
+            "excerpt_window": window,
+        },
+    }
+    return runtime_ctx, friction_records + clusters
+
+
+events = load_events(events_file)
 
 # Read the analyzer prompt.
 try:
@@ -419,33 +811,52 @@ except OSError as exc:
     print(f"FATAL: cannot read analyzer prompt at {prompt_path}: {exc}", file=sys.stderr)
     sys.exit(1)
 
-# Compose the messages payload.
-runtime_context = {
-    "date": day_iso,
-    "originating_clone": clone_id,
-    "calibration_mode": calibration_mode,
-    "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-}
+# Adaptive excerpt window: try window=3 → 1 → 0 until under cap. Only
+# reject the day if even window=0 (no excerpts at all) blows the cap —
+# at which point the events themselves are too many for the configured
+# budget.
+final_window = None
+serialized = None
+est_tokens = None
 
-user_payload = {
-    "runtime_context": runtime_context,
-    "events": event_records,
-}
+for try_window in (3, 1, 0):
+    rt_ctx, ev_list = build_payload(events, try_window)
+    payload = {
+        "runtime_context": rt_ctx,
+        "events": ev_list,
+    }
+    s = json.dumps(payload, ensure_ascii=False)
+    char_total = len(analyzer_prompt) + len(s)
+    et = char_total // 4
+    if et <= max_input_tokens:
+        final_window = try_window
+        serialized = s
+        est_tokens = et
+        break
 
-# Token estimate: rough char/4 over (prompt + serialized payload).
-serialized = json.dumps(user_payload, ensure_ascii=False)
-char_total = len(analyzer_prompt) + len(serialized)
-est_tokens = char_total // 4
-
-if est_tokens > max_input_tokens:
+if final_window is None:
+    # Even window=0 was too big — the event list alone (post-dedup,
+    # post-clustering) exceeds the input cap. Capture the over-cap
+    # estimate against window=0 for the rejection log.
+    rt_ctx, ev_list = build_payload(events, 0)
+    payload = {
+        "runtime_context": rt_ctx,
+        "events": ev_list,
+    }
+    s = json.dumps(payload, ensure_ascii=False)
+    char_total = len(analyzer_prompt) + len(s)
+    est_tokens = char_total // 4
     print(
-        f"WARN: estimated input tokens ({est_tokens}) > cap ({max_input_tokens}); rejecting day {day_iso}",
+        f"WARN: estimated input tokens ({est_tokens}) > cap ({max_input_tokens}) "
+        f"even at window=0; rejecting day {day_iso}",
         file=sys.stderr,
     )
-    # Write a marker so the caller knows we rejected for size.
     with open(os.path.join(tmp_dir, "REJECT_TOKEN_CAP"), "w", encoding="utf-8") as fh:
         fh.write(f"{est_tokens}\n")
     sys.exit(3)
+
+print(f"excerpt window: {final_window}", file=sys.stderr)
+print(f"estimated input tokens: {est_tokens} (cap {max_input_tokens})", file=sys.stderr)
 
 # Build the API request body.
 request_body = {
@@ -482,7 +893,29 @@ PY
     set -e
 
     if [ "${pe_rc}" -eq 3 ]; then
-        # Token cap rejected this day; continue with other days.
+        # Token cap rejected this day. Record the rejection and decide
+        # whether to give up. See rejected_count_for_day / record_rejection.
+        local est_tokens=""
+        if [ -f "${tmp_dir}/REJECT_TOKEN_CAP" ]; then
+            est_tokens="$(tr -d '\n' < "${tmp_dir}/REJECT_TOKEN_CAP" || true)"
+        fi
+        local version
+        version="$(analyzer_version)"
+        record_rejection "${day_iso}" "${est_tokens:-0}" "${MAX_INPUT_TOKENS}" "${version}"
+        local prior
+        prior="$(rejected_count_for_day "${day_iso}" "${version}")"
+        # `prior` already includes this run's record (record_rejection
+        # appended before the count). Anything >= threshold means we've
+        # rejected this day enough times under THIS analyzer version to
+        # give up. A future analyzer version starts the counter fresh.
+        if [ "${prior}" -ge "${REJECT_GIVEUP_THRESHOLD}" ]; then
+            # Give up: leave this day OUT of REJECTED_DAYS so the
+            # bottom-of-script logic bumps last-analyzed past it.
+            echo "autoheal-analyze: GIVE_UP day=${day_iso} rejected ${prior} times; bumping past it." >&2
+        else
+            REJECTED_DAYS="${REJECTED_DAYS}${day_iso}
+"
+        fi
         rm -rf "${tmp_dir}"
         return 0
     fi
@@ -828,8 +1261,42 @@ while IFS= read -r day; do
     fi
 done <<< "${DAYS_TO_ANALYZE}"
 
-# Bump last-analyzed regardless: subsequent runs should not re-process
-# the same days even on partial failure (rejected days are logged).
-printf '%s\n' "${TODAY_ISO}" > "$(last_analyzed_path)"
+# Bump last-analyzed (issue #517):
+#  - --force-day mode never bumps (explicit user override).
+#  - Otherwise, bump to TODAY unless we rejected a day during this run.
+#  - When rejections happened, set last-analyzed to (earliest_rejected - 1)
+#    so the next run retries the rejected day. Days that crossed the
+#    give-up threshold are excluded from the rejected set so we DO
+#    bump past them.
+if [ -n "${FORCE_DAY}" ]; then
+    : # --force-day: leave last-analyzed unchanged
+elif [ -z "${REJECTED_DAYS}" ]; then
+    printf '%s\n' "${TODAY_ISO}" > "$(last_analyzed_path)"
+else
+    # Pick the earliest still-retriable rejection. Pass via sys.argv
+    # rather than splicing into the Python source string — consistent
+    # with the rest of this file and avoids any shell-interpolation
+    # foot-gun if rejected-day values ever stop being date-validated
+    # upstream.
+    EARLIEST_REJECTED="$(printf '%s' "${REJECTED_DAYS}" | grep -v '^$' | sort | head -n 1)"
+    if [ -n "${EARLIEST_REJECTED}" ]; then
+        NEW_LAST="$(python3 -c "
+import datetime as dt
+import sys
+d = dt.date.fromisoformat(sys.argv[1]) - dt.timedelta(days=1)
+print(d.isoformat())
+" "${EARLIEST_REJECTED}")"
+        # If the earliest rejection is at/before our existing last-analyzed
+        # we leave the file alone (would otherwise step backwards).
+        CURRENT_LAST=""
+        if [ -f "$(last_analyzed_path)" ]; then
+            CURRENT_LAST="$(cat "$(last_analyzed_path)" 2>/dev/null | tr -d '\n')"
+        fi
+        if [ -z "${CURRENT_LAST}" ] || [ "${NEW_LAST}" \> "${CURRENT_LAST}" ]; then
+            printf '%s\n' "${NEW_LAST}" > "$(last_analyzed_path)"
+        fi
+        echo "autoheal-analyze: rejected days this run: $(printf '%s' "${REJECTED_DAYS}" | tr '\n' ' '); last-analyzed=${NEW_LAST}" >&2
+    fi
+fi
 
 exit "${OVERALL_RC}"

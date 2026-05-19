@@ -166,16 +166,29 @@ if [ -f "${LAST}" ]; then
 fi
 
 # ---------------------------------------------------------------------
-# Test 2 — 40k token cap rejection.
+# Test 2 — token cap rejection.
+#
+# Issue #517 raised the default cap from 40k to 200k and made it
+# configurable. To trigger the rejection deterministically we set
+# max_input_tokens to a tight 5k via config — 1000 friction events
+# (permission_request) at ~250 chars each still exceed it even at
+# window=0 (no excerpts).
 # ---------------------------------------------------------------------
 
 T2_HOME=$(mktemp -d -t autoheal_t2.XXXXXX)
 T2_DIR="${T2_HOME}/autoheal"
 mk_state "${T2_DIR}"
 
-# Write enough events to blow past the 40k token cap. The analyzer's
-# rough estimate is char_total // 4, so we need >160k chars of payload.
-# Each event we emit is ~250 chars; 1000 events = ~250k chars.
+# Tight cap so 1000 permission_request friction events overflow even at
+# window=0. Friction events are kept as full records (they're the
+# signal); only routine successes get clustered.
+cat > "${T2_DIR}/config.json" <<'EOF'
+{
+  "max_input_tokens": 5000,
+  "daily_cost_cap_usd": 1.00
+}
+EOF
+
 python3 - "${T2_DIR}/events/${YESTERDAY}.jsonl" 1000 <<'PY'
 import datetime as dt
 import json
@@ -189,6 +202,13 @@ with open(path, "w", encoding="utf-8") as fh:
     for i in range(count):
         rec = {
             "kind": "permission_request",
+            # `permission_decision: "ask"` keeps these as friction
+            # post-fix (issue #519); friction events are NOT clustered,
+            # so 1000 of them at ~250 chars each genuinely overflow the
+            # tight 5K cap even at window=0. Without the decision field
+            # the events would cluster down to a single record and the
+            # cap would never be hit.
+            "permission_decision": "ask",
             "timestamp": (now - dt.timedelta(seconds=i)).isoformat(),
             "session_id": f"s-{i}",
             "tool_name": "Bash",
@@ -220,6 +240,39 @@ fi
 ERR_BODY=$(cat "${T2_HOME}/run.err")
 assert_contains "${ERR_BODY}" "estimated input tokens" "token cap: warning printed to stderr"
 
+# Issue #517: rejected day must be logged AND last-analyzed must NOT
+# advance past it (so the next run with a higher cap retries it).
+assert_file_exists "${T2_DIR}/rejected-days.jsonl" "token cap: rejection logged to rejected-days.jsonl"
+
+if [ -f "${T2_DIR}/rejected-days.jsonl" ]; then
+    REJ_DATE=$(python3 -c "
+import json
+with open('${T2_DIR}/rejected-days.jsonl') as fh:
+    for line in fh:
+        line = line.strip()
+        if not line:
+            continue
+        rec = json.loads(line)
+        print(rec.get('date',''))
+        break
+")
+    assert_eq "${REJ_DATE}" "${YESTERDAY}" "token cap: rejected-days.jsonl records the right date"
+fi
+
+LAST_VAL=""
+if [ -f "${T2_DIR}/last-analyzed" ]; then
+    LAST_VAL=$(cat "${T2_DIR}/last-analyzed" | tr -d '\n')
+fi
+# last-analyzed must be < rejected day (so next run will retry it).
+if [ -n "${LAST_VAL}" ]; then
+    if [ "${LAST_VAL}" \< "${YESTERDAY}" ]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        echo "FAIL: token cap: last-analyzed should be < rejected day ${YESTERDAY}, got ${LAST_VAL}"
+    fi
+fi
+
 # ---------------------------------------------------------------------
 # Test 3 — daily cost cap honored.
 # ---------------------------------------------------------------------
@@ -228,6 +281,16 @@ T3_HOME=$(mktemp -d -t autoheal_t3.XXXXXX)
 T3_DIR="${T3_HOME}/autoheal"
 mk_state "${T3_DIR}"
 write_events "${T3_DIR}/events/${YESTERDAY}.jsonl" 3
+
+# Issue #517 raised the default cost cap to $1.00. Pin the test to its
+# original $0.50 cap via config so the synthesized $0.51 cost.log line
+# still triggers a skip — keeps the test about cost-cap mechanics, not
+# default values.
+cat > "${T3_DIR}/config.json" <<'EOF'
+{
+  "daily_cost_cap_usd": 0.50
+}
+EOF
 
 # Synthesize a cost.log near the limit (51 cents today).
 printf '%s\t100000\t5000\t0.510000\n' "${TODAY}" > "${T3_DIR}/cost.log"
