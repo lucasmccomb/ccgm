@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Epic 6: content TBD — launchd LaunchAgent plist template. Fires
+     bin/autoheal-daily.sh at 08:00 local; next-wake firing. NEVER
+     include RESEND_API_KEY or ANTHROPIC_API_KEY in EnvironmentVariables
+     (they are read from the shell env at runtime). See plan.md §5 Epic
+     6. -->

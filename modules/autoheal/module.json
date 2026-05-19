@@ -1,0 +1,198 @@
+{
+  "name": "autoheal",
+  "displayName": "Autoheal: Self-Healing Observability Loop",
+  "description": "Captures permission events, tool failures, and user-correction signals; runs a daily analyzer via direct Anthropic API call; produces a local digest + opt-in Resend email; opt-in real-time security alerts and opt-in confidence-gated auto-apply. Cross-clone-safe via fcntl file locks. Webhook publisher seam is dormant by default.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["hooks"],
+  "files": {
+    "hooks/permission-event-logger.py": {
+      "target": "hooks/permission-event-logger.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/failure-logger.py": {
+      "target": "hooks/failure-logger.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/user-correction-detector.py": {
+      "target": "hooks/user-correction-detector.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/permission-request-suppress.py": {
+      "target": "hooks/permission-request-suppress.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/post-prompt-introspect.py": {
+      "target": "hooks/post-prompt-introspect.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/realtime-security-scanner.py": {
+      "target": "hooks/realtime-security-scanner.py",
+      "type": "hook",
+      "template": false
+    },
+    "commands/permission-fix.md": {
+      "target": "commands/permission-fix.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/permission-audit.md": {
+      "target": "commands/permission-audit.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/autoheal.md": {
+      "target": "commands/autoheal.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/autoheal-digest.md": {
+      "target": "commands/autoheal-digest.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/autoheal-toggle.md": {
+      "target": "commands/autoheal-toggle.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/autoheal-snooze.md": {
+      "target": "commands/autoheal-snooze.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/autoheal-apply.md": {
+      "target": "commands/autoheal-apply.md",
+      "type": "command",
+      "template": false
+    },
+    "bin/permission-audit.sh": {
+      "target": "bin/permission-audit.sh",
+      "type": "script",
+      "template": false
+    },
+    "bin/autoheal-analyze.sh": {
+      "target": "bin/autoheal-analyze.sh",
+      "type": "script",
+      "template": false
+    },
+    "bin/autoheal-install.sh": {
+      "target": "bin/autoheal-install.sh",
+      "type": "script",
+      "template": false
+    },
+    "bin/autoheal-uninstall.sh": {
+      "target": "bin/autoheal-uninstall.sh",
+      "type": "script",
+      "template": false
+    },
+    "bin/post-install.sh": {
+      "target": "bin/post-install.sh",
+      "type": "script",
+      "template": false
+    },
+    "bin/autoheal-digest.sh": {
+      "target": "bin/autoheal-digest.sh",
+      "type": "script",
+      "template": false
+    },
+    "bin/autoheal-email.sh": {
+      "target": "bin/autoheal-email.sh",
+      "type": "script",
+      "template": false
+    },
+    "bin/autoheal-daily.sh": {
+      "target": "bin/autoheal-daily.sh",
+      "type": "script",
+      "template": false
+    },
+    "bin/autoheal-auto-apply.sh": {
+      "target": "bin/autoheal-auto-apply.sh",
+      "type": "script",
+      "template": false
+    },
+    "bin/autoheal-publish.sh": {
+      "target": "bin/autoheal-publish.sh",
+      "type": "script",
+      "template": false
+    },
+    "bin/autoheal-retention.sh": {
+      "target": "bin/autoheal-retention.sh",
+      "type": "script",
+      "template": false
+    },
+    "lib/event-schema.json": {
+      "target": "lib/event-schema.json",
+      "type": "lib",
+      "template": false
+    },
+    "lib/proposal-schema.json": {
+      "target": "lib/proposal-schema.json",
+      "type": "lib",
+      "template": false
+    },
+    "lib/secret-patterns.json": {
+      "target": "lib/secret-patterns.json",
+      "type": "lib",
+      "template": false
+    },
+    "lib/permission-fix-prompt.md": {
+      "target": "lib/permission-fix-prompt.md",
+      "type": "lib",
+      "template": false
+    },
+    "lib/apply-proposal.py": {
+      "target": "lib/apply-proposal.py",
+      "type": "lib",
+      "template": false
+    },
+    "lib/analyzer-prompt.md": {
+      "target": "lib/analyzer-prompt.md",
+      "type": "lib",
+      "template": false
+    },
+    "lib/analyzer-sandbox.sb": {
+      "target": "lib/analyzer-sandbox.sb",
+      "type": "lib",
+      "template": false
+    },
+    "lib/com.__USERNAME__.ccgm.autoheal.daily.plist.template": {
+      "target": "lib/com.__USERNAME__.ccgm.autoheal.daily.plist",
+      "type": "lib",
+      "template": true
+    },
+    "lib/autoheal.cron.template": {
+      "target": "lib/autoheal.cron",
+      "type": "lib",
+      "template": true
+    },
+    "lib/realtime-security-patterns.json": {
+      "target": "lib/realtime-security-patterns.json",
+      "type": "lib",
+      "template": false
+    },
+    "lib/repo-config-schema.json": {
+      "target": "lib/repo-config-schema.json",
+      "type": "lib",
+      "template": false
+    },
+    "rules/autoheal.md": {
+      "target": "rules/autoheal.md",
+      "type": "rule",
+      "template": false
+    },
+    "settings.partial.json": {
+      "target": "settings.json",
+      "type": "config",
+      "merge": true,
+      "template": false
+    }
+  },
+  "tags": ["autoheal", "observability", "self-healing", "permissions", "telemetry", "jsonl", "hooks"],
+  "configPrompts": []
+}
