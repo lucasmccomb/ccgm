@@ -1,0 +1,4 @@
+{
+  "_description": "Epic 10: content TBD — high-confidence security patterns for the realtime scanner. See plan.md §3.6. Patterns are: github_pat_in_commit_or_echo, aws_key_in_command, anthropic_key_in_command, force_push_main_without_bypass, rm_rf_absolute_root, sudo_destructive, drop_production_db.",
+  "patterns": []
+}

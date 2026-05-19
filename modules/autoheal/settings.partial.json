@@ -1,0 +1,79 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/permission-event-logger.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/failure-logger.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/realtime-security-scanner.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/permission-event-logger.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/failure-logger.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/permission-event-logger.py",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/permission-request-suppress.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/user-correction-detector.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/post-prompt-introspect.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}

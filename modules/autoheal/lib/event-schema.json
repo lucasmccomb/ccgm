@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Autoheal Event Record",
+  "description": "Append-only event record written to ~/.claude/autoheal/events/{YYYY-MM-DD}.jsonl. Each line is one event captured by an autoheal hook. All free-text fields pass through hook_utils.redact_secrets() before being written so credentials cannot leak into the log.",
+  "type": "object",
+  "required": ["kind", "timestamp", "session_id", "tool_name"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "tool_use",
+        "tool_failure",
+        "permission_request",
+        "user_correction",
+        "realtime_security_alert"
+      ],
+      "description": "Event family. Determines which other fields are populated."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of the event."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Claude Code session id; used for cross-event correlation."
+    },
+    "tool_name": {
+      "type": "string",
+      "description": "Tool that triggered the event (Bash, Edit, Write, Read, etc.)."
+    },
+    "redacted_command": {
+      "type": ["string", "null"],
+      "description": "For Bash events only: the command string after redact_secrets() and truncation to <= 500 chars."
+    },
+    "exit_code": {
+      "type": ["integer", "null"],
+      "description": "Exit code from PostToolUseFailure events; null for non-failure events."
+    },
+    "stderr_excerpt": {
+      "type": ["string", "null"],
+      "maxLength": 200,
+      "description": "Up to 200 redacted chars of stderr for tool_failure events."
+    },
+    "permission_decision": {
+      "type": ["string", "null"],
+      "description": "For permission_request events: 'allow' | 'deny' | 'ask' as decided by the user (or null when the request was auto-handled by a hook)."
+    },
+    "cwd": {
+      "type": ["string", "null"],
+      "description": "Working directory of the originating tool call. Used for per-repo config lookup."
+    },
+    "clone_path": {
+      "type": ["string", "null"],
+      "description": "Originating clone path (e.g. ~/code/ccgm-workspaces/ccgm-w1/ccgm-w1-c0). Enables cross-clone proposal correlation."
+    },
+    "approval_count": {
+      "type": ["integer", "null"],
+      "description": "For permission_request events: how many prior approvals of this (tool, command) signature exist across the event log. Used by permission-request-suppress.py."
+    },
+    "correction_pattern_matched": {
+      "type": ["string", "null"],
+      "description": "For user_correction events: the regex pattern name that matched."
+    },
+    "context_event_ids": {
+      "type": ["array", "null"],
+      "items": {"type": "string"},
+      "description": "For user_correction events: the prior tool_use event ids (recent) that the correction is about."
+    },
+    "security_pattern_matched": {
+      "type": ["string", "null"],
+      "description": "For realtime_security_alert events: the realtime-security-patterns.json pattern name that fired."
+    },
+    "id": {
+      "type": "string",
+      "description": "Optional event id (uuid4 short). Set when downstream code needs to reference this event by id."
+    }
+  }
+}
