@@ -306,6 +306,17 @@ NK_ERR=$(cat "${T5_HOME}/run.err")
 assert_contains "${NK_ERR}" "ANTHROPIC_API_KEY not set" "no API key: stderr explains the skip"
 
 # ---------------------------------------------------------------------
+# Test 6 — rejection log + cost log use locked appends (issue #503).
+# log_rejection and append_cost must route through the same fcntl.flock
+# path as append_jsonl so concurrent clones cannot tear writes. Guard
+# the property at the source level.
+# ---------------------------------------------------------------------
+
+ANALYZER_SRC=$(cat "${ANALYZER}")
+assert_contains "${ANALYZER_SRC}" "fcntl.flock" "locked-append: analyzer uses fcntl.flock"
+assert_contains "${ANALYZER_SRC}" "append_locked(path" "locked-append: log_rejection/append_cost route through append_locked"
+
+# ---------------------------------------------------------------------
 # Summary.
 # ---------------------------------------------------------------------
 

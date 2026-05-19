@@ -657,16 +657,21 @@ def passes_privilege_gate(prop, calibration_mode):
     return True, ""
 
 
-def append_jsonl(path, record):
+def append_locked(path, data):
     """Locked append using the same shape as hook_utils.file_locked_append.
-    We call it here directly so we don't need to import the hook lib
-    from a script that runs outside the hook environment."""
+    We inline the locking here so we don't need to import the hook lib
+    from a script that runs outside the hook environment.
+
+    Cross-clone-safe: fcntl.flock(LOCK_EX) on the open file descriptor
+    serializes appends so concurrent writers from sibling clones cannot
+    tear records mid-write.
+    """
     import fcntl
 
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    payload = json.dumps(record, ensure_ascii=False) + "\n"
+    payload = data if data.endswith("\n") else data + "\n"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -678,26 +683,23 @@ def append_jsonl(path, record):
         os.close(fd)
 
 
+def append_jsonl(path, record):
+    """Locked JSONL append. Convenience wrapper around append_locked."""
+    append_locked(path, json.dumps(record, ensure_ascii=False))
+
+
 def log_rejection(path, prop, reason):
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
     record = {
         "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
         "reason": reason,
         "proposal": prop,
     }
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    append_locked(path, json.dumps(record, ensure_ascii=False))
 
 
 def append_cost(path, today, input_tokens, output_tokens, cost_usd):
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    line = f"{today}\t{input_tokens}\t{output_tokens}\t{cost_usd:.6f}\n"
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(line)
+    line = f"{today}\t{input_tokens}\t{output_tokens}\t{cost_usd:.6f}"
+    append_locked(path, line)
 
 
 schema = load_schema(schema_path)

@@ -227,6 +227,12 @@ EOF
 )
 assert_not_contains "${out}" "<autoheal-suggestion>" "scenario 10: stop_hook_active suppresses suggestion"
 
+# ---------- Scenario 11: _mark_seen uses locked append (issue #503) ----
+# Per-session dedup writes must route through hook_utils.file_locked_append
+# so concurrent Stop hooks across sibling clones do not tear the seen file.
+HOOK_SRC=$(cat "${HOOK}")
+assert_contains "${HOOK_SRC}" "hook_utils.file_locked_append" "scenario 11: _mark_seen uses hook_utils.file_locked_append"
+
 echo ""
 echo "test-post-prompt-introspect.sh: ${PASS} passed, ${FAIL} failed"
 [ "${FAIL}" -eq 0 ] || exit 1
