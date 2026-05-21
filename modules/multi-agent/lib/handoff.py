@@ -16,21 +16,31 @@ File format (markdown with YAML frontmatter):
     ---
     agent: agent-w0-c0
     repo: ccgm
-    branch: 370-multi-agent-handoff
-    pr: 371
-    issue: 370
-    timestamp: 2026-04-21T05:49:00Z
+    branch: 531-refactor-handoff-session
+    pr: 532
+    issue: 531
+    timestamp: 2026-05-21T16:46:25Z
+    title: Refactor /handoff
     ---
 
-    # Handoff — #370 ...
+    # Handoff — Refactor /handoff
 
-    ## What I did
+    ## Current state
     ...
 
-    ## What's next
+    ## Next steps
+    1. ...
+
+    ## Decisions & rationale
+    - ...
+
+    ## Files in progress
+    - `path:line` — state — note
+
+    ## Gotchas
     ...
 
-    ## Blockers / context
+    ## Blockers
     ...
 
 This module provides:
