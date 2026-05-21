@@ -1,50 +1,120 @@
-# /handoff — Write a handoff note for peer clones
+# /handoff — Write a session handoff with copy-paste kickoff prompt
 
-Write a short markdown handoff so sibling clones on this machine can orient quickly on startup. Handoffs are the lightweight level between "nothing" and a full `/recall` transcript dive.
+Write a structured markdown handoff to disk AND emit a copy-paste-ready kickoff prompt the next session can paste into a fresh Claude Code conversation. Solves the problem of context bloat: end a session before it degrades, paste the prompt into a new session, the next agent reads the handoff and picks up cleanly.
 
 ## Usage
 
 ```
-/handoff                        Prompt yourself to fill in the three sections
-/handoff {one-line description} Pre-seed the title; still fill in the sections
+/handoff                          Build the handoff from current session context
+/handoff {one-line description}   Same, but seed the title
 ```
+
+The skill is **always interactive**: you (the agent) gather the six sections from session context, write the file, and print the kickoff prompt verbatim. Do not skip sections — every one has a purpose. If a section genuinely has no content, write `(none)` and move on.
 
 ## When to use
 
-- **After `gh pr merge`** on non-trivial work. The post-merge reflection hook already reminds you.
-- **Before ending a session** that touched shared code another agent might need to pick up.
-- **When you hand off a blocker** — name it explicitly so the next agent does not rediscover it.
+- **End of a working session** that you don't want to resume via `claude --continue` (session is bloated, you're switching machines, you're going headless, etc.)
+- **Mid-task context checkpoint** when `/compact` would lose too much. Write the handoff, `/clear`, paste the kickoff prompt back in.
+- **Before a risky operation** — handoff acts as a known-good restore point.
+- **End-of-day pause**. Resume tomorrow with the kickoff prompt.
 
-Skip for trivial one-liner commits (typo fixes, dependency bumps) and for work entirely inside throwaway experiments.
+Skip for trivial one-liner commits or work entirely inside throwaway experiments. For the peer-clone broadcast use case, the same `handoff.py` lib also feeds `/startup` auto-injection — you do not need a separate command.
 
-## What to write
+## The six sections (in priority order)
 
-A handoff answers three questions, in order:
+A good handoff is one a fresh agent can read in under 2 minutes and act on within 5. Target 200-400 words total, never more. Use file:line anchors instead of pasted file contents.
 
-1. **What I did** — one paragraph. Shipped PR / functionality. Name files or modules touched. Link the PR if there is one.
-2. **What's next** — immediate follow-ups. Open questions that block the next step. Ideally concrete enough that the next agent can act without re-deriving context.
-3. **Blockers / context for the next agent** — known landmines, decisions made and their reason, anything that would surprise someone who did not sit through this session. Say nothing if nothing applies.
-
-Keep the whole thing under ~200 words. If it needs more, you are writing docs, not a handoff.
-
-## How it gets consumed
-
-`auto-startup.py` reads `~/.claude/handoffs/{repo}/*.md` on SessionStart, filters out the current agent's own handoffs and anything older than 7 days, and injects a compact block into the fresh session. Peer agents see your handoff at the top of their next session's context.
-
-Handoffs older than 30 days are pruned on startup.
+1. **Current state** — One paragraph snapshot of where things are right now. Not a journal of what you did; a state read.
+2. **Next steps** — Numbered, immediate, actionable. Item #1 is what the next agent should do first.
+3. **Decisions & rationale** — What you chose AND why. Without rationale, the next agent can't judge edge cases.
+4. **Files in progress** — `path:lineStart-lineEnd — state — one-line note`. States: `editing`, `partial`, `needs_review`, `ready`.
+5. **Gotchas** — Anti-patterns you discovered, surprises, things that look right but aren't. The "if I forgot to tell you this, you'd waste an hour" section.
+6. **Blockers** — What's stopping forward progress and what would unblock it. `(none)` if nothing.
 
 ## Implementation
 
-Invoke the helper:
+Gather the six sections, then invoke the helper. Prefer the `--body` heredoc form for multi-line content (file lists, numbered next steps with sub-bullets):
 
 ```bash
-python3 ~/.claude/lib/handoff.py --repo "$(git remote get-url origin | sed 's#.*[:/]##;s#\.git$##')"
+python3 ~/.claude/lib/handoff.py write --body "$(cat <<'EOF'
+# Handoff — <one-line description>
+
+## Current state
+
+<one paragraph>
+
+## Next steps
+
+1. <action>
+2. <action>
+
+## Decisions & rationale
+
+- **<decision>**: <why> (`file:line` if relevant)
+
+## Files in progress
+
+- `path/to/file.ts:40-80` — editing — <note>
+
+## Gotchas
+
+<anti-patterns, surprises>
+
+## Blockers
+
+<what's stuck, or (none)>
+EOF
+)"
 ```
 
-Or invoke the CLI shim installed alongside the lib. The helper reads `.env.clone` / cwd to derive agent identity, introspects git for branch/PR/issue, and writes the file.
+For single-line sections (a quick checkpoint), the per-section flags work too:
+
+```bash
+python3 ~/.claude/lib/handoff.py write \
+  --title "Fix auth bug" \
+  --state "..." --next "..." --decisions "..." \
+  --files "..." --gotchas "..." --blockers "..."
+```
+
+The lib auto-detects repo, branch, agent (from `.env.clone`), PR, and issue. Pass `--repo`/`--agent` explicitly only when detection fails.
+
+## Output contract
+
+The CLI prints two things, in this order:
+
+1. **Line 1**: absolute path to the new handoff file (script-safe, capturable via `head -n1`)
+2. **Below the divider**: the copy-paste kickoff prompt — three sentences plus an optional `[USER DIRECTIVE]` slot
+
+You (the agent) must show the user the **full output verbatim**, including the divider, so they can grab the prompt with a single triple-click or drag-select. Do not paraphrase, reformat, or wrap it in extra markdown.
+
+Example:
+
+```
+/Users/lem/.claude/handoffs/ccgm/2026-05-21T16-46-25-agent-w0-c0.md
+
+Copy the prompt below into your next session:
+----------------------------------------------------------------
+Continue from session handoff at /Users/lem/.claude/handoffs/ccgm/2026-05-21T16-46-25-agent-w0-c0.md.
+
+Read it completely before doing anything else. Trust the context it gives you — do not re-explore the codebase unless the handoff is wrong or incomplete. Then start with item #1 in "Next steps".
+
+[USER DIRECTIVE: leave blank to let the agent propose the next action, or fill in to override]
+----------------------------------------------------------------
+```
+
+Pass `--no-kickoff` only if you have a specific script-side reason; the default is always on.
+
+## How it gets consumed
+
+Two paths, both supported:
+
+- **Copy-paste path (primary):** the user takes the kickoff prompt and pastes it as the first message in a fresh Claude Code session (same repo, different machine, or `claude -p` headless). The receiving agent reads the absolute path, opens the doc, and starts with item #1.
+- **Auto-injection path (secondary):** if the user runs `/startup` in a new session in this clone, `startup-gather.sh` calls `handoff.py summary --include-self --max 3 --days 3` and surfaces recent handoffs (including peers') in the dashboard. This is the same lib feeding the same files; no second mechanism.
+
+Handoffs older than 30 days are pruned on startup. Each handoff is timestamped — never overwrite; write a new one if you need to revise.
 
 ## Conventions
 
-- One handoff per "unit of handed-off work" (typically one PR). Multiple handoffs in the same session is fine.
-- Do not overwrite — each handoff is timestamped; editing is done by writing a new one.
-- No secrets. Handoffs live on-disk unencrypted under `~/.claude/handoffs/`.
+- One handoff per "unit of handed-off work" (typically one session-end). Multiple handoffs in the same session is fine.
+- No secrets. Handoffs live unencrypted under `~/.claude/handoffs/`. Never include env vars, API keys, or API response bodies. File paths only.
+- Keep it terse. Two sentences in a section beats six. The next agent has fresh context — they don't need a tutorial, they need a state read.

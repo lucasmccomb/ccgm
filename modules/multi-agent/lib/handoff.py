@@ -394,28 +394,78 @@ def detect_pr(cwd: str | None = None) -> str | None:
 
 _TEMPLATE = """# Handoff{title_suffix}
 
-## What I did
+## Current state
 
-{body_did}
+{body_state}
 
-## What's next
+## Next steps
 
 {body_next}
 
-## Blockers / context
+## Decisions & rationale
+
+{body_decisions}
+
+## Files in progress
+
+{body_files}
+
+## Gotchas
+
+{body_gotchas}
+
+## Blockers
 
 {body_blockers}
 """
 
 
-def _render_body(title: str | None, did: str, nxt: str, blockers: str) -> str:
+def _render_body(
+    title: str | None,
+    state: str,
+    nxt: str,
+    decisions: str,
+    files: str,
+    gotchas: str,
+    blockers: str,
+) -> str:
+    """Render the 6-section handoff template.
+
+    Section vocabulary chosen to force a state snapshot, not a journal:
+      - Current state replaces the older "What I did" — snapshot, not retrospective
+      - Decisions & rationale and Files in progress are new; both flagged as
+        critical-for-handoff by every template source surveyed
+      - Gotchas captures anti-patterns the writer learned NOT to repeat
+    """
     title_suffix = f" — {title}" if title else ""
     return _TEMPLATE.format(
         title_suffix=title_suffix,
-        body_did=did.strip() or "(not filled in)",
+        body_state=state.strip() or "(not filled in)",
         body_next=nxt.strip() or "(not filled in)",
+        body_decisions=decisions.strip() or "(none)",
+        body_files=files.strip() or "(none)",
+        body_gotchas=gotchas.strip() or "(none)",
         body_blockers=blockers.strip() or "(none)",
     )
+
+
+_KICKOFF_DIVIDER = "-" * 64
+
+_KICKOFF_TEMPLATE = """Continue from session handoff at {path}.
+
+Read it completely before doing anything else. Trust the context it gives you — do not re-explore the codebase unless the handoff is wrong or incomplete. Then start with item #1 in "Next steps".
+
+[USER DIRECTIVE: leave blank to let the agent propose the next action, or fill in to override]"""
+
+
+def render_kickoff_prompt(path: str | os.PathLike) -> str:
+    """Render the copy-paste kickoff prompt the next session pastes in.
+
+    3 sentences + an optional [USER DIRECTIVE] slot. Format chosen for
+    copy-paste safety: no smart quotes, ASCII-safe punctuation, framed
+    so the receiving agent reads first and does not re-explore.
+    """
+    return _KICKOFF_TEMPLATE.format(path=str(path))
 
 
 def _cli_write(args) -> int:
@@ -435,7 +485,17 @@ def _cli_write(args) -> int:
         if not _sys.stdin.isatty():
             body = _sys.stdin.read()
     if not body:
-        body = _render_body(args.title, args.did or "", args.next or "", args.blockers or "")
+        # --state is preferred; --did is back-compat alias mapping to Current state
+        state = args.state or args.did or ""
+        body = _render_body(
+            args.title,
+            state,
+            args.next or "",
+            args.decisions or "",
+            args.files or "",
+            args.gotchas or "",
+            args.blockers or "",
+        )
 
     dest = write_handoff(
         body=body,
@@ -446,7 +506,16 @@ def _cli_write(args) -> int:
         issue=issue,
         title=args.title,
     )
+    # First line is the path so script callers using `head -n1` or capturing
+    # stdout still get a clean answer. The kickoff block follows visually
+    # separated, so a human running the CLI directly can copy-paste it.
     print(dest)
+    if not args.no_kickoff:
+        print()
+        print("Copy the prompt below into your next session:")
+        print(_KICKOFF_DIVIDER)
+        print(render_kickoff_prompt(dest))
+        print(_KICKOFF_DIVIDER)
     return 0
 
 
@@ -504,10 +573,19 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--pr")
     w.add_argument("--issue")
     w.add_argument("--title")
-    w.add_argument("--did", help="What-I-did section (plain text)")
-    w.add_argument("--next", help="What's-next section")
+    w.add_argument("--state", help="Current state section (snapshot of where things are)")
+    w.add_argument("--next", help="Next steps section (numbered, immediate actions)")
+    w.add_argument("--decisions", help="Decisions & rationale section (what + why)")
+    w.add_argument("--files", help="Files in progress section (path:line + state)")
+    w.add_argument("--gotchas", help="Gotchas section (anti-patterns, surprises)")
     w.add_argument("--blockers", help="Blockers section")
+    w.add_argument("--did", help="(back-compat alias for --state)")
     w.add_argument("--body", help="Full markdown body override (skips template)")
+    w.add_argument(
+        "--no-kickoff",
+        action="store_true",
+        help="Suppress the copy-paste kickoff prompt printed after the path",
+    )
     w.set_defaults(func=_cli_write)
 
     ls = sub.add_parser("list", help="List peer handoffs for the current repo")

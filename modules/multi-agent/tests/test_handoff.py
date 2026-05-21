@@ -39,7 +39,15 @@ class HandoffTestCase(unittest.TestCase):
 
     def _write(self, **kw) -> Path:
         defaults = dict(
-            body="# H\n## What I did\nThing.\n## What's next\nMore.\n## Blockers / context\nNone.\n",
+            body=(
+                "# H\n"
+                "## Current state\nSnapshot.\n"
+                "## Next steps\n1. Do thing.\n"
+                "## Decisions & rationale\nNone.\n"
+                "## Files in progress\nNone.\n"
+                "## Gotchas\nNone.\n"
+                "## Blockers\nNone.\n"
+            ),
             repo="ccgm",
             agent="agent-w0-c0",
         )
@@ -61,7 +69,50 @@ class HandoffTestCase(unittest.TestCase):
         self.assertIn("pr: 42", content)
         self.assertIn("issue: 40", content)
         self.assertIn("title: Fix X", content)
-        self.assertIn("## What I did", content)
+        self.assertIn("## Current state", content)
+
+    def test_render_body_six_sections(self) -> None:
+        body = self.ho._render_body(
+            title="Refactor X",
+            state="Mid-refactor.",
+            nxt="1. Finish ParserY.",
+            decisions="Picked Z because faster.",
+            files="src/parser.ts:40-80 - editing",
+            gotchas="Watch for null in line 73.",
+            blockers="Need user input on API shape.",
+        )
+        for header in (
+            "# Handoff — Refactor X",
+            "## Current state",
+            "## Next steps",
+            "## Decisions & rationale",
+            "## Files in progress",
+            "## Gotchas",
+            "## Blockers",
+        ):
+            self.assertIn(header, body)
+        self.assertIn("Mid-refactor.", body)
+        self.assertIn("ParserY", body)
+        self.assertIn("API shape", body)
+
+    def test_render_body_empty_sections_have_placeholders(self) -> None:
+        body = self.ho._render_body(
+            title=None, state="", nxt="", decisions="", files="", gotchas="", blockers="",
+        )
+        # Current state and Next steps are required content; everything else
+        # falls back to (none) so the doc still parses with structure intact.
+        self.assertIn("(not filled in)", body)
+        self.assertIn("(none)", body)
+
+    def test_render_kickoff_prompt_format(self) -> None:
+        prompt = self.ho.render_kickoff_prompt("/tmp/handoff/abc.md")
+        self.assertIn("/tmp/handoff/abc.md", prompt)
+        self.assertIn("Read it completely before doing anything else", prompt)
+        self.assertIn("Trust the context", prompt)
+        self.assertIn("Next steps", prompt)
+        self.assertIn("[USER DIRECTIVE:", prompt)
+        # 3 sentences + directive line; sanity-check token-economy
+        self.assertLess(len(prompt), 600)
 
     def test_list_peer_handoffs_excludes_self(self) -> None:
         self._write(agent="agent-w0-c0", when=datetime.now(timezone.utc) - timedelta(hours=1))
