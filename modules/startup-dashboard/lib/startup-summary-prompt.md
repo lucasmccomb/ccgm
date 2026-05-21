@@ -24,8 +24,9 @@ Last handoff
   Mark self-authored entries with "(you)" preserved from the HANDOFFS data —
   these are notes the previous session in this clone wrote for "future-me"
   (e.g., from /sds), so prioritize surfacing them.
-- If a handoff entry has a "What's next" line, indent it as a sub-bullet
-  beneath the entry so the next action is visible at a glance.
+- If a handoff entry has a "Next steps" line (or legacy "What's next"),
+  indent it as a sub-bullet beneath the entry so the next action is
+  visible at a glance.
 - OMIT this section entirely if HANDOFFS is empty or missing.
 
 Recent activity (last 48h)
@@ -47,8 +48,9 @@ Live sessions
 
 Next up
 - ONE concrete, grounded action. Priority order:
-  1. self-handoff "What's next" (HANDOFFS marked "(you)" — the previous
-     session in this clone left a concrete next step; honor it)
+  1. self-handoff "Next steps" / legacy "What's next" (HANDOFFS marked
+     "(you)" — the previous session in this clone left a concrete next
+     step; honor it)
   2. open PR to review (name it: "Review PR #X")
   3. dirty working tree (clone mode)
   4. dirty clones (workspace mode — name them)

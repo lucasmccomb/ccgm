@@ -939,16 +939,18 @@ Sets up isolated workspace directories with multiple clones for parallel agent w
 
 ### /handoff
 
-**Write a handoff note for peer clones.**
+**Write a session handoff with copy-paste kickoff prompt.**
 
-Writes a short markdown handoff under `~/.claude/handoffs/{repo}/` so sibling clones on this machine can orient quickly on startup. `auto-startup.py` reads these on SessionStart, filters out the current agent's own notes and anything older than 7 days, and injects a compact block into the fresh session. Lightweight alternative between "nothing" and a full `/recall` transcript dive.
+Writes a structured 6-section markdown handoff under `~/.claude/handoffs/{repo}/` and prints a 3-sentence copy-paste prompt the next session can paste into a fresh Claude Code conversation. The same file also feeds peer-clone auto-injection on the next `/startup` (`summarize_for_startup --include-self` surfaces both peer handoffs and the current clone's own, marked `(you)`).
 
-**When to use**: After `gh pr merge` on non-trivial work, before ending a session that touched shared code, or when handing off a blocker.
+**Sections**: Current state / Next steps / Decisions & rationale / Files in progress / Gotchas / Blockers.
+
+**When to use**: End of a working session you do not want to resume via `claude --continue` (bloated, switching machines, going headless); mid-task checkpoint where `/compact` would lose too much; end-of-day pause.
 
 **Usage**:
 ```
-/handoff                           # Prompt yourself to fill in three sections
-/handoff {one-line description}    # Pre-seed the title
+/handoff                           # Build the handoff from current session context
+/handoff {one-line description}    # Same, but seed the title
 ```
 
 **Installed by**: multi-agent module
