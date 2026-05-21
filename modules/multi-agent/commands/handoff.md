@@ -90,11 +90,11 @@ You (the agent) must show the user the **full output verbatim**, including the d
 Example:
 
 ```
-/Users/lem/.claude/handoffs/ccgm/2026-05-21T16-46-25-agent-w0-c0.md
+~/.claude/handoffs/myrepo/2026-05-21T16-46-25-agent-w0-c0.md
 
 Copy the prompt below into your next session:
 ----------------------------------------------------------------
-Continue from session handoff at /Users/lem/.claude/handoffs/ccgm/2026-05-21T16-46-25-agent-w0-c0.md.
+Continue from session handoff at ~/.claude/handoffs/myrepo/2026-05-21T16-46-25-agent-w0-c0.md.
 
 Read it completely before doing anything else. Trust the context it gives you — do not re-explore the codebase unless the handoff is wrong or incomplete. Then start with item #1 in "Next steps".
 
