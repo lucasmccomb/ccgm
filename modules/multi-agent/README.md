@@ -22,8 +22,8 @@ Key capabilities:
 | `multi-agent-system.md` | doc | Full multi-agent coordination documentation |
 | `commands/mawf.md` | command | Multi-Agent Workflow command (/mawf) |
 | `commands/workspace-setup.md` | command | Creates a workspace-based multi-clone directory structure (/workspace-setup) |
-| `commands/handoff.md` | command | Writes a handoff note for peer clones (/handoff) |
-| `lib/handoff.py` | lib | Helper library backing the /handoff command |
+| `commands/handoff.md` | command | Writes a session handoff with a copy-paste kickoff prompt; also feeds peer-clone auto-injection (/handoff) |
+| `lib/handoff.py` | lib | Helper library backing the /handoff command (6-section template + kickoff prompt renderer) |
 | `port-registry.json` | config | Per-repo port allocation registry (template) |
 
 ## Dependencies
