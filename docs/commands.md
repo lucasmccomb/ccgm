@@ -1354,6 +1354,23 @@ Walks every doc under `docs/solutions/**/*.md` and classifies each as Keep / Upd
 
 ---
 
+### /argus
+
+**Visual-ATDD convergence loop.**
+
+Develops a feature's UI against a per-feature design spec and signs off on its own work — functional and visual — by grounding every judgment in deterministic gates plus a separate `argus-judge` subagent that scores the render against the spec, a reference image, and the design system (never the diff). Loops to two consecutive rubric passes, then commits a snapshot baseline. Platform-agnostic via a pluggable sensor+gates adapter (web built in; iOS via a project adapter).
+
+**Usage**:
+```
+/argus feature:habits                     # converge every target in the spec
+/argus feature:habits target:list         # one target
+/argus feature:habits mode:report-only    # one dry iteration, no edits
+```
+
+**Installed by**: argus module
+
+---
+
 ### /design-review
 
 **Visual design review for web pages.**

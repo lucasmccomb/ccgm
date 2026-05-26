@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 64 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 66 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -844,6 +844,18 @@ File-based review-finding tracker for things that don't merit a GitHub issue.
 **What it does**: Review findings, PR nitpicks, and tech debt that fall between "fix immediately" and "cut a full issue" go to `.claude/todos/NNN-{status}-{priority}-{description}.md` with YAML frontmatter. Three skills compose — `/todo-create` (canonical writer), `/todo-triage` (interactive pending→ready transition), `/todo-resolve` (batch-resolve ready todos via parallel subagents).
 
 **Dependencies**: skill-authoring, subagent-patterns
+
+---
+
+### argus
+
+Visual-ATDD convergence loop: develop UI against a design spec and self-sign-off via deterministic gates plus a separate judge agent.
+
+**Installs**: `skills/argus/SKILL.md` (`/argus`), `agents/argus-judge.md`, `rules/argus.md`, plus spec/verdict/gate/rubric schemas and six dependency-free deterministic gate scripts under `skills/argus/`
+
+**What it does**: Runs an implement → render → externally-judge → converge loop for a feature's UI. An `implementer` subagent edits code, deterministic gates (build/lint/type/WCAG-contrast/a11y/snapshot/flows) form an ungameable floor, and a *separate* `argus-judge` subagent scores the render against the spec, a reference image, and the design system — never seeing the diff. The loop signs off after two consecutive rubric passes (3-attempt-per-dimension cap, then freeze + document), then commits a snapshot baseline. Platform-agnostic via a pluggable sensor+gates adapter: a web adapter is built in (Chrome capture); iOS/macOS plug in via a project adapter. Minimal human input — ≤1 reference image per screen plus one spot-check.
+
+**Dependencies**: subagent-patterns
 
 ---
 
