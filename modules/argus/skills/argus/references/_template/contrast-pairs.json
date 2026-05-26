@@ -1,0 +1,16 @@
+{
+  "_comment": "Declared foreground/background token PAIRS to check for WCAG contrast. Color VALUES are read from tokens.json by name; this file only declares which pairs matter and the minimum ratio each must meet. check_contrast.py composites alpha over the bg before computing the WCAG 2.x relative-luminance ratio.",
+  "pairs": [
+    { "fg": "textPrimary", "bg": "surface", "min": 4.5 },
+    { "fg": "textSecondary", "bg": "surface", "min": 4.5 },
+    {
+      "fg": "textMuted",
+      "bg": "surface",
+      "min": 3.0,
+      "note": "placeholder/disabled text qualifies for AA-large (WCAG 1.4.3); 3.0 is intentional, not a workaround",
+      "whitelist": ["dark"]
+    },
+    { "fg": "primaryForeground", "bg": "primary", "min": 4.5 },
+    { "fg": "destructiveForeground", "bg": "destructive", "min": 4.5 }
+  ]
+}

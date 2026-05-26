@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "argus/gate-result.schema.json",
+  "title": "Argus deterministic gate result",
+  "description": "Machine-readable output of the deterministic gate runner (scripts/gates.sh). The ungameable floor: the judge is never dispatched while all_green is false. Platform adapters fill in the gates they implement and mark the rest 'skip'.",
+  "type": "object",
+  "required": ["feature", "target", "gates", "all_green"],
+  "additionalProperties": false,
+  "properties": {
+    "feature": { "type": "string", "description": "Feature slug, e.g. 'habits'." },
+    "target": { "type": "string", "description": "The renderable unit being gated (a screen / view / page id from the spec)." },
+    "state": { "type": "string", "description": "Render state, e.g. 'empty' | 'populated'." },
+    "appearance": { "type": "string", "description": "Render appearance, e.g. 'light' | 'dark'." },
+    "gates": {
+      "type": "object",
+      "description": "Per-gate status. 'skip' means the adapter does not implement this gate; skipped gates do not affect all_green.",
+      "additionalProperties": false,
+      "properties": {
+        "build": { "$ref": "#/$defs/passfail" },
+        "lint": { "$ref": "#/$defs/passfail" },
+        "type_check": { "$ref": "#/$defs/passfail" },
+        "token_contrast": { "$ref": "#/$defs/passfail", "description": "Deterministic WCAG contrast over declared token pairs (check_contrast.py). Platform-agnostic." },
+        "token_compliance": { "$ref": "#/$defs/passfail", "description": "Deterministic grep of changed source for hardcoded colors/spacing not sourced from the design system. Adapter-specific." },
+        "snapshot": { "type": "string", "enum": ["pass", "diff", "skip"], "description": "Visual snapshot/regression baseline comparison." },
+        "flows": { "$ref": "#/$defs/passfail", "description": "Functional flow suite (Playwright/Maestro/XCUITest)." },
+        "a11y_ids": {
+          "type": "object",
+          "description": "Result of comparing the probe's element ids against the spec's a11y contract (a11y_assert.py).",
+          "required": ["expected", "present", "missing"],
+          "additionalProperties": false,
+          "properties": {
+            "expected": { "type": "integer", "minimum": 0 },
+            "present": { "type": "integer", "minimum": 0 },
+            "missing": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "all_green": { "type": "boolean", "description": "True iff every implemented (non-skip) gate passed. Computed by gates.sh, never by the model." }
+  },
+  "$defs": {
+    "passfail": { "type": "string", "enum": ["pass", "fail", "skip"] }
+  }
+}

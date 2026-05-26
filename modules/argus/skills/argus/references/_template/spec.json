@@ -1,0 +1,39 @@
+{
+  "feature": "example",
+  "adapter": "web",
+  "design_system": {
+    "tokens": "argus/specs/example/tokens.json",
+    "contrast_pairs": "argus/specs/example/contrast-pairs.json"
+  },
+  "targets": [
+    {
+      "id": "list",
+      "route": "http://localhost:3000/example",
+      "states": ["empty", "populated"],
+      "appearances": ["light", "dark"],
+      "fixtures": {
+        "empty": "no-items",
+        "populated": "happy-path"
+      },
+      "canonical": { "state": "populated", "appearance": "dark" },
+      "a11y_contract": [
+        "screen.example",
+        "state.example.empty",
+        "button.createItem",
+        "row.item.*"
+      ],
+      "references": [
+        {
+          "state": "populated",
+          "appearance": "dark",
+          "status": "needed",
+          "file": "references/list-populated-dark.png"
+        }
+      ],
+      "component_contracts": [
+        { "state": "populated", "expects": "a scrollable list where each row shows a title, a subtitle, and a primary action button" },
+        { "state": "empty", "expects": "a centered empty-state with an illustration, one line of copy, and the create button" }
+      ]
+    }
+  ]
+}

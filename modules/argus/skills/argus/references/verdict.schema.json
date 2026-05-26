@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "argus/verdict.schema.json",
+  "title": "Argus judge verdict",
+  "description": "The JSON the argus-judge subagent emits per iteration. The judge sees the spec, the reference, the design-system tokens, the fresh render + probe, and the gate-result — never the diff. Anchors are per-dimension: 'reference' (composition), 'design-system' (tokens/spacing/type), or 'spec-text' (functional/accessibility).",
+  "type": "object",
+  "required": ["iteration", "feature", "target", "dimensions", "all_pass", "failed_dimensions"],
+  "additionalProperties": false,
+  "properties": {
+    "iteration": { "type": "integer", "minimum": 1 },
+    "feature": { "type": "string" },
+    "target": { "type": "string" },
+    "state": { "type": "string" },
+    "appearance": { "type": "string" },
+    "reference_source": {
+      "type": "string",
+      "enum": ["human", "candidate"],
+      "description": "Where the reference came from. 'candidate' => visual_fidelity asserts composition-match only (anti-tautology, see rubric)."
+    },
+    "dimensions": {
+      "type": "object",
+      "description": "One entry per rubric dimension. Each scored independently with discrete partial credit.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["score", "anchor", "evidence"],
+        "additionalProperties": false,
+        "properties": {
+          "score": { "type": "number", "enum": [0, 0.5, 1], "description": "Discrete partial credit. A dimension passes iff score >= its rubric threshold." },
+          "anchor": { "type": "string", "enum": ["reference", "design-system", "spec-text"] },
+          "evidence": { "type": "string", "description": "The grounded observation that justifies the score (observe -> claim -> verify -> score)." }
+        }
+      }
+    },
+    "closer_to_reference_than_prev": {
+      "type": ["boolean", "null"],
+      "description": "Pairwise rank vs the previous iteration's render. null on the first iteration. VLMs rank more reliably than they score absolutely."
+    },
+    "all_pass": { "type": "boolean", "description": "True iff every dimension scored >= its threshold." },
+    "failed_dimensions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Dimensions below threshold this iteration. The implementer is told to fix ONLY these."
+    },
+    "notes": { "type": "string" }
+  }
+}

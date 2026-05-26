@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "argus/spec.schema.json",
+  "title": "Argus feature spec contract",
+  "description": "The machine-readable half of a feature spec (spec.json). The prose half (spec.md) carries acceptance criteria and component contracts the judge reads as 'spec-text'. Keeping the contract as JSON (not YAML front matter) removes the parser dependency and lets spec_lint.py validate with stdlib only.",
+  "type": "object",
+  "required": ["feature", "adapter", "design_system", "targets"],
+  "additionalProperties": false,
+  "properties": {
+    "feature": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "Feature slug. Spec lives at argus/specs/{feature}/." },
+    "adapter": { "type": "string", "description": "Which sensor+gates adapter renders this feature: 'web' | 'ios' | a custom adapter name. See references/adapter-contract.md." },
+    "design_system": {
+      "type": "object",
+      "required": ["tokens"],
+      "additionalProperties": false,
+      "properties": {
+        "tokens": { "type": "string", "description": "Path (repo-relative) to the generated read-only tokens.json manifest. Single source of truth for the design-system-anchored dimensions." },
+        "contrast_pairs": { "type": "string", "description": "Path to contrast-pairs.json for the token_contrast gate." }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The renderable units (screens / views / pages) the loop converges, one at a time.",
+      "items": {
+        "type": "object",
+        "required": ["id", "route", "states"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "Target id, e.g. 'list' | 'detail' | 'create'." },
+          "route": { "type": "string", "description": "How the adapter reaches this target. Web: a URL/path. iOS: an 'app://feature/target' deep route. Opaque to the loop; interpreted by the adapter." },
+          "states": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" },
+            "description": "Render states the fixture harness can actually produce, e.g. ['empty','populated']. Do NOT list 'loading'/'error' unless a fixture renders them."
+          },
+          "appearances": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": ["light"],
+            "description": "Appearances to sign off, e.g. ['light','dark']. Default ['light']."
+          },
+          "fixtures": {
+            "type": "object",
+            "description": "Map of state -> deterministic data-fixture name the adapter injects before rendering. Renders are judged against fixtures, never live data.",
+            "additionalProperties": { "type": "string" }
+          },
+          "canonical": {
+            "type": "object",
+            "description": "The single state+appearance that needs a reference image. Other state/appearance deltas are described in spec.md prose (keeps human input at <=1 reference/target). Defaults to states[0]+appearances[0].",
+            "additionalProperties": false,
+            "properties": {
+              "state": { "type": "string" },
+              "appearance": { "type": "string" }
+            }
+          },
+          "a11y_contract": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Element ids the probe must find on this target (existing scheme, documented as-found, never invented). A '*' suffix matches a prefix family, e.g. 'row.habit.*'."
+          },
+          "references": {
+            "type": "array",
+            "description": "Reference manifest. <=1 'present' entry per target is the canonical composition target; others are deltas described in prose.",
+            "items": {
+              "type": "object",
+              "required": ["state", "appearance", "status"],
+              "additionalProperties": false,
+              "properties": {
+                "state": { "type": "string" },
+                "appearance": { "type": "string" },
+                "status": { "type": "string", "enum": ["present", "needed", "candidate"], "description": "present=file exists (gates loop); needed=HE worklist; candidate=agent render awaiting approval." },
+                "source": { "type": "string", "enum": ["human", "candidate"], "description": "Recorded into signoff.json so a candidate-bootstrapped sign-off is not read as bespoke design approval." },
+                "file": { "type": "string", "description": "Path under the feature's references/ dir, named {target}-{state}-{appearance}.png." }
+              }
+            }
+          },
+          "component_contracts": {
+            "type": "array",
+            "description": "Free-form per-state component expectations the judge reads as spec-text (e.g. 'each row shows a title, a streak count, and a complete button').",
+            "items": { "type": "object" }
+          }
+        }
+      }
+    }
+  }
+}
