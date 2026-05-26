@@ -1,0 +1,33 @@
+{
+  "name": "argus",
+  "displayName": "Argus: Visual-ATDD Convergence Loop",
+  "description": "/argus - a closed-loop visual-ATDD harness where the agent develops UI against a per-feature design spec and signs off on its own work (functional AND visual) by grounding every judgment in deterministic gates plus a SEPARATE judge subagent that scores the render against the spec, a reference image, and the design system — never the diff. Loops to two consecutive passes, then commits a snapshot baseline. Platform-agnostic via a pluggable sensor+gates adapter (web built in; iOS/macOS via a project adapter). Ships the loop skill, the argus-judge agent, the spec/verdict/gate/rubric schemas, six dependency-free deterministic gate scripts, and an adapter-authoring contract.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["subagent-patterns"],
+  "files": {
+    "skills/argus/SKILL.md": { "target": "skills/argus/SKILL.md", "type": "skill", "template": false },
+    "agents/argus-judge.md": { "target": "agents/argus-judge.md", "type": "agent", "template": false },
+    "rules/argus.md": { "target": "rules/argus.md", "type": "rule", "template": false },
+
+    "skills/argus/references/spec.schema.json": { "target": "skills/argus/references/spec.schema.json", "type": "doc", "template": false },
+    "skills/argus/references/verdict.schema.json": { "target": "skills/argus/references/verdict.schema.json", "type": "doc", "template": false },
+    "skills/argus/references/gate-result.schema.json": { "target": "skills/argus/references/gate-result.schema.json", "type": "doc", "template": false },
+    "skills/argus/references/rubric.json": { "target": "skills/argus/references/rubric.json", "type": "doc", "template": false },
+    "skills/argus/references/adapter-contract.md": { "target": "skills/argus/references/adapter-contract.md", "type": "doc", "template": false },
+    "skills/argus/references/_template/spec.json": { "target": "skills/argus/references/_template/spec.json", "type": "doc", "template": false },
+    "skills/argus/references/_template/spec.md": { "target": "skills/argus/references/_template/spec.md", "type": "doc", "template": false },
+    "skills/argus/references/_template/contrast-pairs.json": { "target": "skills/argus/references/_template/contrast-pairs.json", "type": "doc", "template": false },
+    "skills/argus/references/_template/tokens.json": { "target": "skills/argus/references/_template/tokens.json", "type": "doc", "template": false },
+
+    "skills/argus/scripts/check_contrast.py": { "target": "skills/argus/scripts/check_contrast.py", "type": "script", "template": false },
+    "skills/argus/scripts/a11y_assert.py": { "target": "skills/argus/scripts/a11y_assert.py", "type": "script", "template": false },
+    "skills/argus/scripts/loop_state.py": { "target": "skills/argus/scripts/loop_state.py", "type": "script", "template": false },
+    "skills/argus/scripts/verdict_validate.py": { "target": "skills/argus/scripts/verdict_validate.py", "type": "script", "template": false },
+    "skills/argus/scripts/spec_lint.py": { "target": "skills/argus/scripts/spec_lint.py", "type": "script", "template": false },
+    "skills/argus/scripts/image_unchanged.sh": { "target": "skills/argus/scripts/image_unchanged.sh", "type": "script", "template": false },
+    "skills/argus/scripts/gates.sh": { "target": "skills/argus/scripts/gates.sh", "type": "script", "template": false }
+  },
+  "tags": ["argus", "visual-atdd", "convergence-loop", "judge", "anti-reward-hacking", "design", "accessibility", "wcag", "snapshot", "orchestrator"],
+  "configPrompts": []
+}

@@ -1,0 +1,58 @@
+{
+  "version": "1",
+  "description": "Default Argus judge rubric. 7 full-coverage dimensions, each anchored independently. Projects may copy this to argus/specs/{feature}/rubric.json and tune thresholds/weights; the loop loads the feature-local rubric if present, else this default.",
+  "loop": {
+    "consecutive_passes_required": 2,
+    "max_attempts_per_dimension": 3,
+    "max_iterations_default": 12
+  },
+  "scoring": {
+    "scale": [0, 0.5, 1],
+    "rule": "A dimension passes iff score >= threshold. 0.5 is a progress signal (improving), not a pass. all_pass = every dimension passes.",
+    "ranking": "Each iteration the judge also reports closer_to_reference_than_prev (pairwise). Ranking is more reliable than absolute scoring."
+  },
+  "dimensions": {
+    "visual_fidelity": {
+      "weight": 2,
+      "threshold": 1,
+      "anchor": "reference",
+      "description": "Composition matches the reference image: element placement, grouping, proportion, overall layout gestalt. When reference_source is 'candidate', this asserts composition UNCHANGED from the approved baseline only — never that the render matches itself as a quality claim."
+    },
+    "token_compliance": {
+      "weight": 1,
+      "threshold": 1,
+      "anchor": "design-system",
+      "description": "Rendered colors and radii read as on-palette vs tokens.json (no off-token colors, no ad-hoc shades). This is the VISUAL check; the authoritative source-level check is the deterministic token_compliance gate, which the judge cannot perform (it never sees source)."
+    },
+    "layout_spacing": {
+      "weight": 1,
+      "threshold": 1,
+      "anchor": "design-system",
+      "description": "Spacing, padding, alignment, and rhythm match the design system's spacing scale. Off-grid gaps, cramped or disconnected groups, misalignment."
+    },
+    "typography": {
+      "weight": 1,
+      "threshold": 1,
+      "anchor": "design-system",
+      "description": "Type scale, weight, and hierarchy match the design system. Headings distinguishable from body, no off-scale sizes, readable measure."
+    },
+    "hierarchy": {
+      "weight": 1,
+      "threshold": 1,
+      "anchor": "design-system",
+      "description": "Visual weight directs attention to the right element first; primary action is prominent; secondary content recedes. Anchored to the design system + spec, not the reference."
+    },
+    "functional_correctness": {
+      "weight": 2,
+      "threshold": 1,
+      "anchor": "spec-text",
+      "description": "The render satisfies the spec's acceptance criteria and component contracts for this state (right elements present, right content, right empty/populated treatment). Verified against the probe + spec text, NOT the reference image."
+    },
+    "accessibility": {
+      "weight": 1,
+      "threshold": 1,
+      "anchor": "spec-text",
+      "description": "The probe exposes the spec's a11y contract ids and roles; interactive elements are labelled. The deterministic a11y_ids gate is the floor; this dimension judges quality (meaningful labels, not just present ids)."
+    }
+  }
+}
