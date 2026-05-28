@@ -7,3 +7,6 @@ __pycache__/
 modules/autoheal/config.json
 **/.autoheal/config.json
 **/autoheal/.env
+
+# multi-clone workspaces: per-clone identity + dev-server ports (local-only)
+.env.clone
