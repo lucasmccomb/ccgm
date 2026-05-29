@@ -140,6 +140,7 @@ For a quick install with a preset:
 ```bash
 ./start.sh --scope project    # Install to .claude/ in current project instead of ~/.claude/
 ./start.sh --link             # Symlink instead of copy (for CCGM developers)
+./start.sh --add <module>     # Add one module to an existing install (inherits scope + link mode)
 ```
 
 ### Update / Uninstall
