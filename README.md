@@ -300,11 +300,11 @@ Or manually add to `~/.claude/settings.json`:
 **Display Example:**
 
 ```
-🧠 O-4.6 | code main | ctx:8% | 5h:62% ███░░ 2h26m | 7d:79% ████░ 3d8h
+🧠 O-4.8 | code main | ctx:8% | 5h:62% ███░░ 2h26m | 7d:79% ████░ 3d8h
 ```
 
 **Features:**
-- Model with tier emoji (🧠 Opus, 🐢 Sonnet, ⚠️ Haiku) and abbreviation (O-4.6, S-4.6, H-4.5, etc.)
+- Model with tier emoji (🧠 Opus, 🐢 Sonnet, ⚠️ Haiku) and abbreviation (O-4.8, S-4.6, H-4.5, etc.)
 - Current directory and git branch
 - Context window usage (0-100%)
 - 5-hour rate limit with bar and reset countdown
