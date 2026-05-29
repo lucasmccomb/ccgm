@@ -7,6 +7,7 @@ input=$(cat)
 # --- Model (abbreviated: O-4.6, S-4.6, H-4.5, etc.) with tier indicators
 model_raw=$(echo "$input" | jq -r '.model.display_name // ""')
 case "$model_raw" in
+  *"Opus 4.8"*)   model_abbr="O-4.8"; model_tier="opus-best" ;;
   *"Opus 4.7"*)   model_abbr="O-4.7"; model_tier="opus-best" ;;
   *"Opus 4.6"*)   model_abbr="O-4.6"; model_tier="opus-best" ;;
   *"Opus 4.5"*)   model_abbr="O-4.5"; model_tier="opus-other" ;;
