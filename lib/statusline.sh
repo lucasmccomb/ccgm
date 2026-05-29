@@ -4,21 +4,32 @@
 
 input=$(cat)
 
-# --- Model (abbreviated: O-4.6, S-4.6, H-4.5, etc.) with tier indicators
+# --- Model: render as "{family}-{version}" with a tier that drives color/emoji.
+# Family and version are parsed from display_name generically, so NEW MODEL
+# RELEASES NEED NO EDITS HERE. Examples:
+#   "Opus 4.8 (1M context)" -> 🧠 O-4.8   "Sonnet 4.6" -> 🐢 S-4.6   "Haiku 4.5" -> ⚠️ H-4.5
 model_raw=$(echo "$input" | jq -r '.model.display_name // ""')
+
+# First version token in the name, e.g. "4.8" (empty when the name has none).
+model_ver=$(printf '%s' "$model_raw" | grep -oE '[0-9]+(\.[0-9]+)?' | head -n1)
+
 case "$model_raw" in
-  *"Opus 4.8"*)   model_abbr="O-4.8"; model_tier="opus-best" ;;
-  *"Opus 4.7"*)   model_abbr="O-4.7"; model_tier="opus-best" ;;
-  *"Opus 4.6"*)   model_abbr="O-4.6"; model_tier="opus-best" ;;
-  *"Opus 4.5"*)   model_abbr="O-4.5"; model_tier="opus-other" ;;
-  *"Opus 4"*)     model_abbr="O-4"; model_tier="opus-other" ;;
-  *"Sonnet 4.6"*) model_abbr="S-4.6"; model_tier="sonnet" ;;
-  *"Sonnet 4.5"*) model_abbr="S-4.5"; model_tier="sonnet" ;;
-  *"Sonnet 4"*)   model_abbr="S-4"; model_tier="sonnet" ;;
-  *"Haiku 4.5"*)  model_abbr="H-4.5"; model_tier="haiku" ;;
-  *"Haiku"*)      model_abbr="H"; model_tier="haiku" ;;
-  "")             model_abbr=""; model_tier="" ;;
-  *)              model_abbr=$(echo "$model_raw" | sed 's/Claude //;s/ .*//'); model_tier="unknown" ;;
+  *Opus*)
+    model_abbr="O${model_ver:+-$model_ver}"
+    # Opus is flagship (🧠) at 4.6 or newer, plain below. The check is numeric
+    # and monotonic, so future versions (4.9, 5.0, …) are flagship automatically.
+    ver_major=${model_ver%%.*}; ver_minor=${model_ver#*.}
+    [ "$ver_minor" = "$model_ver" ] && ver_minor=0
+    if [ "${ver_major:-0}" -gt 4 ] || { [ "${ver_major:-0}" -eq 4 ] && [ "${ver_minor:-0}" -ge 6 ]; }; then
+      model_tier="opus-best"
+    else
+      model_tier="opus-other"
+    fi
+    ;;
+  *Sonnet*) model_abbr="S${model_ver:+-$model_ver}"; model_tier="sonnet" ;;
+  *Haiku*)  model_abbr="H${model_ver:+-$model_ver}"; model_tier="haiku" ;;
+  "")       model_abbr=""; model_tier="" ;;
+  *)        model_abbr=$(echo "$model_raw" | sed 's/Claude //;s/ .*//'); model_tier="unknown" ;;
 esac
 
 # --- Directory: immediate dir name only
