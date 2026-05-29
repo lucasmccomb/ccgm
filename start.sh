@@ -112,12 +112,214 @@ write_manifest() {
   ui_success "Wrote manifest: $manifest_file"
 }
 
+# --- Add mode helper ---
+# Non-interactive fast path: install one or more modules into an existing
+# CCGM setup. Inherits link-mode + scope from the existing manifest, resolves
+# dependencies, skips already-installed modules, and merges the new modules
+# and files into the manifest. Bypasses the entire interactive installer.
+#
+# The plan-build and execute loops below intentionally mirror Step 8 (preview)
+# and Step 11 (install) of main(). That logic is inlined in the monolithic
+# main(); duplicating the small faithful copy here keeps --add isolated from
+# the interactive path rather than refactoring the core installer in this PR.
+run_add_mode() {
+  if ! command -v jq &>/dev/null; then
+    ui_error "--add requires jq."
+    exit 1
+  fi
+
+  local global_dir="$HOME/.claude"
+  local project_dir
+  project_dir="$(pwd)/.claude"
+
+  # Locate the manifest: prefer global, fall back to a project install.
+  local manifest_file=""
+  if [ -f "${global_dir}/.ccgm-manifest.json" ]; then
+    manifest_file="${global_dir}/.ccgm-manifest.json"
+  elif [ -f "${project_dir}/.ccgm-manifest.json" ]; then
+    manifest_file="${project_dir}/.ccgm-manifest.json"
+  else
+    ui_error "No existing CCGM install found (looked in ${global_dir} and ${project_dir})."
+    ui_info "Run ./start.sh first to set up CCGM, then use --add to add modules."
+    exit 1
+  fi
+
+  # Inherit install settings from the manifest (do not re-prompt).
+  LINK_MODE=$(jq -r '.linkMode // false' "$manifest_file")
+  SCOPE=$(jq -r '.scope // "global"' "$manifest_file")
+  PRESET_NAME=$(jq -r '.preset // "custom"' "$manifest_file")
+
+  local install_global=false
+  local install_project=false
+  case "$SCOPE" in
+    global)  install_global=true ;;
+    project) install_project=true ;;
+    both)    install_global=true; install_project=true ;;
+    *) ui_error "Manifest has invalid scope: $SCOPE"; exit 1 ;;
+  esac
+
+  # .ccgm.env (for template expansion) is written to the global dir by the
+  # installer; fall back to the project dir for a project-only install.
+  local env_file="${global_dir}/.ccgm.env"
+  [ -f "$env_file" ] || env_file="${project_dir}/.ccgm.env"
+
+  # Modules already recorded as installed.
+  local existing_modules=()
+  local m
+  while IFS= read -r m; do
+    [ -n "$m" ] && existing_modules+=("$m")
+  done < <(jq -r '.modules[]?' "$manifest_file")
+
+  # Validate each requested module exists before doing any work.
+  local req
+  for req in "${ADD_MODULES[@]}"; do
+    if [ ! -f "${CCGM_ROOT}/modules/${req}/module.json" ]; then
+      ui_error "Unknown module: $req"
+      ui_info "Run ./start.sh and choose 'Custom module selection' to see available modules."
+      exit 1
+    fi
+  done
+
+  # Resolve dependencies (dep-first order).
+  local resolved=()
+  while IFS= read -r m; do
+    [ -n "$m" ] && resolved+=("$m")
+  done < <(resolve_dependencies "${ADD_MODULES[@]}")
+
+  if [ ${#resolved[@]} -eq 0 ]; then
+    ui_error "Could not resolve modules: ${ADD_MODULES[*]}"
+    exit 1
+  fi
+
+  # Filter out modules already installed.
+  local to_install=()
+  local e found
+  for m in "${resolved[@]}"; do
+    found=false
+    for e in ${existing_modules[@]+"${existing_modules[@]}"}; do
+      if [ "$e" = "$m" ]; then found=true; break; fi
+    done
+    if [ "$found" = false ]; then to_install+=("$m"); fi
+  done
+
+  ui_header "Add Modules"
+  ui_info "Requested: ${ADD_MODULES[*]}"
+  ui_info "Scope: $SCOPE | Mode: $([ "$LINK_MODE" = true ] && echo symlink || echo copy)"
+
+  if [ ${#to_install[@]} -eq 0 ]; then
+    ui_success "Already installed: ${ADD_MODULES[*]} (with dependencies). Nothing to do."
+    exit 0
+  fi
+  ui_info "Installing (${#to_install[@]}): ${to_install[*]}"
+  echo ""
+
+  # Ensure target dirs exist and clear stale symlinks (as the main flow does).
+  [ "$install_global" = true ] && mkdir -p "$global_dir" && repair_dangling_symlinks "$global_dir"
+  [ "$install_project" = true ] && mkdir -p "$project_dir" && repair_dangling_symlinks "$project_dir"
+
+  # --- Build install plan (mirror of main() Step 8) ---
+  local install_plan=()
+  for m in "${to_install[@]}"; do
+    local src target template merge
+    while IFS='|' read -r src target _ template merge; do
+      local full_src="${CCGM_ROOT}/modules/${m}/${src}"
+      local scope_list mod_scope
+      scope_list=$(get_module_scope "$m")
+      while IFS= read -r mod_scope; do
+        local target_dir=""
+        case "$mod_scope" in
+          global)  [ "$install_global" = true ] && target_dir="$global_dir" ;;
+          project) [ "$install_project" = true ] && target_dir="$project_dir" ;;
+        esac
+        [ -z "$target_dir" ] && continue
+        local full_target="${target_dir}/${target}"
+        local action="copy"
+        [ "$LINK_MODE" = true ] && [ "$merge" != "true" ] && action="link"
+        [ "$merge" = "true" ] && action="merge"
+        install_plan+=("${action}|${full_src}|${full_target}|${template}|${m}")
+      done <<< "$scope_list"
+    done < <(get_module_files "$m")
+  done
+
+  # --- Execute install plan (mirror of main() Step 11) ---
+  INSTALLED_FILES=()
+  local entry action src target template mod_name
+  for entry in ${install_plan[@]+"${install_plan[@]}"}; do
+    IFS='|' read -r action src target template mod_name <<< "$entry"
+    mkdir -p "$(dirname "$target")"
+    case "$action" in
+      merge)
+        init_settings "$target"
+        if [ "$template" = "true" ]; then
+          local tmp_merge
+          tmp_merge=$(mktemp)
+          cp "$src" "$tmp_merge"
+          expand_templates "$tmp_merge" "$env_file"
+          merge_settings "$target" "$tmp_merge"
+          rm -f "$tmp_merge"
+        else
+          merge_settings "$target" "$src"
+        fi
+        ui_success "Merged: $target"
+        ;;
+      link)
+        { [ -e "$target" ] || [ -L "$target" ]; } && rm -f "$target"
+        if [ "$template" = "true" ]; then
+          cp "$src" "$target"
+          expand_templates "$target" "$env_file"
+          ui_success "Copied+expanded (template): $target"
+        else
+          ln -s "$src" "$target"
+          ui_success "Linked: $target"
+        fi
+        ;;
+      copy)
+        cp "$src" "$target"
+        if [ "$template" = "true" ]; then
+          expand_templates "$target" "$env_file"
+          ui_success "Copied+expanded: $target"
+        else
+          ui_success "Copied: $target"
+        fi
+        ;;
+    esac
+    INSTALLED_FILES+=("$target")
+  done
+
+  # --- Merge into the manifest (existing entries preserved) ---
+  local existing_files=()
+  local f
+  while IFS= read -r f; do
+    [ -n "$f" ] && existing_files+=("$f")
+  done < <(jq -r '.files[]?' "$manifest_file")
+
+  local existing_backups=()
+  local b
+  while IFS= read -r b; do
+    [ -n "$b" ] && existing_backups+=("$b")
+  done < <(jq -r '.backups[]?' "$manifest_file")
+
+  RESOLVED_MODULES=("${existing_modules[@]+"${existing_modules[@]}"}" "${to_install[@]}")
+  INSTALLED_FILES=("${existing_files[@]+"${existing_files[@]}"}" "${INSTALLED_FILES[@]+"${INSTALLED_FILES[@]}"}")
+  BACKUP_DIRS=("${existing_backups[@]+"${existing_backups[@]}"}")
+
+  echo ""
+  ui_header "Updating Manifest"
+  [ "$install_global" = true ] && write_manifest "$global_dir"
+  [ "$install_project" = true ] && write_manifest "$project_dir"
+
+  echo ""
+  ui_success "Added ${#to_install[@]} module(s): ${to_install[*]}"
+  ui_info "Open a new Claude Code session to pick up the new config."
+}
+
 # --- Main ---
 main() {
   # Parse arguments
   LINK_MODE=false
   PRESET_NAME=""
   SCOPE=""
+  ADD_MODULES=()
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -133,6 +335,14 @@ main() {
         SCOPE="$2"
         shift 2
         ;;
+      --add)
+        if [ $# -lt 2 ]; then
+          echo "Error: --add requires a module name"
+          exit 1
+        fi
+        ADD_MODULES+=("$2")
+        shift 2
+        ;;
       --help|-h)
         echo "CCGM - Claude Code God Mode"
         echo ""
@@ -142,12 +352,15 @@ main() {
         echo "  --link              Create symlinks instead of copies"
         echo "  --preset <name>     Use preset (minimal, standard, full, team)"
         echo "  --scope <scope>     Installation scope (global, project, both)"
+        echo "  --add <module>      Add a module to an existing install (repeatable);"
+        echo "                      inherits link-mode and scope from the manifest"
         echo "  -h, --help          Show this help"
         echo ""
         echo "Examples:"
         echo "  ./start.sh                        Interactive installation"
         echo "  ./start.sh --preset standard       Quick install with standard preset"
         echo "  ./start.sh --link --preset full    Symlink full preset"
+        echo "  ./start.sh --add argus             Add the argus module to an existing install"
         exit 0
         ;;
       *)
@@ -157,6 +370,16 @@ main() {
         ;;
     esac
   done
+
+  # --- Add mode: fast path to install module(s) into an existing setup ---
+  if [ ${#ADD_MODULES[@]} -gt 0 ]; then
+    if [ -n "$PRESET_NAME" ]; then
+      ui_error "--add cannot be combined with --preset."
+      exit 1
+    fi
+    run_add_mode
+    exit 0
+  fi
 
   # ===========================================================
   # Step 1: Welcome
