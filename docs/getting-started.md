@@ -81,6 +81,16 @@ Global installation is the most common choice. Project-level installation is use
 | **Copy** (default) | - | Copies files to `~/.claude/`. Independent of the CCGM repo after install. |
 | **Link** | `--link` | Creates symlinks to the CCGM repo. Changes to the repo are reflected immediately. Best for CCGM developers. |
 
+## Adding modules later
+
+To add a single module to an existing install without re-running the full installer:
+
+```bash
+./start.sh --add <module>     # e.g. ./start.sh --add shadcn
+```
+
+It inherits the scope and copy/link mode recorded in your install manifest, pulls in any dependencies, skips modules you already have, and updates the manifest. Open a new Claude Code session afterward to pick up the added config. The flag is repeatable (`--add a --add b`).
+
 ## Your first session
 
 After installation, start Claude Code:

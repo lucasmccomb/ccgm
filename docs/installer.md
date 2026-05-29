@@ -180,3 +180,22 @@ CCGM_NON_INTERACTIVE=1 \
 | `CCGM_TIMEZONE` | Timezone | auto-detected |
 
 All module config prompts use their default values in non-interactive mode.
+
+## Adding a module to an existing install
+
+`--add <module>` is a non-interactive fast path that installs one or more modules into an already-installed setup, without re-running the interactive installer:
+
+```bash
+./start.sh --add argus
+./start.sh --add shadcn --add tailwind   # repeatable
+```
+
+It reads the existing `.ccgm-manifest.json` (global, falling back to a project install) and:
+
+- **Inherits** `linkMode` and `scope` from the manifest — it does not re-prompt for username, code dir, or timezone.
+- **Resolves dependencies** of the requested module(s) via the same topological sort as a full install.
+- **Skips** modules already recorded in the manifest (idempotent — re-running is a no-op that exits successfully).
+- **Builds and executes** the install plan for the new module(s) only, reusing the same link / copy / merge logic and `.ccgm.env` template expansion.
+- **Merges** the new modules and files into the manifest, preserving existing entries.
+
+It exits non-zero with a clear message if there is no existing manifest, if a requested module does not exist, or if `--add` is combined with `--preset` (mutually exclusive). Open a new Claude Code session afterward to pick up the added config.
