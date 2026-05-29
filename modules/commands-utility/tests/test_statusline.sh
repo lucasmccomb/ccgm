@@ -69,6 +69,46 @@ check "Haiku 5"              "⚠️ H-5"
 check ""                      "$(basename "$TMPHOME")"   # no model -> dir is first field
 check "Claude Gizmo 9"        "Gizmo"                    # unknown family -> sed fallback, plain
 
+# --- Effort + ultracode label ---
+# Pass effort explicitly; the model field carries the effort suffix
+# ("🧠 O-4.8 Max"). The first " | "-delimited field is model + effort.
+field_first() {  # $1 = full stdin JSON, $2 = HOME dir
+  printf '%s' "$1" \
+    | env -u CLAUDE_CODE_EFFORT_LEVEL HOME="$2" bash "$STATUSLINE" \
+    | sed 's/\x1b\[[0-9;]*m//g' \
+    | sed 's/ | .*//'
+}
+check_effort() {  # $1 = label, $2 = stdin JSON, $3 = HOME, $4 = expected
+  local got
+  got="$(field_first "$2" "$3")"
+  if [ "$got" = "$4" ]; then
+    PASS=$((PASS + 1)); echo "  PASS: $1 -> '$got'"
+  else
+    FAIL=$((FAIL + 1)); echo "  FAIL: $1 -> got '$got', expected '$4'"
+  fi
+}
+
+echo ""
+echo "=== effort + ultracode ==="
+M='{"model":{"display_name":"Opus 4.8"},"cwd":"'"$TMPHOME"'"'
+# Baseline effort labels (no ultracode) — must be unchanged.
+check_effort "max"               "$M,\"effort\":{\"level\":\"max\"}}"                     "$TMPHOME" "🧠 O-4.8 Max"
+check_effort "xhigh"             "$M,\"effort\":{\"level\":\"xhigh\"}}"                   "$TMPHOME" "🧠 O-4.8 XH"
+# Ultracode via stdin .effort.level (defensive: auto-works if CC reports it raw).
+check_effort "effort=ultracode"  "$M,\"effort\":{\"level\":\"ultracode\"}}"               "$TMPHOME" "🧠 O-4.8 Ultra"
+# Ultracode via a stdin boolean (defensive: auto-works if CC adds the flag).
+check_effort "stdin .ultracode"  "$M,\"effort\":{\"level\":\"xhigh\"},\"ultracode\":true}" "$TMPHOME" "🧠 O-4.8 Ultra"
+# Ultracode shown in place of max.
+check_effort "ultracode>max"     "$M,\"effort\":{\"level\":\"max\"},\"ultracode\":true}"   "$TMPHOME" "🧠 O-4.8 Ultra"
+
+# Ultracode via the `ultracode` settings key — the channel that works today.
+# CC resolves effort to xhigh under ultracode, so stdin reports xhigh here.
+UCHOME="$(mktemp -d)"
+mkdir -p "$UCHOME/.claude"
+printf '{"ultracode": true}' > "$UCHOME/.claude/settings.json"
+check_effort "settings ultracode" "{\"model\":{\"display_name\":\"Opus 4.8\"},\"cwd\":\"$UCHOME\",\"effort\":{\"level\":\"xhigh\"}}" "$UCHOME" "🧠 O-4.8 Ultra"
+rm -rf "$UCHOME"
+
 echo ""
 echo "  Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

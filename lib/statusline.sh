@@ -51,6 +51,25 @@ if [ -z "$effort_raw" ] && [ -n "$cwd" ]; then
   [ -z "$effort_raw" ] && effort_raw=$(read_effort_from "$cwd/.claude/settings.json")
 fi
 [ -z "$effort_raw" ] && effort_raw=$(read_effort_from "$HOME/.claude/settings.json")
+
+# Ultracode is a session mode (xhigh effort + standing dynamic-workflow
+# orchestration), tracked as a SEPARATE boolean from effort. Claude Code (2.1.x)
+# resolves .effort.level to "xhigh" when it's on and does NOT put the flag in the
+# statusline payload, so a session-only toggle is invisible here — we can only
+# see it via the `ultracode` settings key. Check every channel that could declare
+# it (mirroring the effort cascade) so this also auto-works if a future CC adds
+# `.ultracode` / effort=="ultracode" to stdin.
+read_ultracode_from() {
+  [ -f "$1" ] && jq -e '.ultracode == true' "$1" >/dev/null 2>&1
+}
+ultracode=""
+if   [ "$(echo "$input" | jq -r '.ultracode // empty')" = "true" ]; then ultracode=1
+elif [ "$effort_raw" = "ultracode" ] || [ "${CLAUDE_CODE_EFFORT_LEVEL:-}" = "ultracode" ]; then ultracode=1
+elif [ -n "$cwd" ] && read_ultracode_from "$cwd/.claude/settings.local.json"; then ultracode=1
+elif [ -n "$cwd" ] && read_ultracode_from "$cwd/.claude/settings.json"; then ultracode=1
+elif read_ultracode_from "$HOME/.claude/settings.json"; then ultracode=1
+fi
+
 case "$effort_raw" in
   low)    effort_abbr="L" ;;
   medium) effort_abbr="M" ;;
@@ -59,6 +78,9 @@ case "$effort_raw" in
   max)    effort_abbr="Max" ;;
   *)      effort_abbr="" ;;
 esac
+# Ultracode presents as xhigh effort; surface it as its own top-tier label,
+# shown in place of XH/Max when active.
+[ -n "$ultracode" ] && effort_abbr="Ultra"
 
 # --- Git branch (skip optional locks to avoid hangs in multi-clone repos)
 git_branch=""
@@ -85,6 +107,7 @@ RED='\033[31m'
 DIM='\033[2m'
 BLUE='\033[34m'
 ORANGE='\033[38;5;208m'
+VIOLET='\033[38;5;135m'
 
 # Compact usage bar: 5 chars wide
 make_bar() {
@@ -109,11 +132,12 @@ if [ -n "$model_abbr" ]; then
   effort_suffix=""
   if [ -n "$effort_abbr" ]; then
     case "$effort_abbr" in
-      Max) effort_color="$RED" ;;
-      XH)  effort_color="$ORANGE" ;;
-      H)   effort_color="$YELLOW" ;;
-      M)   effort_color="$GREEN" ;;
-      *)   effort_color="$DIM" ;;
+      Ultra) effort_color="$VIOLET" ;;
+      Max)   effort_color="$RED" ;;
+      XH)    effort_color="$ORANGE" ;;
+      H)     effort_color="$YELLOW" ;;
+      M)     effort_color="$GREEN" ;;
+      *)     effort_color="$DIM" ;;
     esac
     effort_suffix="$(printf " ${effort_color}%s${RESET}" "$effort_abbr")"
   fi
