@@ -94,19 +94,22 @@ M='{"model":{"display_name":"Opus 4.8"},"cwd":"'"$TMPHOME"'"'
 # Baseline effort labels (no ultracode) — must be unchanged.
 check_effort "max"               "$M,\"effort\":{\"level\":\"max\"}}"                     "$TMPHOME" "🧠 O-4.8 Max"
 check_effort "xhigh"             "$M,\"effort\":{\"level\":\"xhigh\"}}"                   "$TMPHOME" "🧠 O-4.8 XH"
-# Ultracode via stdin .effort.level (defensive: auto-works if CC reports it raw).
-check_effort "effort=ultracode"  "$M,\"effort\":{\"level\":\"ultracode\"}}"               "$TMPHOME" "🧠 O-4.8 Ultra"
-# Ultracode via a stdin boolean (defensive: auto-works if CC adds the flag).
-check_effort "stdin .ultracode"  "$M,\"effort\":{\"level\":\"xhigh\"},\"ultracode\":true}" "$TMPHOME" "🧠 O-4.8 Ultra"
-# Ultracode shown in place of max.
-check_effort "ultracode>max"     "$M,\"effort\":{\"level\":\"max\"},\"ultracode\":true}"   "$TMPHOME" "🧠 O-4.8 Ultra"
+# Ultracode keeps the accurate effort (always xhigh -> XH) and bookends with ✨.
+# Via stdin .effort.level=="ultracode" (defensive: no effort case -> forced XH).
+check_effort "effort=ultracode"  "$M,\"effort\":{\"level\":\"ultracode\"}}"               "$TMPHOME" "🧠 O-4.8 ✨XH✨"
+# Via a stdin boolean (defensive: auto-works if CC adds the flag).
+check_effort "stdin .ultracode"  "$M,\"effort\":{\"level\":\"xhigh\"},\"ultracode\":true}" "$TMPHOME" "🧠 O-4.8 ✨XH✨"
+# Ultracode forces XH even if stdin claims another level (ultracode IS xhigh).
+check_effort "ultracode forces XH" "$M,\"effort\":{\"level\":\"max\"},\"ultracode\":true}" "$TMPHOME" "🧠 O-4.8 ✨XH✨"
 
 # Ultracode via the `ultracode` settings key — the channel that works today.
-# CC resolves effort to xhigh under ultracode, so stdin reports xhigh here.
 UCHOME="$(mktemp -d)"
 mkdir -p "$UCHOME/.claude"
 printf '{"ultracode": true}' > "$UCHOME/.claude/settings.json"
-check_effort "settings ultracode" "{\"model\":{\"display_name\":\"Opus 4.8\"},\"cwd\":\"$UCHOME\",\"effort\":{\"level\":\"xhigh\"}}" "$UCHOME" "🧠 O-4.8 Ultra"
+# CC resolves effort to xhigh under ultracode, so stdin reports xhigh here.
+check_effort "settings ultracode" "{\"model\":{\"display_name\":\"Opus 4.8\"},\"cwd\":\"$UCHOME\",\"effort\":{\"level\":\"xhigh\"}}" "$UCHOME" "🧠 O-4.8 ✨XH✨"
+# Settings flag with NO stdin effort -> still ✨XH✨ (forced from the ultracode flag).
+check_effort "settings ultracode, no stdin effort" "{\"model\":{\"display_name\":\"Opus 4.8\"},\"cwd\":\"$UCHOME\"}" "$UCHOME" "🧠 O-4.8 ✨XH✨"
 rm -rf "$UCHOME"
 
 echo ""

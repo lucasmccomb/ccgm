@@ -78,9 +78,9 @@ case "$effort_raw" in
   max)    effort_abbr="Max" ;;
   *)      effort_abbr="" ;;
 esac
-# Ultracode presents as xhigh effort; surface it as its own top-tier label,
-# shown in place of XH/Max when active.
-[ -n "$ultracode" ] && effort_abbr="Ultra"
+# Ultracode always runs at xhigh effort, so show the accurate level (XH); the
+# render bookends it with sparkles (✨XH✨) to flag the mode without hiding it.
+[ -n "$ultracode" ] && effort_abbr="XH"
 
 # --- Git branch (skip optional locks to avoid hangs in multi-clone repos)
 git_branch=""
@@ -107,7 +107,6 @@ RED='\033[31m'
 DIM='\033[2m'
 BLUE='\033[34m'
 ORANGE='\033[38;5;208m'
-VIOLET='\033[38;5;135m'
 
 # Compact usage bar: 5 chars wide
 make_bar() {
@@ -132,14 +131,18 @@ if [ -n "$model_abbr" ]; then
   effort_suffix=""
   if [ -n "$effort_abbr" ]; then
     case "$effort_abbr" in
-      Ultra) effort_color="$VIOLET" ;;
-      Max)   effort_color="$RED" ;;
-      XH)    effort_color="$ORANGE" ;;
-      H)     effort_color="$YELLOW" ;;
-      M)     effort_color="$GREEN" ;;
-      *)     effort_color="$DIM" ;;
+      Max) effort_color="$RED" ;;
+      XH)  effort_color="$ORANGE" ;;
+      H)   effort_color="$YELLOW" ;;
+      M)   effort_color="$GREEN" ;;
+      *)   effort_color="$DIM" ;;
     esac
-    effort_suffix="$(printf " ${effort_color}%s${RESET}" "$effort_abbr")"
+    if [ -n "$ultracode" ]; then
+      # Ultracode: keep the accurate effort color, bookend with sparkles (✨XH✨).
+      effort_suffix="$(printf " ✨${effort_color}%s${RESET}✨" "$effort_abbr")"
+    else
+      effort_suffix="$(printf " ${effort_color}%s${RESET}" "$effort_abbr")"
+    fi
   fi
   case "$model_tier" in
     opus-best)
