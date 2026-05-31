@@ -56,6 +56,11 @@ Companion commands:
 - **/xplana** - Thin alias for `/xplan --autonomous`
 - **/xplan-status** - Check progress on a running or completed plan
 - **/xplan-resume** - Resume an interrupted plan execution from its last checkpoint
+- **/etp** - Execute *any* plan file (xplan-authored or hand-written) end-to-end: parallel implementation agents, adversarial two-stage review of every PR by a *separate* agent, reasonable-and-valid fixes, follow-up completion, run-to-completion. Stops only for absolute blockers, which it reports while continuing all non-blocked work.
+
+### /etp vs /xplan-resume
+
+Both execute plans, but they are not interchangeable. `/xplan-resume` resumes an `/xplan`-native interrupted run using xplan's epic/wave checkpoint structure - it is xplan-specific. `/etp` is the general-purpose execution engine: point it at any plan file (or let it find the in-progress one) and it decomposes, executes, adversarially reviews, and completes - including the follow-up work that surfaces mid-run. `/etp` is itself resumable: it checkpoints beside the plan and a re-invocation continues rather than restarts.
 
 ## Files
 
@@ -65,6 +70,7 @@ Companion commands:
 | `commands/xplana.md` | command | Autonomous alias - /xplana invokes /xplan --autonomous |
 | `commands/xplan-status.md` | command | Plan progress dashboard (/xplan-status) |
 | `commands/xplan-resume.md` | command | Resume interrupted execution (/xplan-resume) |
+| `commands/etp.md` | command | Execute any plan file end-to-end with adversarial PR review and follow-up completion (/etp) |
 | `lib/xplan-status-gather.sh` | lib | Helper script that gathers plan progress data for /xplan-status |
 | `lib/xplan-web-review.py` | lib | Local web server that renders plan.md in browser with section-level comment support for Phase 6 review |
 
@@ -96,6 +102,7 @@ cp commands/xplan.md ~/.claude/commands/xplan.md
 cp commands/xplana.md ~/.claude/commands/xplana.md
 cp commands/xplan-status.md ~/.claude/commands/xplan-status.md
 cp commands/xplan-resume.md ~/.claude/commands/xplan-resume.md
+cp commands/etp.md ~/.claude/commands/etp.md
 
 # Copy lib files
 mkdir -p ~/.claude/lib
@@ -123,3 +130,4 @@ After installation, invoke with:
 - `/xplan <concept> --repo <existing-repo-path>` - plan work against an existing repo
 - `/xplan <concept> --light` - fast path, minimal interaction
 - `/xplan <concept> --autonomous` or `/xplana <concept>` - full-depth pipeline with zero mid-flow prompts; completed plan presented at the end
+- `/etp <plan-file-or-dir>` - execute an existing plan end-to-end (`--dry-run` to preview the execution model, `--confirm` for a go/no-go gate, `--max-agents N` to cap parallelism)
