@@ -44,7 +44,7 @@ To enable the analyzer: add `ANTHROPIC_API_KEY=sk-ant-...` to `~/.claude/autohea
 - `/autoheal` — help + status.
 - `/autoheal-digest [date]` — render today's (or a specific date's) digest.
 - `/autoheal-toggle [pause|resume|status|realtime|autoapply|webhook]` — flip config flags.
-- `/autoheal-snooze <id> [days]` — snooze a proposal for N days (default 7).
+- `/autoheal-snooze <id> [days]` — snooze a proposal for N days (default 30).
 - `/autoheal-apply [id|list]` — formal apply path; same shape as `/permission-fix apply`.
 
 ## When NOT to invoke
