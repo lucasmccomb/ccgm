@@ -891,6 +891,25 @@ Reconstructs context from plan files (`progress.md`, `plan.md`, `decisions.md`, 
 
 ---
 
+### /etp
+
+**Execute an existing plan end-to-end with parallel agents, adversarial PR review, and follow-up completion.**
+
+Resolves a plan (file path, directory, or the in-progress plan), decomposes it into dependency-ordered waves, and runs each wave with parallel implementation agents. Every PR gets a two-stage adversarial review by a *separate* agent (`spec-compliance-reviewer` then `code-quality-reviewer`) that never sees the implementer's rationale — reasonable-and-valid findings are fixed, speculative ones deferred. Follow-up work that arises is tracked, triaged, and the in-scope items get the same review. Reconciles against live git/GitHub state so finished work is skipped (resumable). Runs to completion, stopping only for absolute blockers, which it reports while continuing all non-blocked work. Unlike `/xplan-resume` (which resumes an xplan-native run), `/etp` executes any plan file.
+
+**Usage**:
+```
+/etp ~/code/plans/my-project/plan.md
+/etp                         # autodetect the in-progress plan
+/etp <plan> --dry-run        # preview the execution model, don't execute
+/etp <plan> --confirm        # one go/no-go gate before executing
+/etp <plan> --max-agents 3   # cap parallel agents
+```
+
+**Installed by**: xplan module
+
+---
+
 ### /mawf
 
 **Multi-Agent Workflow.**
