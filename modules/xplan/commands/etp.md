@@ -1,32 +1,34 @@
 ---
-description: Execute an existing plan end-to-end with parallel agents, adversarial PR review, and follow-up completion. Runs to completion, stopping only for absolute blockers.
+description: Execute a ready plan OR GitHub issue(s) end-to-end with parallel agents, adversarial PR review, and follow-up completion. Runs to completion, stopping only for absolute blockers.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <plan-file-or-dir> [--dry-run] [--confirm] [--max-agents N]
+argument-hint: <plan-file-or-dir | #issue [#issue ...] | issue-url> [--dry-run] [--confirm] [--max-agents N] [--light-review]
 ---
 
-# etp - Execute The Plan
+# etp - Execute the Plan or Issue(s)
 
-Take a plan that already exists - one an agent has been building, or any plan file you point at - and drive it to completion. `etp` does not research, name, or write a plan; it **executes** one. It decomposes the plan into units, runs them with parallel agents, adversarially reviews every PR with a *separate* agent, fixes what is reasonable and valid, completes the follow-up work that surfaces along the way (reviewing those PRs too), and does not stop until everything that can be done is done.
+Take work that is ready to build - a plan an agent has been developing, any plan file you point at, or one-or-more GitHub issues that have been investigated and are ready to complete - and drive it to done. `etp` does not research, name, or write the work; it **executes** it. It resolves the target into units, runs them with parallel agents, adversarially reviews every PR with a *separate* agent, fixes what is reasonable and valid, completes the follow-up work that surfaces along the way (reviewing those PRs too), and does not stop until everything that can be done is done.
 
-This is the execution half of `/xplan` generalized to any plan file, with a hardened review-and-follow-through loop bolted on.
+A plan and an issue are two **sources** of work that both resolve into the same thing - **units** - and everything downstream (review → fix → merge → follow-ups → audit) is shared. **Ceremony scales to the work**: a single issue skips the multi-clone / wave / bring-up machinery a multi-epic plan needs and collapses to implement → adversarial review → fix → merge → follow-ups → done.
 
 ## Prime Directive
 
 > Execute the plan that is linked in the prompt itself, according to the file path, use as many agents as makes sense, do adversarial critical reviews of all PRs and make any fixes to those PRs that are reasonable and valid, complete any follow-up issues that arise during the execution of the plan and do adversarial reviews on those PRs as well. Don't stop until everything is complete. Do your best to reason through issues that you find along the way. If there's an absolute blocker, notify me of that, but continue the plan if possible.
 
-Everything below is the operational expansion of that directive. When a phase and the directive seem to conflict, the directive wins.
+Everything below is the operational expansion of that directive. When a phase and the directive seem to conflict, the directive wins. The directive was written for a plan; it applies identically when the work source is one or more GitHub issues - read "plan" as "the work you pointed me at."
 
 ## When to use `/etp`
 
 - A `/xplan` (or `/xplana`) plan exists and you want it executed now.
 - An agent has been working a plan and you want another agent to pick it up and finish it.
-- You have a hand-written plan, design doc with executable steps, or checklist at a known path and want it built.
+- You have a hand-written plan, design doc with executable steps, or checklist at a known path.
+- **One or more GitHub issues** have been investigated and are ready to build: `/etp #42`, or a batch `/etp #42 #43 #45`.
 
 ## When NOT to use it
 
-- There is no plan yet - use `/xplan` to create one first.
-- The "plan" is pure prose with no executable units (a vision doc). `etp` will surface this rather than guess wildly - see Phase 0.3.
-- You want to resume an `/xplan`-native interrupted run with its full epic/wave checkpoint structure - `/xplan-resume` is the specialized tool for that. `etp` is the general plan-file executor (and is itself resumable - see Resumability).
+- There is no ready work yet - neither a plan nor an investigated issue. Create a plan (`/xplan`) or flesh out the issue first.
+- The issue is vague or un-investigated (no acceptance criteria, no approach, no root-cause). `etp` surfaces this rather than guessing - see Phase 0.5. Investigate it first (`/debug` for a bug, `/xplan` for a feature).
+- The "plan" is pure prose with no executable units (a vision doc). Same handling: surfaced, not guessed.
+- You want to resume an `/xplan`-native interrupted run with its full epic/wave checkpoint structure - `/xplan-resume` is the specialized tool. `etp` is the general work executor (and is itself resumable - see Resumability).
 
 ## Sub-Agent Model Optimization
 
@@ -50,40 +52,64 @@ $ARGUMENTS
 ```
 
 Parse from `$ARGUMENTS`:
-- **Plan reference** (positional): a file path, a directory, or empty.
-- **`--dry-run`**: resolve and analyze the plan, print the execution model, then STOP. No branches, PRs, or merges.
-- **`--confirm`**: pause for one explicit go/no-go gate after the pre-flight analysis (Phase 3). Off by default - the directive says don't stop, so the default is to proceed once the plan is resolved unambiguously.
+- **Target** (positional): a plan path (file or directory), **one or more issue references** (`#N`, a bare number, or a GitHub issue URL), or empty.
+- **`--dry-run`**: resolve and analyze the target, print the execution model, then STOP. No branches, PRs, or merges.
+- **`--confirm`**: pause for one explicit go/no-go gate after the pre-flight analysis (Phase 3). Off by default - the directive says don't stop, so the default is to proceed once the target is resolved unambiguously.
 - **`--max-agents N`**: cap concurrent implementation agents (default: the width of the widest wave, clamped to the available isolation slots).
+- **`--light-review`**: downgrade the adversarial review to a single separate-agent spec-compliance pass (skip the Stage-2 code-quality pass). For trivial diffs only. **The default is the full two-stage review regardless of diff size** - this flag is an explicit opt-out, never the default.
 
 ---
 
-## Phase 0: Resolve & Load the Plan
+## Phase 0: Resolve & Load the Work Source
 
-### 0.1 Resolve the plan reference
+### 0.1 Classify the target
 
-Resolution is deterministic - do it with shell checks, not guesses:
+Determine the target type deterministically - with shell/pattern checks, not guesses:
+- Every positional token matches an **issue reference** (`^#?\d+$`, or a `github.com/.../issues/N` URL) → **issue target** (single if one, **batch** if several).
+- The positional token is a **path** that exists (file or directory) → **plan target**.
+- **Empty** → autodetect an in-progress **plan** only (see 0.2.3). Do not autodetect an issue - guessing which issue to build is the wrong kind of guess.
+- Anything that resolves to neither (a path that does not exist, a malformed ref) → absolute blocker: notify the user with what you looked for; do not invent a target.
+
+Do not mix types in one run (a plan path AND issue refs). If both appear, ask which the user meant.
+
+### 0.2 Resolve a plan target
 
 1. **Explicit file** - the argument is a path to a file that exists → that is the plan.
-2. **Directory** - the argument is a directory → look, in order, for `plan.md`, `PLAN.md`, then the single most-recently-modified `*.md`. If a `progress.md` / `etp-progress.md` sits beside it, load that too (resumability).
-3. **Empty argument** - find the plan an agent has been working on:
+2. **Directory** - look, in order, for `plan.md`, `PLAN.md`, then the single most-recently-modified `*.md`. If a `progress.md` / `etp-progress.md` sits beside it, load that too (resumability).
+3. **Empty argument (autodetect)** - find the plan an agent has been working on:
    - `ls -t ~/code/plans/*/plan.md` and check each sibling `progress.md` for `Status: IN PROGRESS` or `INTERRUPTED`.
    - Check the current repo root and `docs/` for a `plan.md` / `PLAN.md`.
-   - If exactly one in-progress candidate exists, use it. If several, list them and ask (AskUserQuestion). If none, that is an absolute blocker → notify the user and stop.
-4. **Path does not exist** - absolute blocker. Notify the user with what you looked for; do not invent a plan.
+   - Exactly one in-progress candidate → use it. Several → list them and ask (AskUserQuestion). None → absolute blocker, notify and stop.
 
-Announce the resolved path explicitly: `Resolved plan: <absolute path>`. Resolving the *wrong* plan and executing it is the most expensive failure mode this command has - make the target unambiguous before any work begins.
+Announce explicitly: `Resolved plan: <absolute path>`. Resolving the *wrong* target and executing it is the most expensive failure mode this command has.
 
-### 0.2 Load full context
+### 0.3 Resolve an issue target
 
-Read the entire plan plus every sibling artifact that exists - never operate on a skimmed plan:
-- The plan file (required).
-- `progress.md` / `etp-progress.md` (prior execution state, if any).
-- `decisions.md`, `research.md`, `reviews/*.md` (xplan-style context, if present).
-- The target repo's `CLAUDE.md` and `README.md` once the repo is identified (Phase 1.3).
+For each issue reference, load the full issue - the body **and the comments** (the comments are where investigation, root-cause, and the agreed approach usually live):
 
-### 0.3 Validate the plan is executable
+```bash
+gh issue view <N> --json number,title,body,comments,labels,state,assignees
+```
 
-A plan must contain actionable units. If it is pure prose - a design doc or vision statement with no steps, epics, tasks, or checklist - do **not** fabricate an execution graph. Instead, decompose it as best you can, present the decomposition you would execute, and ask the user to confirm or point you at the executable version. This is a soft blocker, handled per the Confusion Protocol, not a silent guess.
+- Announce each: `Resolved issue: #<N> "<title>" (<state>)`.
+- If an issue is **CLOSED**, warn and ask whether to proceed (it may already be done - see Phase 2).
+- The issue's title + body + acceptance criteria + investigation comments **become the unit's spec** - this is exactly what the adversarial reviewer will check the PR against (Phase 4.2). Capture it.
+- For a **batch**, resolve every issue before building the model so dependencies between them are visible.
+
+### 0.4 Load full context
+
+Read everything that grounds the work - never operate on a skimmed target:
+- A plan: the plan file plus `progress.md`/`etp-progress.md`, `decisions.md`, `research.md`, `reviews/*.md` (whatever exists).
+- An issue: the issue body + all comments, plus any files, PRs, or prior issues they link to.
+- In both cases: the target repo's `CLAUDE.md` and `README.md` once the repo is identified (Phase 1.3).
+
+### 0.5 Validate the work is executable
+
+Work must be concrete enough to build without guessing.
+- A **plan** must contain actionable units. Pure prose with no steps/epics/tasks → do not fabricate an execution graph.
+- An **issue** must carry enough to act: acceptance criteria or a clear definition of done, plus an approach or root-cause for anything non-trivial. A one-line "fix the thing" with no investigation does not qualify.
+
+In either case, if the work is too thin, **do not guess**. Present the decomposition you *would* execute and ask the user to confirm or point you at the investigated/fleshed-out version. This is a soft blocker handled per the Confusion Protocol.
 
 ---
 
@@ -91,34 +117,46 @@ A plan must contain actionable units. If it is pure prose - a design doc or visi
 
 ### 1.1 Decompose into units
 
-Parse the plan into discrete **units** - the smallest independently-shippable pieces. Adapt to the plan's shape:
-- xplan-style → one unit per agent-epic.
-- Numbered/bulleted task list → one unit per task.
-- Checklist → one unit per unchecked item.
-- Prose with embedded steps → one unit per step you can scope concretely.
+Resolve the target into discrete **units** - the smallest independently-shippable pieces:
+- **Plan**, xplan-style → one unit per agent-epic.
+- **Plan**, task list / checklist → one unit per task / unchecked item.
+- **Plan**, prose with embedded steps → one unit per step you can scope concretely.
+- **Single issue** → **one unit** (the issue itself).
+- **Issue batch** → **one unit per issue**.
 
-Each unit needs: a clear scope, the files/areas it touches, its acceptance criteria, and its dependencies. If the plan already specifies these, use them verbatim. If it does not, derive them and record your derivation in the progress file so the run is auditable.
+Each unit needs: a clear scope, the files/areas it touches, its acceptance criteria, and its dependencies. For an issue unit these come from the issue (body + criteria + investigation comments). For a plan unit, use the plan's own spec if present, else derive it and record the derivation.
 
 ### 1.2 Derive dependency order → waves
 
-Group units into **waves**: everything in a wave is mutually independent and runs in parallel; waves run in sequence. Use the plan's own waves/dependency graph if it has one. If it is a flat list, infer dependencies from file overlap and logical ordering. When ordering is genuinely unclear, **serialize** - parallelism is an optimization, correctness is not. Only parallelize units you are confident are independent (no shared files, no producer/consumer relationship).
+Group independent units into **waves** (parallel within a wave, sequential across waves):
+- **Single issue** → one wave of one. No wave machinery.
+- **Issue batch** → group issues that touch different files/areas into a parallel wave; serialize any that depend on each other (an issue that says "depends on #A", or two issues editing the same files). When independence is unclear, **serialize** - parallelism is an optimization, correctness is not.
+- **Plan** → use the plan's own waves/dependency graph; infer it from file overlap if the plan is a flat list.
 
-### 1.3 Identify the target repo and isolation model
+### 1.3 Identify the target repo, isolation, and ceremony level
 
-Determine where the work lands and how agents avoid colliding:
-- Find the target repo (from the plan, the `--repo` context, or the cwd).
-- Detect the multi-agent setup: workspace model (`~/code/{repo}-workspaces/...`), flat clones (`~/code/{repo}-repos/...`), or single clone. If clones exist, assign one unit per clone. If not, give each implementation agent its own **git worktree** (`isolation: "worktree"`) so parallel agents never share a working tree.
-- "As many agents as makes sense" = `min(units in this wave, available isolation slots, --max-agents)`. Never spawn more agents than the wave has independent units - that just creates idle agents or merge conflicts.
+- Find the target repo (from the plan, the issue's repo, or the cwd).
+- **Isolation**: detect the multi-agent setup - workspace (`~/code/{repo}-workspaces/...`), flat clones (`~/code/{repo}-repos/...`), or single clone. With clones, assign one unit per clone; otherwise give each implementation agent its own **git worktree** (`isolation: "worktree"`) so parallel agents never share a working tree.
+- **"As many agents as makes sense"** = `min(units in this wave, available isolation slots, --max-agents)`. Never spawn more agents than the wave has independent units.
+- **Ceremony scales to the work.** Match the apparatus to the size:
+
+  | Target | Waves | Isolation | Bring-up runbook | Checkpoint record |
+  |--------|-------|-----------|------------------|-------------------|
+  | Single issue | none (1 unit) | one worktree/clone | only if the issue calls for it | the issue + its PR |
+  | Issue batch | group independents | one per parallel unit | per-issue if any call for it | live GitHub state (re-run reconciles) |
+  | Plan | from the plan | full clone/workspace setup | per the plan (Phase 4.5) | progress file beside the plan |
+
+  Do not impose plan-scale ceremony (multi-clone provisioning, wave checkpoints, bring-up runbooks) on a single issue. Do not skip it for a real multi-epic plan.
 
 ### 1.4 Surface prerequisites and human-only steps
 
-Scan for anything the plan needs that an agent cannot do: credentials, API keys, OAuth/dashboard setup, DNS, paid-service signups. List these now. They become Phase 5 blockers (notify-and-continue), not silent failures mid-wave.
+Scan for anything the work needs that an agent cannot do: credentials, API keys, OAuth/dashboard setup, DNS, paid-service signups. List them now. They become Phase 5 blockers (notify-and-continue), not silent failures mid-run.
 
 ---
 
 ## Phase 2: Reconcile with Live State (resumability)
 
-A plan an agent has been working on is rarely a blank slate. Before executing anything, reconcile the plan against reality so you never redo finished work:
+Work that an agent has touched is rarely a blank slate. Before executing, reconcile against reality so you never redo finished work:
 
 ```bash
 gh pr list --state merged --limit 100      # what already landed
@@ -127,12 +165,12 @@ gh issue list --state all --limit 200      # tracked + closed work
 git branch -a                              # existing feature branches
 ```
 
-For each unit, classify:
-- **DONE** - its PR is merged or its acceptance criteria already hold on `main`. Skip it.
-- **IN-FLIGHT** - an open PR or a branch exists. Do not restart it; enter it at the review step (Phase 4.2). For a branch with no PR, assess the commits and open the PR if the work is complete.
+Classify each unit:
+- **DONE** - its PR is merged, its issue is already closed by a merged PR, or its acceptance criteria already hold on `main`. Skip it.
+- **IN-FLIGHT** - an open PR or a branch exists. Do not restart it; enter it at the review step (Phase 4.2). A branch with no PR → assess the commits and open the PR if the work is complete.
 - **PENDING** - not started. Full treatment.
 
-Also pull each active clone to latest `main` and note uncommitted work. Build the remaining-work list from the PENDING + IN-FLIGHT units only.
+For an issue **batch**, this is the resume mechanism: re-running `/etp #42 #43 #45` skips the ones already merged and continues the rest - no progress file needed, live GitHub state is the checkpoint. Build the remaining-work list from PENDING + IN-FLIGHT only.
 
 ---
 
@@ -141,10 +179,11 @@ Also pull each active clone to latest `main` and note uncommitted work. Build th
 Print the execution model so the run is legible before it starts:
 
 ```
-Plan: <absolute path>
-Repo: <repo>  ·  Isolation: workspace | flat-clones | worktrees
+Work source: <plan path | issue #N | issues #N #M #… (batch)>
+Repo: <repo>  ·  Isolation: workspace | flat-clones | worktrees | single
 Units: N total  ·  M already done  ·  K remaining
-Waves: <wave 1: units...> → <wave 2: units...> → ...
+Waves: <wave 1: units…> → <wave 2: units…> → …   (or "single unit" / "N independent issues")
+Review: full two-stage (default)  |  light (spec-compliance only)
 Max parallel agents: <n>
 Prerequisites / human-only blockers detected: <list or none>
 ```
@@ -154,65 +193,71 @@ Then choose the path:
 - **`--confirm`** → ask one AskUserQuestion go/no-go gate, then proceed on approval.
 - **Default** → proceed immediately. The directive is to execute, not to ask.
 
-**Exception - Confusion Protocol.** If a genuine high-stakes ambiguity exists, stop and ask even in default mode. The triggers are narrow: the plan could not be resolved to one file; the plan is prose with no executable units (0.3); the plan calls for destructive or irreversible actions it does not clearly authorize (dropping data, deleting resources, force-pushing shared branches, production deploys not named in the plan); or two incompatible interpretations of a unit's scope exist and the choice shapes everything downstream. Name the ambiguity in one sentence, give 2-3 options with tradeoffs, and wait. This is the directive's "absolute blocker → notify me" path. Everything outside these triggers, you reason through yourself.
+**Exception - Confusion Protocol.** Stop and ask even in default mode when a genuine high-stakes ambiguity exists. Narrow triggers: the target could not be resolved; the work is too thin to build without guessing (0.5); it calls for destructive or irreversible actions it does not clearly authorize (dropping data, deleting resources, force-pushing shared branches, production deploys not named in the work); or two incompatible interpretations of a unit's scope exist and the choice shapes everything downstream. Name the ambiguity in one sentence, give 2-3 options with tradeoffs, and wait. This is the directive's "absolute blocker → notify me" path. Everything outside these triggers, you reason through yourself.
 
 ---
 
-## Phase 4: Execute Waves
+## Phase 4: Execute
 
-For each wave, in order. This is the core loop.
+For each wave, in order (a single issue is a wave of one). This is the core loop, identical for plans and issues.
 
-### 4.1 Implement (parallel)
+### 4.1 Implement (parallel within a wave)
 
 Spawn one `implementer` agent per unit (model sonnet), each in its own clone or worktree. Each agent:
-- Branches from `origin/main` (`git checkout -b {issue-or-slug}-{desc} origin/main`).
+- Branches from `origin/main` (`git checkout -b {issue#}-{desc} origin/main` for an issue unit, `{slug}-{desc}` for a plan unit).
 - Implements the unit with tests, following the existing project patterns.
 - **Verifies the work actually functions** - unit tests passing is the floor, not the finish line. Run the real path where feasible.
-- Pushes and opens a PR whose body references the plan unit and closes its tracking issue if one exists.
+- Pushes and opens a PR. For an issue unit the PR body **closes the issue** (`Closes #N`); for a plan unit it references the plan unit and closes its tracking issue if one exists.
 - Returns the four-state status (DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT) with verification evidence.
 
 Do not trust the self-report as proof. The diff and the review are the proof.
 
 ### 4.2 Adversarial review (SEPARATE agents - this is the integrity property)
 
-For every PR - newly created or inherited in-flight - run the two-stage adversarial review. **The reviewer is a different agent from the implementer and is given the plan's spec for that unit plus the diff - never the implementer's rationale or self-report.** Coupled self-grading inflates grades; an implementer asked to grade its own work will pass it. Independence is what makes the sign-off mean anything.
+For every PR - newly created or inherited in-flight - run the adversarial review. **The reviewer is a different agent from the implementer and is given the unit's spec plus the diff - never the implementer's rationale or self-report.** For an issue unit, the **spec is the issue** (title + body + acceptance criteria + investigation comments). For a plan unit, the spec is the plan's unit. Coupled self-grading inflates grades; an implementer asked to grade its own work will pass it. Independence is what makes the sign-off mean anything.
 
-- **Stage 1 - `spec-compliance-reviewer`**: Did the PR deliver exactly the unit's spec? Every deliverable present? Any scope creep (files, helpers, adjacent "while I'm here" changes the unit did not call for)? It treats the implementer's DONE as a claim and re-verifies from the diff. Stage 1 gates Stage 2.
+**Default - full two-stage review** (every PR, regardless of diff size):
+- **Stage 1 - `spec-compliance-reviewer`**: Did the PR deliver exactly the spec (the issue's definition of done / the plan unit's deliverables)? Everything present? Any scope creep (files, helpers, adjacent "while I'm here" changes not asked for)? It treats the implementer's DONE as a claim and re-verifies from the diff. Stage 1 gates Stage 2.
 - **Stage 2 - `code-quality-reviewer`** (only if Stage 1 passes): correctness bugs, security holes, silent failures, unhandled edge cases, project-pattern violations, over-engineering. Runs fresh checks (tests, build) rather than trusting prior output.
 
-Each stage returns a verdict and a specific, itemized findings list. Reviewing quality on a spec-failing PR wastes effort on code that will change - so the order is fixed, never parallel.
+**`--light-review`** collapses this to Stage 1 only - a single separate-agent spec-compliance pass, skipping Stage 2. Use it only for trivial diffs (a typo, a constant bump). It still keeps the integrity property (a separate reviewer, the issue as spec); it only drops depth. It is never the default.
+
+Each stage returns a verdict and a specific, itemized findings list. Quality-reviewing a spec-failing PR wastes effort on code that will change - so the order is fixed, never parallel.
 
 ### 4.3 Apply reasonable and valid fixes
 
-Triage the findings yourself (orchestrator judgment - this is latent work, not delegable):
-- **Reasonable and valid** (real bug, real scope creep, real spec gap) → fix it. Dispatch an `implementer` agent against the PR branch (or fix inline for a one-liner), push, and **re-review the changed PR** (back to 4.2). 
-- **Invalid, speculative, or out-of-scope** (gold-plating, hypothetical edge cases, "you could also...") → reject with a one-line reason recorded in the progress file. Completeness means finishing the unit, not expanding it. Do not implement review suggestions that have no caller or that the plan did not ask for.
+Triage the findings yourself (orchestrator judgment - latent work, not delegable):
+- **Reasonable and valid** (real bug, real scope creep, real spec gap) → fix it. Dispatch an `implementer` against the PR branch (or fix inline for a one-liner), push, and **re-review the changed PR** (back to 4.2).
+- **Invalid, speculative, or out-of-scope** (gold-plating, hypothetical edge cases, "you could also…") → reject with a one-line reason recorded in the run record. Completeness means finishing the unit, not expanding it. Do not implement review suggestions with no caller or that the work did not ask for.
 
-Loop review → fix → re-review until the PR passes both stages. Bound it: after **3 fix rounds** on the same PR without convergence, freeze that PR, record the unresolved findings as a blocker, and move on - one stuck PR does not halt the wave.
+Loop review → fix → re-review until the PR passes. Bound it: after **3 fix rounds** on the same PR without convergence, freeze that PR, record the unresolved findings as a blocker, and move on - one stuck PR does not halt the wave.
 
 ### 4.4 Merge
 
-Merge a PR only when: it passed both review stages, CI is green, and it does not conflict. Merge in dependency order within the wave. Use squash merge (the repo default). Never merge a PR that failed adversarial review to "keep moving" - that defeats the entire loop.
+Merge a PR only when: it passed review (both stages, or Stage 1 under `--light-review`), CI is green, and it does not conflict. Merge in dependency order within the wave. Squash merge (the repo default). Never merge a PR that failed adversarial review to "keep moving" - that defeats the entire loop.
 
-### 4.5 Bring-up & integration verification
+### 4.5 Bring-up & integration verification (when applicable)
 
-After the wave's PRs merge, execute any bring-up the plan specifies (migrations in order, dependency installs, type regen, env/secret sets, dev-server and worker restarts, deploys) and verify every layer is actually live - DB reachable and migrated, backend responding, frontend loading, workers running, deploy current. Run the wave's smoke test against the running system, not just CI. The next wave does not start against a degraded system. If the plan specifies no bring-up, confirm that is correct (docs-only units) rather than assuming.
+If the work specifies bring-up (migrations, dependency installs, type regen, env/secret sets, dev-server/worker restarts, deploys), execute it and verify every layer is actually live - DB migrated, backend responding, frontend loading, workers running, deploy current - then run a smoke test against the running system, not just CI. A single issue usually has no bring-up; confirm that is true rather than assuming. A plan wave does not advance against a degraded system.
 
 ### 4.6 Checkpoint
 
-Update the progress file (`progress.md` for an xplan plan, else `<plan-basename>.etp-progress.md` beside the plan) with: units done this wave + their PRs, merged SHAs, the next wave, live-state verification result, and any open blockers. This is what makes a re-run of `/etp <same-plan>` resume instead of restart.
+Record progress so the run is resumable, matched to the ceremony level (1.3):
+- **Single issue** → the issue + its PR is the record. No file.
+- **Issue batch** → live GitHub state is the record; a re-run reconciles (Phase 2). Optionally jot a one-line status per issue if the batch is large.
+- **Plan** → update the progress file (`progress.md`, else `<plan-basename>.etp-progress.md` beside the plan) with units done, PRs, merged SHAs, next wave, live-state result, and open blockers.
 
 ---
 
 ## Phase 5: Follow-Up Work That Arises
 
-Execution surfaces work the plan did not enumerate: a bug found while integrating, a missing prerequisite, a gap between two units, a flaky test that is really a real bug. Handle every one - do not let it evaporate.
+Execution surfaces work the target did not enumerate: a bug found while integrating, a missing prerequisite, a gap between two units, a flaky test that is really a real bug. Handle every one - do not let it evaporate. This is the directive's "complete any follow-up issues that arise."
 
 For each arising item:
-1. **Track it** - open a GitHub issue (or a progress-file entry if issue-tracking is not set up), so nothing is lost.
+1. **Track it** - open a GitHub issue, so nothing is lost.
 2. **Triage scope**:
-   - **In-scope-now** (the plan cannot be called complete, or is not reasonable+valid, without it) → treat it as a first-class unit: branch, implement (`implementer`), then the **same adversarial two-stage review** as any other PR (Phase 4.2-4.4), then merge. The directive is explicit that follow-up PRs get adversarial review too.
-   - **Out-of-scope / speculative** (a nice-to-have, an unrelated improvement, a v2 idea) → log it as a deferred issue and leave it. Surface the deferred list in the final report. Scope discipline: finish the plan and the work it necessitates, not every improvement you can see.
+   - **In-scope-now** (the work cannot be called complete, or reasonable+valid, without it) → treat it as a first-class unit: branch, implement (`implementer`), then the **same adversarial review** as any other PR (Phase 4.2-4.4), then merge. Follow-up PRs get adversarially reviewed too - this is explicit in the directive.
+   - **Out-of-scope / speculative** (a nice-to-have, an unrelated improvement, a v2 idea) → log it as a deferred issue and leave it. Surface the deferred list in the final report. Scope discipline: finish the work and what it necessitates, not every improvement you can see.
 3. **Absolute blocker** (needs a credential you do not have, a human-only dashboard action, an external dependency) → notify the user immediately with the exact ask, file a `blocked` issue, and **continue all non-blocked work**. A blocker stops one unit, never the run.
 
 ---
@@ -223,9 +268,9 @@ When a unit fails - red CI, merge conflict, failing test, an ambiguous step - do
 1. Read the actual error fully.
 2. Find the root cause (trace it; do not patch the symptom).
 3. Form one hypothesis, make the minimal change, verify it.
-4. If three focused attempts fail (three-strike rule), stop guessing: question the assumption, re-read the relevant source/docs, or escalate that single unit as a blocker - then continue the rest of the plan.
+4. If three focused attempts fail (three-strike rule), stop guessing: question the assumption, re-read the relevant source/docs, or escalate that single unit as a blocker - then continue the rest.
 
-Distinguish "something I can reason through" (the overwhelming majority - ambiguous wording, an obvious-once-traced bug, a missing import) from "an absolute blocker that genuinely needs the human" (missing credentials, a product decision with no right answer, an irreversible action the plan does not authorize). Reason through the first kind. Notify on the second. Never conflate "this is hard" with "this is blocked."
+Distinguish "something I can reason through" (the overwhelming majority - ambiguous wording, an obvious-once-traced bug, a missing import) from "an absolute blocker that genuinely needs the human" (missing credentials, a product decision with no right answer, an irreversible action the work does not authorize). Reason through the first kind. Notify on the second. Never conflate "this is hard" with "this is blocked."
 
 ---
 
@@ -234,9 +279,9 @@ Distinguish "something I can reason through" (the overwhelming majority - ambigu
 Loop Phases 4-6 until every condition holds:
 - All units DONE or explicitly escalated as blocked.
 - All in-scope follow-ups DONE.
-- All PRs merged (or frozen-and-recorded as blocked).
+- All PRs merged (or frozen-and-recorded as blocked); all target issues closed by their merged PRs.
 - CI green, no uncommitted changes in any clone, no unexpected open PRs.
-- All layers confirmed live; end-to-end smoke test passes.
+- All layers confirmed live (where the work has runtime impact); smoke test passes.
 
 "Don't stop until everything is complete" means: do not stop while completable work remains. Blocked units are set aside with a clear notification; they do not end the run. The run ends when the only thing left is genuinely human-blocked, and the user has been told exactly what each blocker needs.
 
@@ -254,39 +299,39 @@ gh issue list --state open
 
 ### 8.2 Report to the user
 
-- **Completed**: units finished, PRs merged, with evidence (test output, smoke-test result, live URLs).
+- **Completed**: units finished, PRs merged, issues closed - with evidence (test output, smoke-test result, live URLs).
 - **Blocked**: each blocker, why, and the exact human action that unblocks it.
 - **Deferred**: out-of-scope follow-ups logged but intentionally not done.
-- **Live state**: the verification that the system actually runs end-to-end.
+- **Live state**: the verification that the system actually runs end-to-end (where applicable).
 
-### 8.3 Finalize the progress file
+### 8.3 Finalize the run record
 
-Mark it `COMPLETE`, or `BLOCKED - WAITING ON HUMAN` with the blocker list. A later `/etp <same-plan>` reads this and resumes from exactly here.
+A plan run: mark the progress file `COMPLETE`, or `BLOCKED - WAITING ON HUMAN` with the blocker list. An issue/batch run: live GitHub state is the record - a re-run of `/etp <same args>` reconciles and resumes from exactly here.
 
 ---
 
 ## Guardrails
 
-**Integrity - the separate judge.** The agent that reviews a PR is never the agent that wrote it, and the reviewer never sees the implementer's rationale or self-report - only the unit's spec and the diff. The orchestrator does not grade PRs in its own context either. This separation is the whole reason a self-signed-off execution can be trusted; collapsing it turns review into rubber-stamping.
+**Integrity - the separate judge.** The agent that reviews a PR is never the agent that wrote it, and the reviewer never sees the implementer's rationale or self-report - only the unit's spec (the issue, or the plan unit) and the diff. The orchestrator does not grade PRs in its own context either. This separation is the whole reason a self-signed-off execution can be trusted; collapsing it turns review into rubber-stamping.
 
-**Two-stage order is fixed.** Spec-compliance gates code-quality. Never run them in parallel, never quality-review a spec-failing PR.
+**Two-stage order is fixed.** Spec-compliance gates code-quality. Never run them in parallel, never quality-review a spec-failing PR. `--light-review` drops Stage 2; it never reorders or parallelizes the stages.
 
 **Verify, don't trust.** A subagent's DONE is a claim. Read the diff, run the tests, check the artifact before treating a unit as complete. Fresh evidence before every completion claim.
 
-**Scope discipline.** Execute the plan plus the follow-ups it necessitates. Reject "while I'm here" work, speculative features, and review suggestions with no caller. Finishing the job is not expanding the job.
+**Scope discipline.** Execute the work plus the follow-ups it necessitates. Reject "while I'm here" work, speculative features, and review suggestions with no caller. Finishing the job is not expanding the job.
 
 **Notify-and-continue.** Absolute blockers are reported the moment they are found and never halt non-blocked work. The run degrades gracefully around blockers; it does not stop dead.
 
-**Safety on irreversible / outward actions.** Even in autonomous mode, anything destructive or externally-visible that the plan did not clearly authorize - production deploys, resource deletion, force-pushing shared branches, sending external communications - requires notifying the user first. The plan authorizes its own scope; it does not authorize off-plan irreversible acts.
+**Safety on irreversible / outward actions.** Even in autonomous mode, anything destructive or externally-visible that the work did not clearly authorize - production deploys, resource deletion, force-pushing shared branches, sending external communications - requires notifying the user first. The work authorizes its own scope; it does not authorize off-scope irreversible acts.
 
 **No AI attribution** in commits or PR bodies (per the git-workflow rule). Use the repo's PR template if one exists.
 
-**Resumability.** Checkpoint after every wave. The progress file beside the plan is the resume point - re-invoking `/etp` on the same plan continues rather than restarts.
+**Resumability.** A plan run checkpoints to the progress file beside the plan; an issue/batch run uses live GitHub state. Either way, re-invoking `/etp` on the same target continues rather than restarts.
 
 ---
 
 ## Relationship to xplan
 
-- `/xplan`, `/xplana` - create a plan (research → plan → review). `etp` consumes a plan; it never creates one.
-- `/xplan-resume` - resumes an `/xplan`-native interrupted execution using xplan's epic/wave checkpoint structure. Prefer it when the plan is a live xplan run.
-- `/etp` - executes **any** plan file, xplan-authored or not, with the hardened adversarial-review and follow-up loop above. It is the general-purpose execution engine.
+- `/xplan`, `/xplana` - create a plan (research → plan → review). `etp` consumes work; it never creates a plan.
+- `/xplan-resume` - resumes an `/xplan`-native interrupted execution using xplan's epic/wave checkpoint structure. Prefer it when the target is a live xplan run.
+- `/etp` - executes **any** ready work: a plan file (xplan-authored or not) **or** one-or-more investigated GitHub issues, through the hardened adversarial-review and follow-up loop above. It is the general-purpose execution engine.
