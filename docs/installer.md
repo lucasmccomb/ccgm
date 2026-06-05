@@ -93,9 +93,14 @@ This manifest is used by `update.sh` and `uninstall.sh` to know what was install
 
 Checks that all installed files exist on disk, scans for unexpanded `__PLACEHOLDER__` tokens (indicating a template expansion failure), and validates `settings.json` as valid JSON via `jq`.
 
-### Step 14: Shell alias
+### Step 14: Shell aliases
 
-Optionally adds `alias ccgm="claude /startup --dangerously-skip-permissions"` to `~/.zshrc` or `~/.bashrc`. Detects existing aliases to avoid duplicates.
+Optionally adds two aliases to `~/.zshrc` or `~/.bashrc`:
+
+- `alias ccgm="claude --dangerously-skip-permissions"` — plain launch with CCGM defaults
+- `alias ccgms="claude /startup --dangerously-skip-permissions"` — launch with the startup dashboard
+
+Detects existing aliases to avoid duplicates.
 
 ### Step 15: Next steps
 
