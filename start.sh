@@ -1382,24 +1382,30 @@ TMPL
       ;;
   esac
 
-  # Explain the alias before prompting
+  # Explain both aliases before prompting
   echo ""
-  ui_info "CCGM provides a shell alias for launching Claude Code:"
+  ui_info "CCGM provides two shell aliases for launching Claude Code:"
   echo ""
-  echo "  ccgm   Session startup   claude /startup --dangerously-skip-permissions"
-  echo "         Prints the startup dashboard: git state, open PRs, tracking,"
-  echo "         live sessions, recent activity, orphans, release check."
+  echo "  ccgm    Plain launch      claude --dangerously-skip-permissions"
+  echo "          Launches Claude Code with CCGM's default settings. No"
+  echo "          startup command."
+  echo ""
+  echo "  ccgms   Session startup   claude /startup --dangerously-skip-permissions"
+  echo "          Launches and prints the startup dashboard: git state, open"
+  echo "          PRs, tracking, live sessions, recent activity, release check."
   echo ""
 
   local alias_ccgm_installed=false
+  local alias_ccgms_installed=false
 
   if [ -n "$rc_file" ]; then
-    local ccgm_cmd='claude /startup --dangerously-skip-permissions'
+    # --- ccgm alias (plain launch) ---
+    local ccgm_cmd='claude --dangerously-skip-permissions'
     if [ -f "$rc_file" ] && grep -qF 'alias ccgm=' "$rc_file" 2>/dev/null; then
       ui_info "Alias 'ccgm' already exists in ${rc_file} - skipping"
-    elif ui_confirm "Add 'ccgm' alias to ${rc_file}?"; then
+    elif ui_confirm "Add 'ccgm' (plain launch) alias to ${rc_file}?"; then
       echo "" >> "$rc_file"
-      echo "# CCGM - startup dashboard" >> "$rc_file"
+      echo "# CCGM - Claude Code launchers" >> "$rc_file"
       echo "alias ccgm=\"${ccgm_cmd}\"" >> "$rc_file"
       ui_success "ccgm alias added"
       alias_ccgm_installed=true
@@ -1407,15 +1413,35 @@ TMPL
       ui_info "Skipped. Add manually: alias ccgm=\"${ccgm_cmd}\""
     fi
 
-    if [ "$alias_ccgm_installed" = true ]; then
+    echo ""
+
+    # --- ccgms alias (startup dashboard) ---
+    local ccgms_cmd='claude /startup --dangerously-skip-permissions'
+    if [ -f "$rc_file" ] && grep -qF 'alias ccgms=' "$rc_file" 2>/dev/null; then
+      ui_info "Alias 'ccgms' already exists in ${rc_file} - skipping"
+    elif ui_confirm "Add 'ccgms' (startup dashboard) alias to ${rc_file}?"; then
+      # Add comment only if ccgm wasn't just added (avoid duplicate comment)
+      if [ "$alias_ccgm_installed" = false ]; then
+        echo "" >> "$rc_file"
+        echo "# CCGM - Claude Code launchers" >> "$rc_file"
+      fi
+      echo "alias ccgms=\"${ccgms_cmd}\"" >> "$rc_file"
+      ui_success "ccgms alias added"
+      alias_ccgms_installed=true
+    else
+      ui_info "Skipped. Add manually: alias ccgms=\"${ccgms_cmd}\""
+    fi
+
+    if [ "$alias_ccgm_installed" = true ] || [ "$alias_ccgms_installed" = true ]; then
       echo ""
-      ui_info "Run 'source ${rc_file}' or open a new terminal to use the alias"
+      ui_info "Run 'source ${rc_file}' or open a new terminal to use the aliases"
     fi
   else
     ui_info "Skipping alias setup."
     echo ""
     echo "Add manually to your shell config:"
-    echo "  alias ccgm=\"claude /startup --dangerously-skip-permissions\""
+    echo "  alias ccgm=\"claude --dangerously-skip-permissions\""
+    echo "  alias ccgms=\"claude /startup --dangerously-skip-permissions\""
   fi
 
   # ===========================================================
@@ -1453,8 +1479,8 @@ TMPL
 
   ui_info "Next steps:"
   local step=1
-  if [ "$alias_ccgm_installed" = true ]; then
-    echo "  ${step}. Run 'source ${rc_file}' to activate the new alias"
+  if [ "$alias_ccgm_installed" = true ] || [ "$alias_ccgms_installed" = true ]; then
+    echo "  ${step}. Run 'source ${rc_file}' to activate the new aliases"
     step=$((step + 1))
   else
     echo "  ${step}. Open a new Claude Code session to pick up the new config"
@@ -1472,7 +1498,10 @@ TMPL
   echo ""
   ui_info "Useful commands:"
   if [ "$alias_ccgm_installed" = true ]; then
-    echo "  ccgm             Session startup (git status, tracking, live sessions, recent activity)"
+    echo "  ccgm             Launch Claude Code with CCGM defaults"
+  fi
+  if [ "$alias_ccgms_installed" = true ]; then
+    echo "  ccgms            Launch with session startup (git status, tracking, live sessions, recent activity)"
   fi
   echo "  ./update.sh      Check for upstream updates"
   echo "  ./uninstall.sh   Remove installed modules"
