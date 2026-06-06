@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 66 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 67 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -760,6 +760,18 @@ Seven-lens plan-quality gate before a spec ships to execution.
 **What it does**: `/document-review` fans out to seven role-specific reviewer agents (coherence, feasibility, product-lens, scope-guardian, design-lens, security-lens, adversarial) and merges structured JSON findings with severity and confidence. Each lens has tight "what you flag" boundaries so they don't overlap.
 
 **Dependencies**: skill-authoring, subagent-patterns
+
+---
+
+### adversarial-review
+
+One hostile lens against a plan or any entity, with automatic plan incorporation.
+
+**Installs**: `skills/adrev/`, `agents/adrev-reviewer.md`
+
+**What it does**: `/adrev` resolves a target (plan, doc, PR, issue, code directory, or stated concept) and dispatches a fresh-context adrev-reviewer agent that attacks premises, hunts failure modes, steelmans the strongest opposing case, and checks falsifiability and reversal costs. When the target is a plan, the reviewing agent incorporates its findings into the plan automatically - high-confidence findings revise sections directly, judgment calls land in `## Risks & Open Questions`, and the full review is written to the plan's `reviews/` directory - unless invoked with `--no-apply`. Non-plan targets are never modified. The single-lens, any-entity counterpart to document-review's 7-lens doc gate.
+
+**Dependencies**: subagent-patterns
 
 ---
 

@@ -1,0 +1,81 @@
+# Adversarial Review
+
+`/adrev` - run a single hostile lens against a plan or any entity: a file, doc, PR, issue, directory, or an idea stated inline. A separate `adrev-reviewer` agent (fresh context - the author session never grades its own work) attacks premises, hunts failure modes, steelmans the strongest case against, and checks falsifiability and reversal costs.
+
+The differentiator from CCGM's other review surfaces: **when the target is a plan, the reviewing agent incorporates its findings into the plan automatically** - revising sections for high-confidence findings, deferring judgment calls to a `## Risks & Open Questions` section, and writing the full review to the plan's `reviews/` directory as the audit trail. Pass `--no-apply` (or just say "don't change the plan") to get a report instead. Non-plan targets are never modified.
+
+## How It Relates to Other Review Modules
+
+| Surface | Scope | Modifies the target? |
+|---|---|---|
+| `/adrev` | One adversarial lens, **any entity** | Plans: yes, by default. Everything else: never |
+| `/document-review` | 7 lenses, docs headed to execution | Never - findings are presented |
+| `/ce-review`, `pr-review-toolkit`, `/code-review` | Code diffs and PRs | Via review comments / fixes |
+| `/editorial-critique` | Prose style | Optional `--fix` |
+
+Use `/document-review` for the full pre-execution gate on a plan; use `/adrev` when you want the premise-challenge lens alone, on anything, with the plan updated when it is a plan.
+
+## What This Module Provides
+
+Files installed globally to `~/.claude/`:
+
+| Source | Target | Purpose |
+|--------|--------|---------|
+| `skills/adrev/SKILL.md` | `skills/adrev/SKILL.md` | `/adrev` - target resolution + dispatch + verification |
+| `agents/adrev-reviewer.md` | `agents/adrev-reviewer.md` | The attack battery + plan apply protocol |
+
+## Usage
+
+```
+/adrev ~/code/plans/my-feature/plan.md       # review + incorporate findings into the plan
+/adrev ~/code/plans/my-feature/plan.md --no-apply   # review only
+/adrev my-feature                            # plan slug under ~/code/plans/
+/adrev                                       # autodetect the in-progress plan (confirms first)
+/adrev #42                                   # adversarial review of a GitHub issue
+/adrev pr#117                                # adversarial review of a PR
+/adrev src/auth/                             # attack a codebase area
+/adrev "switching the store from JSONL to SQLite"   # attack a stated concept
+/adrev docs/rfc.md --apply                   # force incorporation for a non-plan doc
+/adrev plan.md --focus "the rollout sequencing"
+/adrev plan.md mode:headless                 # skill-to-skill: JSON envelope, no prompts
+```
+
+## The Attack Battery
+
+1. **Premise attack** - load-bearing assumptions the author has not realized they are making
+2. **Falsification test** - claims with no articulated way to know if they are wrong
+3. **Failure-mode hunt** - empty input, partial failure, concurrency, scale, clock edges, careless and malicious users
+4. **Strongest opposing case** - steelman the alternative, including do-nothing
+5. **Reversal-cost check** - expensive-to-undo decisions with thin justification
+6. **Second-order effects** - assume it ships and works; who adapts to it, games it, or becomes load-bearing on it
+
+Findings carry severity (P0-P3) and confidence (0.0-1.0), matching the document-review conventions. The report also lists what the target **survived** - a clean verdict is only credible when the attacks are shown.
+
+## The Apply Protocol (plans)
+
+- P0/P1 at confidence >= 0.80 → affected sections revised directly, integrated as if considered from the start
+- P1/P2 at confidence 0.60-0.79 → added to `## Risks & Open Questions`, citing the finding id
+- Below 0.60 → review artifact only; the plan is never edited on speculation
+- Premise-invalidating revisions are visibly marked (`> **Revised {date} (adversarial review):** ...`) - intent is never silently rewritten
+- `progress.md`, completed-work records, and decision-log history are never touched; `decisions.md` gets one appended line per incorporated finding
+- The orchestrator verifies the agent's ledger against the actual diff before reporting
+
+## Manual Installation
+
+```bash
+# From the CCGM repo root:
+mkdir -p ~/.claude/skills/adrev ~/.claude/agents
+cp modules/adversarial-review/skills/adrev/SKILL.md ~/.claude/skills/adrev/SKILL.md
+cp modules/adversarial-review/agents/adrev-reviewer.md ~/.claude/agents/adrev-reviewer.md
+```
+
+## Dependencies
+
+- `subagent-patterns` - dispatch uses pass-paths-not-contents, the four-state status protocol, and skill invocation modes
+
+## When To Run
+
+- After drafting a plan and before `/etp` executes it (lighter than the full `/document-review` gate)
+- Before committing to a direction on an issue - `/adrev #N` pressure-tests the proposal in the issue body
+- When a PR's approach (not its diff hygiene) deserves a hostile read
+- Any time you catch yourself wanting the plan to be right more than wanting to know whether it is
