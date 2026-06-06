@@ -1,0 +1,14 @@
+{
+  "name": "adversarial-review",
+  "displayName": "Adversarial Review",
+  "description": "/adrev - adversarial review of a plan or any entity (file, doc, PR, issue, directory, or stated concept). Dispatches a separate adrev-reviewer agent that attacks premises, hunts failure modes, and steelmans the case against. Plan targets get findings incorporated into the plan automatically unless told not to; all other targets get a report.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["subagent-patterns"],
+  "files": {
+    "skills/adrev/SKILL.md": { "target": "skills/adrev/SKILL.md", "type": "skill", "template": false },
+    "agents/adrev-reviewer.md": { "target": "agents/adrev-reviewer.md", "type": "agent", "template": false }
+  },
+  "tags": ["review", "adversarial", "red-team", "planning", "quality-gate"],
+  "configPrompts": []
+}

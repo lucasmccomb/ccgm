@@ -132,7 +132,7 @@ For a quick install with a preset:
 |--------|---------|----------|
 | **minimal** | global-claude-md, autonomy, git-workflow | Getting started |
 | **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, settings, commands-core, commands-utility | Most users |
-| **full** | 48 modules | Power users |
+| **full** | 49 modules | Power users |
 | **team** | global-claude-md, autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification | Teams |
 
 ### Other install options
@@ -193,6 +193,7 @@ For a quick install with a preset:
 | **commands-preamble** | workflow | [EXPERIMENTAL] UserPromptSubmit hook that injects a compact preamble of iron-law principles into every prompt | - |
 | **compound-knowledge** | workflow | Team-shared learnings in `docs/solutions/`. After solving a non-trivial problem, capture the pattern in a versioned schema | - |
 | **document-review** | workflow | Seven-lens plan-quality gate. /document-review fans out to 7 role-specific reviewers (coherence, feasibility, product, scope, design, security, adversarial) with structured JSON findings | skill-authoring, subagent-patterns |
+| **adversarial-review** | workflow | /adrev - adversarial review of a plan or any entity (file, PR, issue, dir, concept). Separate reviewer agent attacks premises and failure modes; plan targets get findings incorporated automatically unless told not to | subagent-patterns |
 | **git-worktrees** | workflow | Solo-agent worktree-based isolation for feature work. Lighter alternative to multi-clone | - |
 | **pr-feedback** | workflow | /resolve-pr-feedback - fetches unresolved PR review threads via GraphQL, clusters 3+ items by category, dispatches parallel resolver agents | skill-authoring, subagent-patterns |
 | **todos** | workflow | File-based review-finding tracker. Review findings, PR nitpicks, and tech debt tracked with structured YAML | - |
@@ -320,8 +321,8 @@ The `docs/` directory contains comprehensive documentation:
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 66 modules |
-| [Commands Reference](docs/commands.md) | All 73 slash commands with usage examples |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 67 modules |
+| [Commands Reference](docs/commands.md) | All 74 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 13 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |

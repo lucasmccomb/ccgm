@@ -1308,6 +1308,30 @@ Unlike commands, skills may carry supporting assets (sub-docs, scripts, referenc
 
 ---
 
+### /adrev
+
+**Adversarial review of a plan or any entity.**
+
+Resolves a target - plan, doc, PR, issue, code directory, or a concept stated inline - and dispatches a separate adrev-reviewer agent (fresh context, so the author session never grades its own work) that attacks premises, hunts failure modes, steelmans the strongest opposing case, and checks falsifiability and reversal costs. Findings carry P0-P3 severity and confidence. When the target is a plan, the reviewing agent incorporates its findings into the plan automatically (high-confidence findings revise sections; judgment calls go to `## Risks & Open Questions`; the full review lands in the plan's `reviews/` directory) unless told not to. Non-plan targets are never modified. Single-lens, any-entity counterpart to `/document-review`'s 7-lens doc gate.
+
+**Usage**:
+```
+/adrev ~/code/plans/my-feature/plan.md   # review + incorporate into the plan
+/adrev plan.md --no-apply                # review only, don't touch the plan
+/adrev                                   # autodetect the in-progress plan (confirms first)
+/adrev #42                               # adversarial review of a GitHub issue
+/adrev pr#117                            # adversarial review of a PR
+/adrev src/auth/                         # attack a codebase area
+/adrev "moving the store to SQLite"      # attack a stated concept
+/adrev docs/rfc.md --apply               # force incorporation for a non-plan doc
+/adrev plan.md --focus "rollout order"   # narrow the attack surface
+/adrev plan.md mode:headless             # skill-to-skill: JSON envelope, no prompts
+```
+
+**Installed by**: adversarial-review module
+
+---
+
 ### /brainstorm
 
 **Design-before-implementation gate.**
