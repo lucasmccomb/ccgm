@@ -6,14 +6,21 @@ Reference spec for distributed audit using git worktrees for isolation.
 
 ## Agent Assignments
 
+9 audit categories are distributed across 4 agents. Agent 0 carries 3 categories because the
+ToS & Compliance audit is often the most project-specific and benefits from sharing context
+with the Security and Dependencies audits.
+
 | Agent | Worktree Dir | Categories | Merge Priority |
 |-------|-------------|------------|----------------|
-| 0 | `.audit/worktrees/agent-0` | Security, Dependencies | 1 (highest - wins conflicts) |
+| 0 | `.audit/worktrees/agent-0` | Security, Dependencies, ToS & Compliance | 1 (highest - wins conflicts) |
 | 1 | `.audit/worktrees/agent-1` | Code Quality, TypeScript/React | 2 |
 | 2 | `.audit/worktrees/agent-2` | Architecture, Performance | 3 |
 | 3 | `.audit/worktrees/agent-3` | Testing, Documentation | 4 (lowest) |
 
-**Merge priority**: When `--collect` merges branches and encounters a conflict, the process **halts and writes a conflict report** to `.audit/current/merge-conflicts.md`. Neither agent's changes are silently dropped. The human reviewer resolves the conflict and re-runs `--collect`. Agent 0 (Security/Dependencies) has the highest priority, but priority does NOT mean auto-resolution.
+**9 categories total**: Security, Dependencies, ToS & Compliance, Code Quality, TypeScript/React,
+Architecture, Performance, Testing, Documentation.
+
+**Merge priority**: When `--collect` merges branches and encounters a conflict, the process **halts and writes a conflict report** to `.audit/current/merge-conflicts.md`. Neither agent's changes are silently dropped. The human reviewer resolves the conflict and re-runs `--collect`. Agent 0 (Security/Dependencies/ToS) has the highest priority, but priority does NOT mean auto-resolution.
 
 **Agent identity**: Derived from worktree directory name suffix. `agent-0` -> agent 0, `agent-3` -> agent 3.
 
@@ -113,6 +120,10 @@ Written by coordinator during M4. Each task file is self-contained so workers do
     {
       "name": "Dependencies",
       "instructions": "Full category audit instructions embedded here..."
+    },
+    {
+      "name": "ToS & Compliance",
+      "instructions": "Full category audit instructions embedded here (Agent 9 prompt from SKILL.md)..."
     }
   ],
   "fix_reference": "Embedded content from fix-patterns.md...",
@@ -150,7 +161,7 @@ Written by worker during W2 (initial) and W5 (final).
   "started_at": "ISO-8601 timestamp",
   "completed_at": "ISO-8601 timestamp or null",
   "branch": "audit/agent-0-YYYYMMDD",
-  "categories_audited": ["Security", "Dependencies"],
+  "categories_audited": ["Security", "Dependencies", "ToS & Compliance"],
   "findings": [
     {
       "id": "agent-0-security-001",

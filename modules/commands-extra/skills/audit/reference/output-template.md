@@ -20,6 +20,7 @@ Always apply:
 Category-specific:
 - `security` - Security findings
 - `dependencies` - Dependency findings
+- `tos-compliance` - Terms of Service & Policy Compliance findings
 - `code-quality` - Code quality findings
 - `architecture` - Architecture findings
 - `typescript` - TypeScript/React findings
@@ -323,7 +324,7 @@ Audit: YYYY-MM-DD - Distributed Codebase Audit
 | Metric | Value |
 |--------|-------|
 | **Audit Date** | YYYY-MM-DD |
-| **Base Branch** | development |
+| **Base Branch** | {base_branch} |
 | **Agents Used** | 4 |
 | **Total Findings** | XX |
 | **Auto-Fixed** | XX |
@@ -335,6 +336,7 @@ Audit: YYYY-MM-DD - Distributed Codebase Audit
 |----------|-------|----------|------|--------|-----|-------|--------|
 | Security | 0 | X | X | X | X | X | X |
 | Dependencies | 0 | X | X | X | X | X | X |
+| ToS & Compliance | 0 | X | X | X | X | X | X |
 | Code Quality | 1 | X | X | X | X | X | X |
 | TypeScript/React | 1 | X | X | X | X | X | X |
 | Architecture | 2 | X | X | X | X | X | X |
@@ -350,7 +352,7 @@ Audit: YYYY-MM-DD - Distributed Codebase Audit
 ### Agent Breakdown
 
 <details>
-<summary>Agent 0 - Security & Dependencies (XX findings, XX fixed)</summary>
+<summary>Agent 0 - Security, Dependencies & ToS (XX findings, XX fixed)</summary>
 
 #### Commits
 - `abc1234` audit(security): remove PII-leaking console.log
@@ -413,7 +415,7 @@ git commit -m "revert: undo audit YYYY-MM-DD"
 
 Or reset the branch:
 ```bash
-git reset --hard origin/development
+git reset --hard origin/{base_branch}
 ```
 ```
 

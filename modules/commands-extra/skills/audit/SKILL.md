@@ -907,6 +907,10 @@ These prompts are used by both single-session mode (directly) and multi-agent mo
 ```
 Audit for security vulnerabilities. For each finding, classify its fixability.
 
+READ AND APPLY: ~/.claude/skills/audit/reference/security-patterns.md
+Use the pattern regexes, severity guidelines, and OWASP Top 10 quick reference from that file
+to guide every check below. Do not rely on memory — open and apply the file.
+
 Check for:
 - Hardcoded secrets, API keys, tokens (NOT auto-fixable - needs env var setup)
 - Console.logs with sensitive data (auto-fixable: remove line)
@@ -916,12 +920,15 @@ Check for:
 - Edge function auth bypasses (NOT auto-fixable)
 
 Report with severity, file:line, and auto_fixable classification.
-Reference: ~/.claude/skills/audit/reference/security-patterns.md
 ```
 
 ### Agent 2: Dependencies Audit
 ```
 Audit dependencies. For each finding, classify its fixability.
+
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Consult the Fix Type Reference table and confidence levels from that file when classifying
+each finding's fix_type and fix_confidence. Do not rely on memory — open and apply the file.
 
 Check for:
 - npm audit vulnerabilities (auto-fixable: npm audit fix for non-breaking)
@@ -938,6 +945,14 @@ Report with severity and auto_fixable classification.
 ```
 Audit code quality. For each finding, classify its fixability.
 
+READ AND APPLY: ~/.claude/skills/audit/reference/code-quality.md
+Use the code smell categories, thresholds, and severity guidelines from that file to inform
+your checks. Do not rely on memory — open and apply the file.
+
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Use the Fix Type Reference table from that file to assign fix_type and fix_confidence to
+each finding. Do not rely on memory — open and apply the file.
+
 Check for:
 - ESLint violations (auto-fixable: eslint --fix)
 - Prettier violations (auto-fixable: prettier --write)
@@ -947,12 +962,15 @@ Check for:
 - Empty catch blocks (NOT auto-fixable - needs error handling)
 
 Report with severity, file:line, and auto_fixable classification.
-Reference: ~/.claude/skills/audit/reference/code-quality.md
 ```
 
 ### Agent 4: Architecture Audit
 ```
 Audit architecture patterns. Most findings need human review.
+
+READ AND APPLY: ~/.claude/skills/audit/reference/architecture.md
+Use the structural antipattern indicators, dependency detection patterns, and severity
+guidelines from that file to guide every check below. Do not rely on memory — open and apply the file.
 
 Check for:
 - Circular dependencies (NOT auto-fixable)
@@ -961,19 +979,23 @@ Check for:
 - Import from wrong layer (MAYBE auto-fixable with verification)
 
 Report with severity and file references.
-Reference: ~/.claude/skills/audit/reference/architecture.md
 ```
 
 ### Agent 5: TypeScript/React Audit
 ```
 Audit TypeScript and React patterns.
 
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Use the Fix Type Reference table from that file to assign fix_type and fix_confidence to
+each finding. Do not rely on memory — open and apply the file.
+
 Check for:
 - Excessive `any` types (auto-fixable if type is inferable)
 - Missing return types (auto-fixable: add inferred type)
 - React hooks violations (NOT auto-fixable)
 - Fast Refresh violations (NOT auto-fixable)
-- Missing key props (auto-fixable: add index as key, but flag for review)
+- Missing key props (NOT auto-fixable: array index as key is an anti-pattern; requires a
+  stable, unique identifier — flag for human review to supply the correct key)
 
 Report with severity, file:line, and auto_fixable classification.
 ```
@@ -981,6 +1003,10 @@ Report with severity, file:line, and auto_fixable classification.
 ### Agent 6: Testing Audit
 ```
 Audit test coverage and quality. Most findings need human review.
+
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Use the Fix Type Reference table from that file when classifying findings (in particular,
+`test_implementation` fix_type is NOT auto-fixable). Do not rely on memory — open and apply the file.
 
 Check for:
 - Missing test files for components (NOT auto-fixable)
@@ -994,8 +1020,14 @@ Report with severity and specific test gaps.
 ```
 Audit documentation.
 
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Use the Fix Type Reference table from that file when classifying findings. In particular:
+the `documentation` fix_type is NOT auto-fixable (auto-fixable = No) — generated stubs
+do not substitute for meaningful documentation and require human authorship.
+Do not rely on memory — open and apply the file.
+
 Check for:
-- Missing JSDoc on exports (auto-fixable: generate from types)
+- Missing JSDoc on exports (NOT auto-fixable: requires human-authored documentation)
 - Stale comments (NOT auto-fixable)
 - README completeness (NOT auto-fixable)
 
@@ -1006,9 +1038,13 @@ Report with severity and file references.
 ```
 Audit performance patterns. Most findings need human review.
 
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Use the Fix Type Reference table and confidence levels from that file when classifying findings.
+Do not rely on memory — open and apply the file.
+
 Check for:
 - N+1 query patterns (NOT auto-fixable)
-- Missing React.memo (auto-fixable: add memo wrapper)
+- Missing React.memo (auto-fixable: add memo wrapper — medium confidence per fix-patterns.md)
 - Large bundle imports (NOT auto-fixable - needs tree shaking)
 
 Report with severity and file:line references.
@@ -1017,6 +1053,10 @@ Report with severity and file:line references.
 ### Agent 9: Terms of Service & Policy Compliance Audit
 ```
 Audit for terms-of-service, license, and platform-policy violations. This is a COMPLIANCE audit: flag legal/policy risk for human review. Be ULTRA-COMPREHENSIVE - cover every ToS surface relevant to THIS project's type. Most findings are NOT auto-fixable (they need human/legal judgment): default auto_fixable=false unless a fix is purely mechanical.
+
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Use the Fix Type Reference table from that file when assigning fix_type and fix_confidence.
+Do not rely on memory — open and apply the file.
 
 First detect the project type and which policy regimes apply:
 - package.json / requirements.txt / go.mod / Cargo.toml / *.csproj  -> dependency-license compliance

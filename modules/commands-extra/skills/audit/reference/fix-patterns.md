@@ -204,7 +204,7 @@ When running in multi-agent mode (`/audit --worker`), follow these additional ru
 Each agent is assigned specific audit categories (see `multi-agent-config.md` for assignments). During the fix cycle:
 
 - **Only fix findings in your assigned categories.** If you discover an issue that belongs to another agent's category, record it as a `cross_category_finding` but do NOT modify the code.
-- **Example:** Agent 0 (Security, Dependencies) finds an unused import while auditing for security console.log leaks. Record it as a cross-category finding for Code Quality, but don't fix it - that's Agent 1's job.
+- **Example:** Agent 0 (Security, Dependencies, ToS & Compliance) finds an unused import while auditing for security console.log leaks. Record it as a cross-category finding for Code Quality, but don't fix it - that's Agent 1's job.
 
 ### Commit Message Format (Multi-Agent)
 
