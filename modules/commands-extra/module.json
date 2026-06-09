@@ -103,6 +103,11 @@
       "type": "script",
       "template": false
     },
+    "skills/audit/scripts/emit-findings.py": {
+      "target": "skills/audit/scripts/emit-findings.py",
+      "type": "script",
+      "template": false
+    },
     "skills/audit/schemas/severity-rubric.json": {
       "target": "skills/audit/schemas/severity-rubric.json",
       "type": "doc",
