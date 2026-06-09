@@ -33,7 +33,7 @@
       "severity": "medium",
       "confidence": "medium",
       "detection": "llm",
-      "auto_fixable": false
+      "auto_fixable": true
     }
   ]
 }

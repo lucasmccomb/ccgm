@@ -3,17 +3,15 @@
   "name": "Code Quality",
   "version": "1.0.0",
   "applies_when": ["always"],
-  "tags": ["code-quality", "eslint", "prettier", "style"],
+  "tags": ["code-quality", "prettier", "style"],
   "severity_floor": "low",
-  "tools": ["eslint"],
+  "tools": [],
   "checks": [
     {
       "id": "code-quality/eslint-violation",
       "severity": "medium",
       "confidence": "high",
-      "detection": "tool",
-      "tool": "eslint",
-      "fallback": "llm",
+      "detection": "llm",
       "auto_fixable": true
     },
     {
@@ -27,9 +25,7 @@
       "id": "code-quality/unused-import",
       "severity": "low",
       "confidence": "high",
-      "detection": "hybrid",
-      "tool": "eslint",
-      "fallback": "llm",
+      "detection": "llm",
       "auto_fixable": true
     },
     {

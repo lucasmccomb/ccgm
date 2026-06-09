@@ -4,7 +4,7 @@
 
 ## Scope
 
-This pack audits source code for common quality issues: linting violations, formatting drift, unused imports, oversized methods and files, and unhandled error paths (empty catch blocks). It covers all languages for the language-agnostic checks (long-method, large-file, empty-catch-block) and JavaScript/TypeScript projects for the ESLint-backed checks; the ESLint checks degrade gracefully on non-JS repos (the tool is simply absent and the llm fallback runs). This pack does NOT cover security vulnerabilities, dependency health, architectural patterns, or TypeScript/React-specific type checks — those belong in their respective packs.
+This pack audits source code for common quality issues: linting violations, formatting drift, unused imports, oversized methods and files, and unhandled error paths (empty catch blocks). It covers all languages for the language-agnostic checks (long-method, large-file, empty-catch-block) and JavaScript/TypeScript projects for the ESLint-based checks. The ESLint-based checks (eslint-violation, unused-import) use LLM detection; the worker agent may run `npx eslint` for advisory results, but does not rely on the spine's eslint wrapper (which is config-isolated to a fixed eval-rule surface under the `lint/*` namespace). This pack does NOT cover security vulnerabilities, dependency health, architectural patterns, or TypeScript/React-specific type checks — those belong in their respective packs.
 
 **Pack ID:** `ccgm/code-quality`
 **Applies when:** `always`
@@ -15,7 +15,7 @@ This pack audits source code for common quality issues: linting violations, form
 
 | Condition | Reason |
 |-----------|--------|
-| `always` | Long-method, large-file, and empty-catch-block are language-agnostic structural smells detectable by the LLM in any codebase. The ESLint-backed checks (eslint-violation, unused-import) only run when ESLint is present; they degrade gracefully to llm fallback on non-JS repos, so running on all repos produces no false noise. |
+| `always` | Long-method, large-file, and empty-catch-block are language-agnostic structural smells detectable by the LLM in any codebase. The ESLint-based checks (eslint-violation, unused-import) use LLM detection and the worker agent scopes its eslint invocations to JS/TS files only, so running on all repos produces no false noise on non-JS codebases. |
 
 ---
 
@@ -27,18 +27,18 @@ This pack audits source code for common quality issues: linting violations, form
 
 **Severity:** `medium`
 **Confidence:** `high`
-**Detection:** `tool`
+**Detection:** `llm`
 
 #### Detection
 
-ESLint is invoked by the spine against the repository root. Any rule violation reported at error or warning level is a finding.
+The LLM agent scans JavaScript and TypeScript source files for common ESLint rule violations. The worker agent may run `npx eslint` (read-only, results advisory) on JS/TS files exactly as the original category prompt's agent did; however, the spine's eslint wrapper (`scripts/spine/wrap-eslint.sh`) is config-isolated via `--no-config-lookup` and runs only a narrow hardcoded eval-rule surface (`no-eval`, `no-implied-eval`, `no-new-func`), emitting findings under the `lint/*` namespace — it does NOT run these rule classes and does NOT emit `code-quality/eslint-violation` check IDs. Detection is therefore LLM-owned.
 
 **Tool (if detection = tool or hybrid):**
-`eslint`
+n/a
 
-Rule / rule-id: `(all enabled rules in the project's ESLint config)`
+Rule / rule-id: n/a
 
-Fallback when tool absent: `llm`
+Fallback when tool absent: n/a (detection is always llm)
 
 **LLM instruction (if detection = llm or hybrid):**
 
@@ -51,9 +51,13 @@ READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
 Use the Fix Type Reference table from that file to assign fix_type and fix_confidence to
 each finding. Do not rely on memory — open and apply the file.
 
-The ESLint spine tool was not available. Scan JavaScript and TypeScript source files for
-common ESLint rule violations that are statically detectable:
-- no-unused-vars: variables declared but never referenced
+Scan JavaScript and TypeScript source files for common ESLint rule violations that are
+statically detectable. You may run `npx eslint` on JS/TS files for advisory results if
+the project has ESLint installed; treat its output as one signal among several.
+
+Rule classes to check (via LLM inspection of source files):
+- no-unused-vars: variables declared but never referenced (note: unused IMPORTS are
+  reported separately under code-quality/unused-import)
 - no-console: console.log/warn/error left in production code
 - eqeqeq: == or != used instead of === or !==
 - no-var: var declarations instead of let/const
@@ -67,16 +71,19 @@ snippet. Mark auto_fixable: true (eslint --fix resolves these mechanically).
 
 ```yaml
 check_id: code-quality/eslint-violation
-detection: tool
-tool: eslint
-fallback: llm
+detection: llm
 ```
+
+Note: the spine's `wrap-eslint.sh` runs only `no-eval` / `no-implied-eval` / `no-new-func` with
+`--no-config-lookup`, emitting findings under the `lint/*` namespace. It does NOT run the rule
+classes above and does NOT emit `code-quality/eslint-violation` IDs. Wave 2's reliability pack
+will wire eslint rules to the spine properly.
 
 #### Severity / Confidence
 
 **Severity rationale:** ESLint violations indicate code that breaks project-defined quality rules. Medium severity: violations create maintenance debt and can mask bugs, but do not typically cause immediate runtime failures on their own.
 
-**Confidence rationale:** ESLint is deterministic — it parses the AST and applies rules exactly. When the tool runs, confidence is high. The llm fallback covers only common rule patterns and has the same high confidence for those patterns.
+**Confidence rationale:** The LLM covers common statically-detectable rule patterns (eqeqeq, no-var, prefer-const, no-console, no-unused-vars) with high reliability. High confidence.
 
 **Rubric entry:** `code-quality/eslint-violation`
 
@@ -191,18 +198,18 @@ function Button({ label }: { label: string }) {
 
 **Severity:** `low`
 **Confidence:** `high`
-**Detection:** `hybrid`
+**Detection:** `llm`
 
 #### Detection
 
-ESLint's `no-unused-vars` / `@typescript-eslint/no-unused-vars` rule detects unused imports when the spine tool runs. LLM fallback scans import statements against usages in the file body.
+The LLM agent scans JavaScript and TypeScript source files for import or require statements where the imported binding is never referenced in the file body. The spine's eslint wrapper accepts no per-pack rules; `no-unused-vars` never runs in the spine's eslint surface. Detection is therefore LLM-owned.
 
 **Tool (if detection = tool or hybrid):**
-`eslint`
+n/a
 
-Rule / rule-id: `no-unused-vars` / `@typescript-eslint/no-unused-vars`
+Rule / rule-id: n/a
 
-Fallback when tool absent: `llm`
+Fallback when tool absent: n/a (detection is always llm)
 
 **LLM instruction (if detection = llm or hybrid):**
 
@@ -215,8 +222,8 @@ READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
 Use the Fix Type Reference table from that file to assign fix_type and fix_confidence to
 each finding. Do not rely on memory — open and apply the file.
 
-ESLint was not available. Scan JavaScript and TypeScript source files for import or require
-statements where the imported binding is never referenced in the file body. This includes:
+Scan JavaScript and TypeScript source files for import or require statements where the
+imported binding is never referenced in the file body. This includes:
 - Named imports: import { Foo } from './foo' where Foo is never used
 - Default imports: import Bar from './bar' where Bar is never used
 - Namespace imports: import * as Baz from './baz' where Baz is never used
@@ -235,17 +242,17 @@ statement. Mark auto_fixable: true (eslint --fix removes these).
 
 ```yaml
 check_id: code-quality/unused-import
-detection: hybrid
-tool: eslint
-rule: no-unused-vars
-fallback: llm
+detection: llm
 ```
+
+Note: the spine's `wrap-eslint.sh` accepts no per-pack rule configuration; `no-unused-vars`
+never runs in the spine's eslint surface. The LLM agent handles this check directly.
 
 #### Severity / Confidence
 
 **Severity rationale:** Unused imports are dead code that inflate bundle size and create confusion about what a file depends on. Low severity: they add noise but do not cause runtime errors in most cases.
 
-**Confidence rationale:** Static analysis of import/use pairs is deterministic. Both ESLint and LLM-based scanning produce precise results for this pattern. High confidence.
+**Confidence rationale:** Static analysis of import/use pairs is straightforward. LLM-based scanning produces precise results for this pattern. High confidence.
 
 **Rubric entry:** `code-quality/unused-import`
 
@@ -305,10 +312,10 @@ READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
 Use the Fix Type Reference table from that file to assign fix_type and fix_confidence to
 each finding. Do not rely on memory — open and apply the file.
 
-Scan source files for functions or methods longer than 50 lines. Count lines from the
-opening brace (or colon for Python) to the closing brace, inclusive, excluding blank
-lines and comment-only lines from the line count only when doing so would not affect the
-threshold determination — in practice, count all lines for simplicity.
+Scan source files for functions or methods longer than 50 lines. Count ALL lines between
+the function's opening delimiter (opening brace for C-like languages, colon for Python)
+and its closing delimiter, inclusive. Blank lines and comment-only lines are included in
+the count.
 
 Flag every function/method body that exceeds 50 lines as a finding.
 
@@ -390,9 +397,10 @@ READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
 Use the Fix Type Reference table from that file to assign fix_type and fix_confidence to
 each finding. Do not rely on memory — open and apply the file.
 
-Identify source files with more than 500 lines. Use: find . -name "*.ts" -o -name "*.tsx"
--o -name "*.js" -o -name "*.jsx" -o -name "*.py" -o -name "*.go" -o -name "*.rb" | head -200
-then check line counts with wc -l on the discovered files.
+Identify source files with more than 500 lines. Use:
+  git ls-files '*.ts' '*.tsx' '*.js' '*.jsx' '*.py' '*.go' '*.rb'
+This respects .gitignore and excludes node_modules, dist, and other generated directories
+automatically. Then check line counts with wc -l on the discovered files.
 
 Do NOT flag:
 - Auto-generated files (*.generated.*, *.pb.go, *.min.js, dist/, build/, node_modules/)
@@ -535,7 +543,7 @@ Maps every bullet from the original Agent 3 category prompt to the check that ow
 |-------------------------|----------|
 | ESLint violations (auto-fixable: eslint --fix) | `code-quality/eslint-violation` |
 | Prettier violations (auto-fixable: prettier --write) | `code-quality/prettier-violation` |
-| Unused imports/variables (auto-fixable: eslint --fix) | `code-quality/unused-import` (split: unused **imports** → `code-quality/unused-import`; unused **variables** → `code-quality/eslint-violation` via `no-unused-vars`, with llm fallback when eslint is absent) |
+| Unused imports/variables (auto-fixable: eslint --fix) | `code-quality/unused-import` (split: unused **imports** → `code-quality/unused-import`; unused **variables** → `code-quality/eslint-violation` via the `no-unused-vars` rule class in its LLM instruction) |
 | Long methods >50 lines (NOT auto-fixable - needs refactor) | `code-quality/long-method` |
 | Large files >500 lines (NOT auto-fixable - needs split) | `code-quality/large-file` |
 | Empty catch blocks (NOT auto-fixable - needs error handling) | `code-quality/empty-catch-block` |

@@ -7,7 +7,7 @@
 This pack audits TypeScript and React-specific patterns: overuse of the `any` escape hatch, missing function return type annotations, React Hooks Rules violations, React Fast Refresh violations (mixed component/non-component exports), and missing `key` props in list renders. It applies to any repository that uses JavaScript or TypeScript (detected by the presence of a `package.json`), which includes plain-JS React projects and TypeScript projects alike. This pack does NOT cover general code quality smells, architecture patterns, security issues, or dependency health — those belong in their respective packs.
 
 **Pack ID:** `ccgm/typescript-react`
-**Applies when:** `language:js`
+**Applies when:** `language:javascript`
 
 ---
 
@@ -15,7 +15,7 @@ This pack audits TypeScript and React-specific patterns: overuse of the `any` es
 
 | Condition | Reason |
 |-----------|--------|
-| `language:js` | The ecosystem detector emits `language:js` for any repository that has a `package.json`, including TypeScript projects (TypeScript compiles to JS and shares the same ecosystem). This is the broadest honest gate: plain-JS React projects keep full coverage, and TypeScript projects are included automatically. Running on repos without a `package.json` (pure Go, Python, etc.) would produce zero signal since none of these patterns apply outside the JS/TS ecosystem. |
+| `language:javascript` | The ecosystem detector emits the `javascript` ecosystem for any repository that has a `package.json`; TypeScript repos additionally emit `typescript`. The registry derives condition tokens as `language:javascript` and `language:typescript` respectively. Because `applies_when` is AND-semantics, using `language:javascript` is the broadest honest gate: it covers both plain-JS React projects and TypeScript React projects (all TS repos also satisfy `language:javascript` since both ecosystems are detected). Using `language:typescript` would exclude plain-JS React repos; using `always` would incorrectly fire on Go, Python, and other non-JS repos where none of these patterns apply. |
 
 ---
 
@@ -142,7 +142,7 @@ Do NOT flag:
 - Functions with `void` return (callbacks, event handlers where return is irrelevant)
 - Private/unexported helper functions (lower priority)
 - Arrow functions used as inline callbacks
-- Functions where the return type is immediately obvious from a one-line body
+- Functions whose body is a single return statement returning a literal (string, number, boolean, or template literal)
 
 For each finding: mark auto_fixable: true when the inferred type is clear and unambiguous
 (TypeScript would infer it correctly); mark auto_fixable: false when the return type
@@ -219,6 +219,10 @@ Scan React component files (.tsx, .jsx) for violations of the Rules of Hooks:
    React component or custom hook function
 4. Hooks called outside React components or custom hooks: hook calls in plain helper
    functions, class methods, or event handlers that are not themselves hooks
+5. Hooks called after a conditional early return: a hook call that appears AFTER an
+   `if (!x) return null;` (or similar guard) near the top of a component — the hook
+   runs on some renders but not others, violating the unconditional-call rule. Example:
+   `if (!user) return null;` followed by `const [count, setCount] = useState(0);`
 
 Custom hooks start with `use` by convention — treat them as valid hook call sites.
 
