@@ -102,6 +102,16 @@
       "target": "skills/audit/scripts/detect-ecosystems.sh",
       "type": "script",
       "template": false
+    },
+    "skills/audit/schemas/severity-rubric.json": {
+      "target": "skills/audit/schemas/severity-rubric.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/scripts/lint-rubric.py": {
+      "target": "skills/audit/scripts/lint-rubric.py",
+      "type": "script",
+      "template": false
     }
   },
   "tags": [
