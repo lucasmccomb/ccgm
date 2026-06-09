@@ -1,5 +1,5 @@
 ---
-description: Codebase Audit with Auto-Fix - 9 categories including ToS/policy compliance and optional CVE/advisory checks
+description: Codebase audit across 9 categories (security, deps, quality, architecture, TS/React, testing, docs, performance, ToS) with optional auto-fix
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, WebSearch, WebFetch, AskUserQuestion
 ---
 
@@ -12,7 +12,7 @@ Run a comprehensive codebase audit across 9 categories. See the full skill for a
 ```
 /audit                    # Full audit — prompts for scope and execution strategy
 /audit --fix              # Audit WITH auto-fixes (uses worktrees, creates PR)
-/audit --single           # Single-session audit (8 subagents, lightweight)
+/audit --single           # Single-session audit (8 subagents, lightweight; always read-only)
 /audit --manual           # Set up tasks + output launch commands for manual orchestration
 /audit --worker           # Worker mode (run from worktree/clone after --manual setup)
 /audit --collect          # Compile results + create issues (after workers complete)

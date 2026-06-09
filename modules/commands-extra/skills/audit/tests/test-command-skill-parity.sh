@@ -74,7 +74,7 @@ STRAY_SEVERITIES=()
 # We look for these uppercase forms as standalone words (not lowercased "warning" in prose).
 # We explicitly exclude: "critical" in lowercase (allowed as a severity word), and
 # common prose uses of the word (e.g. "error handling", "warning message").
-for term in WARNING WARN INFO; do
+for term in CRITICAL WARNING WARN INFO ERROR; do
   # Match the exact uppercase form as a whole word, without -i (case-sensitive).
   set +e
   HITS=$(grep -n "\b${term}\b" "$COMMAND_DOC" 2>/dev/null || true)
@@ -89,7 +89,7 @@ for term in WARNING WARN INFO; do
 done
 
 if [ ${#STRAY_SEVERITIES[@]} -eq 0 ]; then
-  pass "command doc contains no stray severity terms (WARNING/WARN/INFO/ERROR not present)"
+  pass "command doc contains no stray severity terms (CRITICAL/WARNING/WARN/INFO/ERROR not present)"
 else
   fail "command doc contains stray severity terms outside {critical,high,medium,low}" \
     "found: ${STRAY_SEVERITIES[*]}"
@@ -173,6 +173,40 @@ if [ "${CATEGORY_FILTER:-0}" -gt 0 ]; then
 else
   pass "command doc does not claim '/audit security' (category-filter removed)"
 fi
+
+
+# ---------------------------------------------------------------------------
+# TEST 2c: Every flag in SKILL.md mode-detection also exists in command doc (SKILL->CMD)
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- [2c] Flags in SKILL.md mode-detection are documented in command doc ---"
+
+# Extract flags from SKILL.md's mode-detection / argument-parsing section.
+# The mode-detection section lists flags as backtick-quoted items: `--single` -> ...
+# Scope the extraction to the block between "Mode Detection" and "If NO flags are passed"
+# to avoid picking up unrelated git flags from later sections.
+set +e
+SKILL_FLAGS=$(awk '/^### Mode Detection/,/^\*\*If NO flags are passed/' "$SKILL_DOC"   | grep -oE '[-][-][a-z-]+'   | sort -u || true)
+set -e
+
+if [ -z "$SKILL_FLAGS" ]; then
+  fail "could not extract flags from SKILL.md mode-detection section — check extraction pattern" ""
+else
+  pass "SKILL.md mode-detection section contains flags to check"
+fi
+
+while IFS= read -r flag; do
+  [ -z "$flag" ] && continue
+  set +e
+  IN_CMD=$(grep -c -- "$flag" "$COMMAND_DOC" 2>/dev/null || true)
+  set -e
+  if [ "${IN_CMD:-0}" -gt 0 ]; then
+    pass "flag '$flag' from SKILL.md mode-detection is documented in command doc"
+  else
+    fail "flag '$flag' found in SKILL.md mode-detection but NOT documented in command doc" \
+      "add '$flag' to the command doc's Usage section or remove it from SKILL.md"
+  fi
+done <<< "$SKILL_FLAGS"
 
 # ---------------------------------------------------------------------------
 # TEST 3: No phantom model note in command doc
