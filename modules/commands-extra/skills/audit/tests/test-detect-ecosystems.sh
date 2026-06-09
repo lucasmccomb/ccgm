@@ -348,6 +348,45 @@ MOB_JSON=$(run_detector "$FIX_MOB")
 assert_bool         "mobile: is_mobile true"    "$MOB_JSON" ".project_shape.is_mobile" "true"
 
 # ---------------------------------------------------------------------------
+# Fixture 11: Polyglot repo (go.mod + package.json) → both ecosystems detected
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Fixture: Polyglot repo (Go + JavaScript) ==="
+FIX_POLY=$(make_fixture "polyglot-repo")
+cat > "$FIX_POLY/go.mod" <<'GOMOD'
+module github.com/example/polyapp
+
+go 1.21
+GOMOD
+cat > "$FIX_POLY/package.json" <<'JSON'
+{
+  "name": "polyapp-frontend",
+  "version": "1.0.0"
+}
+JSON
+
+POLY_JSON=$(run_detector "$FIX_POLY")
+assert_contains     "poly: detected go"          "$POLY_JSON" ".detected_ecosystems" "go"
+assert_contains     "poly: detected javascript"  "$POLY_JSON" ".detected_ecosystems" "javascript"
+
+# ---------------------------------------------------------------------------
+# Fixture 12: has_migrations false-positive guard
+#   - repo has fixtures/seed.sql (.sql file) but NO migration directory
+#   - has_migrations must be false; sql ecosystem must still be detected
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Fixture: seed.sql only (no migration dir) ==="
+FIX_SEED=$(make_fixture "seed-only-repo")
+mkdir -p "$FIX_SEED/fixtures"
+cat > "$FIX_SEED/fixtures/seed.sql" <<'SQL'
+INSERT INTO users (email) VALUES ('test@example.com');
+SQL
+
+SEED_JSON=$(run_detector "$FIX_SEED")
+assert_bool         "seed: has_migrations false" "$SEED_JSON" ".project_shape.has_migrations" "false"
+assert_contains     "seed: sql ecosystem present" "$SEED_JSON" ".detected_ecosystems" "sql"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

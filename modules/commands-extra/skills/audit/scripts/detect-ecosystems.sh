@@ -25,6 +25,14 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
+# Pre-flight: require jq
+# ---------------------------------------------------------------------------
+if ! command -v jq >/dev/null 2>&1; then
+  echo "detect-ecosystems.sh: jq is required but not installed" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # Resolve target directory
 # ---------------------------------------------------------------------------
 if [ -n "${1:-}" ]; then
@@ -272,16 +280,15 @@ PYEOF
   fi
 fi
 
-# Python frameworks (scan requirements.txt and pyproject.toml)
-for fw_file in "$TARGET_DIR/requirements.txt" "$TARGET_DIR/pyproject.toml"; do
-  [ -f "$fw_file" ] || continue
-  content=$(cat "$fw_file")
+# Python frameworks (scan requirements.txt)
+if [ -f "$TARGET_DIR/requirements.txt" ]; then
+  content=$(cat "$TARGET_DIR/requirements.txt")
   for fw in django flask fastapi starlette tornado sanic; do
     if echo "$content" | grep -qi "^[[:space:]]*${fw}[>=<!\[]"; then
       frameworks+=("$fw")
     fi
   done
-done
+fi
 
 # Go frameworks (scan go.mod)
 if has_file "go.mod"; then
@@ -295,11 +302,11 @@ if has_file "go.mod"; then
 fi
 
 # --- has_migrations ---
+# TRUE only when a real migration directory exists (not on presence of .sql files)
 has_migrations=false
 if has_dir "supabase/migrations" || has_dir "prisma/migrations" \
     || has_dir "db/migrate" || has_dir "db/migrations" \
-    || has_dir "database/migrations" \
-    || find_ext "sql" 4; then
+    || has_dir "database/migrations"; then
   has_migrations=true
 fi
 
