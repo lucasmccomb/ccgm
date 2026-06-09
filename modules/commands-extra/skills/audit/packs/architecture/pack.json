@@ -1,0 +1,39 @@
+{
+  "id": "ccgm/architecture",
+  "name": "Architecture",
+  "version": "1.0.0",
+  "applies_when": ["always"],
+  "tags": ["architecture", "structure", "dependencies", "layering"],
+  "severity_floor": "medium",
+  "tools": [],
+  "checks": [
+    {
+      "id": "architecture/circular-dependency",
+      "severity": "high",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "architecture/god-object",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "architecture/improper-layering",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "architecture/wrong-layer-import",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": true
+    }
+  ]
+}
