@@ -138,6 +138,36 @@
       "type": "doc",
       "template": false
     },
+    "skills/audit/packs/testing/pack.json": {
+      "target": "skills/audit/packs/testing/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/testing/checks.md": {
+      "target": "skills/audit/packs/testing/checks.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/documentation/pack.json": {
+      "target": "skills/audit/packs/documentation/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/documentation/checks.md": {
+      "target": "skills/audit/packs/documentation/checks.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/performance/pack.json": {
+      "target": "skills/audit/packs/performance/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/performance/checks.md": {
+      "target": "skills/audit/packs/performance/checks.md",
+      "type": "doc",
+      "template": false
+    },
     "skills/audit/scripts/spine/run.sh": {
       "target": "skills/audit/scripts/spine/run.sh",
       "type": "script",

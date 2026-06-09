@@ -1,0 +1,32 @@
+{
+  "id": "ccgm/performance",
+  "name": "Performance Audit",
+  "version": "1.0.0",
+  "applies_when": ["always"],
+  "tags": ["performance", "react", "bundle", "database", "quality"],
+  "severity_floor": "low",
+  "tools": [],
+  "checks": [
+    {
+      "id": "performance/n-plus-one-query",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "performance/missing-react-memo",
+      "severity": "low",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "performance/large-bundle-import",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}
