@@ -20,6 +20,7 @@ Always apply:
 Category-specific:
 - `security` - Security findings
 - `dependencies` - Dependency findings
+- `tos-compliance` - Terms of Service & Policy Compliance findings
 - `code-quality` - Code quality findings
 - `architecture` - Architecture findings
 - `typescript` - TypeScript/React findings
@@ -207,13 +208,14 @@ When presenting to user before issue creation:
 |------------------|----------|------|--------|-----|-------|--------|
 | Security         | 1        | 3    | 2      | 0   | 2     | 4      |
 | Dependencies     | 0        | 2    | 5      | 3   | 3     | 7      |
+| ToS & Compliance | 0        | 1    | 1      | 0   | 0     | 2      |
 | Code Quality     | 0        | 1    | 8      | 12  | 3     | 18     |
 | Architecture     | 0        | 2    | 3      | 1   | 0     | 6      |
 | TypeScript/React | 0        | 0    | 4      | 6   | 0     | 10     |
 | Testing          | 0        | 4    | 2      | 0   | 0     | 6      |
 | Documentation    | 0        | 0    | 3      | 5   | 0     | 8      |
 | Performance      | 0        | 1    | 2      | 2   | 0     | 5      |
-| **Total**        | **1**    | **13** | **29** | **29** | **8** | **64** |
+| **Total**        | **1**    | **14** | **30** | **29** | **8** | **66** |
 
 ## Critical Findings (Immediate Action Required)
 
@@ -323,7 +325,7 @@ Audit: YYYY-MM-DD - Distributed Codebase Audit
 | Metric | Value |
 |--------|-------|
 | **Audit Date** | YYYY-MM-DD |
-| **Base Branch** | development |
+| **Base Branch** | {base_branch} |
 | **Agents Used** | 4 |
 | **Total Findings** | XX |
 | **Auto-Fixed** | XX |
@@ -335,6 +337,7 @@ Audit: YYYY-MM-DD - Distributed Codebase Audit
 |----------|-------|----------|------|--------|-----|-------|--------|
 | Security | 0 | X | X | X | X | X | X |
 | Dependencies | 0 | X | X | X | X | X | X |
+| ToS & Compliance | 0 | X | X | X | X | X | X |
 | Code Quality | 1 | X | X | X | X | X | X |
 | TypeScript/React | 1 | X | X | X | X | X | X |
 | Architecture | 2 | X | X | X | X | X | X |
@@ -350,7 +353,7 @@ Audit: YYYY-MM-DD - Distributed Codebase Audit
 ### Agent Breakdown
 
 <details>
-<summary>Agent 0 - Security & Dependencies (XX findings, XX fixed)</summary>
+<summary>Agent 0 - Security, Dependencies & ToS (XX findings, XX fixed)</summary>
 
 #### Commits
 - `abc1234` audit(security): remove PII-leaking console.log
@@ -413,7 +416,7 @@ git commit -m "revert: undo audit YYYY-MM-DD"
 
 Or reset the branch:
 ```bash
-git reset --hard origin/development
+git reset --hard origin/{base_branch}
 ```
 ```
 
