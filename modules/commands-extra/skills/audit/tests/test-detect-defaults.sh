@@ -261,7 +261,8 @@ if [ -d "$AUDIT_SKILL_DIR" ]; then
   set +e
   # Exclude this test file itself — it contains the string in comments/checks
   GNU_GREP_HITS=$(grep -rn 'grep -oP' "$AUDIT_SKILL_DIR" 2>/dev/null \
-    | grep -v 'test-detect-defaults.sh' || true)
+    | grep -v 'test-detect-defaults.sh' \
+    | grep -vE ':[0-9]+:[[:space:]]*#' || true)
   set -e
   if [ -z "$GNU_GREP_HITS" ]; then
     pass "no 'grep -oP' (GNU-only) found in audit skill source files"
