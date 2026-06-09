@@ -13,6 +13,7 @@
       "confidence": "high",
       "detection": "tool",
       "tool": "eslint",
+      "fallback": "llm",
       "auto_fixable": true
     },
     {

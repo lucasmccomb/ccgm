@@ -138,17 +138,12 @@ Identify god objects: modules or classes that have accumulated so many responsib
 that they have become a central hub that everything depends on, or that handle concerns
 that should be separated into distinct modules.
 
-Indicators of a god object:
-- A class or module with more than 10 public methods spanning unrelated concerns
-- A "utils" or "helpers" module that has grown to contain business logic, data access,
-  and presentation concerns mixed together
-- A single file or module that is imported by more than 30% of other modules in the
-  project
-- A class that has both data access (database queries), business logic, AND presentation
-  logic
+Use the indicators defined in architecture.md (God Object / Blob section) — including
+file size thresholds, method count thresholds, and import-percentage thresholds — as the
+authoritative criteria. Do not substitute your own numeric thresholds.
 
 Steps:
-1. Check file sizes — large files (>300 lines) are candidates
+1. Apply the size and export-count indicators from architecture.md to find candidates
 2. Count the number of imports/dependents for key modules (grep -r "from './utils'" src/ | wc -l)
 3. For candidate files, assess whether the exported functions/classes span multiple
    unrelated concerns

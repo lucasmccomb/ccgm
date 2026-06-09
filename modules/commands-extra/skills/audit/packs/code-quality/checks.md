@@ -535,7 +535,7 @@ Maps every bullet from the original Agent 3 category prompt to the check that ow
 |-------------------------|----------|
 | ESLint violations (auto-fixable: eslint --fix) | `code-quality/eslint-violation` |
 | Prettier violations (auto-fixable: prettier --write) | `code-quality/prettier-violation` |
-| Unused imports/variables (auto-fixable: eslint --fix) | `code-quality/unused-import` |
+| Unused imports/variables (auto-fixable: eslint --fix) | `code-quality/unused-import` (split: unused **imports** → `code-quality/unused-import`; unused **variables** → `code-quality/eslint-violation` via `no-unused-vars`, with llm fallback when eslint is absent) |
 | Long methods >50 lines (NOT auto-fixable - needs refactor) | `code-quality/long-method` |
 | Large files >500 lines (NOT auto-fixable - needs split) | `code-quality/large-file` |
 | Empty catch blocks (NOT auto-fixable - needs error handling) | `code-quality/empty-catch-block` |
