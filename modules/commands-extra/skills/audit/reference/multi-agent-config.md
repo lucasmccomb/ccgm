@@ -13,7 +13,7 @@ Reference spec for distributed audit using git worktrees for isolation.
 | 2 | `.audit/worktrees/agent-2` | Architecture, Performance | 3 |
 | 3 | `.audit/worktrees/agent-3` | Testing, Documentation | 4 (lowest) |
 
-**Merge priority**: When `--collect` merges branches and encounters conflicts, the lower-numbered agent's changes take precedence. Agent 0 (Security/Dependencies) always wins because security fixes must not be overridden.
+**Merge priority**: When `--collect` merges branches and encounters a conflict, the process **halts and writes a conflict report** to `.audit/current/merge-conflicts.md`. Neither agent's changes are silently dropped. The human reviewer resolves the conflict and re-runs `--collect`. Agent 0 (Security/Dependencies) has the highest priority, but priority does NOT mean auto-resolution.
 
 **Agent identity**: Derived from worktree directory name suffix. `agent-0` -> agent 0, `agent-3` -> agent 3.
 
@@ -24,7 +24,7 @@ Reference spec for distributed audit using git worktrees for isolation.
 **All parallel audit work MUST use git worktrees.** Worktrees are created inside `.audit/worktrees/` within the current repo. This ensures:
 
 1. **No interference with the user's working directory** - The user's current branch is never checked out or modified
-2. **No interference with sibling clones** - Other clones (supersam-1, supersam-2, etc.) may have active agent work and are NEVER touched
+2. **No interference with sibling clones** - Other clone directories may have active agent work and are NEVER touched
 3. **Complete isolation** - Each worktree has its own working tree, branch, and node_modules
 4. **Shared git objects** - Worktrees share the same `.git` object database, so no redundant cloning
 
@@ -77,7 +77,7 @@ Written by coordinator during M2.
 {
   "audit_date": "YYYYMMDD",
   "started_at": "ISO-8601 timestamp",
-  "base_branch": "development",
+  "base_branch": "<detected from git symbolic-ref refs/remotes/origin/HEAD, fallback: main>",
   "agent_count": 4,
   "scope": "entire repo",
   "fix_mode": true,
@@ -100,7 +100,7 @@ Written by coordinator during M4. Each task file is self-contained so workers do
 {
   "agent": 0,
   "audit_date": "YYYYMMDD",
-  "base_branch": "development",
+  "base_branch": "<detected base branch>",
   "branch": "audit/agent-0-YYYYMMDD",
   "fix_mode": true,
   "merge_priority": 1,
@@ -117,9 +117,9 @@ Written by coordinator during M4. Each task file is self-contained so workers do
   ],
   "fix_reference": "Embedded content from fix-patterns.md...",
   "verification_commands": {
-    "lint": "bun run lint",
-    "type_check": "bun run type-check",
-    "build": "bun run build"
+    "lint": "<detected from package.json scripts; e.g. 'npm run lint' or 'pnpm run lint'>",
+    "type_check": "<detected from package.json scripts; e.g. 'npm run type-check'>",
+    "build": "<detected from package.json scripts; e.g. 'npm run build'>"
   },
   "finding_format": {
     "id": "agent-N-category-NNN",
@@ -212,7 +212,7 @@ Written by `--collect` during C6. Combines all agent results for trend tracking.
 {
   "audit_date": "YYYYMMDD",
   "completed_at": "ISO-8601 timestamp",
-  "base_branch": "development",
+  "base_branch": "<detected base branch>",
   "combined_branch": "audit/YYYYMMDD",
   "pr_number": 123,
   "pr_url": "https://github.com/org/repo/pull/123",
@@ -275,11 +275,12 @@ Coordinator (/audit)             Workers (/audit --worker)        Collector (/au
 ### Conflict Resolution During Merge (C3)
 
 1. Attempt `git merge` for each agent branch in priority order (0 first, 3 last)
-2. If merge conflicts occur, the **earlier-merged agent wins** (since their changes are already in the target branch)
-3. For conflicted files, use `git checkout --ours {file}` to keep the higher-priority version
-4. If an entire merge fails catastrophically, fall back to cherry-picking individual commits from that agent
-5. After all merges, run full verification (`lint`, `type-check`, `build`)
-6. If verification fails, incrementally test by reverting the last merge and re-verifying to identify the breaking agent
+2. If a merge conflict occurs: **HALT immediately**. Write a conflict report to `.audit/current/merge-conflicts.md` listing the conflicted files and both agents involved. Abort the merge with `git merge --abort`. Stop processing further agent branches.
+3. **NEVER use `git checkout --ours`** to auto-resolve conflicts. Both agents may have applied valid fixes; silently dropping either agent's work is incorrect and falsely records it as applied.
+4. Report the halt to the user: "Merge conflict on agent-N branch. See `.audit/current/merge-conflicts.md`. Resolve manually and re-run `--collect`."
+5. After the human resolves conflicts and re-runs `--collect`, continue with remaining merges.
+6. After all merges, run full verification using the detected commands (`lint`, `type-check`, `build`)
+7. If verification fails, incrementally test by reverting the last merge and re-verifying to identify the breaking agent
 
 ### Cross-Category Findings
 

@@ -42,7 +42,7 @@ This ensures the user always knows exactly what the audit will do before it star
 
 1. **Read-only by default** - The audit does NOT modify any files, create branches, or make commits unless the user explicitly chooses "Analyze + auto-fix".
 2. **Worktree isolation (recommended)** - When worktrees or auto-fix are used, all work happens in git worktrees under `.audit/worktrees/`. The user's working directory is never touched.
-3. **Multi-clone is opt-in only** - Sibling clones (supersam-1, supersam-2, etc.) are ONLY used when the user explicitly selects "Multi-clone" execution. Before using clones, ALL must be verified as clean (no uncommitted changes, no active feature branches). If any clone has active work, warn the user and suggest worktrees instead.
+3. **Multi-clone is opt-in only** - Sibling clones are ONLY used when the user explicitly selects "Multi-clone" execution. Before using clones, ALL must be verified as clean (no uncommitted changes, no active feature branches). If any clone has active work, warn the user and suggest worktrees instead.
 4. **Always prompt first** - When `/audit` is called without flags, always ask the user to configure scope and execution strategy before doing anything.
 
 ---
@@ -74,7 +74,7 @@ Options:
 Options:
 1. **Parallel worktrees (Recommended)** - description: "4 Task agents in isolated git worktrees within this repo. Good balance of depth and speed. Your working directory is never touched."
 2. **Single session** - description: "8 lightweight subagents in the current session. Fastest but least thorough - agents have limited context windows."
-3. **Multi-clone** - description: "4 agents across sibling clone directories (supersam-0 through supersam-3). Deepest analysis with full context per agent. WARNING: Requires all clones to be on clean branches with no active work."
+3. **Multi-clone** - description: "4 agents across sibling clone directories. Deepest analysis with full context per agent. WARNING: Requires all clones to be on clean branches with no active work."
 4. **Manual setup** - description: "Set up worktrees and task files, then output launch commands so you can run each agent yourself in separate terminals."
 
 **Map user choices to configuration:**
@@ -92,9 +92,9 @@ Options:
 
 **Multi-clone mode additional validation (when selected):**
 Before proceeding, the coordinator MUST:
-1. Discover sibling clones: `ls -d "$REPOS_DIR"/supersam-*/` (or equivalent pattern)
+1. Discover sibling clones by detecting the repo name from `git remote get-url origin` (basename without `.git`) and listing sibling directories matching `{repo-name}-[0-9]*` or `{repo-name}-repos/{repo-name}-[0-9]*` in the parent directory.
 2. Verify ALL clones have clean git state (`git status --porcelain` returns empty)
-3. Verify NO clone has active feature branches checked out (all should be on `development` or `main`)
+3. Verify NO clone has active feature branches checked out (all should be on the base branch or `main`)
 4. If any clone is dirty or has active work, WARN the user and suggest "Parallel worktrees" instead
 5. Only proceed after explicit user confirmation
 
@@ -109,8 +109,24 @@ AUDIT_DIR="$REPO_DIR/.audit"
 # Today's date
 AUDIT_DATE=$(date +%Y%m%d)
 
-# Base branch (read from config.json if exists, otherwise default)
-BASE_BRANCH="development"
+# Base branch: detect from remote HEAD, fall back to "main"
+BASE_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
+  | sed 's|refs/remotes/origin/||' \
+  || echo "main")
+[ -z "$BASE_BRANCH" ] && BASE_BRANCH="main"
+
+# Package manager: detect from lockfile present in repo root
+if [ -f "$REPO_DIR/bun.lockb" ]; then
+  PKG_MANAGER="bun"
+elif [ -f "$REPO_DIR/pnpm-lock.yaml" ]; then
+  PKG_MANAGER="pnpm"
+elif [ -f "$REPO_DIR/yarn.lock" ]; then
+  PKG_MANAGER="yarn"
+elif [ -f "$REPO_DIR/package-lock.json" ]; then
+  PKG_MANAGER="npm"
+else
+  PKG_MANAGER="npm"  # safe fallback: npm is always present in Node projects
+fi
 
 # Number of agents (always 4 - one per category pair)
 AGENT_COUNT=4
@@ -165,7 +181,7 @@ Write `config.json`:
 {
   "audit_date": "YYYYMMDD",
   "started_at": "ISO-8601",
-  "base_branch": "development",
+  "base_branch": "<detected base branch>",
   "agent_count": 4,
   "scope": "entire repo",
   "fix_mode": false,
@@ -227,19 +243,32 @@ for i in 0 1 2 3; do
   git worktree add "$AUDIT_DIR/worktrees/agent-$i" -b "audit/agent-$i-$AUDIT_DATE" "origin/$BASE_BRANCH"
 done
 ```
-If FIX_MODE is true, also install dependencies in each worktree:
+If FIX_MODE is true, also install dependencies in each worktree using the detected package manager:
 ```bash
+case "$PKG_MANAGER" in
+  bun)  INSTALL_CMD="bun install --frozen-lockfile" ;;
+  pnpm) INSTALL_CMD="pnpm install --frozen-lockfile" ;;
+  yarn) INSTALL_CMD="yarn install --frozen-lockfile" ;;
+  *)    INSTALL_CMD="npm ci" ;;
+esac
 for i in 0 1 2 3; do
-  (cd "$AUDIT_DIR/worktrees/agent-$i" && bun install --frozen-lockfile 2>&1 | tail -1) &
+  (cd "$AUDIT_DIR/worktrees/agent-$i" && $INSTALL_CMD 2>&1 | tail -1) &
 done
 wait
 ```
 
 **Multi-clone mode:**
-Discover and prepare sibling clones:
+Derive the sibling clone pattern from the repo name and discover sibling clone directories:
 ```bash
 REPOS_DIR=$(dirname "$REPO_DIR")
-for dir in "$REPOS_DIR"/supersam-*/; do
+REPO_NAME=$(basename "$REPO_DIR")
+# Clones are expected as {repo-name}-0 through {repo-name}-3 in the parent dir
+CLONE_DIRS=()
+for i in 0 1 2 3; do
+  candidate="$REPOS_DIR/${REPO_NAME}-$i"
+  [ -d "$candidate/.git" ] || [ -f "$candidate/.git" ] && CLONE_DIRS+=("$candidate")
+done
+for dir in "${CLONE_DIRS[@]}"; do
   echo "=== $(basename $dir) ==="
   git -C "$dir" status --porcelain
 done
@@ -247,9 +276,10 @@ done
 Verify all clones are clean (no uncommitted changes, no active feature branches). If any are dirty, STOP and warn the user.
 Then create audit branches in each clone:
 ```bash
-for i in 0 1 2 3; do
-  git -C "$REPOS_DIR/supersam-$i" fetch origin
-  git -C "$REPOS_DIR/supersam-$i" checkout -b "audit/agent-$i-$AUDIT_DATE" "origin/$BASE_BRANCH"
+for i in "${!CLONE_DIRS[@]}"; do
+  dir="${CLONE_DIRS[$i]}"
+  git -C "$dir" fetch origin
+  git -C "$dir" checkout -b "audit/agent-$i-$AUDIT_DATE" "origin/$BASE_BRANCH"
 done
 ```
 If FIX_MODE is true, install dependencies in each clone.
@@ -306,7 +336,7 @@ Running 4 audit agents in parallel...
 
 Where `{agent_dir}` is:
 - **Worktree mode**: `$AUDIT_DIR/worktrees/agent-N`
-- **Multi-clone mode**: `$REPOS_DIR/supersam-N`
+- **Multi-clone mode**: `${CLONE_DIRS[N]}` (the discovered sibling clone for agent N)
 - **Plain read-only**: `$REPO_DIR` (all agents read from same directory)
 
 And `{mode}` is "Read-only" or "Read + auto-fix".
@@ -506,7 +536,7 @@ Run from a worktree (manual mode) or invoked as a Task agent (autonomous mode). 
 
 1. **Derive agent number** from current directory:
    ```bash
-   AGENT_NUMBER=$(basename "$PWD" | grep -oP '\d+$')
+   AGENT_NUMBER=$(basename "$PWD" | sed -E 's/.*[^0-9]([0-9]+)$/\1/')
    ```
 
 2. **Derive AUDIT_DIR** from git common directory:
@@ -633,11 +663,11 @@ Same as Phase M7 above - present the report, ask about issue creation.
    git worktree prune
    ```
 
-3. **If multi-clone mode was used**, reset clones to base branch:
+3. **If multi-clone mode was used**, reset clones to base branch (using the `CLONE_DIRS` array derived during M3):
    ```bash
-   for i in 0 1 2 3; do
-     git -C "$REPOS_DIR/supersam-$i" checkout "$BASE_BRANCH"
-     git -C "$REPOS_DIR/supersam-$i" pull origin "$BASE_BRANCH"
+   for dir in "${CLONE_DIRS[@]}"; do
+     git -C "$dir" checkout "$BASE_BRANCH"
+     git -C "$dir" pull origin "$BASE_BRANCH"
    done
    ```
 
@@ -664,9 +694,15 @@ for i in 0 1 2 3; do
   git worktree add "$AUDIT_DIR/worktrees/agent-$i" -b "audit/agent-$i-$AUDIT_DATE" "origin/$BASE_BRANCH"
 done
 
-# Install dependencies in each worktree (parallel)
+# Install dependencies in each worktree (parallel) using the detected package manager
+case "$PKG_MANAGER" in
+  bun)  INSTALL_CMD="bun install --frozen-lockfile" ;;
+  pnpm) INSTALL_CMD="pnpm install --frozen-lockfile" ;;
+  yarn) INSTALL_CMD="yarn install --frozen-lockfile" ;;
+  *)    INSTALL_CMD="npm ci" ;;
+esac
 for i in 0 1 2 3; do
-  (cd "$AUDIT_DIR/worktrees/agent-$i" && bun install --frozen-lockfile 2>&1 | tail -1) &
+  (cd "$AUDIT_DIR/worktrees/agent-$i" && $INSTALL_CMD 2>&1 | tail -1) &
 done
 wait
 ```
@@ -680,7 +716,7 @@ Use `git -C {AUDIT_DIR}/worktrees/agent-{N}` for all git commands.
 
 For auto-fixable findings:
 - Implement fixes using Edit tool with absolute paths
-- Run verification: cd {AUDIT_DIR}/worktrees/agent-{N} && bun run lint
+- Run verification using the commands from your task file's verification_commands field
 - If verification passes: git add <files> && git commit -m "audit({category}): {title}"
 - If verification fails: git checkout -- . && git clean -fd
 - Record fix success/failure in results
@@ -694,10 +730,10 @@ For each auto-fixable finding, ordered by fix_confidence (high first, then mediu
 
 1. **Verify this is YOUR category** - never fix cross-category findings
 2. **Implement the fix** using Edit/Write tools
-3. **Run verification**:
+3. **Run verification** using verification commands from the task file (which contains the project's detected commands):
    ```bash
-   bun run lint 2>&1 || echo "LINT_FAILED"
-   bun run type-check 2>&1 || echo "TYPECHECK_FAILED"
+   ${LINT_CMD} 2>&1 || echo "LINT_FAILED"
+   ${TYPECHECK_CMD} 2>&1 || echo "TYPECHECK_FAILED"
    ```
 4. **If verification passes**: Commit:
    ```bash
@@ -720,22 +756,44 @@ After collecting results, merge the fix branches:
    git worktree add "$AUDIT_DIR/worktrees/combined" -b "audit/$AUDIT_DATE" "origin/$BASE_BRANCH"
    ```
 
-2. **Merge each agent branch** in priority order (0 first, 3 last):
+2. **Merge each agent branch** in priority order (0 first, 3 last).
+   **CRITICAL: merge conflicts HALT the process — do NOT auto-resolve with `--ours`.**
    ```bash
    cd "$AUDIT_DIR/worktrees/combined"
+   CONFLICT_REPORT="$AUDIT_DIR/current/merge-conflicts.md"
+   MERGE_OK=true
    for i in 0 1 2 3; do
-     git merge "origin/audit/agent-$i-$AUDIT_DATE" --no-edit || {
-       git checkout --ours .
-       git add .
-       git commit --no-edit
-     }
+     if ! git merge "origin/audit/agent-$i-$AUDIT_DATE" --no-edit 2>/dev/null; then
+       MERGE_OK=false
+       # Write conflict report — DO NOT resolve automatically
+       CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
+       cat >> "$CONFLICT_REPORT" <<EOF
+   ## Merge conflict: agent-$i branch
+
+   Conflicted files:
+   $CONFLICTED_FILES
+
+   Resolution required: Manually review and resolve conflicts between
+   audit/agent-$((i-1))-$AUDIT_DATE and audit/agent-$i-$AUDIT_DATE.
+   Both agents' fixes are preserved in conflict markers. Do NOT silently
+   discard either agent's changes.
+   EOF
+       git merge --abort 2>/dev/null || true
+       echo "MERGE CONFLICT on agent-$i branch. See $CONFLICT_REPORT"
+       echo "STOPPING: resolve conflicts manually then re-run --collect."
+       break
+     fi
    done
+   if [ "$MERGE_OK" != "true" ]; then
+     echo "Merge incomplete. Review $CONFLICT_REPORT before proceeding."
+     exit 1
+   fi
    ```
 
-3. **Install deps and verify**:
+3. **Install deps and verify** using the detected package manager:
    ```bash
-   bun install --frozen-lockfile
-   bun run lint && bun run type-check && bun run build
+   $INSTALL_CMD
+   ${LINT_CMD} && ${TYPECHECK_CMD} && ${BUILD_CMD}
    ```
 
 4. **Push and create PR**:
@@ -1032,7 +1090,7 @@ Never block on the network - fall back to offline pattern + metadata analysis.
 |----------|----------|
 | Agent crashes mid-audit | Results show `"in_progress"`. `--collect` reports incomplete agents. `--force` collects available. |
 | Fix breaks the build (--fix) | Fix is reverted, recorded in `fixes_failed`, agent continues. |
-| Merge conflict (--fix) | Higher-priority agent wins. Falls back to cherry-pick. |
+| Merge conflict (--fix) | HALT: write conflict report to `.audit/current/merge-conflicts.md`, abort the merge, stop. Resolve manually and re-run `--collect`. Neither agent's fixes are silently dropped. |
 | `.audit/current/` already exists | Coordinator asks: clean start, resume, or cancel. |
 | Worktree already exists | Remove stale worktree first, then create fresh. |
 | Task file missing | Worker errors with message to run `/audit` first. |
