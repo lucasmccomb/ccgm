@@ -258,18 +258,34 @@ wait
 ```
 
 **Multi-clone mode:**
-Derive the sibling clone pattern from the repo name and discover sibling clone directories:
+Derive the sibling clone pattern from the repo's remote URL (NOT the directory basename — a flat
+clone named `myapp-0` would yield `myapp-0`, making the loop search for `myapp-0-0` through
+`myapp-0-3`, which never exist):
 ```bash
 REPOS_DIR=$(dirname "$REPO_DIR")
-REPO_NAME=$(basename "$REPO_DIR")
-# Clones are expected as {repo-name}-0 through {repo-name}-3 in the parent dir
+# Derive base name from the remote URL (strips path prefix and .git suffix).
+# Fallback: strip a trailing -<digits> suffix from the directory basename so both
+# flat-clone layouts (myapp-0, myapp-1, ...) and workspace layouts resolve correctly.
+REPO_BASE=$(git remote get-url origin 2>/dev/null | sed 's|.*/||; s|\.git$||')
+if [ -z "$REPO_BASE" ]; then
+  REPO_BASE=$(basename "$REPO_DIR" | sed -E 's/-[0-9]+$//')
+fi
+# Clones are expected as {repo-base}-0 through {repo-base}-3 in the parent dir
 CLONE_DIRS=()
 for i in 0 1 2 3; do
-  candidate="$REPOS_DIR/${REPO_NAME}-$i"
+  candidate="$REPOS_DIR/${REPO_BASE}-$i"
   [ -d "$candidate/.git" ] || [ -f "$candidate/.git" ] && CLONE_DIRS+=("$candidate")
 done
+# HALT if discovery found zero clones — do NOT silently proceed with no agents.
+if [ "${#CLONE_DIRS[@]}" -eq 0 ]; then
+  echo "ERROR: Multi-clone discovery found zero sibling clone directories." >&2
+  echo "  Searched: $REPOS_DIR/${REPO_BASE}-{0..3}" >&2
+  echo "  Remote URL: $(git remote get-url origin 2>/dev/null || echo '(none)')" >&2
+  echo "  Suggest: use 'Parallel worktrees' mode instead, or verify clone layout." >&2
+  exit 1
+fi
 for dir in "${CLONE_DIRS[@]}"; do
-  echo "=== $(basename $dir) ==="
+  echo "=== $(basename "$dir") ==="
   git -C "$dir" status --porcelain
 done
 ```

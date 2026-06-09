@@ -6,6 +6,8 @@
 #   1. Base-branch detector returns "main" on a main-only repo fixture
 #   2. Package manager detection returns correct manager for each lockfile type
 #   3. Fix-mode conflict path halts+reports (no silent --ours)
+#   4. No grep -oP (GNU-only) in audit skill source files
+#   5. Multi-clone base-name derivation: remote URL -> "myapp", dir "myapp-0" fallback -> "myapp"
 #
 # Usage: bash modules/commands-extra/skills/audit/tests/test-detect-defaults.sh
 # Exit: 0 = all pass, non-zero = failure
@@ -90,7 +92,7 @@ git clone --quiet "$FIXTURE_REMOTE" "$FIXTURE_REPO" 2>/dev/null || true
 cd "$FIXTURE_REPO"
 git checkout --quiet -b main 2>/dev/null || git checkout --quiet main 2>/dev/null || true
 # Create an initial commit so the branch exists on remote
-git commit --allow-empty --quiet -m "init"
+git -c user.email="test@example.com" -c user.name="Test" commit --allow-empty --quiet -m "init"
 git push --quiet origin main 2>/dev/null || true
 git remote set-head origin --auto 2>/dev/null || true
 cd - > /dev/null
@@ -269,6 +271,78 @@ if [ -d "$AUDIT_SKILL_DIR" ]; then
   fi
 else
   fail "audit skill directory not found" "tried: $AUDIT_SKILL_DIR"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 5: Multi-clone base-name derivation (guards Fix-1 regression)
+# ---------------------------------------------------------------------------
+# Helper: mirrors SKILL.md logic — derive REPO_BASE from remote URL or directory fallback
+derive_repo_base() {
+  local repo_dir="$1"
+  local base
+  base=$(git -C "$repo_dir" remote get-url origin 2>/dev/null | sed 's|.*/||; s|\.git$||')
+  if [ -z "$base" ]; then
+    base=$(basename "$repo_dir" | sed -E 's/-[0-9]+$//')
+  fi
+  echo "$base"
+}
+
+echo ""
+echo "--- [5] Multi-clone base-name derivation ---"
+
+# 5a: remote URL https://example.com/myapp.git  -> "myapp"
+FIXTURE_URL="$TMPDIR_ROOT/fixture-url-remote"
+FIXTURE_URL_BARE="$TMPDIR_ROOT/fixture-url-remote-bare"
+mkdir -p "$FIXTURE_URL_BARE"
+git init --bare --quiet "$FIXTURE_URL_BARE"
+git clone --quiet "$FIXTURE_URL_BARE" "$FIXTURE_URL" 2>/dev/null || true
+# Override origin to simulate a GitHub-style HTTPS remote URL ending in myapp.git
+git -C "$FIXTURE_URL" remote set-url origin "https://example.com/myapp.git"
+DERIVED=$(derive_repo_base "$FIXTURE_URL")
+if [ "$DERIVED" = "myapp" ]; then
+  pass "base-name: https remote 'https://example.com/myapp.git' -> 'myapp'"
+else
+  fail "base-name: https remote 'https://example.com/myapp.git' -> 'myapp'" "got: '$DERIVED'"
+fi
+
+# 5b: remote URL git@github.com:org/myapp.git  -> "myapp"
+git -C "$FIXTURE_URL" remote set-url origin "git@github.com:org/myapp.git"
+DERIVED=$(derive_repo_base "$FIXTURE_URL")
+if [ "$DERIVED" = "myapp" ]; then
+  pass "base-name: ssh remote 'git@github.com:org/myapp.git' -> 'myapp'"
+else
+  fail "base-name: ssh remote 'git@github.com:org/myapp.git' -> 'myapp'" "got: '$DERIVED'"
+fi
+
+# 5c: directory named 'myapp-0' with NO remote -> fallback strips trailing digit group -> "myapp"
+FIXTURE_NO_REMOTE="$TMPDIR_ROOT/myapp-0"
+mkdir -p "$FIXTURE_NO_REMOTE"
+git init --quiet "$FIXTURE_NO_REMOTE"
+# no remote set — fallback path must activate
+DERIVED=$(derive_repo_base "$FIXTURE_NO_REMOTE")
+if [ "$DERIVED" = "myapp" ]; then
+  pass "base-name: no-remote fallback 'myapp-0' -> 'myapp'"
+else
+  fail "base-name: no-remote fallback 'myapp-0' -> 'myapp'" "got: '$DERIVED'"
+fi
+
+# 5d: directory named 'myapp-0' must NOT produce 'myapp-0' (the original bug)
+if [ "$DERIVED" = "myapp-0" ]; then
+  fail "base-name regression: 'myapp-0' must NOT yield 'myapp-0' (would search myapp-0-0..3)"
+else
+  pass "base-name regression guard: 'myapp-0' does not yield 'myapp-0'"
+fi
+
+# 5e: SKILL.md must NOT contain the old wrong derivation pattern REPO_NAME=$(basename ...)
+# SC2016 is intentionally suppressed: we search for a literal $ in the pattern (not an expansion)
+if [ -f "$SKILL_FILE" ]; then
+  # shellcheck disable=SC2016
+  if grep -qF 'REPO_NAME=$(basename' "$SKILL_FILE"; then
+    fail "SKILL.md must not use REPO_NAME=\$(basename \$REPO_DIR) for multi-clone discovery" \
+      "found in $SKILL_FILE"
+  else
+    pass "SKILL.md does not use REPO_NAME=\$(basename \$REPO_DIR) (wrong derivation removed)"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
