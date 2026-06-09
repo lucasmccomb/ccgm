@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ccgm/audit/finding.schema.json",
+  "title": "CCGM Audit Finding",
+  "description": "Schema for a single finding — one JSON object / one JSONL line in `.audit/current/findings.jsonl`. NOT SARIF; forward-compatible with a v2 SARIF emitter. Gate decision #30.",
+  "type": "object",
+  "required": [
+    "check_id",
+    "rule_id",
+    "severity",
+    "confidence",
+    "location",
+    "message",
+    "fingerprint",
+    "detection",
+    "source"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "check_id": {
+      "type": "string",
+      "description": "The check that produced this finding, e.g. `dm/unquoted-reserved-keyword`. Namespaced `<pack>/<check>`.",
+      "pattern": "^[a-z0-9_-]+/[a-z0-9_.-]+$"
+    },
+    "rule_id": {
+      "type": "string",
+      "description": "The specific rule within the tool or LLM check that fired, e.g. `RF04` or `sql/reserved-keyword`."
+    },
+    "severity": {
+      "type": "string",
+      "description": "Consequence severity. Mechanically overwritten by the severity-rubric.json emitter for known check_ids; agent-reported value preserved in properties.agentReportedSeverity.",
+      "enum": ["critical", "high", "medium", "low", "info"]
+    },
+    "confidence": {
+      "type": "string",
+      "description": "Signal precision. Separate axis from severity.",
+      "enum": ["high", "medium", "low"]
+    },
+    "fix_confidence": {
+      "type": "string",
+      "description": "Safety confidence for auto-fix, if applicable.",
+      "enum": ["high", "medium", "low"]
+    },
+    "location": {
+      "type": "object",
+      "description": "Source location of the finding.",
+      "required": ["path", "line"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Repo-relative file path, e.g. `src/auth/session.ts`."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based start line.",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "1-based end line (inclusive). Omit for single-line findings. When present, must be >= line.",
+          "minimum": 1
+        }
+      }
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable description of the finding. Secret values MUST be redacted before this field is written."
+    },
+    "fingerprint": {
+      "type": "string",
+      "description": "Stable per-finding identity for baseline matching. OUR computed fingerprints use `sha256(normalized ±2 lines)[:16] + ':<gen>'`; where a source tool emits its own fingerprint it is stored VERBATIM. Must be a stable, non-empty identifier.",
+      "pattern": "^[A-Za-z0-9_.:+/=-]{8,128}$"
+    },
+    "detection": {
+      "type": "string",
+      "description": "How this finding was produced.",
+      "enum": ["tool", "llm", "hybrid"]
+    },
+    "source": {
+      "type": "string",
+      "description": "Which runtime component emitted this finding: a deterministic spine tool or an LLM worker agent.",
+      "enum": ["tool", "llm"]
+    },
+    "suppression": {
+      "type": "object",
+      "description": "Present when this finding has been suppressed. Suppressed criticals still surface as [SUPPRESSED] in reports.",
+      "required": ["justification"],
+      "additionalProperties": false,
+      "properties": {
+        "justification": {
+          "type": "string",
+          "description": "Why this finding was suppressed."
+        },
+        "expires": {
+          "type": "string",
+          "description": "ISO 8601 date after which the suppression should be re-reviewed, e.g. `2026-12-31`.",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        }
+      }
+    },
+    "properties": {
+      "type": "object",
+      "description": "Open bag for tool-specific or calibration metadata. Well-known keys: `agentReportedSeverity` (when rubric overwrote it), `owner` (CODEOWNERS entry), `package` (dep name for vuln findings).",
+      "additionalProperties": true
+    }
+  }
+}

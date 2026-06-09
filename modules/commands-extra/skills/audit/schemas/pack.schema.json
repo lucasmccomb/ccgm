@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ccgm/audit/pack.schema.json",
+  "title": "CCGM Audit Pack Manifest",
+  "description": "Schema for a CCGM /audit check pack manifest. `applies_when` is the sole gating mechanism — conditions are project-shape flags, language predicates, or the literal `always`.",
+  "type": "object",
+  "required": ["id", "name", "version", "applies_when", "checks"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Stable, namespaced pack identifier, e.g. `ccgm/data-migrations`.",
+      "pattern": "^[a-z0-9_-]+/[a-z0-9_-]+$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable pack name."
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic version string, e.g. `1.0.0`.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "applies_when": {
+      "type": "array",
+      "description": "Gating conditions. ALL items must be satisfied for the pack to run. Items are project-shape flags, `language:<lang>` predicates, or the literal `always`.",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "anyOf": [
+          {
+            "description": "Run on all repos, unconditionally.",
+            "const": "always"
+          },
+          {
+            "description": "Project-shape flags emitted by the ecosystem detector.",
+            "enum": [
+              "has_migrations",
+              "has_dockerfile",
+              "has_workflows",
+              "is_extension",
+              "is_mobile"
+            ]
+          },
+          {
+            "description": "Language predicate — `language:<lang>` where lang is lowercase.",
+            "pattern": "^language:[a-z][a-z0-9_-]*$"
+          }
+        ]
+      }
+    },
+    "tags": {
+      "type": "array",
+      "description": "Free-form labels for filtering and display.",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "severity_floor": {
+      "type": "string",
+      "description": "Minimum severity a check in this pack will ever emit; used for display filtering.",
+      "enum": ["critical", "high", "medium", "low", "info"],
+      "default": "low"
+    },
+    "tools": {
+      "type": "array",
+      "description": "Spine tools this pack may invoke. Tools not present are skipped gracefully.",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "checks": {
+      "type": "array",
+      "description": "Ordered list of checks this pack defines.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "required": ["id", "severity", "confidence", "detection"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable check identifier, e.g. `dm/unquoted-reserved-keyword`. Must be unique within the pack.",
+          "pattern": "^[a-z0-9_-]+/[a-z0-9_.-]+$"
+        },
+        "severity": {
+          "type": "string",
+          "description": "Consequence severity of this check finding. Declared here and enforced by the rubric emitter.",
+          "enum": ["critical", "high", "medium", "low", "info"]
+        },
+        "confidence": {
+          "type": "string",
+          "description": "Precision of this check's signal. Separate from severity.",
+          "enum": ["high", "medium", "low"]
+        },
+        "detection": {
+          "type": "string",
+          "description": "How this check produces findings: deterministic tool, LLM agent, or hybrid (tool finds candidates, LLM confirms).",
+          "enum": ["tool", "llm", "hybrid"]
+        },
+        "tool": {
+          "type": "string",
+          "description": "Spine tool that runs this check. Required when detection is `tool` or `hybrid`."
+        },
+        "rule": {
+          "type": "string",
+          "description": "Rule identifier within the tool, e.g. a Semgrep rule ID or ESLint rule name."
+        },
+        "fallback": {
+          "type": "string",
+          "description": "Fallback mechanism when the primary tool is absent, e.g. `grep` or `llm`."
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "description": "Whether findings from this check can be automatically fixed.",
+          "default": false
+        }
+      }
+    }
+  }
+}
