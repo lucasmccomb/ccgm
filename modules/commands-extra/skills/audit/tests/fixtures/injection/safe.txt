@@ -1,0 +1,5 @@
+# Injection fixture directory
+# The file named "evil; touch PWNED" in this directory is a shell-injection fixture.
+# After running the spine against this directory, no file named PWNED should exist.
+# The token below is a fake credential (36 alphanumeric chars after ghp_) for test purposes.
+GITHUB_TOKEN=ghp_FakeTokenForTesting1234567890abcdefX
