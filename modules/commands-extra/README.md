@@ -30,9 +30,10 @@ cp commands/unfreeze.md ~/.claude/commands/unfreeze.md
 cp commands/guard.md ~/.claude/commands/guard.md
 cp commands/checkpoint.md ~/.claude/commands/checkpoint.md
 
-# Skill
-mkdir -p ~/.claude/skills/audit
+# Skill (+ reference docs the skill reads and embeds into agent task files)
+mkdir -p ~/.claude/skills/audit/reference
 cp skills/audit/SKILL.md ~/.claude/skills/audit/SKILL.md
+cp skills/audit/reference/*.md ~/.claude/skills/audit/reference/
 
 # Project-level
 cp commands/audit.md .claude/commands/audit.md
@@ -58,3 +59,4 @@ cp commands/checkpoint.md .claude/commands/checkpoint.md
 | `commands/guard.md` | Compose careful + freeze for focused, safe sessions |
 | `commands/checkpoint.md` | Save or resume a WIP session-state checkpoint under `~/.claude/checkpoints/{repo}/` |
 | `skills/audit/SKILL.md` | Skill definition backing the /audit command (audit methodology and categories) |
+| `skills/audit/reference/*.md` | Reference docs the audit skill reads at runtime and embeds into agent task files: security / code-quality / architecture pattern libraries, fix-confidence rules, multi-agent coordination JSON schemas, and GitHub issue/PR output templates |

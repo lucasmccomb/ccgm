@@ -14,7 +14,13 @@
     "commands/unfreeze.md": { "target": "commands/unfreeze.md", "type": "command", "template": false },
     "commands/guard.md": { "target": "commands/guard.md", "type": "command", "template": false },
     "commands/checkpoint.md": { "target": "commands/checkpoint.md", "type": "command", "template": false },
-    "skills/audit/SKILL.md": { "target": "skills/audit/SKILL.md", "type": "skill", "template": false }
+    "skills/audit/SKILL.md": { "target": "skills/audit/SKILL.md", "type": "skill", "template": false },
+    "skills/audit/reference/security-patterns.md": { "target": "skills/audit/reference/security-patterns.md", "type": "doc", "template": false },
+    "skills/audit/reference/code-quality.md": { "target": "skills/audit/reference/code-quality.md", "type": "doc", "template": false },
+    "skills/audit/reference/architecture.md": { "target": "skills/audit/reference/architecture.md", "type": "doc", "template": false },
+    "skills/audit/reference/fix-patterns.md": { "target": "skills/audit/reference/fix-patterns.md", "type": "doc", "template": false },
+    "skills/audit/reference/multi-agent-config.md": { "target": "skills/audit/reference/multi-agent-config.md", "type": "doc", "template": false },
+    "skills/audit/reference/output-template.md": { "target": "skills/audit/reference/output-template.md", "type": "doc", "template": false }
   },
   "tags": ["commands", "audit", "verification", "walkthrough", "safety", "checkpoint"],
   "configPrompts": []
