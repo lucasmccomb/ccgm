@@ -1,0 +1,14 @@
+{
+  "id": "bad/pack",
+  "name": "Malformed Pack",
+  "version": "not-semver",
+  "applies_when": ["language:js"],
+  "checks": [
+    {
+      "id": "bad/check",
+      "severity": "INVALID_SEVERITY",
+      "confidence": "high",
+      "detection": "tool"
+    }
+  ]
+}
