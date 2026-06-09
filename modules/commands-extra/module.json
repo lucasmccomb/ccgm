@@ -3,28 +3,114 @@
   "displayName": "Extra Commands",
   "description": "Additional slash commands: /audit (codebase audit), /pwv (Playwright visual verify), /walkthrough (step-by-step guide), /promote-rule (promote repo rules to global), /freeze + /unfreeze + /guard (safety-hook state management), /checkpoint (save/resume WIP session state).",
   "category": "commands",
-  "scope": ["global"],
+  "scope": [
+    "global"
+  ],
   "dependencies": [],
   "files": {
-    "commands/audit.md": { "target": "commands/audit.md", "type": "command", "template": false },
-    "commands/pwv.md": { "target": "commands/pwv.md", "type": "command", "template": false },
-    "commands/walkthrough.md": { "target": "commands/walkthrough.md", "type": "command", "template": false },
-    "commands/promote-rule.md": { "target": "commands/promote-rule.md", "type": "command", "template": false },
-    "commands/freeze.md": { "target": "commands/freeze.md", "type": "command", "template": false },
-    "commands/unfreeze.md": { "target": "commands/unfreeze.md", "type": "command", "template": false },
-    "commands/guard.md": { "target": "commands/guard.md", "type": "command", "template": false },
-    "commands/checkpoint.md": { "target": "commands/checkpoint.md", "type": "command", "template": false },
-    "skills/audit/SKILL.md": { "target": "skills/audit/SKILL.md", "type": "skill", "template": false },
-    "skills/audit/reference/security-patterns.md": { "target": "skills/audit/reference/security-patterns.md", "type": "doc", "template": false },
-    "skills/audit/reference/code-quality.md": { "target": "skills/audit/reference/code-quality.md", "type": "doc", "template": false },
-    "skills/audit/reference/architecture.md": { "target": "skills/audit/reference/architecture.md", "type": "doc", "template": false },
-    "skills/audit/reference/fix-patterns.md": { "target": "skills/audit/reference/fix-patterns.md", "type": "doc", "template": false },
-    "skills/audit/reference/multi-agent-config.md": { "target": "skills/audit/reference/multi-agent-config.md", "type": "doc", "template": false },
-    "skills/audit/reference/output-template.md": { "target": "skills/audit/reference/output-template.md", "type": "doc", "template": false },
-    "skills/audit/schemas/pack.schema.json": { "target": "skills/audit/schemas/pack.schema.json", "type": "doc", "template": false },
-    "skills/audit/schemas/finding.schema.json": { "target": "skills/audit/schemas/finding.schema.json", "type": "doc", "template": false },
-    "skills/audit/scripts/registry.py": { "target": "skills/audit/scripts/registry.py", "type": "script", "template": false }
+    "commands/audit.md": {
+      "target": "commands/audit.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/pwv.md": {
+      "target": "commands/pwv.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/walkthrough.md": {
+      "target": "commands/walkthrough.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/promote-rule.md": {
+      "target": "commands/promote-rule.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/freeze.md": {
+      "target": "commands/freeze.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/unfreeze.md": {
+      "target": "commands/unfreeze.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/guard.md": {
+      "target": "commands/guard.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/checkpoint.md": {
+      "target": "commands/checkpoint.md",
+      "type": "command",
+      "template": false
+    },
+    "skills/audit/SKILL.md": {
+      "target": "skills/audit/SKILL.md",
+      "type": "skill",
+      "template": false
+    },
+    "skills/audit/reference/security-patterns.md": {
+      "target": "skills/audit/reference/security-patterns.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/reference/code-quality.md": {
+      "target": "skills/audit/reference/code-quality.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/reference/architecture.md": {
+      "target": "skills/audit/reference/architecture.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/reference/fix-patterns.md": {
+      "target": "skills/audit/reference/fix-patterns.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/reference/multi-agent-config.md": {
+      "target": "skills/audit/reference/multi-agent-config.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/reference/output-template.md": {
+      "target": "skills/audit/reference/output-template.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/schemas/pack.schema.json": {
+      "target": "skills/audit/schemas/pack.schema.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/schemas/finding.schema.json": {
+      "target": "skills/audit/schemas/finding.schema.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/scripts/registry.py": {
+      "target": "skills/audit/scripts/registry.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/detect-ecosystems.sh": {
+      "target": "skills/audit/scripts/detect-ecosystems.sh",
+      "type": "script",
+      "template": false
+    }
   },
-  "tags": ["commands", "audit", "verification", "walkthrough", "safety", "checkpoint"],
+  "tags": [
+    "commands",
+    "audit",
+    "verification",
+    "walkthrough",
+    "safety",
+    "checkpoint"
+  ],
   "configPrompts": []
 }
