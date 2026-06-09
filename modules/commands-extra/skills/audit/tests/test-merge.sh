@@ -742,9 +742,11 @@ else
   # ADV-009: the assembled key string is CONSTRUCTED AT RUNTIME from fragments.
   # The prefix "AKIA" and the 16-char suffix "ABCDEFGHIJKLMNOP" are never
   # concatenated in any tracked file -- only at runtime here.
-  # NOTE: "AKIAIOSFODNN7EXAMPLE" is the official AWS docs example and is
-  # allow-listed in gitleaks; we use a different 16-char suffix that
-  # triggers real detection without being a real credential.
+  # NOTE: the AWS docs example key is "AKIA" + "IOSFODNN7EXAMPLE" (fragmented
+  # here per ADV-009 to prevent secret-scanner false positives on this file);
+  # that combined value is allow-listed in gitleaks.  We use a different 16-char
+  # suffix ("ABCDEFGHIJKLMNOP") that triggers real detection without being a
+  # real credential.
   git init "$E2E_DIR/repo" --quiet 2>/dev/null
   git -C "$E2E_DIR/repo" config user.email "test@test.test"
   git -C "$E2E_DIR/repo" config user.name "Test"
@@ -822,7 +824,13 @@ PYEOF
     fail "t7: 0 findings with check_id=secrets/leaked-credential (expected >= 1)"
   fi
 
-  # Assert severity=critical (sourced from rubric, not gitleaks default "high")
+  # Assert severity=critical.
+  # parse-gitleaks.py maps aws-access-token to "critical" in _RULE_SEVERITY, so
+  # the parser severity and the rubric severity coincide for this rule.  The
+  # NON-vacuous proof that rubric enforcement is mechanical (not just passing
+  # through the parser value) is t6: t6 feeds the same check_id with spine
+  # severity="high" and asserts output severity="critical" -- proving the rubric
+  # step fires independently of what the parser emitted.  See t6 above.
   E2E_SEV="$(python3 - "$E2E_MERGED" << 'PYEOF'
 import json, sys
 with open(sys.argv[1]) as fh:
@@ -843,7 +851,7 @@ PYEOF
 )"
 
   if [[ "$E2E_SEV" == "critical" ]]; then
-    pass "t7: severity=critical sourced from rubric (not gitleaks default)"
+    pass "t7: severity=critical enforced by rubric (parser+rubric both map aws-access-token->critical)"
   else
     fail "t7: severity='$E2E_SEV' (expected 'critical' from rubric)"
   fi

@@ -33,7 +33,7 @@ Each --llm file is a JSON object with two keys:
     "findings": [
       {
         "check_id":      str,   e.g. "security/hardcoded-secret"
-        "rule_id":       str,
+        "rule_id":       str,   Optional for llm findings -- defaults to check_id when absent.
         "severity":      str,   critical|high|medium|low|info
         "confidence":    str,   high|medium|low
         "detection":     str,   tool|llm|hybrid
@@ -94,7 +94,6 @@ Merge semantics (in order)
 import argparse
 import importlib.util
 import json
-import os
 import sys
 from pathlib import Path
 

@@ -1203,7 +1203,7 @@ Each worker writes a single JSON file to `.audit/current/results/<worker-id>.jso
   "findings": [
     {
       "check_id":      "<pack>/<check>",
-      "rule_id":       "<rule>",
+      "rule_id":       "<rule>",   // optional -- defaults to check_id when absent
       "severity":      "critical|high|medium|low|info",
       "confidence":    "high|medium|low",
       "detection":     "tool|llm|hybrid",
