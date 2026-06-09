@@ -1155,6 +1155,12 @@ Never block on the network - fall back to offline pattern + metadata analysis.
 
 ---
 
+## Severity Sourcing
+
+**Agents MUST source severity, confidence, and fix_confidence from `schemas/severity-rubric.json`.** Do NOT invent or guess these values. For every finding whose `check_id` appears in the rubric, copy the rubric's `severity`, `confidence`, and `fix_confidence` verbatim. Preserve the agent-reported value in `properties.agentReportedSeverity` if it differs. For `check_id`s not yet in the rubric, set confidence to `"low"` and flag for rubric expansion.
+
+---
+
 ## Notes
 
 - **Always prompt the user** when `/audit` is called without flags - let them choose scope and execution strategy
