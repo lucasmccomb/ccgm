@@ -1,0 +1,32 @@
+{
+  "id": "ccgm/testing",
+  "name": "Testing Audit",
+  "version": "1.0.0",
+  "applies_when": ["always"],
+  "tags": ["testing", "coverage", "quality"],
+  "severity_floor": "low",
+  "tools": [],
+  "checks": [
+    {
+      "id": "testing/missing-test-file",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "testing/no-assertions",
+      "severity": "high",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "testing/missing-edge-cases",
+      "severity": "low",
+      "confidence": "low",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "id": "ccgm/documentation",
+  "name": "Documentation Audit",
+  "version": "1.0.0",
+  "applies_when": ["always"],
+  "tags": ["documentation", "jsdoc", "readme", "quality"],
+  "severity_floor": "low",
+  "tools": [],
+  "checks": [
+    {
+      "id": "documentation/missing-jsdoc",
+      "severity": "low",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "documentation/stale-comment",
+      "severity": "low",
+      "confidence": "low",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "documentation/incomplete-readme",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}
