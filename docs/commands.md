@@ -129,7 +129,7 @@ Installed by the **commands-extra** module.
 
 **Multi-phase codebase audit.**
 
-Runs a comprehensive audit across 8 categories using parallel specialized agents, then optionally applies auto-fixes and creates GitHub issues for manual findings.
+Runs a comprehensive audit across 9 categories using parallel specialized agents, then optionally applies auto-fixes and creates GitHub issues for manual findings.
 
 **Audit categories**:
 1. Security (injection, auth, secrets, dependencies)
@@ -140,6 +140,7 @@ Runs a comprehensive audit across 8 categories using parallel specialized agents
 6. Testing (coverage gaps, test quality, missing edge cases)
 7. Documentation (outdated docs, missing API docs)
 8. Performance (bundle size, render performance, memory leaks)
+9. Terms of Service & Policy Compliance (OSS/dependency license violations, third-party API/service ToS, app/extension store policy, AI/LLM provider ToS)
 
 **Severity levels**: Critical, High, Medium, Low
 

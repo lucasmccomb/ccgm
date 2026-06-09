@@ -1,11 +1,11 @@
 ---
-description: Codebase Audit with Auto-Fix - 8 categories including optional CVE/advisory checks
+description: Codebase Audit with Auto-Fix - 9 categories including ToS/policy compliance and optional CVE/advisory checks
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, WebSearch, WebFetch, AskUserQuestion
 ---
 
 # /audit - Codebase Audit with Auto-Fix
 
-Run a comprehensive codebase audit across 8 categories with optional auto-fix.
+Run a comprehensive codebase audit across 9 categories with optional auto-fix.
 
 ## Sub-Agent Model Optimization
 
@@ -35,6 +35,13 @@ When spawning audit category agents in Phase 3, set model to **sonnet** in the A
 6. **Testing** - Missing test coverage, untested edge cases, flaky tests, missing mocks, test anti-patterns
 7. **Documentation** - Missing README sections, outdated API docs, missing JSDoc on public APIs, stale comments
 8. **Performance** - Large bundle imports, missing lazy loading, unoptimized images, missing caching, N+1 queries
+9. **Terms of Service & Policy Compliance** - OSS/dependency license violations (copyleft in proprietary code, non-commercial licenses in commercial use, missing attribution), third-party API/service ToS (scraping, prohibited storage/caching, rate-limit/paywall circumvention, key misuse), app/extension store policy (Chrome Web Store remote code & overbroad permissions, Apple private-API & IAP bypass, Google Play sensitive permissions), AI/LLM provider ToS (training competitors on outputs, prohibited use, missing attribution)
+   **Optional: Internet-powered ToS & license checks**
+   For dependencies and integrated services, agents can verify current terms:
+   - Resolve a dependency license: `npm view {package} license` or `WebFetch` on `https://registry.npmjs.org/{package}`
+   - Check a service's ToS: `WebSearch: "{service} terms of service {action} prohibited"` then `WebFetch` the ToS page
+   - Detect a relicense (e.g. a package that moved to BUSL): `WebSearch: "{package} license change relicense BUSL"`
+   These checks are supplementary - the audit works offline via license metadata and code patterns too.
 
 ## Workflow
 
@@ -49,7 +56,7 @@ When spawning audit category agents in Phase 3, set model to **sonnet** in the A
 - List all configuration files
 
 ### Phase 3: Parallel Audit
-Run audit agents in parallel across the 8 categories. Each agent:
+Run audit agents in parallel across the 9 categories. Each agent:
 1. Scans relevant files using Glob and Grep
 2. Checks against category-specific rules
 3. Classifies findings as: CRITICAL, WARNING, or INFO
