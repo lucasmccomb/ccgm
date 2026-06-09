@@ -1,0 +1,56 @@
+{
+  "id": "ccgm/code-quality",
+  "name": "Code Quality",
+  "version": "1.0.0",
+  "applies_when": ["always"],
+  "tags": ["code-quality", "eslint", "prettier", "style"],
+  "severity_floor": "low",
+  "tools": ["eslint"],
+  "checks": [
+    {
+      "id": "code-quality/eslint-violation",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "tool",
+      "tool": "eslint",
+      "auto_fixable": true
+    },
+    {
+      "id": "code-quality/prettier-violation",
+      "severity": "low",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "code-quality/unused-import",
+      "severity": "low",
+      "confidence": "high",
+      "detection": "hybrid",
+      "tool": "eslint",
+      "fallback": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "code-quality/long-method",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "code-quality/large-file",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "code-quality/empty-catch-block",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}

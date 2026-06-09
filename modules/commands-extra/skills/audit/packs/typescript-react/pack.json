@@ -1,0 +1,46 @@
+{
+  "id": "ccgm/typescript-react",
+  "name": "TypeScript / React",
+  "version": "1.0.0",
+  "applies_when": ["language:js"],
+  "tags": ["typescript", "react", "hooks", "fast-refresh"],
+  "severity_floor": "low",
+  "tools": [],
+  "checks": [
+    {
+      "id": "typescript/excessive-any",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "typescript/missing-return-type",
+      "severity": "low",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "typescript/react-hooks-violation",
+      "severity": "high",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "typescript/fast-refresh-violation",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "typescript/missing-key-prop",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}
