@@ -132,6 +132,116 @@
       "target": "skills/audit/reference/pack-quality-bar.md",
       "type": "doc",
       "template": false
+    },
+    "skills/audit/scripts/spine/run.sh": {
+      "target": "skills/audit/scripts/spine/run.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/normalize.py": {
+      "target": "skills/audit/scripts/spine/normalize.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-gitleaks.sh": {
+      "target": "skills/audit/scripts/spine/wrap-gitleaks.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-gitleaks.py": {
+      "target": "skills/audit/scripts/spine/parse-gitleaks.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-semgrep.sh": {
+      "target": "skills/audit/scripts/spine/wrap-semgrep.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-semgrep.py": {
+      "target": "skills/audit/scripts/spine/parse-semgrep.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-dep-audit.sh": {
+      "target": "skills/audit/scripts/spine/wrap-dep-audit.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-dep-audit.py": {
+      "target": "skills/audit/scripts/spine/parse-dep-audit.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-knip.sh": {
+      "target": "skills/audit/scripts/spine/wrap-knip.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-knip.py": {
+      "target": "skills/audit/scripts/spine/parse-knip.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-eslint.sh": {
+      "target": "skills/audit/scripts/spine/wrap-eslint.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-eslint.py": {
+      "target": "skills/audit/scripts/spine/parse-eslint.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-govulncheck.sh": {
+      "target": "skills/audit/scripts/spine/wrap-govulncheck.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-govulncheck.py": {
+      "target": "skills/audit/scripts/spine/parse-govulncheck.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-bandit.sh": {
+      "target": "skills/audit/scripts/spine/wrap-bandit.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-bandit.py": {
+      "target": "skills/audit/scripts/spine/parse-bandit.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-hadolint.sh": {
+      "target": "skills/audit/scripts/spine/wrap-hadolint.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-hadolint.py": {
+      "target": "skills/audit/scripts/spine/parse-hadolint.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-actionlint.sh": {
+      "target": "skills/audit/scripts/spine/wrap-actionlint.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-actionlint.py": {
+      "target": "skills/audit/scripts/spine/parse-actionlint.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-trivy.sh": {
+      "target": "skills/audit/scripts/spine/wrap-trivy.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-trivy.py": {
+      "target": "skills/audit/scripts/spine/parse-trivy.py",
+      "type": "script",
+      "template": false
     }
   },
   "tags": [
