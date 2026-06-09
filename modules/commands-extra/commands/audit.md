@@ -1,101 +1,51 @@
 ---
-description: Codebase Audit with Auto-Fix - 9 categories including ToS/policy compliance and optional CVE/advisory checks
+description: Codebase audit across 9 categories (security, deps, quality, architecture, TS/React, testing, docs, performance, ToS) with optional auto-fix
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, WebSearch, WebFetch, AskUserQuestion
 ---
 
-# /audit - Codebase Audit with Auto-Fix
+# /audit - Codebase Audit
 
-Run a comprehensive codebase audit across 9 categories with optional auto-fix.
+Run a comprehensive codebase audit across 9 categories. See the full skill for all phases and options: `~/.claude/skills/audit/SKILL.md`.
 
-## Sub-Agent Model Optimization
+## Usage
 
-When spawning audit category agents in Phase 3, set model to **sonnet** in the Agent/Task tool call. Code analysis and pattern matching work well on Sonnet. The orchestrator remains on the current model for synthesis, fix decisions, and the fix cycle.
-
----
+```
+/audit                    # Full audit — prompts for scope and execution strategy
+/audit --fix              # Audit WITH auto-fixes (uses worktrees, creates PR)
+/audit --single           # Single-session audit (8 subagents, lightweight; always read-only)
+/audit --manual           # Set up tasks + output launch commands for manual orchestration
+/audit --worker           # Worker mode (run from worktree/clone after --manual setup)
+/audit --collect          # Compile results + create issues (after workers complete)
+/audit --collect --force  # Collect even if some agents haven't completed
+/audit --max-fixes 10     # Limit number of auto-fixes (only with --fix)
+/audit [PATH]             # Audit a specific path instead of the entire repo
+```
 
 ## Audit Categories
 
 1. **Security** - Secrets in code, exposed API keys, missing input sanitization, SQL injection risks, XSS vulnerabilities, insecure dependencies
-   **Optional: Internet-powered vulnerability checks**
-   For each dependency in package.json or lock file, agents can check:
-   - CVE databases: `WebSearch: "{package}@{version} vulnerability CVE security advisory"`
-   - GitHub Security Advisories: `gh api graphql -f query='{ securityVulnerabilities(first:5, package:"{package}") { nodes { advisory { summary severity } } } }'`
-   - Known vulnerabilities: `WebFetch` on `https://registry.npmjs.org/-/npm/v1/security/advisories?package={package}`
-   These checks are supplementary - the audit works without internet access too.
 2. **Dependencies** - Outdated packages, unused dependencies, duplicate packages, missing lock files, version conflicts
-   **Optional: Internet-powered deprecation checks**
-   For key dependencies, agents can verify maintenance status:
-   - Check if repo is archived: `gh repo view {owner}/{package} --json isArchived 2>/dev/null`
-   - Check for deprecation notices: `WebSearch: "{package} deprecated alternative migration"`
-   - Check npm deprecation: `npm view {package} deprecated 2>/dev/null`
-   These checks are supplementary - the audit works without internet access too.
 3. **Code Quality** - Dead code, unused exports, large files, complex functions, inconsistent naming, missing error handling
 4. **Architecture** - Circular dependencies, improper layer access, mixed concerns, missing abstractions, inconsistent patterns
 5. **TypeScript/React** - Any type usage, missing return types, improper hook usage, missing error boundaries, Fast Refresh violations
 6. **Testing** - Missing test coverage, untested edge cases, flaky tests, missing mocks, test anti-patterns
 7. **Documentation** - Missing README sections, outdated API docs, missing JSDoc on public APIs, stale comments
 8. **Performance** - Large bundle imports, missing lazy loading, unoptimized images, missing caching, N+1 queries
-9. **Terms of Service & Policy Compliance** - OSS/dependency license violations (copyleft in proprietary code, non-commercial licenses in commercial use, missing attribution), third-party API/service ToS (scraping, prohibited storage/caching, rate-limit/paywall circumvention, key misuse), app/extension store policy (Chrome Web Store remote code & overbroad permissions, Apple private-API & IAP bypass, Google Play sensitive permissions), AI/LLM provider ToS (training competitors on outputs, prohibited use, missing attribution)
-   **Optional: Internet-powered ToS & license checks**
-   For dependencies and integrated services, agents can verify current terms:
-   - Resolve a dependency license: `npm view {package} license` or `WebFetch` on `https://registry.npmjs.org/{package}`
-   - Check a service's ToS: `WebSearch: "{service} terms of service {action} prohibited"` then `WebFetch` the ToS page
-   - Detect a relicense (e.g. a package that moved to BUSL): `WebSearch: "{package} license change relicense BUSL"`
-   These checks are supplementary - the audit works offline via license metadata and code patterns too.
+9. **Terms of Service & Policy Compliance** - OSS/dependency license violations, third-party API/service ToS, app/extension store policy, AI/LLM provider ToS
 
-## Workflow
+## Severity Levels
 
-### Phase 1: Pre-Flight
-- Determine project type (monorepo, single package, etc.)
-- Identify available linters, formatters, and test runners
-- Check for existing audit configs (.eslintrc, tsconfig strict mode, etc.)
+Findings are classified as: **critical**, **high**, **medium**, or **low**.
 
-### Phase 2: Discovery
-- Map the full directory structure (use two-method verification for monorepos)
-- Identify all packages, entry points, and build targets
-- List all configuration files
+## Interactive Mode (no flags)
 
-### Phase 3: Parallel Audit
-Run audit agents in parallel across the 9 categories. Each agent:
-1. Scans relevant files using Glob and Grep
-2. Checks against category-specific rules
-3. Classifies findings as: CRITICAL, WARNING, or INFO
-4. Suggests specific fixes with file paths and line numbers
+When called without flags, the skill prompts with two questions:
 
-### Phase 4: Collect Results
-- Aggregate findings from all audit agents
-- Deduplicate overlapping findings
-- Sort by severity (CRITICAL first)
+1. **Audit scope** — Read-only (findings report + GitHub issues) or Analyze + auto-fix (also applies safe fixes, creates PR)
+2. **Execution strategy** — Parallel worktrees, single session, multi-clone, or manual setup
 
-### Phase 5: Fix Cycle
-For each fixable finding:
-1. Show the finding with context
-2. Apply the fix
-3. Run linters/tests to verify the fix doesn't break anything
-4. If the fix breaks something, revert and flag for manual review
+## Output
 
-### Phase 6: Summary
-Present a summary table:
-```
-| Category      | Critical | Warning | Info | Fixed | Manual |
-|---------------|----------|---------|------|-------|--------|
-| Security      | 0        | 2       | 1    | 2     | 1      |
-| Dependencies  | 1        | 3       | 0    | 3     | 1      |
-| ...           | ...      | ...     | ...  | ...   | ...    |
-```
-
-### Phase 7: Issue Creation (Optional)
-For findings that require manual intervention:
-- Create GitHub issues with detailed descriptions
-- Label with audit category and severity
-- Include file paths, line numbers, and suggested fixes
-
-## Usage
-
-```
-/audit                    # Full audit, all categories
-/audit security           # Single category
-/audit security,testing   # Multiple categories
-/audit --fix              # Auto-fix where possible
-/audit --no-issues        # Skip GitHub issue creation
-```
+- Audit report at `.audit/current/audit-report.md`
+- GitHub issues (optional) — grouped by category, linked to an epic tracking issue
+- PR with fixes (only with `--fix`)
