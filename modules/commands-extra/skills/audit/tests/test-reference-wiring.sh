@@ -5,6 +5,7 @@
 # Tests:
 #   1. multi-agent-config.md assignment table includes ToS & Compliance and lists 9 categories
 #   2. Every category prompt in SKILL.md contains a READ AND APPLY instruction
+#   2b. Per-section: each ### Agent N section individually contains READ AND APPLY
 #   3. Agent 7 (Documentation) marks JSDoc as NOT auto-fixable (aligns with fix-patterns.md)
 #   4. Agent 5 (TypeScript/React) does not recommend array index as key (key-prop fix)
 #   5. output-template.md does not contain hardcoded 'development' branch (genericized)
@@ -151,7 +152,7 @@ AGENT_HEADERS=(
   "Agent 9: Terms of Service"
 )
 
-# We check that "READ AND APPLY" appears at least as many times as there are agents.
+# Global count check: "READ AND APPLY" must appear at least once per agent.
 set +e
 READ_APPLY_COUNT=$(grep -c 'READ AND APPLY' "$SKILL_DOC" 2>/dev/null || true)
 set -e
@@ -173,6 +174,45 @@ for header in "${AGENT_HEADERS[@]}"; do
   else
     fail "SKILL.md is missing agent header: '$header'" \
       "ensure the Category Prompts section contains this header"
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# TEST 2b: Per-section READ AND APPLY verification
+# For EACH ### Agent N section, assert that a READ AND APPLY line appears
+# between that header and the next ### Agent header (or end of file).
+# This catches the case where occurrences cluster under one agent while
+# another agent's section has none.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- [2b] SKILL.md: per-section READ AND APPLY verification ---"
+
+for header in "${AGENT_HEADERS[@]}"; do
+  # Use awk to extract lines from this agent's header up to (not including)
+  # the next "### Agent" header.
+  set +e
+  SECTION_CONTENT=$(awk \
+    -v hdr="### $header" \
+    'BEGIN{found=0}
+     $0 ~ hdr {found=1; next}
+     found && /^### Agent / {exit}
+     found {print}
+    ' "$SKILL_DOC" 2>/dev/null || true)
+  set -e
+
+  if [ -z "$SECTION_CONTENT" ]; then
+    fail "per-section: could not extract section for '$header'" \
+      "header may be missing or malformed in SKILL.md"
+  else
+    set +e
+    SECTION_READ_APPLY=$(echo "$SECTION_CONTENT" | grep -c 'READ AND APPLY' 2>/dev/null || true)
+    set -e
+    if [ "${SECTION_READ_APPLY:-0}" -gt 0 ]; then
+      pass "per-section: '$header' contains READ AND APPLY"
+    else
+      fail "per-section: '$header' is missing a READ AND APPLY instruction" \
+        "add 'READ AND APPLY: ~/.claude/skills/audit/reference/<doc>.md' inside this agent's prompt block"
+    fi
   fi
 done
 

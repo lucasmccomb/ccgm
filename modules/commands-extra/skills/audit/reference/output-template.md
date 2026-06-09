@@ -208,13 +208,14 @@ When presenting to user before issue creation:
 |------------------|----------|------|--------|-----|-------|--------|
 | Security         | 1        | 3    | 2      | 0   | 2     | 4      |
 | Dependencies     | 0        | 2    | 5      | 3   | 3     | 7      |
+| ToS & Compliance | 0        | 1    | 1      | 0   | 0     | 2      |
 | Code Quality     | 0        | 1    | 8      | 12  | 3     | 18     |
 | Architecture     | 0        | 2    | 3      | 1   | 0     | 6      |
 | TypeScript/React | 0        | 0    | 4      | 6   | 0     | 10     |
 | Testing          | 0        | 4    | 2      | 0   | 0     | 6      |
 | Documentation    | 0        | 0    | 3      | 5   | 0     | 8      |
 | Performance      | 0        | 1    | 2      | 2   | 0     | 5      |
-| **Total**        | **1**    | **13** | **29** | **29** | **8** | **64** |
+| **Total**        | **1**    | **14** | **30** | **29** | **8** | **66** |
 
 ## Critical Findings (Immediate Action Required)
 
