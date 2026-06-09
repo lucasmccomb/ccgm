@@ -210,6 +210,61 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 1b: Adversarial repo path (contains " and space) -> provenance is
+# valid JSON.  Verifies the json.dumps provenance fix (not printf).
+# ---------------------------------------------------------------------------
+printf '\nTest 1b: Adversarial repo path -> provenance line is valid JSON\n'
+
+WEIRD_DIR="$TESTRUN_TMPDIR/repo-with-quote\"-and space"
+mkdir -p "$WEIRD_DIR"
+printf '{"name":"weird"}\n' > "$WEIRD_DIR/package.json"
+
+WEIRD_OUTPUT="$TESTRUN_TMPDIR/test1b-output.jsonl"
+set +e
+bash "$SPINE_DIR/run.sh" \
+  --repo "$WEIRD_DIR" \
+  --tools "gitleaks" \
+  --output "$WEIRD_OUTPUT" \
+  2>/dev/null
+WEIRD_EXIT=$?
+set -e
+
+if [[ $WEIRD_EXIT -eq 0 ]]; then
+  pass "spine exits 0 on adversarial repo path"
+else
+  fail "spine exits $WEIRD_EXIT on adversarial repo path (expected 0)"
+fi
+
+# Extract and validate the provenance line using python3 (grep patterns vary by
+# platform; json.dumps adds spaces after ":" so a no-space grep would miss it).
+PROV_VALID="$(python3 - "$WEIRD_OUTPUT" << 'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    for raw in f:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            print("invalid")
+            sys.exit(0)
+        if obj.get("type") == "provenance":
+            # round-trip succeeded -- JSON is valid
+            print("valid")
+            sys.exit(0)
+print("missing")
+PYEOF
+)"
+if [[ "$PROV_VALID" == "valid" ]]; then
+  pass "provenance line is valid JSON for adversarial repo path (contains quote + space)"
+elif [[ "$PROV_VALID" == "missing" ]]; then
+  fail "no provenance line found in output for adversarial repo path"
+else
+  fail "provenance line is NOT valid JSON for adversarial repo path -- printf escaping bug?"
+fi
+
+# ---------------------------------------------------------------------------
 # Test 2: Injection fixture -- no PWNED file after spine run
 # ---------------------------------------------------------------------------
 printf '\nTest 2: Injection fixture -- no PWNED file created\n'

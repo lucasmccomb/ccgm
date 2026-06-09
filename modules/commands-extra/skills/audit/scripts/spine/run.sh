@@ -113,13 +113,21 @@ fi
 
 # ---------------------------------------------------------------------------
 # Emit a provenance header record
+# Use python3 json.dumps so repo paths / tool names containing ", \, or
+# newlines produce valid JSONL instead of malformed output.
 # ---------------------------------------------------------------------------
-{
-  printf '{"type":"provenance","tool":"ccgm-spine","version":"1.0","repo":"%s","tools_requested":"%s","timestamp":"%s"}\n' \
-    "$REPO_ROOT" \
-    "$REQUESTED_TOOLS" \
-    "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-} >> "$SINK"
+python3 - "$REPO_ROOT" "$REQUESTED_TOOLS" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" << 'PYEOF' >> "$SINK"
+import json, sys
+repo, tools, ts = sys.argv[1], sys.argv[2], sys.argv[3]
+print(json.dumps({
+    "type": "provenance",
+    "tool": "ccgm-spine",
+    "version": "1.0",
+    "repo": repo,
+    "tools_requested": tools,
+    "timestamp": ts,
+}))
+PYEOF
 
 # ---------------------------------------------------------------------------
 # Run each tool wrapper in order
