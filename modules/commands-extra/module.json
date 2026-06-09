@@ -103,6 +103,36 @@
       "type": "script",
       "template": false
     },
+    "skills/audit/scripts/emit-findings.py": {
+      "target": "skills/audit/scripts/emit-findings.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/schemas/severity-rubric.json": {
+      "target": "skills/audit/schemas/severity-rubric.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/scripts/lint-rubric.py": {
+      "target": "skills/audit/scripts/lint-rubric.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/lint-pack.py": {
+      "target": "skills/audit/scripts/lint-pack.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/packs/_TEMPLATE/checks.md": {
+      "target": "skills/audit/packs/_TEMPLATE/checks.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/reference/pack-quality-bar.md": {
+      "target": "skills/audit/reference/pack-quality-bar.md",
+      "type": "doc",
+      "template": false
+    },
     "skills/audit/scripts/spine/run.sh": {
       "target": "skills/audit/scripts/spine/run.sh",
       "type": "script",
