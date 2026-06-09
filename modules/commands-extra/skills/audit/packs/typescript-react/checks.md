@@ -15,7 +15,7 @@ This pack audits TypeScript and React-specific patterns: overuse of the `any` es
 
 | Condition | Reason |
 |-----------|--------|
-| `language:javascript` | The ecosystem detector emits the `javascript` ecosystem for any repository that has a `package.json`; TypeScript repos additionally emit `typescript`. The registry derives condition tokens as `language:javascript` and `language:typescript` respectively. Because `applies_when` is AND-semantics, using `language:javascript` is the broadest honest gate: it covers both plain-JS React projects and TypeScript React projects (all TS repos also satisfy `language:javascript` since both ecosystems are detected). Using `language:typescript` would exclude plain-JS React repos; using `always` would incorrectly fire on Go, Python, and other non-JS repos where none of these patterns apply. |
+| `language:javascript` | The ecosystem detector emits the `javascript` ecosystem for any repository that has a `package.json`; TypeScript repos additionally emit `typescript`. The registry derives condition tokens as `language:javascript` and `language:typescript` respectively. Because `applies_when` is AND-semantics, using `language:javascript` is the broadest honest gate: it covers both plain-JS React projects and TypeScript React projects (TS repos with a `package.json` satisfy both ecosystems; a `package.json`-less TS repo — e.g. Deno-style — would not be gated in, which is acceptable since React projects in practice always carry a `package.json`). Using `language:typescript` would exclude plain-JS React repos; using `always` would incorrectly fire on Go, Python, and other non-JS repos where none of these patterns apply. |
 
 ---
 
