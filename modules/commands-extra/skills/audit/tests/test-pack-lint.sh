@@ -302,11 +302,10 @@ trap "rm -rf '${_T5_DIR}'" EXIT
 
 make_valid_pack "${_T5_DIR}/test-covered"
 
-# Write a rubric that DOES contain "tv/check-one"
+# Write a rubric in dict-envelope form ({"checks": {<id>: {...}}}) that DOES contain "tv/check-one".
+# This pins the dict-envelope branch added to lint-pack.py so reverting it would break this test.
 cat > "${_T5_DIR}/rubric.json" <<'JSON'
-[
-  {"id": "tv/check-one", "severity": "high", "confidence": "high"}
-]
+{"checks": {"tv/check-one": {"severity": "high", "confidence": "high"}}}
 JSON
 
 output=""
