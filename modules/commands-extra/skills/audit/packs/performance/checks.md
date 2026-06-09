@@ -153,7 +153,8 @@ Check for missing React.memo:
 - Do NOT flag components that use context or internal state, as memo does not prevent
   re-renders caused by context changes.
 
-Report each finding with: file path, component name, severity LOW,
+Report each finding with: file path, line number (the component's declaration line),
+component name, severity LOW,
 and auto_fixable=true at medium confidence (add memo wrapper per fix-patterns.md).
 ```
 
@@ -197,7 +198,7 @@ export function UserCard({ userId, name }: UserCardProps) {
 // Parent re-renders on every keystroke via useState; UserCard props are stable.
 ```
 
-Finding: `src/components/UserCard.tsx` — `UserCard` receives stable props but is not wrapped
+Finding: `src/components/UserCard.tsx:6` — `UserCard` receives stable props but is not wrapped
 in `React.memo`; auto_fixable=true (add `export default React.memo(UserCard)`).
 
 **True negative** (should produce NO finding):

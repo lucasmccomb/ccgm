@@ -133,8 +133,9 @@ Check for test files without assertions:
 - Flag test files that contain zero assertion calls — these tests can never fail and prove nothing.
 - Flag individual `it()`/`test()` blocks that contain no assertions even if other blocks in the
   same file do contain assertions.
-- Do NOT flag test files that use expectation-based framework APIs that appear assertion-free
-  (e.g. jest.fn() with .toHaveBeenCalled()) — those are valid assertions.
+- Count mock-verification calls as valid assertions (e.g. `expect(fn).toHaveBeenCalled()`,
+  `expect(fn).toHaveBeenCalledWith(...)` are assertions); only flag files that have NO
+  assertion forms whatsoever.
 - Do NOT flag setup/teardown files (beforeAll, afterAll, etc.) that are not themselves test blocks.
 
 Report each finding with: file path and block name, severity HIGH,

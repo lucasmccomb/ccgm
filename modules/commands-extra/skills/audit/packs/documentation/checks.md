@@ -279,7 +279,7 @@ reasonably but may disagree on threshold, yielding medium confidence.
 
 **True positive** (`README.md` missing installation instructions):
 
-```markdown
+````markdown
 # MyApp
 
 A web application for tracking habits.
@@ -287,13 +287,13 @@ A web application for tracking habits.
 ## Contributing
 
 Submit a PR.
-```
+````
 
 Finding: `README.md` — missing "Installation" and "Usage" sections.
 
 **True negative** (should produce NO finding):
 
-```markdown
+````markdown
 # MyApp
 
 A web application for tracking habits.
@@ -308,7 +308,7 @@ npm run dev
 ## Usage
 
 Visit http://localhost:3000 and create your first habit.
-```
+````
 
 No finding: README contains description, installation, and usage.
 
