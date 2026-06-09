@@ -74,9 +74,12 @@ def _load_rubric(rubric_path: Path):
     if isinstance(raw, list):
         rubric = {entry["id"]: entry for entry in raw if isinstance(entry, dict) and "id" in entry}
     elif isinstance(raw, dict):
-        # Could be {"checks": [...]} envelope or a flat {id: entry} map.
+        # Could be {"checks": [...]} envelope, {"checks": {id: entry, ...}} envelope,
+        # or a flat {id: entry} map. Accept all three.
         if "checks" in raw and isinstance(raw["checks"], list):
             rubric = {e["id"]: e for e in raw["checks"] if isinstance(e, dict) and "id" in e}
+        elif "checks" in raw and isinstance(raw["checks"], dict):
+            rubric = raw["checks"]
         else:
             rubric = raw
     else:
