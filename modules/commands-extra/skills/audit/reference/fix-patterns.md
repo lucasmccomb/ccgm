@@ -232,7 +232,7 @@ audit(documentation): add JSDoc to public API functions
 
 Each agent works on its own branch. Since agents audit different categories, file-level conflicts should be rare. However:
 
-- **Same-file conflicts can occur** when two categories overlap (e.g., Security removes a console.log on line 45, Code Quality removes an unused import on line 3 of the same file). These are resolved by merge priority during `--collect`.
+- **Same-file conflicts can occur** when two categories overlap (e.g., Security removes a console.log on line 45, Code Quality removes an unused import on line 3 of the same file). If a conflict is detected during `--collect`, the process **halts and writes a conflict report** — it does NOT silently resolve with `--ours`. See `multi-agent-config.md` for the conflict resolution protocol.
 - **Never modify files solely owned by another category.** For example, if `package.json` changes are needed for both Dependencies and Testing, only Agent 0 (Dependencies) should modify `package.json`. Agent 3 (Testing) should record the needed change as a cross-category finding.
 
 ### Shared Files (Conflict-Prone)
