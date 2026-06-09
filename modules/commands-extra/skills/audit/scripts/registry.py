@@ -65,7 +65,7 @@ def _validate_check(check: object, path: str) -> None:
         raise ValidationError(f"{path}: unexpected fields: {sorted(extra)}")
 
     _id = check["id"]
-    if not isinstance(_id, str) or not re.fullmatch(r"[a-z0-9_-]+/[a-z0-9_.,-]+", _id):
+    if not isinstance(_id, str) or not re.fullmatch(r"[a-z0-9_-]+/[a-z0-9_.-]+", _id):
         raise ValidationError(f"{path}.id: must match pattern ^[a-z0-9_-]+/[a-z0-9_.-]+$ (got {_id!r})")
 
     if check["severity"] not in _VALID_SEVERITIES:

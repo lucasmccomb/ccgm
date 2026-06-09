@@ -58,7 +58,7 @@
         },
         "end_line": {
           "type": "integer",
-          "description": "1-based end line (inclusive). Omit for single-line findings.",
+          "description": "1-based end line (inclusive). Omit for single-line findings. When present, must be >= line.",
           "minimum": 1
         }
       }
@@ -69,8 +69,8 @@
     },
     "fingerprint": {
       "type": "string",
-      "description": "Stable baseline-matching key: sha256(lower(strip_all_whitespace(<primary_line ± 2 lines>)))[:16] + ':1', OR the tool's own partialFingerprint verbatim. Must not change when the file is reformatted.",
-      "pattern": "^[a-f0-9]{16}:[0-9]+$"
+      "description": "Stable per-finding identity for baseline matching. OUR computed fingerprints use `sha256(normalized ±2 lines)[:16] + ':<gen>'`; where a source tool emits its own fingerprint it is stored VERBATIM. Must be a stable, non-empty identifier.",
+      "pattern": "^[A-Za-z0-9_.:+/=-]{8,128}$"
     },
     "detection": {
       "type": "string",
