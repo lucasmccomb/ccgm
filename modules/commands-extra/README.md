@@ -6,7 +6,7 @@ Additional slash commands for codebase audits, visual verification, guided walkt
 
 This module installs eight slash command files:
 
-- **/audit** - Run a comprehensive codebase audit across 8 categories (security, dependencies, code quality, architecture, TypeScript/React, testing, documentation, performance) with auto-fix capabilities
+- **/audit** - Run a comprehensive codebase audit across 9 categories (security, dependencies, code quality, architecture, TypeScript/React, testing, documentation, performance, terms-of-service & policy compliance) with auto-fix capabilities
 - **/pwv** - Playwright Visual Verification for testing UI in a headless browser with screenshots, viewport checks, and theme verification
 - **/walkthrough** - Enter step-by-step guide mode where Claude presents one step at a time and waits for confirmation before proceeding
 - **/promote-rule** - Review repo-level CLAUDE.md files and suggest rules that should be promoted to the global configuration
@@ -49,7 +49,7 @@ cp commands/checkpoint.md .claude/commands/checkpoint.md
 
 | File | Description |
 |------|-------------|
-| `commands/audit.md` | Codebase audit command with 8 audit categories and auto-fix |
+| `commands/audit.md` | Codebase audit command with 9 audit categories and auto-fix |
 | `commands/pwv.md` | Playwright visual verification command |
 | `commands/walkthrough.md` | Step-by-step guided walkthrough command |
 | `commands/promote-rule.md` | Rule promotion from repo to global config |

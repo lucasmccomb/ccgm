@@ -171,7 +171,7 @@ Additional slash commands for code quality and guided workflows.
 
 | Command | Description |
 |---------|-------------|
-| `/audit` | Multi-phase codebase audit across 8 categories |
+| `/audit` | Multi-phase codebase audit across 9 categories |
 | `/pwv` | Playwright visual verification |
 | `/walkthrough` | Step-by-step guided mode |
 | `/promote-rule` | Review and promote repo rules to global |

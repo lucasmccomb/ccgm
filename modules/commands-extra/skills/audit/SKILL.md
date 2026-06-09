@@ -190,6 +190,7 @@ Tracking issue for the YYYY-MM-DD codebase audit.
 ### Categories
 - [ ] Security
 - [ ] Dependencies
+- [ ] Terms of Service & Policy Compliance
 - [ ] Code Quality
 - [ ] TypeScript/React
 - [ ] Architecture
@@ -267,7 +268,7 @@ Reference the agent assignment table from `~/.claude/skills/audit/reference/mult
 
 | Agent | Categories | Merge Priority |
 |-------|-----------|----------------|
-| 0 | Security, Dependencies | 1 (highest) |
+| 0 | Security, Dependencies, ToS & Compliance | 1 (highest) |
 | 1 | Code Quality, TypeScript/React | 2 |
 | 2 | Architecture, Performance | 3 |
 | 3 | Testing, Documentation | 4 (lowest) |
@@ -280,7 +281,7 @@ For each agent's task file:
 5. Embed all of this into the task JSON per the schema in `reference/multi-agent-config.md`
 
 **Category-to-Agent mapping for task file creation:**
-- Agent 0: Embed Agent 1 (Security) + Agent 2 (Dependencies) instructions
+- Agent 0: Embed Agent 1 (Security) + Agent 2 (Dependencies) + Agent 9 (ToS & Compliance) instructions
 - Agent 1: Embed Agent 3 (Code Quality) + Agent 5 (TypeScript/React) instructions
 - Agent 2: Embed Agent 4 (Architecture) + Agent 8 (Performance) instructions
 - Agent 3: Embed Agent 6 (Testing) + Agent 7 (Documentation) instructions
@@ -295,7 +296,7 @@ Display progress summary before launching:
 
 | Agent | Categories | Working Dir | Mode |
 |-------|-----------|------------|------|
-| 0 | Security, Dependencies | {agent_dir} | {mode} |
+| 0 | Security, Dependencies, ToS & Compliance | {agent_dir} | {mode} |
 | 1 | Code Quality, TypeScript/React | {agent_dir} | {mode} |
 | 2 | Architecture, Performance | {agent_dir} | {mode} |
 | 3 | Testing, Documentation | {agent_dir} | {mode} |
@@ -383,6 +384,7 @@ After all agents complete:
 |----------|----------|------|--------|-----|-------|
 | Security | X | X | X | X | X |
 | Dependencies | X | X | X | X | X |
+| ToS & Policy Compliance | X | X | X | X | X |
 | Code Quality | X | X | X | X | X |
 | TypeScript/React | X | X | X | X | X |
 | Architecture | X | X | X | X | X |
@@ -471,7 +473,7 @@ Display a clear summary and launch commands:
 ### Agent Assignments
 | Agent | Worktree | Categories | Branch |
 |-------|----------|-----------|--------|
-| 0 | .audit/worktrees/agent-0 | Security, Dependencies | audit/agent-0-YYYYMMDD |
+| 0 | .audit/worktrees/agent-0 | Security, Dependencies, ToS & Compliance | audit/agent-0-YYYYMMDD |
 | 1 | .audit/worktrees/agent-1 | Code Quality, TypeScript/React | audit/agent-1-YYYYMMDD |
 | 2 | .audit/worktrees/agent-2 | Architecture, Performance | audit/agent-2-YYYYMMDD |
 | 3 | .audit/worktrees/agent-3 | Testing, Documentation | audit/agent-3-YYYYMMDD |
@@ -771,11 +773,11 @@ Lightweight single-session audit using 8 subagents within the current Claude Cod
 
 4. **Determine scope**: Use path argument or audit entire repo.
 
-### Phase 3: Parallel Audit (8 Agents)
+### Phase 3: Parallel Audit (9 Agents)
 
-Launch **8 Task agents in parallel** (in a single message with multiple tool calls). Each agent should use `subagent_type: "Explore"` and `run_in_background: true`.
+Launch **9 Task agents in parallel** (in a single message with multiple tool calls). Each agent should use `subagent_type: "Explore"` and `run_in_background: true`.
 
-**CRITICAL**: Send all 8 Task tool calls in ONE message to run them truly in parallel.
+**CRITICAL**: Send all 9 Task tool calls in ONE message to run them truly in parallel.
 
 **Each agent must report findings in this format:**
 ```json
@@ -936,6 +938,67 @@ Check for:
 - Large bundle imports (NOT auto-fixable - needs tree shaking)
 
 Report with severity and file:line references.
+```
+
+### Agent 9: Terms of Service & Policy Compliance Audit
+```
+Audit for terms-of-service, license, and platform-policy violations. This is a COMPLIANCE audit: flag legal/policy risk for human review. Be ULTRA-COMPREHENSIVE - cover every ToS surface relevant to THIS project's type. Most findings are NOT auto-fixable (they need human/legal judgment): default auto_fixable=false unless a fix is purely mechanical.
+
+First detect the project type and which policy regimes apply:
+- package.json / requirements.txt / go.mod / Cargo.toml / *.csproj  -> dependency-license compliance
+- manifest.json with "manifest_version"                            -> Chrome/Edge Web Store policy
+- Info.plist / *.xcodeproj / Podfile / fastlane                    -> Apple App Store Review Guidelines
+- AndroidManifest.xml / build.gradle                               -> Google Play policy
+- SDK calls to openai/anthropic/@anthropic-ai/google-generativeai/cohere/replicate -> AI/LLM provider ToS
+- HTTP clients to third-party hosts, headless browsers (puppeteer/playwright/selenium), yt-dlp, scrapers -> third-party service ToS
+
+(1) OSS / DEPENDENCY LICENSE COMPLIANCE
+- Read the project's own license (LICENSE file, package.json "license", "private": true).
+- Enumerate dependency licenses (npm: `npx license-checker --summary`; python: `pip-licenses`; or read each package's metadata / parse the lockfile).
+- CRITICAL: copyleft (GPL-2.0/3.0, AGPL-3.0, LGPL, SSPL, OSL, EUPL) linked into a proprietary or differently-licensed product. AGPL/SSPL in a network-served/SaaS app triggers source-disclosure obligations.
+- CRITICAL: "non-commercial" / "source-available" licenses (CC-BY-NC, BUSL-1.1, Elastic-2.0, Commons Clause, Polyform Noncommercial) used in a commercial product.
+- HIGH: missing attribution - MIT/BSD/Apache-2.0/ISC require preserving copyright + license text in distributions. Check for a NOTICE / THIRD-PARTY-LICENSES bundle, especially for shipped binaries, extensions, and bundled frontends. Apache-2.0 also requires stating changes.
+- MEDIUM: "UNLICENSED" / missing-license dependencies (unknown obligations); license incompatibility (e.g. a GPL-3.0 dep in a GPL-2.0-only or Apache-2.0 project).
+- Vendored/copied third-party code (vendor/, copied source) shipped without its original license header.
+- Fonts, icons, images, datasets, and ML model weights with restrictive or unstated licenses (e.g. weights "non-commercial research only", icon sets needing a paid license, datasets forbidding commercial/redistribution use).
+
+(2) THIRD-PARTY API & SERVICE ToS
+- Scraping/crawling sites whose ToS forbid automated access (LinkedIn, Meta/Instagram/Facebook, X/Twitter, Amazon, Google SERP, Ticketmaster, etc.); bulk crawling; ignoring robots.txt; headless automation of authenticated third-party sites.
+- Prohibited storage/caching of provider data (e.g. Google Maps/Places content stored beyond cache limits, market/financial data redistributed, geocoding cached against ToS).
+- Rate-limit / anti-abuse circumvention: IP/proxy rotation, randomized user-agents to evade detection, CAPTCHA-solving services, key rotation to exceed quotas.
+- Paywall / login-wall / DRM / license-check bypass of a third party.
+- Credential misuse: one API key shared across many users; free/personal-tier keys serving commercial/multi-tenant traffic; provider keys embedded client-side against ToS.
+- Trademark/brand misuse against a provider's brand guidelines.
+
+(3) APP / EXTENSION STORE & PLATFORM POLICY
+- Chrome/Edge Web Store: remotely-hosted code, or eval/new Function executing remote strings (Manifest V3 forbids remote code); overbroad permissions or <all_urls> host access not justified by features; obfuscated/minified-only source with no readable build; tabs/webRequest/cookies/scripting access beyond stated purpose; undisclosed analytics/ads.
+- Apple App Store: private/undocumented API use; bypassing In-App Purchase for digital goods; hot-code-push / downloading executable code; missing NS*UsageDescription strings; tracking without App Tracking Transparency consent; production secrets in the shipped bundle.
+- Google Play: sensitive permissions (SMS, Call Log, accessibility, QUERY_ALL_PACKAGES, MANAGE_EXTERNAL_STORAGE) without a qualifying use; background location without disclosure; ad-ID misuse.
+- General: undisclosed data collection/telemetry contradicting a stated privacy policy; PII / children's data (COPPA, GDPR-K) collected without controls; missing privacy policy referenced by the store listing.
+
+(4) AI / LLM PROVIDER ToS
+- HIGH: using a provider's model outputs to train, fine-tune, or distill a COMPETING model (OpenAI/Anthropic/Google terms prohibit this).
+- Prohibited / disallowed-use categories wired into product code.
+- Scraping or reverse-engineering provider endpoints; using non-public/undocumented endpoints; circumventing safety systems or rate limits.
+- Missing required attribution; misrepresenting AI output as human (or vice-versa) where disclosure is required.
+- Storing user prompts/outputs in ways the provider's data-use terms restrict.
+
+(5) ANY OTHER RELEVANT ToS SURFACE
+- Email/SMS (missing unsubscribe, sending without consent), payment processors (Stripe/PayPal restricted/prohibited businesses), cloud-provider AUPs, OAuth scope over-request, font/CDN hotlinking against ToS, "not for production" sample/demo licenses shipped in prod.
+
+For each finding report: severity, file:line, the specific clause/principle at risk, why it is a risk, and a concrete remediation path (e.g. "replace AGPL dep X with MIT alternative Y", "add THIRD-PARTY-LICENSES generated from dependency metadata", "move the remote-code call to a bundled local module", "switch to a commercial API tier", "remove stored field Z"). Set auto_fixable=true ONLY for mechanical fixes (generate a NOTICE/THIRD-PARTY-LICENSES file from dependency metadata = low confidence; add a missing `license` field = low confidence); everything else is auto_fixable=false.
+
+Severity guidance:
+- CRITICAL: AGPL/SSPL/GPL copyleft in a closed-source distributed/SaaS product; non-commercial-licensed code in a commercial product; AI outputs used to train a competitor; IAP-bypass or remote-code that causes store rejection/removal.
+- HIGH: missing required attribution in a shipped artifact; scraping/circumvention against a major provider's ToS; overbroad extension permissions or private-API use likely to fail review; storing data a provider forbids retaining.
+- MEDIUM: UNLICENSED/unknown dependency; undisclosed telemetry; trademark/brand issues; cache-retention edge cases.
+- LOW: minor attribution gaps; missing `license` field; demo/sample code carrying "not for production" notices.
+
+OPTIONAL - internet-powered deep checks (supplementary; the audit works offline too):
+- Resolve an exact license: `npm view {package} license` or `WebFetch https://registry.npmjs.org/{package}`.
+- Confirm a service's current ToS or a copyleft/compat question: `WebSearch: "{service} terms of service {action} prohibited"`, then WebFetch the ToS / usage-policy page.
+- Detect a relicense (e.g. a package that moved to BUSL): `WebSearch: "{package} license change relicense BUSL"`.
+Never block on the network - fall back to offline pattern + metadata analysis.
 ```
 
 ---
