@@ -20,7 +20,7 @@
 #     "available_tools": [...]
 #   }
 #
-# BSD-safe: no grep -oP; no GNU-only flags.
+# BSD-safe: avoids GNU-only Perl-regex grep flags.
 
 set -euo pipefail
 
