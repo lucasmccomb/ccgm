@@ -1155,6 +1155,112 @@ Never block on the network - fall back to offline pattern + metadata analysis.
 
 ---
 
+## Spine Execution Ownership & Merge Contract
+
+**ADV-002. This section is the authoritative spec for Epic 1.7b orchestration.**
+
+### Spine Execution (coordinator responsibility)
+
+The **COORDINATOR** runs the deterministic spine **once per audit run** — never per-worker, never inside a worktree:
+
+```
+scripts/spine/run.sh \
+  --repo  <ABSOLUTE repo root> \
+  --tools <comma-list scoped to the union of the selected packs' tools[]> \
+  --output <ABSOLUTE>/.audit/current/spine/findings.jsonl
+```
+
+- The repo path must be **absolute**. The spine must run against the main checkout, not a worktree.
+- `--tools` must be the union of every `tools[]` array from the packs selected for this run. Do not run spine tools that no pack will consume.
+- The output file is written to `.audit/current/spine/` (under the **main** checkout's `.audit/`, not under any worktree).
+
+### Per-worker spine slices
+
+Workers run in separate git worktrees and **cannot see** a relative `.audit/` under the main checkout. Every path a worker receives must be **absolute**.
+
+At task-file-writing time (Phase M3/M4) the coordinator:
+
+1. Filters the spine output by the pack's check-id namespaces and `tools[]` to produce a per-pack slice.
+2. Writes the slice to `<ABSOLUTE>/.audit/current/spine/<pack-dir>.jsonl`.
+3. Embeds the **absolute** slice path in the worker's task file as `spine_slice_path`.
+
+Workers read their slice from that absolute path. They never access `.audit/current/spine/findings.jsonl` directly.
+
+### Worker duties
+
+For each pack a worker handles:
+
+1. **Triage hybrid candidates**: for every finding in the spine slice with `detection: "hybrid"`, decide `confirmed` or `dismissed` and record a `spine_triage` entry in the results file. A finding is only dropped if ALL workers that named its fingerprint voted `dismissed`; a single `confirmed` vote from any worker overrides any number of `dismissed` votes.
+2. **Add LLM-only findings**: run the pack's LLM/hybrid checks; emit new findings with `source: "llm"`.
+3. **Never invent severity**: workers must NOT set severity, confidence, or fix_confidence from intuition. Use `schemas/severity-rubric.json` only. The merge step enforces this mechanically, but workers should follow it proactively to avoid spurious `agentReportedSeverity` entries.
+
+### Worker results-file contract
+
+Each worker writes a single JSON file. The ABSOLUTE path to this file (`.audit/current/results/<worker-id>.json`) is embedded in the worker's task file at the same time as `spine_slice_path`, so workers always receive it as an absolute path and never need to derive it from cwd.
+
+```json
+{
+  "findings": [
+    {
+      "check_id":      "<pack>/<check>",
+      "rule_id":       "<rule>",   // optional -- defaults to check_id when absent
+      "severity":      "critical|high|medium|low|info",
+      "confidence":    "high|medium|low",
+      "detection":     "tool|llm|hybrid",
+      "source":        "llm",
+      "message":       "<human-readable description>",
+      "location":      {"path": "<repo-relative path>", "line": 1},
+      "fingerprint":   "<optional — kept VERBATIM if present>",
+      "fix_confidence":"high|medium|low",
+      "properties":    {}
+    }
+  ],
+  "spine_triage": [
+    {
+      "fingerprint": "<fingerprint of a spine hybrid candidate>",
+      "verdict":     "confirmed|dismissed",
+      "note":        "<optional explanation>"
+    }
+  ]
+}
+```
+
+`findings` contains only the worker's **new** LLM-detected findings. Spine findings are not re-emitted here; they are carried through by the merge step.
+
+### `--single` mode
+
+In `--single` mode there is no coordinator/worker split. The single session:
+
+1. Runs the spine inline (same invocation as above, before dispatching its read-only subagents).
+2. Dispatches read-only subagents per pack (they receive the absolute spine slice path and produce results files).
+3. Runs the merge itself after all subagents complete.
+
+### Merge invocation
+
+After all workers complete, the coordinator runs:
+
+```
+scripts/merge-findings.py \
+  --spine  <ABSOLUTE>/.audit/current/spine/findings.jsonl \
+  --llm    <ABSOLUTE>/.audit/current/results/worker-0.json \
+  --llm    <ABSOLUTE>/.audit/current/results/worker-1.json \
+  ...
+  --rubric <ABSOLUTE>/schemas/severity-rubric.json \
+  --repo   <ABSOLUTE repo root> \
+  --output <ABSOLUTE>/.audit/current/findings.jsonl
+```
+
+`--repo` must be the same absolute repo root passed to `scripts/spine/run.sh`. It ensures fingerprints computed for location paths are cwd-independent so baseline comparisons remain stable across invocations from different directories.
+
+The merger:
+
+- Deduplicates findings by fingerprint (tool source wins over llm source when fingerprints collide).
+- Applies mechanical rubric overwrite: for every `check_id` in the rubric, overwrites `severity`, `confidence`, and `fix_confidence` with the rubric values. When the overwrite changes severity, preserves the original as `properties.agentReportedSeverity` (ADV-007 — calibration disagreements stay visible).
+- Folds coverage-gap records from the spine through to the output (deduped).
+- Validates every output finding against `finding.schema.json`.
+
+---
+
 ## Severity Sourcing
 
 **Agents MUST source severity, confidence, and fix_confidence from `schemas/severity-rubric.json`.** Do NOT invent or guess these values. For every finding whose `check_id` appears in the rubric, copy the rubric's `severity`, `confidence`, and `fix_confidence` verbatim. Preserve the agent-reported value in `properties.agentReportedSeverity` if it differs. For `check_id`s not yet in the rubric, set confidence to `"low"` and flag for rubric expansion.

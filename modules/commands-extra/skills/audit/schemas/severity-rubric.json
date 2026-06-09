@@ -9,6 +9,11 @@
     "fix_confidence": "high|medium|low — safety confidence for auto-fix when applicable"
   },
   "checks": {
+    "secrets/leaked-credential": {
+      "severity": "critical",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
     "security/hardcoded-secret": {
       "severity": "critical",
       "confidence": "medium",
