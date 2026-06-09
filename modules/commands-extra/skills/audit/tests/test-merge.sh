@@ -788,7 +788,8 @@ PYEOF
   # Run merge with real rubric (no LLM files)
   E2E_MERGED="$E2E_DIR/merged.jsonl"
   set +e
-  python3 "$MERGE_SCRIPT" --spine "$E2E_SPINE" --rubric "$RUBRIC_FILE" --output "$E2E_MERGED" 2>/dev/null
+  python3 "$MERGE_SCRIPT" --spine "$E2E_SPINE" --rubric "$RUBRIC_FILE" \
+    --repo "$E2E_DIR/repo" --output "$E2E_MERGED" 2>/dev/null
   MERGE_E2E_EXIT=$?
   set -e
 
@@ -901,7 +902,8 @@ PYEOF
 
   E2E_ACTION_MERGED="$E2E_DIR/merged_action.jsonl"
   set +e
-  python3 "$MERGE_SCRIPT" --spine "$E2E_ACTION_SPINE" --rubric "$RUBRIC_FILE" --output "$E2E_ACTION_MERGED" 2>/dev/null
+  python3 "$MERGE_SCRIPT" --spine "$E2E_ACTION_SPINE" --rubric "$RUBRIC_FILE" \
+    --repo "$E2E_DIR/repo" --output "$E2E_ACTION_MERGED" 2>/dev/null
   ACTION_MERGE_EXIT=$?
   set -e
 
@@ -932,31 +934,310 @@ PYEOF
   if [[ "$E2E_ACTION_GAP_COUNT" -ge 1 ]]; then
     pass "t7: actionlint coverage_gap folds through merge ($E2E_ACTION_GAP_COUNT gap(s))"
   else
-    # actionlint absent: spine emits skipped + coverage_gap records
-    # The merge passes through coverage_gap; check for any note-type records
-    E2E_NOTE_COUNT="$(python3 - "$E2E_ACTION_MERGED" << 'PYEOF'
+    fail "t7: no coverage_gap records in actionlint spine merge output (expected >= 1)"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Test 8: worker trust-boundary -- dismissed verdict on tool-detection finding
+#   (a) dismissed verdict targeting detection="tool" finding -> warning on stderr
+#       AND the finding is kept (non-hybrid findings are not dismissible)
+# ---------------------------------------------------------------------------
+printf '\nTest 8a: dismissed verdict on tool-detection finding -- warn + keep\n'
+
+T8_DIR="$TESTRUN_DIR/t8"
+mkdir -p "$T8_DIR"
+
+T8_FP_TOOL="334455667788aabb:1"
+
+python3 - "$T8_DIR/spine.jsonl" "$T8_FP_TOOL" << 'PYEOF'
 import json, sys
-count = 0
-with open(sys.argv[1]) as fh:
-    for l in fh:
-        l = l.strip()
-        if not l:
-            continue
-        try:
-            obj = json.loads(l)
-            if obj.get("type") in ("coverage_gap", "skipped"):
-                count += 1
-        except Exception:
-            pass
-print(count)
+spine_file, fp = sys.argv[1], sys.argv[2]
+with open(spine_file, "w") as fh:
+    fh.write(json.dumps({
+        "type": "provenance", "tool": "ccgm-spine", "version": "1.0",
+        "repo": "/tmp/test-repo", "tools_requested": "gitleaks",
+        "timestamp": "2026-01-01T00:00:00Z",
+    }) + "\n")
+    fh.write(json.dumps({
+        "check_id": "security/hardcoded-secret",
+        "rule_id": "gitleaks-rule",
+        "severity": "high",
+        "confidence": "high",
+        "detection": "tool",
+        "source": "tool",
+        "message": "hardcoded secret detected by tool",
+        "location": {"path": "src/config.py", "line": 10},
+        "fingerprint": fp,
+    }) + "\n")
+PYEOF
+
+python3 - "$T8_DIR/llm.json" "$T8_FP_TOOL" << 'PYEOF'
+import json, sys
+out, fp = sys.argv[1], sys.argv[2]
+with open(out, "w") as fh:
+    json.dump({
+      "findings": [],
+      "spine_triage": [
+        {"fingerprint": fp, "verdict": "dismissed", "note": "worker tries to dismiss tool finding"}
+      ]
+    }, fh)
+PYEOF
+
+set +e
+T8A_STDERR="$(python3 "$MERGE_SCRIPT" --spine "$T8_DIR/spine.jsonl" \
+  --llm "$T8_DIR/llm.json" --rubric "$RUBRIC_FILE" 2>&1 >/dev/null)"
+T8A_OUT="$(python3 "$MERGE_SCRIPT" --spine "$T8_DIR/spine.jsonl" \
+  --llm "$T8_DIR/llm.json" --rubric "$RUBRIC_FILE" 2>/dev/null)"
+T8A_EXIT=$?
+set -e
+
+if [[ $T8A_EXIT -eq 0 ]]; then
+  pass "t8a: merge exits 0 (tool finding kept)"
+else
+  fail "t8a: merge exits $T8A_EXIT (expected 0)"
+fi
+
+T8A_PRESENT="$(fp_exists "$T8A_OUT" "$T8_FP_TOOL")"
+if [[ "$T8A_PRESENT" == "yes" ]]; then
+  pass "t8a: tool-detection finding is kept despite dismissed verdict"
+else
+  fail "t8a: tool-detection finding was incorrectly dropped by dismissed verdict"
+fi
+
+if echo "$T8A_STDERR" | grep -q "WARNING.*non-hybrid\|WARNING.*not dismissible"; then
+  pass "t8a: stderr warning emitted for attempted non-hybrid dismissal"
+else
+  fail "t8a: no warning on stderr for attempted non-hybrid dismissal (got: $T8A_STDERR)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 8b: invalid finding (string line) -> exit 1 with actionable message
+# ---------------------------------------------------------------------------
+printf '\nTest 8b: invalid finding (string line) -> exit 1 with actionable message\n'
+
+T8B_FP="445566778899bbcc:1"
+
+python3 - "$T8_DIR/llm_badline.json" "$T8B_FP" << 'PYEOF'
+import json, sys
+out, fp = sys.argv[1], sys.argv[2]
+with open(out, "w") as fh:
+    json.dump({
+      "findings": [
+        {
+          "check_id": "code-quality/eslint-violation",
+          "rule_id": "no-unused-vars",
+          "severity": "medium",
+          "confidence": "medium",
+          "detection": "llm",
+          "source": "llm",
+          "message": "eslint violation",
+          # line is a string instead of int -- malformed input
+          "location": {"path": "src/app.js", "line": "7"},
+          "fingerprint": fp
+        }
+      ],
+      "spine_triage": []
+    }, fh)
+PYEOF
+
+write_spine "$T8_DIR/spine_empty.jsonl"
+
+set +e
+T8B_STDERR="$(python3 "$MERGE_SCRIPT" --spine "$T8_DIR/spine_empty.jsonl" \
+  --llm "$T8_DIR/llm_badline.json" --rubric "$RUBRIC_FILE" 2>&1 >/dev/null)"
+T8B_EXIT=$?
+set -e
+
+if [[ $T8B_EXIT -eq 1 ]]; then
+  pass "t8b: merge exits 1 on string-line finding"
+else
+  fail "t8b: merge exits $T8B_EXIT (expected 1 for malformed input)"
+fi
+
+# Assert actionable error message (not a bare traceback)
+if echo "$T8B_STDERR" | grep -q "VALIDATION ERROR\|location.line must be"; then
+  pass "t8b: stderr contains actionable error message (not a traceback)"
+else
+  fail "t8b: stderr does not contain actionable error message (got: $T8B_STDERR)"
+fi
+
+# Assert no traceback leaked
+if echo "$T8B_STDERR" | grep -q "Traceback\|TypeError"; then
+  fail "t8b: bare Python traceback leaked to stderr (got: $T8B_STDERR)"
+else
+  pass "t8b: no bare traceback in stderr"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 8c: deterministic ordering -- two runs produce byte-identical output
+# ---------------------------------------------------------------------------
+printf '\nTest 8c: deterministic ordering -- two runs produce byte-identical output\n'
+
+T8C_DIR="$TESTRUN_DIR/t8c"
+mkdir -p "$T8C_DIR"
+
+# Write spine with two findings at different paths/lines
+python3 - "$T8C_DIR/spine.jsonl" << 'PYEOF'
+import json, sys
+with open(sys.argv[1], "w") as fh:
+    fh.write(json.dumps({
+        "type": "provenance", "tool": "ccgm-spine", "version": "1.0",
+        "repo": "/tmp/test-repo", "tools_requested": "gitleaks",
+        "timestamp": "2026-01-01T00:00:00Z",
+    }) + "\n")
+    fh.write(json.dumps({
+        "check_id": "security/hardcoded-secret",
+        "rule_id": "rule-b",
+        "severity": "high", "confidence": "high",
+        "detection": "tool", "source": "tool",
+        "message": "secret at z file",
+        "location": {"path": "z/file.py", "line": 5},
+        "fingerprint": "zz9988776655aabb:1",
+    }) + "\n")
+    fh.write(json.dumps({
+        "check_id": "code-quality/eslint-violation",
+        "rule_id": "rule-a",
+        "severity": "medium", "confidence": "medium",
+        "detection": "tool", "source": "tool",
+        "message": "eslint at a file",
+        "location": {"path": "a/file.py", "line": 1},
+        "fingerprint": "aa1122334455bbcc:1",
+    }) + "\n")
+PYEOF
+
+set +e
+T8C_RUN1="$(python3 "$MERGE_SCRIPT" --spine "$T8C_DIR/spine.jsonl" \
+  --rubric "$RUBRIC_FILE" 2>/dev/null)"
+T8C_RUN2="$(python3 "$MERGE_SCRIPT" --spine "$T8C_DIR/spine.jsonl" \
+  --rubric "$RUBRIC_FILE" 2>/dev/null)"
+set -e
+
+if [[ "$T8C_RUN1" == "$T8C_RUN2" ]]; then
+  pass "t8c: two runs produce byte-identical output (deterministic)"
+else
+  fail "t8c: runs differ -- output is non-deterministic"
+fi
+
+# Also verify that findings are sorted (a/file.py before z/file.py)
+T8C_PATHS="$(python3 - "$T8C_RUN1" << 'PYEOF'
+import json, sys
+paths = []
+for l in sys.argv[1].splitlines():
+    if not l.strip():
+        continue
+    try:
+        obj = json.loads(l)
+        if isinstance(obj, dict) and "type" not in obj:
+            paths.append(obj.get("location", {}).get("path", ""))
+    except Exception:
+        pass
+print(",".join(paths))
 PYEOF
 )"
-    if [[ "$E2E_NOTE_COUNT" -ge 1 ]]; then
-      pass "t7: actionlint absence recorded as coverage_gap or skipped note ($E2E_NOTE_COUNT record(s))"
-    else
-      fail "t7: no coverage_gap or note records in actionlint spine merge output"
-    fi
-  fi
+
+if [[ "$T8C_PATHS" == "a/file.py,z/file.py" ]]; then
+  pass "t8c: output is sorted by path (a/file.py before z/file.py)"
+else
+  fail "t8c: output order unexpected: '$T8C_PATHS' (expected 'a/file.py,z/file.py')"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 8d: conflicting cross-file verdicts -> finding kept + warning
+# ---------------------------------------------------------------------------
+printf '\nTest 8d: conflicting cross-file verdicts -> finding kept + warning\n'
+
+T8D_DIR="$TESTRUN_DIR/t8d"
+mkdir -p "$T8D_DIR"
+
+T8D_FP="556677889900ccdd:1"
+
+python3 - "$T8D_DIR/spine.jsonl" "$T8D_FP" << 'PYEOF'
+import json, sys
+spine_file, fp = sys.argv[1], sys.argv[2]
+with open(spine_file, "w") as fh:
+    fh.write(json.dumps({
+        "type": "provenance", "tool": "ccgm-spine", "version": "1.0",
+        "repo": "/tmp/test-repo", "tools_requested": "semgrep",
+        "timestamp": "2026-01-01T00:00:00Z",
+    }) + "\n")
+    fh.write(json.dumps({
+        "check_id": "security/hardcoded-secret",
+        "rule_id": "semgrep-rule",
+        "severity": "high", "confidence": "medium",
+        "detection": "hybrid", "source": "tool",
+        "message": "possible secret",
+        "location": {"path": "src/auth.py", "line": 7},
+        "fingerprint": fp,
+    }) + "\n")
+PYEOF
+
+# Worker A says dismissed
+python3 - "$T8D_DIR/worker_a.json" "$T8D_FP" << 'PYEOF'
+import json, sys
+out, fp = sys.argv[1], sys.argv[2]
+with open(out, "w") as fh:
+    json.dump({
+      "findings": [],
+      "spine_triage": [{"fingerprint": fp, "verdict": "dismissed", "note": "worker A says false positive"}]
+    }, fh)
+PYEOF
+
+# Worker B says confirmed
+python3 - "$T8D_DIR/worker_b.json" "$T8D_FP" << 'PYEOF'
+import json, sys
+out, fp = sys.argv[1], sys.argv[2]
+with open(out, "w") as fh:
+    json.dump({
+      "findings": [],
+      "spine_triage": [{"fingerprint": fp, "verdict": "confirmed", "note": "worker B says real"}]
+    }, fh)
+PYEOF
+
+# Test both orderings: A then B, and B then A
+set +e
+T8D_STDERR_AB="$(python3 "$MERGE_SCRIPT" --spine "$T8D_DIR/spine.jsonl" \
+  --llm "$T8D_DIR/worker_a.json" --llm "$T8D_DIR/worker_b.json" \
+  --rubric "$RUBRIC_FILE" 2>&1 >/dev/null)"
+T8D_OUT_AB="$(python3 "$MERGE_SCRIPT" --spine "$T8D_DIR/spine.jsonl" \
+  --llm "$T8D_DIR/worker_a.json" --llm "$T8D_DIR/worker_b.json" \
+  --rubric "$RUBRIC_FILE" 2>/dev/null)"
+T8D_EXIT_AB=$?
+
+T8D_STDERR_BA="$(python3 "$MERGE_SCRIPT" --spine "$T8D_DIR/spine.jsonl" \
+  --llm "$T8D_DIR/worker_b.json" --llm "$T8D_DIR/worker_a.json" \
+  --rubric "$RUBRIC_FILE" 2>&1 >/dev/null)"
+T8D_OUT_BA="$(python3 "$MERGE_SCRIPT" --spine "$T8D_DIR/spine.jsonl" \
+  --llm "$T8D_DIR/worker_b.json" --llm "$T8D_DIR/worker_a.json" \
+  --rubric "$RUBRIC_FILE" 2>/dev/null)"
+T8D_EXIT_BA=$?
+set -e
+
+if [[ $T8D_EXIT_AB -eq 0 && $T8D_EXIT_BA -eq 0 ]]; then
+  pass "t8d: merge exits 0 for both orderings"
+else
+  fail "t8d: merge exits $T8D_EXIT_AB (A+B) / $T8D_EXIT_BA (B+A) (expected 0)"
+fi
+
+T8D_PRESENT_AB="$(fp_exists "$T8D_OUT_AB" "$T8D_FP")"
+T8D_PRESENT_BA="$(fp_exists "$T8D_OUT_BA" "$T8D_FP")"
+
+if [[ "$T8D_PRESENT_AB" == "yes" && "$T8D_PRESENT_BA" == "yes" ]]; then
+  pass "t8d: finding kept in both orderings (dismissal requires unanimity)"
+else
+  fail "t8d: finding unexpectedly dropped -- AB=$T8D_PRESENT_AB, BA=$T8D_PRESENT_BA"
+fi
+
+if echo "$T8D_STDERR_AB" | grep -q "WARNING.*conflict\|WARNING.*unanimity\|WARNING.*dismissal"; then
+  pass "t8d: warning emitted for conflicting verdicts (A+B order)"
+else
+  fail "t8d: no conflict warning in A+B order (stderr: $T8D_STDERR_AB)"
+fi
+
+if echo "$T8D_STDERR_BA" | grep -q "WARNING.*conflict\|WARNING.*unanimity\|WARNING.*dismissal"; then
+  pass "t8d: warning emitted for conflicting verdicts (B+A order)"
+else
+  fail "t8d: no conflict warning in B+A order (stderr: $T8D_STDERR_BA)"
 fi
 
 # ---------------------------------------------------------------------------

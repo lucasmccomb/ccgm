@@ -8,8 +8,8 @@ rubric mechanically, and streams schema-valid JSONL to stdout (or --output).
 
 Usage
 -----
-  merge-findings.py --spine <spine.jsonl> [--llm <results.json> ...] \
-                    [--rubric <path>] [--output <path>]
+  merge-findings.py --spine <spine.jsonl> [--llm <results.json> ...] \\
+                    [--rubric <path>] [--repo <abs-path>] [--output <path>]
 
 Arguments
 ---------
@@ -18,6 +18,10 @@ Arguments
                      Pass the flag multiple times for multiple workers.
   --rubric  <path>   Path to severity-rubric.json.
                      Default: ../schemas/severity-rubric.json relative to this script.
+  --repo    <path>   Absolute path to the repository root.
+                     Used to resolve location.path when computing fingerprints so
+                     fingerprints are cwd-independent (matching emit-findings.py).
+                     Default: current working directory.
   --output  <path>   Write merged JSONL to this file. Default: stdout.
 
 Exit codes
@@ -56,37 +60,62 @@ Each --llm file is a JSON object with two keys:
   }
 
 Workers produce this file by:
-  1. Reading their spine-slice (ABSOLUTE path in their task file).
+  1. Reading their spine-slice (ABSOLUTE path embedded in their task file as spine_slice_path).
   2. For each finding with detection="hybrid": deciding confirmed/dismissed.
   3. Adding any llm-only findings to "findings".
   4. Never inventing severity -- rubric lookup only (merge-findings enforces it).
+
+Worker trust-boundary invariants (enforced at intake, not just documented):
+  - A results file missing BOTH "findings" and "spine_triage" keys is likely a typo'd
+    key; a warning is printed naming the file so the problem is not silently swallowed.
+  - Workers must claim source="llm". A finding claiming source="tool" is coerced to
+    "llm" with a stderr warning (deterministic-standing masquerade).
+  - Workers must claim detection="llm" or detection="hybrid". A finding claiming
+    detection="tool" is coerced to detection="llm" with a stderr warning (a worker
+    claiming tool-detection would otherwise become non-dismissible).
 
 Merge semantics (in order)
 ---------------------------
 1.  Parse spine JSONL: separate provenance records, note records (type field
     present), and finding records (no type field).
 2.  Parse each LLM results file; collect findings + triage verdicts.
+    - Enforce worker trust-boundary invariants at intake (see above).
+    - Within a single results file, duplicate fingerprints: first entry wins (the
+      second is a worker-side bug; the warning gate in step 4 will flag the triage
+      target).
+    - Across results files, conflicting verdicts for the same fingerprint: KEEP the
+      finding (dismissal requires unanimity across all workers). A warning names the
+      conflicting fingerprint.
 3.  Ensure every finding has a fingerprint: tool-supplied fingerprints kept
     VERBATIM; fingerprints missing get compute_fingerprint() via the imported
     emit-findings logic (same fallback: message+location when file unreadable).
+    Paths are resolved relative to --repo so fingerprints are cwd-independent.
 4.  Triage:
-      - Drop detection="hybrid" findings whose fingerprint has verdict "dismissed".
+      - Drop detection="hybrid" findings whose fingerprint was unanimously
+        "dismissed" across every results file that named that fingerprint.
       - detection="tool" and detection="llm" findings are NOT dismissible.
         If a triage verdict targets a non-hybrid finding, warn to stderr and skip
         the verdict (the finding is kept).
+      - A triage fingerprint that matches no finding: warn to stderr.
+      - An unknown verdict string (not "confirmed" / "dismissed"): warn to stderr,
+        treat as no-op (never honor unknown verdicts).
       - detection="hybrid" with "confirmed" verdict is kept (same as no verdict --
         the default is keep; dismissed is the only active action).
 5.  Dedup by fingerprint: when a tool finding and an LLM finding share a
     fingerprint, keep the tool finding (source=tool; deterministic wins).
+    Within each source group (tool or llm), first-seen fingerprint wins.
     Order output deterministically: sort by location.path, then location.line,
     then check_id.
-6.  Mechanical rubric enforcement for every finding:
+6.  Validate findings BEFORE sort and rubric steps so malformed input (e.g.
+    "line": "7" as a string) exits 1 through the actionable-error channel instead
+    of a bare TypeError traceback from merged.sort().
+7.  Mechanical rubric enforcement for every finding:
       - check_id IN rubric: overwrite severity, confidence, fix_confidence with
         rubric values. If the overwritten severity DIFFERS from what the finding
         carried, preserve the original as properties.agentReportedSeverity (ADV-007).
       - check_id NOT IN rubric: keep reported severity, force confidence="low",
         set properties.unrubriced=True.
-7.  Output: provenance record(s) first, then merged schema-valid findings (one
+8.  Output: provenance record(s) first, then merged schema-valid findings (one
     JSON object per line), then coverage_gap records (deduped by byte-identity).
     Every finding line is validated; invalid findings cause exit 1.
 """
@@ -206,14 +235,24 @@ def _parse_spine(spine_path: str):
 # LLM results file parsing
 # ---------------------------------------------------------------------------
 
+_KNOWN_VERDICTS = frozenset({"confirmed", "dismissed"})
+
+
 def _parse_llm_file(llm_path: str):
     """
     Parse a single LLM results file.
 
+    Enforces worker trust-boundary invariants at intake:
+      - Missing both "findings" and "spine_triage" keys: stderr warning naming the file.
+      - source="tool" on a worker finding: coerced to "llm" with a warning.
+      - detection="tool" on a worker finding: coerced to "llm" with a warning.
+      - Unknown verdict strings: stderr warning, entry skipped (never honored).
+      - First-wins on duplicate fingerprints within this file.
+
     Returns:
-        llm_findings   list of finding dicts
+        llm_findings   list of finding dicts (trust-boundary coercions applied)
         triage_map     dict of fingerprint -> verdict ("confirmed" | "dismissed")
-        triage_notes   dict of fingerprint -> optional note
+                       Only well-known verdicts for non-duplicate fingerprints are included.
     """
     try:
         with open(llm_path, encoding="utf-8") as fh:
@@ -238,8 +277,17 @@ def _parse_llm_file(llm_path: str):
         )
         sys.exit(1)
 
-    llm_findings = raw.get("findings", [])
-    if not isinstance(llm_findings, list):
+    # Fix #1: warn if neither key is present (likely a typo'd key).
+    if "findings" not in raw and "spine_triage" not in raw:
+        print(
+            f"merge-findings: WARNING: LLM results file {llm_path} contains neither "
+            "'findings' nor 'spine_triage' keys -- possible typo'd key; file ignored",
+            file=sys.stderr,
+        )
+        return [], {}
+
+    llm_findings_raw = raw.get("findings", [])
+    if not isinstance(llm_findings_raw, list):
         print(
             f"merge-findings: ERROR: {llm_path}: 'findings' must be an array",
             file=sys.stderr,
@@ -254,30 +302,70 @@ def _parse_llm_file(llm_path: str):
         )
         sys.exit(1)
 
-    triage_map = {}
-    triage_notes = {}
+    # Fix #5: enforce worker trust-boundary coercions on findings.
+    llm_findings = []
+    for f in llm_findings_raw:
+        if not isinstance(f, dict):
+            continue
+        claimed_source = f.get("source", "")
+        if claimed_source == "tool":
+            print(
+                f"merge-findings: WARNING: {llm_path}: worker finding claims "
+                f"source='tool' (deterministic-standing masquerade); coercing to 'llm'",
+                file=sys.stderr,
+            )
+            f = dict(f)
+            f["source"] = "llm"
+        claimed_detection = f.get("detection", "")
+        if claimed_detection == "tool":
+            print(
+                f"merge-findings: WARNING: {llm_path}: worker finding claims "
+                f"detection='tool'; coercing to 'llm' (a worker claiming tool-detection "
+                "would otherwise become non-dismissible)",
+                file=sys.stderr,
+            )
+            f = dict(f)
+            f["detection"] = "llm"
+        llm_findings.append(f)
+
+    # Build triage_map; warn on unknown verdicts; first-wins on duplicate fingerprints
+    # within this file.
+    triage_map: dict = {}
     for entry in triage_list:
         if not isinstance(entry, dict):
             continue
         fp = entry.get("fingerprint", "")
         verdict = entry.get("verdict", "")
-        if fp and verdict in ("confirmed", "dismissed"):
-            triage_map[fp] = verdict
-            if "note" in entry:
-                triage_notes[fp] = entry["note"]
 
-    return llm_findings, triage_map, triage_notes
+        # Fix #2: warn on unknown verdict strings, never honor them.
+        if verdict not in _KNOWN_VERDICTS:
+            print(
+                f"merge-findings: WARNING: {llm_path}: unknown triage verdict "
+                f"'{verdict}' for fingerprint '{fp}'; treating as no-op",
+                file=sys.stderr,
+            )
+            continue
+
+        if not fp:
+            continue
+
+        # First-wins within this file (within-source dedup rule).
+        if fp not in triage_map:
+            triage_map[fp] = verdict
+
+    return llm_findings, triage_map
 
 
 # ---------------------------------------------------------------------------
 # Fingerprint helper
 # ---------------------------------------------------------------------------
 
-def _ensure_fingerprint(finding: dict, emit_mod) -> dict:
+def _ensure_fingerprint(finding: dict, emit_mod, repo_root: Path) -> dict:
     """
     Ensure the finding has a fingerprint.
     Tool-supplied fingerprints are kept VERBATIM.
     Missing fingerprints are computed via emit-findings' compute_fingerprint.
+    Paths are resolved relative to repo_root so fingerprints are cwd-independent.
     """
     if finding.get("fingerprint"):
         return finding
@@ -287,10 +375,51 @@ def _ensure_fingerprint(finding: dict, emit_mod) -> dict:
     line = loc.get("line", 1)
     message = finding.get("message", "")
 
+    # Resolve path relative to repo_root for cwd-independent fingerprints.
+    abs_path = str(repo_root / path) if path and not Path(path).is_absolute() else path
+
     finding["fingerprint"] = emit_mod.compute_fingerprint(
-        path, line, message
+        abs_path, line, message
     )
     return finding
+
+
+# ---------------------------------------------------------------------------
+# Pre-sort validation helper
+# ---------------------------------------------------------------------------
+
+def _validate_before_sort(findings: list, emit_mod) -> list:
+    """
+    Validate findings BEFORE sort and rubric steps (Fix #6).
+
+    Exits 1 with an actionable error message if any finding is malformed
+    (e.g. location.line is a string instead of an int), so the user sees
+    a clear ERROR rather than a bare TypeError traceback from merged.sort().
+
+    Returns validated findings (unchanged list if all pass).
+    """
+    errors = []
+    for idx, f in enumerate(findings):
+        loc = f.get("location", {})
+        line_val = loc.get("line") if isinstance(loc, dict) else None
+        if line_val is not None and not isinstance(line_val, int):
+            errors.append(
+                f"finding[{idx}] ({f.get('check_id','?')}): "
+                f"location.line must be an integer, got {type(line_val).__name__} "
+                f"value {line_val!r}"
+            )
+        # Also run the full validation to catch any other malformed fields early.
+        try:
+            emit_mod.validate_finding(f)
+        except emit_mod.ValidationError as exc:
+            errors.append(f"finding[{idx}] ({f.get('check_id','?')}): {exc}")
+
+    if errors:
+        for err in errors:
+            print(f"merge-findings: VALIDATION ERROR: {err}", file=sys.stderr)
+        sys.exit(1)
+
+    return findings
 
 
 # ---------------------------------------------------------------------------
@@ -363,8 +492,26 @@ def main() -> int:
         default=None,
         help="Path to severity-rubric.json (default: ../schemas/severity-rubric.json)",
     )
+    parser.add_argument(
+        "--repo",
+        default=None,
+        metavar="ABS_PATH",
+        help=(
+            "Absolute path to the repository root. Used to resolve location.path "
+            "when computing fingerprints so fingerprints are cwd-independent "
+            "(matching emit-findings.py). Default: current working directory."
+        ),
+    )
     parser.add_argument("--output", default=None, help="Output path (default: stdout)")
     args = parser.parse_args()
+
+    # ------------------------------------------------------------------
+    # Resolve repo root
+    # ------------------------------------------------------------------
+    if args.repo:
+        repo_root = Path(args.repo).resolve()
+    else:
+        repo_root = Path.cwd()
 
     # ------------------------------------------------------------------
     # Load emit-findings module for fingerprint + validation
@@ -391,30 +538,60 @@ def main() -> int:
     provenance_records, note_records, spine_findings = _parse_spine(args.spine)
 
     # ------------------------------------------------------------------
-    # Step 2: Parse LLM results files
+    # Step 2: Parse LLM results files.
+    # Collect per-file triage maps to detect cross-file conflicts.
+    # Dismissal requires unanimity: a fingerprint is dismissed only if
+    # EVERY file that named it voted "dismissed".
     # ------------------------------------------------------------------
-    all_llm_findings = []
-    merged_triage_map = {}  # fingerprint -> verdict
+    all_llm_findings: list = []
+    # per_file_triage: list of (llm_path, triage_map) for conflict detection
+    per_file_triage: list = []
 
     for llm_path in args.llm:
-        llm_findings, triage_map, _ = _parse_llm_file(llm_path)
+        llm_findings, triage_map = _parse_llm_file(llm_path)
         all_llm_findings.extend(llm_findings)
-        merged_triage_map.update(triage_map)
+        per_file_triage.append((llm_path, triage_map))
+
+    # Build the merged triage map with conflict detection (Fix #4).
+    # For each fingerprint that appears in any file:
+    #   - All votes "dismissed" -> dismissed.
+    #   - Any vote "confirmed" or conflict -> confirmed (kept); warn if conflict.
+    merged_triage_map: dict = {}  # fingerprint -> "dismissed" | "confirmed"
+    fp_votes: dict = {}  # fp -> list of (path, verdict)
+    for llm_path, tmap in per_file_triage:
+        for fp, verdict in tmap.items():
+            fp_votes.setdefault(fp, []).append((llm_path, verdict))
+
+    for fp, votes in fp_votes.items():
+        verdicts = [v for _, v in votes]
+        unique_verdicts = set(verdicts)
+        if len(unique_verdicts) == 1:
+            merged_triage_map[fp] = verdicts[0]
+        else:
+            # Fix #4: conflicting verdicts -> keep + warn.
+            sources = ", ".join(f"'{v}' from {p}" for p, v in votes)
+            print(
+                f"merge-findings: WARNING: conflicting triage verdicts for "
+                f"fingerprint '{fp}' ({sources}); keeping finding "
+                "(dismissal requires unanimity across all workers)",
+                file=sys.stderr,
+            )
+            merged_triage_map[fp] = "confirmed"
 
     # ------------------------------------------------------------------
     # Step 3: Ensure all findings have fingerprints
     # ------------------------------------------------------------------
     for f in spine_findings:
-        _ensure_fingerprint(f, emit_mod)
+        _ensure_fingerprint(f, emit_mod, repo_root)
     for f in all_llm_findings:
-        _ensure_fingerprint(f, emit_mod)
+        _ensure_fingerprint(f, emit_mod, repo_root)
 
     # ------------------------------------------------------------------
     # Step 4: Apply triage verdicts
     # ------------------------------------------------------------------
-    # Validate triage targets: warn if a triage verdict targets a non-hybrid finding
+    # Build fp -> detection map from all findings for triage validation.
     all_findings_for_triage = spine_findings + all_llm_findings
-    fp_to_detection = {}
+    fp_to_detection: dict = {}
     for f in all_findings_for_triage:
         fp = f.get("fingerprint", "")
         if fp:
@@ -430,8 +607,15 @@ def main() -> int:
                     "verdict ignored -- deterministic findings are not dismissible",
                     file=sys.stderr,
                 )
+        else:
+            # Fix #3: triage fingerprint matches no finding -> warn.
+            print(
+                f"merge-findings: WARNING: triage fingerprint '{fp}' (verdict='{verdict}') "
+                "does not match any finding in the spine or LLM results; verdict ignored",
+                file=sys.stderr,
+            )
 
-    # Filter: drop dismissed hybrids
+    # Filter: drop hybrid findings that were unanimously dismissed.
     def _keep_finding(f: dict) -> bool:
         detection = f.get("detection", "tool")
         if detection != "hybrid":
@@ -444,31 +628,45 @@ def main() -> int:
     all_llm_findings = [f for f in all_llm_findings if _keep_finding(f)]
 
     # ------------------------------------------------------------------
-    # Step 5: Dedup by fingerprint -- tool source wins over llm source
+    # Step 5: Dedup by fingerprint -- tool source wins over llm source.
+    # Within each source group, first-seen fingerprint wins.
     # ------------------------------------------------------------------
-    # Build a dict keyed by fingerprint; tool findings win.
     by_fingerprint: dict = {}
 
-    # Insert LLM findings first (lower priority)
+    # Insert LLM findings first (lower priority); first-wins within this group.
     for f in all_llm_findings:
         fp = f.get("fingerprint", "")
         if fp and fp not in by_fingerprint:
             by_fingerprint[fp] = f
 
-    # Insert spine (tool) findings, overwriting any LLM finding with same fp
+    # Insert spine (tool) findings, overwriting any LLM finding with same fp.
+    # First-seen wins within the spine group (spine is already deterministic).
     for f in spine_findings:
         fp = f.get("fingerprint", "")
         if fp:
-            by_fingerprint[fp] = f  # tool always wins
-        else:
-            # No fingerprint (should not happen after step 3): keep as unique
-            import hashlib as _hl
-            sentinel = _hl.sha256(json.dumps(f, sort_keys=True).encode()).hexdigest()[:16]
-            by_fingerprint[sentinel] = f
+            by_fingerprint[fp] = f  # tool always wins over llm
 
     merged = list(by_fingerprint.values())
 
+    # ------------------------------------------------------------------
+    # Step 5b: Ensure all merged findings have required fields for validation.
+    # Spine findings already conform; LLM findings may be missing rule_id
+    # or other fields. We do a best-effort coerce before validation.
+    # ------------------------------------------------------------------
+    for f in merged:
+        if "rule_id" not in f:
+            f["rule_id"] = f.get("check_id", "unknown")
+
+    # ------------------------------------------------------------------
+    # Step 6: Validate findings BEFORE sort and rubric (Fix #6).
+    # Exits 1 with an actionable message on malformed input (e.g. string line)
+    # instead of a bare TypeError traceback from merged.sort().
+    # ------------------------------------------------------------------
+    merged = _validate_before_sort(merged, emit_mod)
+
+    # ------------------------------------------------------------------
     # Deterministic sort: path, line, check_id
+    # ------------------------------------------------------------------
     def _sort_key(f: dict):
         loc = f.get("location", {})
         return (
@@ -480,22 +678,13 @@ def main() -> int:
     merged.sort(key=_sort_key)
 
     # ------------------------------------------------------------------
-    # Step 6: Mechanical rubric enforcement
+    # Step 7: Mechanical rubric enforcement
     # ------------------------------------------------------------------
     for f in merged:
         _apply_rubric(f, rubric)
 
     # ------------------------------------------------------------------
-    # Step 6b: Ensure all merged findings have required fields for validation.
-    # Spine findings already conform; LLM findings may be missing rule_id
-    # or other fields. We do a best-effort coerce before validation.
-    # ------------------------------------------------------------------
-    for f in merged:
-        if "rule_id" not in f:
-            f["rule_id"] = f.get("check_id", "unknown")
-
-    # ------------------------------------------------------------------
-    # Validate each merged finding
+    # Final validation pass (post-rubric)
     # ------------------------------------------------------------------
     errors = []
     valid_findings = []
@@ -512,7 +701,7 @@ def main() -> int:
         return 1
 
     # ------------------------------------------------------------------
-    # Step 7: Build output lines
+    # Step 8: Build output lines
     # ------------------------------------------------------------------
     output_lines = []
 
@@ -525,7 +714,7 @@ def main() -> int:
         output_lines.append(json.dumps(f, separators=(",", ":")))
 
     # Coverage gaps (dedup byte-identical lines)
-    seen_gaps = set()
+    seen_gaps: set = set()
     for rec in note_records:
         if rec.get("type") == "coverage_gap":
             serialized = json.dumps(rec, separators=(",", ":"), sort_keys=True)

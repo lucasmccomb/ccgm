@@ -1190,13 +1190,13 @@ Workers read their slice from that absolute path. They never access `.audit/curr
 
 For each pack a worker handles:
 
-1. **Triage hybrid candidates**: for every finding in the spine slice with `detection: "hybrid"`, decide `confirmed` or `dismissed` and record a `spine_triage` entry in the results file.
+1. **Triage hybrid candidates**: for every finding in the spine slice with `detection: "hybrid"`, decide `confirmed` or `dismissed` and record a `spine_triage` entry in the results file. A finding is only dropped if ALL workers that named its fingerprint voted `dismissed`; a single `confirmed` vote from any worker overrides any number of `dismissed` votes.
 2. **Add LLM-only findings**: run the pack's LLM/hybrid checks; emit new findings with `source: "llm"`.
 3. **Never invent severity**: workers must NOT set severity, confidence, or fix_confidence from intuition. Use `schemas/severity-rubric.json` only. The merge step enforces this mechanically, but workers should follow it proactively to avoid spurious `agentReportedSeverity` entries.
 
 ### Worker results-file contract
 
-Each worker writes a single JSON file to `.audit/current/results/<worker-id>.json`:
+Each worker writes a single JSON file. The ABSOLUTE path to this file (`.audit/current/results/<worker-id>.json`) is embedded in the worker's task file at the same time as `spine_slice_path`, so workers always receive it as an absolute path and never need to derive it from cwd.
 
 ```json
 {
@@ -1246,8 +1246,11 @@ scripts/merge-findings.py \
   --llm    <ABSOLUTE>/.audit/current/results/worker-1.json \
   ...
   --rubric <ABSOLUTE>/schemas/severity-rubric.json \
+  --repo   <ABSOLUTE repo root> \
   --output <ABSOLUTE>/.audit/current/findings.jsonl
 ```
+
+`--repo` must be the same absolute repo root passed to `scripts/spine/run.sh`. It ensures fingerprints computed for location paths are cwd-independent so baseline comparisons remain stable across invocations from different directories.
 
 The merger:
 
