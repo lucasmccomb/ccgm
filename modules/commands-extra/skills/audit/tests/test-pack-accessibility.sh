@@ -228,7 +228,7 @@ echo "--- Test 7: grep for anchor-missing-rel TP/TN"
 # Write TP fixture file
 TP_FILE="${TMPROOT}/ExternalLink-tp.tsx"
 cat > "${TP_FILE}" <<'TSXEOF'
-// True positive: target="_blank" without rel="noopener noreferrer"
+// anchor opens a new tab without a rel attribute
 function ExternalLink({ href, children }) {
   return <a href={href} target="_blank">{children}</a>;
 }
@@ -247,14 +247,14 @@ function ExternalLink({ href, children }) {
 }
 TSXEOF
 
-# Grep pattern: find target="_blank" occurrences
-TP_MATCHES=$(grep -c 'target="_blank"' "${TP_FILE}" 2>/dev/null || true)
-TN_MATCHES=$(grep -c 'target="_blank"' "${TN_FILE}" 2>/dev/null || true)
+# Grep pattern: find target="_blank" occurrences (canonical char-class pattern)
+TP_MATCHES=$(grep -c 'target=["'"'"']_blank["'"'"']' "${TP_FILE}" 2>/dev/null || true)
+TN_MATCHES=$(grep -c 'target=["'"'"']_blank["'"'"']' "${TN_FILE}" 2>/dev/null || true)
 
 if [ "${TP_MATCHES}" -ge 1 ]; then
-    pass "grep for target=\"_blank\" matches TP fixture (${TP_MATCHES} line(s))"
+    pass "canonical grep matches TP fixture (${TP_MATCHES} code line(s))"
 else
-    fail "grep for target=\"_blank\" did NOT match TP fixture"
+    fail "canonical grep did NOT match TP fixture"
 fi
 
 # For TN: grep finds target="_blank" but the same line also has rel="noopener"

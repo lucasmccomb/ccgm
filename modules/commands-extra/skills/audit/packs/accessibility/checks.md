@@ -234,14 +234,14 @@ function Card({ onClick }: { onClick: () => void }) {
 
 #### Detection
 
-The LLM agent (or agent-run grep) scans JSX/TSX and HTML-in-JS files for `<a>` elements
-with `target="_blank"` that are missing `rel="noopener noreferrer"` (or at minimum
-`rel="noopener"`).
+The LLM agent (or agent-run grep) scans JSX/TSX, JavaScript, TypeScript, and HTML files
+for `<a>` elements with `target="_blank"` that are missing `rel="noopener noreferrer"`
+(or at minimum `rel="noopener"`).
 
-Grep pattern (deterministic, run by the agent against `.jsx`, `.tsx`, `.html` files):
+Grep pattern (deterministic, run by the agent against `.tsx`, `.jsx`, `.ts`, `.js`, `.html` files):
 
 ```
-grep -rn 'target=["'"'"']_blank["'"'"']' --include='*.tsx' --include='*.jsx' --include='*.html'
+grep -rn 'target=["'"'"']_blank["'"'"']' --include='*.tsx' --include='*.jsx' --include='*.ts' --include='*.js' --include='*.html'
 ```
 
 For each grep match, the agent then checks whether `rel` contains `noopener` on the same
@@ -261,14 +261,12 @@ READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
 Use the Fix Type Reference table from that file to assign fix_type and fix_confidence to
 each finding. Do not rely on memory — open and apply the file.
 
-Scan JSX, TSX, and HTML files for anchor elements (<a>) with target="_blank" that are
-missing rel="noopener noreferrer".
+Scan JSX, TSX, JavaScript, TypeScript, and HTML files for anchor elements (<a>) with
+target="_blank" that are missing rel="noopener noreferrer".
 
 Detection approach: run the following grep to find candidate lines, then check each match:
 
-  grep -rn 'target="_blank"\|target='"'"'_blank'"'"'' \
-    --include='*.tsx' --include='*.jsx' --include='*.html' \
-    --include='*.ts' --include='*.js'
+  grep -rn 'target=["'"'"']_blank["'"'"']' --include='*.tsx' --include='*.jsx' --include='*.ts' --include='*.js' --include='*.html'
 
 For each match, flag it as a finding if the SAME JSX element or HTML tag does NOT contain
 a rel attribute that includes "noopener". Acceptable rel values: "noopener noreferrer",
