@@ -1,0 +1,46 @@
+{
+  "id": "ccgm/accessibility",
+  "name": "Accessibility",
+  "version": "1.0.0",
+  "applies_when": ["language:javascript"],
+  "tags": ["accessibility", "a11y", "jsx", "wcag"],
+  "severity_floor": "low",
+  "tools": [],
+  "checks": [
+    {
+      "id": "a11y/img-missing-alt",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "a11y/click-without-keyboard",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "a11y/anchor-missing-rel",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "a11y/missing-prefers-reduced-motion",
+      "severity": "low",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "a11y/tailwind-cursor-pointer",
+      "severity": "low",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": true
+    }
+  ]
+}
