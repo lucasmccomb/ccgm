@@ -34,10 +34,10 @@ TMPFILE="$(mktemp /tmp/ccgm-eslint-XXXXXX.json)"
 trap 'rm -f "$TMPFILE"' EXIT
 
 # Config isolation: --no-config-lookup is the critical flag.
-# We pass --rule '{}' so no rules run by default -- this is intentional:
-# the audit spine is for security/quality rules from known packs, not
-# running the repo's own lint config against itself.
-# repo_root is passed via cd in subshell, glob is a static pattern.
+# We pass a fixed minimal eval-rule set (no-eval, no-implied-eval, no-new-func)
+# so only the audit spine's known security rules run -- the repo's own lint
+# config is never loaded.  repo_root is passed via cd in subshell, glob is
+# a static pattern.
 set +e
 (
   cd "$REPO_ROOT"

@@ -16,12 +16,29 @@ Comprehensive codebase audit. Produces a findings document and creates GitHub is
 /audit --collect          # Compile results + create issues (after workers complete)
 /audit --collect --force  # Collect even if some agents haven't completed
 /audit --max-fixes 10     # Limit number of auto-fixes (only with --fix)
+
+# Diff-scoped audit (limit findings to changed files only)
+/audit --diff             # Audit only files changed vs the detected base branch (git diff)
+/audit --diff main        # Audit only files changed vs a specific ref
+/audit --staged           # Audit only files currently staged for commit
 ```
+
+> **Note on `--diff` and `--staged`**: These flags scope the audit to changed files only.
+> `--diff` is composable with `--fix` and all execution strategies. `--staged` is always
+> read-only — `--fix` is ignored with a printed note when combined with `--staged`.
+> The deterministic spine still runs against the full repo root; its findings are filtered
+> to the changed-file set before slicing and merging. LLM workers receive the changed-file
+> list and are instructed to audit only those files (except repo-wide checks whose subject
+> file is in the changed set).
 
 > **Note on `--single` and `--fix`**: `--single` is always read-only. It never applies
 > fixes even if `--fix` is also passed. If you invoke `/audit --single --fix`, the `--fix`
 > flag is silently ignored and a note is printed:
 > `Note: --single is read-only; --fix ignored. Use parallel-worktrees strategy for auto-fix.`
+
+> **Note on `--staged` and `--fix`**: `--staged` is always read-only. If you invoke
+> `/audit --staged --fix`, the `--fix` flag is ignored and a note is printed:
+> `Note: --staged is read-only; --fix ignored. Staged-only audits do not apply fixes.`
 
 ### Interactive Configuration
 
@@ -65,6 +82,8 @@ This ensures the user always knows exactly what the audit will do before it star
 - `--fix` -> sets FIX_MODE=true (ignored silently when combined with --single)
 - `--max-fixes N` -> sets MAX_FIXES=N (only with --fix)
 - `--manual` -> Coordinator-Only Mode (Phases M1-M4 + output launch commands)
+- `--diff [ref]` -> sets DIFF_MODE=true; changed files computed via `git diff -z <ref>...HEAD` (ref defaults to BASE_BRANCH). Composable with `--single`, `--fix`, and all execution strategies.
+- `--staged` -> sets STAGED_MODE=true; changed files computed via `git diff -z --staged`. Composable with `--single` and all execution strategies. `--fix` is ignored with a printed note when combined with `--staged` — staged-only runs are always read-only.
 - Remaining argument is the target path (default: entire repo)
 
 **If NO flags are passed, prompt the user with `AskUserQuestion` to configure the audit:**
@@ -196,6 +215,140 @@ Write `config.json`:
 }
 ```
 
+### Phase M2.1: Diff Scope (--diff / --staged only)
+
+**Skip this phase entirely for full-repo audits.** Only execute when `--diff` or `--staged` is set.
+
+1. **Compute the changed-file set once** and write it to the coordination directory.
+
+   `changed-files.z` is canonical for machine consumers; `changed-files.txt` is a lossy
+   human-readable view for LLM scoping (filenames containing newlines render ambiguously there).
+
+   ```bash
+   # --diff mode: changed files vs <ref>...HEAD
+   if [ "${DIFF_MODE:-false}" = "true" ]; then
+     DIFF_REF="${DIFF_REF:-$BASE_BRANCH}"
+     git -C "$REPO_DIR" diff --name-only -z "${DIFF_REF}...HEAD" \
+       > "$AUDIT_DIR/current/changed-files.z"
+     if [ $? -ne 0 ]; then
+       echo "ERROR: git diff failed for ref '${DIFF_REF}' — does it exist?" >&2
+       echo "  Verify with: git rev-parse --verify '${DIFF_REF}'" >&2
+       exit 1
+     fi
+   fi
+
+   # --staged mode: staged files only
+   if [ "${STAGED_MODE:-false}" = "true" ]; then
+     git -C "$REPO_DIR" diff --name-only -z --staged \
+       > "$AUDIT_DIR/current/changed-files.z"
+     if [ $? -ne 0 ]; then
+       echo "ERROR: git diff --staged failed" >&2
+       exit 1
+     fi
+   fi
+
+   # Generate the human-readable version FROM the -z file using python3.
+   # Never split on shell word boundaries — filenames may contain spaces,
+   # semicolons, or other metacharacters; they must remain inert data.
+python3 - "$AUDIT_DIR/current/changed-files.z" \
+          "$AUDIT_DIR/current/changed-files.txt" << 'PYEOF'
+import sys
+with open(sys.argv[1], "rb") as fh:
+    data = fh.read()
+# Null-delimited; strip trailing null before splitting
+paths = [p.decode("utf-8", errors="surrogateescape")
+         for p in data.rstrip(b"\x00").split(b"\x00") if p]
+with open(sys.argv[2], "w", encoding="utf-8") as out:
+    for p in paths:
+        out.write(p + "\n")
+print(f"diff scope: {len(paths)} changed file(s)", file=sys.stderr)
+PYEOF
+   ```
+
+2. **Empty-set guard**: if `changed-files.z` is empty (zero bytes or contains only null bytes), clean up the current directory so the next invocation does not hit the resume prompt for a no-op run (config.json would otherwise still claim full-repo scope), then exit cleanly — no spine, no workers, no report:
+
+   ```bash
+   CHANGED_COUNT=$(python3 -c "
+   import sys
+   data = open(sys.argv[1], 'rb').read()
+   paths = [p for p in data.rstrip(b'\x00').split(b'\x00') if p]
+   print(len(paths))
+   " "$AUDIT_DIR/current/changed-files.z")
+
+   if [ "${CHANGED_COUNT:-0}" -eq 0 ]; then
+     echo "no changed files — nothing to audit"
+     rm -rf "$AUDIT_DIR/current/"
+     exit 0
+   fi
+   ```
+
+3. **Update config.json** with diff scope metadata:
+   ```json
+   {
+     "scope": "diff",
+     "diff_ref": "<ref or 'staged'>",
+     "changed_files": <count>
+   }
+   ```
+
+4. The rest of the M-phase pipeline runs unchanged. The diff scope is enforced in two ways:
+   - **LLM scoping**: task files written in Phase M4 include the absolute path to `changed-files.txt` and the instruction: "Audit ONLY files listed in changed-files.txt. Checks whose subject is repo-wide (dependency manifests, ToS surfaces) run only if their subject file is in that list."
+   - **Spine post-filter**: after the spine runs (Phase M4), filter its findings before slicing:
+
+   ```bash
+python3 - \
+  "$AUDIT_DIR/current/spine/findings.jsonl" \
+  "$AUDIT_DIR/current/changed-files.z" \
+  "$AUDIT_DIR/current/spine/findings-diff-filtered.jsonl" << 'PYEOF'
+import json, sys
+
+spine_file, changed_z, out_file = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# Read changed paths null-delimited — no shell interpolation anywhere.
+with open(changed_z, "rb") as fh:
+    data = fh.read()
+changed_set = set(
+    p.decode("utf-8", errors="surrogateescape")
+    for p in data.rstrip(b"\x00").split(b"\x00") if p
+)
+
+kept = 0
+skipped = 0
+with open(spine_file, encoding="utf-8") as fin, \
+     open(out_file, "w", encoding="utf-8") as fout:
+    for raw in fin:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        # coverage_gap and provenance records always pass through.
+        if "type" in rec:
+            fout.write(raw + "\n")
+            continue
+        # Finding records: keep only if location.path is in the changed set.
+        path = rec.get("location", {}).get("path", "")
+        if path in changed_set:
+            fout.write(raw + "\n")
+            kept += 1
+        else:
+            skipped += 1
+
+print(f"diff-filter: kept {kept} finding(s), skipped {skipped} (not in changed set)",
+      file=sys.stderr)
+PYEOF
+
+   # Replace the spine findings file with the filtered version for downstream phases.
+   mv "$AUDIT_DIR/current/spine/findings-diff-filtered.jsonl" \
+      "$AUDIT_DIR/current/spine/findings.jsonl"
+   ```
+
+5. **Report header**: the audit report compiled in Phase M6 includes:
+   > `Diff scope: N changed files (ref: <ref or "staged">)`.
+   > Deterministic tools scanned the full repository root; findings are scoped to the changed-file set.
+
 ### Phase M2.5: Create Epic Issue
 
 Create a GitHub epic issue to serve as the parent tracker for this audit run. All downstream findings issues (created during collection) will reference this epic.
@@ -326,6 +479,44 @@ else
     --repo  "$REPO_DIR" \
     --tools "$SPINE_TOOLS" \
     --output "$AUDIT_DIR/current/spine/findings.jsonl"
+fi
+
+# Diff mode: apply the Phase M2.1 post-filter to the spine findings NOW, before slicing.
+if [ "${DIFF_MODE:-false}" = "true" ] || [ "${STAGED_MODE:-false}" = "true" ]; then
+  python3 - \
+    "$AUDIT_DIR/current/spine/findings.jsonl" \
+    "$AUDIT_DIR/current/changed-files.z" \
+    "$AUDIT_DIR/current/spine/findings-diff-filtered.jsonl" << 'PYEOF'
+import json, sys
+spine_file, changed_z, out_file = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(changed_z, "rb") as fh:
+    data = fh.read()
+changed_set = set(
+    p.decode("utf-8", errors="surrogateescape")
+    for p in data.rstrip(b"\x00").split(b"\x00") if p
+)
+kept = 0; skipped = 0
+with open(spine_file, encoding="utf-8") as fin, \
+     open(out_file, "w", encoding="utf-8") as fout:
+    for raw in fin:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if "type" in rec:
+            fout.write(raw + "\n"); continue
+        path = rec.get("location", {}).get("path", "")
+        if path in changed_set:
+            fout.write(raw + "\n"); kept += 1
+        else:
+            skipped += 1
+print(f"diff-filter (M4): kept {kept}, skipped {skipped}", file=sys.stderr)
+PYEOF
+  mv "$AUDIT_DIR/current/spine/findings-diff-filtered.jsonl" \
+     "$AUDIT_DIR/current/spine/findings.jsonl"
 fi
 ```
 
@@ -996,7 +1187,10 @@ Merge from `origin/audit/agent-$i-$AUDIT_DATE`.
    done
 
    if [ "${USE_CLONES:-false}" = "true" ]; then
-     # Multi-clone: branches were pushed to origin — merge from origin refs
+     # Multi-clone: branches were pushed to origin — fetch first so the
+     # coordinator sees them (coordinator may not have fetched since workers pushed).
+     git fetch origin
+     # Merge from origin refs
      for i in 0 1 2 3; do
        BRANCH="origin/audit/agent-$i-$AUDIT_DATE"
        git rev-parse --verify --quiet "origin/audit/agent-$i-$AUDIT_DATE" 2>/dev/null || continue
@@ -1056,8 +1250,9 @@ EOF
      echo "  Expected branches:" >&2
      for b in "${EXPECTED_BRANCHES[@]}"; do echo "    $b" >&2; done
      echo "  No combined branch was pushed and no PR was created." >&2
-     echo "  Possible causes: workers did not commit, wrong AUDIT_DATE, or branches" >&2
-     echo "  were removed before M6-fix ran." >&2
+     echo "  Possible causes: workers did not commit, wrong AUDIT_DATE, branches" >&2
+     echo "  were removed before M6-fix ran, or (multi-clone) coordinator has not" >&2
+     echo "  fetched since workers pushed (run 'git fetch origin' and retry)." >&2
      exit 1
    fi
    ```
@@ -1107,6 +1302,31 @@ mkdir -p "$AUDIT_DIR/current/results"
 grep -qxF '.audit/' .gitignore 2>/dev/null || echo '.audit/' >> .gitignore
 ```
 
+### Phase 1.5: Diff Scope (--diff / --staged only, single-session)
+
+**Skip this phase entirely for full-repo audits.** Only execute when `--diff` or `--staged` is set.
+
+Same mechanics as Phase M2.1 in Autonomous Mode: compute the changed-file set once, write
+`$AUDIT_DIR/current/changed-files.z` (null-delimited) and `changed-files.txt` (one path per
+line, generated by python3 from the -z file — never by shell string-splitting), guard on empty
+set, and write `.audit/current/config.json` recording the diff scope (create it; single-session
+mode has none yet). All python3 parsing is null-delimited end-to-end; filenames containing
+spaces, semicolons, or newlines are inert data and are never interpolated into a shell string.
+
+**Bad-ref halt**: if the `git diff` command exits nonzero (nonexistent ref), HALT immediately
+with the git error — do not fall through to the empty-set path.
+
+**Spine post-filter (single-session)**: after the spine runs in Phase 3, apply the same
+documented python3 filter step against `changed-files.z` before producing per-pack slices.
+Filter spine findings whose `location.path` is NOT in the changed set; pass through all
+`coverage_gap` and `provenance` records unfiltered.
+
+**LLM scoping**: each pack subagent's prompt in Phase 4 includes the absolute path to
+`changed-files.txt` and the rule: "Audit ONLY files listed in changed-files.txt. Checks
+whose subject is repo-wide run only if their subject file is in that list."
+
+**Report header**: same as M-phase — note diff scope and changed-file count.
+
 ### Phase 2: Ecosystem Detection + Pack Selection
 
 Run the detector and registry inline:
@@ -1150,6 +1370,44 @@ else
     --repo  "$REPO_DIR" \
     --tools "$SPINE_TOOLS" \
     --output "$AUDIT_DIR/current/spine/findings.jsonl"
+fi
+
+# Diff mode: apply the Phase 1.5 post-filter to the spine findings NOW, before slicing.
+if [ "${DIFF_MODE:-false}" = "true" ] || [ "${STAGED_MODE:-false}" = "true" ]; then
+  python3 - \
+    "$AUDIT_DIR/current/spine/findings.jsonl" \
+    "$AUDIT_DIR/current/changed-files.z" \
+    "$AUDIT_DIR/current/spine/findings-diff-filtered.jsonl" << 'PYEOF'
+import json, sys
+spine_file, changed_z, out_file = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(changed_z, "rb") as fh:
+    data = fh.read()
+changed_set = set(
+    p.decode("utf-8", errors="surrogateescape")
+    for p in data.rstrip(b"\x00").split(b"\x00") if p
+)
+kept = 0; skipped = 0
+with open(spine_file, encoding="utf-8") as fin, \
+     open(out_file, "w", encoding="utf-8") as fout:
+    for raw in fin:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if "type" in rec:
+            fout.write(raw + "\n"); continue
+        path = rec.get("location", {}).get("path", "")
+        if path in changed_set:
+            fout.write(raw + "\n"); kept += 1
+        else:
+            skipped += 1
+print(f"diff-filter (Phase 3): kept {kept}, skipped {skipped}", file=sys.stderr)
+PYEOF
+  mv "$AUDIT_DIR/current/spine/findings-diff-filtered.jsonl" \
+     "$AUDIT_DIR/current/spine/findings.jsonl"
 fi
 ```
 
@@ -1265,6 +1523,7 @@ flag on the specific check. A check is eligible for autonomous fix only when:
 | Task agent times out | Collect proceeds with completed workers, reports incomplete ones. |
 | All Task agents fail | Report failure, suggest `--manual` mode. |
 | `--single` with `--fix` | Print note: `--single is read-only; --fix ignored`. Proceed read-only. |
+| `--staged` with `--fix` | Print note: `--staged is read-only; --fix ignored`. Proceed read-only. |
 
 ---
 

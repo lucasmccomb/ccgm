@@ -88,7 +88,8 @@ def process_npm_pnpm(data, pm):
             message=message,
             fingerprint=fp,
             properties={
-                "tool": pm,
+                "tool": "dep-audit",
+                "package_manager": pm,
                 "package": pkg_name,
             },
         )
@@ -144,7 +145,8 @@ def process_yarn(data):
             message=message,
             fingerprint=fp,
             properties={
-                "tool": "yarn",
+                "tool": "dep-audit",
+                "package_manager": "yarn",
                 "package": pkg,
             },
         )

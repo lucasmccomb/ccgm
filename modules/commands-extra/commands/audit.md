@@ -18,6 +18,9 @@ Run a comprehensive codebase audit across 9 categories. See the full skill for a
 /audit --collect          # Compile results + create issues (after workers complete)
 /audit --collect --force  # Collect even if some agents haven't completed
 /audit --max-fixes 10     # Limit number of auto-fixes (only with --fix)
+/audit --diff             # Audit only files changed vs the detected base branch
+/audit --diff main        # Audit only files changed vs a specific ref
+/audit --staged           # Audit only files currently staged for commit (always read-only; --fix ignored)
 /audit [PATH]             # Audit a specific path instead of the entire repo
 ```
 
