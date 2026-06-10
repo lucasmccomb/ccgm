@@ -412,6 +412,67 @@ PYEOF
   fi
 }
 
+
+# ---------------------------------------------------------------------------
+# Scenario D: live tool_versions — gitleaks key present when installed
+# ---------------------------------------------------------------------------
+
+run_scenario_d() {
+  if ! command -v gitleaks > /dev/null 2>&1; then
+    printf '  [SKIP] scenario-d: gitleaks not on PATH\n'
+    return
+  fi
+
+  local tmpdir
+  tmpdir="$(mktemp -d /tmp/ccgm-test-provenance-XXXXXX)"
+  trap "rm -rf '$tmpdir'" RETURN
+
+  git -C "$tmpdir" init -q
+  git -C "$tmpdir" -c core.hooksPath=/dev/null \
+      -c user.email="test@test.invalid" \
+      -c user.name="Test" \
+      commit --allow-empty -m "init" -q
+
+  local findings_file="$tmpdir/findings.jsonl"
+  make_finding "src/app.ts" > "$findings_file"
+
+  local out_file="$tmpdir/out.jsonl"
+
+  # Run WITHOUT --skip-tool-versions so tool_versions is populated
+  python3 "$PROV_SCRIPT" \
+    --findings "$findings_file" \
+    --repo "$tmpdir" \
+    --rubric "$RUBRIC_FILE" \
+    --output "$out_file"
+
+  local got_tv
+  got_tv="$(jsonl_header_field "$out_file" tool_versions)"
+
+  # tool_versions must not be empty object when gitleaks is installed
+  if [[ "$got_tv" == "{}" ]]; then
+    fail "scenario-d: tool_versions={} but gitleaks is installed; expected gitleaks key"
+    return
+  fi
+
+  # gitleaks key must be present
+  local has_gitleaks
+  has_gitleaks="$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print('yes' if 'gitleaks' in d else 'no')" "$got_tv")"
+  if [[ "$has_gitleaks" != "yes" ]]; then
+    fail "scenario-d: tool_versions missing gitleaks key; got: $got_tv"
+    return
+  fi
+
+  # gitleaks version string must be non-empty
+  local gitleaks_ver
+  gitleaks_ver="$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('gitleaks',''))" "$got_tv")"
+  if [[ -z "$gitleaks_ver" ]]; then
+    fail "scenario-d: gitleaks version string is empty"
+    return
+  fi
+
+  pass "scenario-d: tool_versions contains gitleaks='$gitleaks_ver' (live probe)"
+}
+
 # ---------------------------------------------------------------------------
 # Run all scenarios
 # ---------------------------------------------------------------------------
@@ -426,6 +487,9 @@ run_scenario_b
 
 printf '\nScenario C: per-package scoping + package_summary records\n'
 run_scenario_c
+
+printf '\nScenario D: live tool_versions — gitleaks key\n'
+run_scenario_d
 
 # ---------------------------------------------------------------------------
 # Report

@@ -44,7 +44,8 @@ Output (valid JSONL):
 
 Exit codes:
   0  success
-  1  malformed input (bad JSONL, missing required --findings/--repo)
+  1  malformed input (bad JSONL, unreadable file, invalid --repo path)
+  2  missing or invalid CLI arguments (handled by argparse before script logic runs)
 """
 
 import argparse
