@@ -1,0 +1,53 @@
+{
+  "id": "ccgm/ci-cd",
+  "name": "CI/CD Hardening",
+  "version": "1.0.0",
+  "applies_when": ["has_workflows"],
+  "tags": ["ci", "github-actions", "supply-chain", "security"],
+  "severity_floor": "medium",
+  "tools": ["actionlint", "zizmor", "pinact"],
+  "checks": [
+    {
+      "id": "cicd/unpinned-action",
+      "severity": "high",
+      "confidence": "high",
+      "detection": "hybrid",
+      "tool": "pinact",
+      "fallback": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "cicd/dangerous-trigger",
+      "severity": "critical",
+      "confidence": "high",
+      "detection": "hybrid",
+      "tool": "zizmor",
+      "fallback": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "cicd/excessive-permissions",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "tool",
+      "tool": "zizmor",
+      "auto_fixable": false
+    },
+    {
+      "id": "cicd/script-injection",
+      "severity": "high",
+      "confidence": "high",
+      "detection": "tool",
+      "tool": "zizmor",
+      "auto_fixable": false
+    },
+    {
+      "id": "cicd/actionlint-error",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "tool",
+      "tool": "actionlint",
+      "auto_fixable": false
+    }
+  ]
+}
