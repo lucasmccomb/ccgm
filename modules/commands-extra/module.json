@@ -459,6 +459,86 @@
       "type": "doc",
       "template": false
     },
+    "skills/audit/packs/api-contract/pack.json": {
+      "target": "skills/audit/packs/api-contract/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/api-contract/checks.md": {
+      "target": "skills/audit/packs/api-contract/checks.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/privacy/pack.json": {
+      "target": "skills/audit/packs/privacy/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/privacy/checks.md": {
+      "target": "skills/audit/packs/privacy/checks.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/observability/pack.json": {
+      "target": "skills/audit/packs/observability/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/observability/checks.md": {
+      "target": "skills/audit/packs/observability/checks.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/ccgm-hygiene/pack.json": {
+      "target": "skills/audit/packs/ccgm-hygiene/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/ccgm-hygiene/checks.md": {
+      "target": "skills/audit/packs/ccgm-hygiene/checks.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/ccgm-standards/pack.json": {
+      "target": "skills/audit/packs/ccgm-standards/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/ccgm-standards/checks.md": {
+      "target": "skills/audit/packs/ccgm-standards/checks.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-pip-audit.sh": {
+      "target": "skills/audit/scripts/spine/wrap-pip-audit.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-pip-audit.py": {
+      "target": "skills/audit/scripts/spine/parse-pip-audit.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-cargo-audit.sh": {
+      "target": "skills/audit/scripts/spine/wrap-cargo-audit.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-cargo-audit.py": {
+      "target": "skills/audit/scripts/spine/parse-cargo-audit.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-bundler-audit.sh": {
+      "target": "skills/audit/scripts/spine/wrap-bundler-audit.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-bundler-audit.py": {
+      "target": "skills/audit/scripts/spine/parse-bundler-audit.py",
+      "type": "script",
+      "template": false
+    },
     "skills/audit/scripts/spine/wrap-checkov.sh": {
       "target": "skills/audit/scripts/spine/wrap-checkov.sh",
       "type": "script",
