@@ -42,7 +42,7 @@ fail() { printf "  FAIL: %s\n" "$1"; FAIL=$((FAIL + 1)); }
 echo "--- Test 1: pack.json validates (stdlib registry.py)"
 
 # Write validator to a temp file to avoid heredoc-in-command-substitution warnings.
-_T1_PY="$(mktemp /tmp/pack_validate_rel_XXXXXX.py)"
+_T1_PY="$(mktemp "${TMPDIR:-/tmp}/pack_validate_rel.XXXXXX")"
 cat > "${_T1_PY}" <<'PYEOF'
 import sys, json, importlib.util, pathlib
 

@@ -40,7 +40,7 @@ fail() {
 # ---------------------------------------------------------------------------
 printf '\n(a) parse-eslint.py: synthetic output with eqeqeq + no-unreachable\n'
 
-SYNTHETIC_INPUT="$(mktemp /tmp/ccgm-eslint-synth-XXXXXX.json)"
+SYNTHETIC_INPUT="$(mktemp "${TMPDIR:-/tmp}/ccgm-eslint-synth.XXXXXX")"
 trap 'rm -f "$SYNTHETIC_INPUT"' EXIT
 
 # Construct ESLint-shaped JSON with one eqeqeq violation and one no-unreachable violation
@@ -141,7 +141,7 @@ fi
 
 # Verify all emitted check_ids are in the rubric (rubric-known).
 # Write findings to a temp file to avoid stdin/heredoc conflict.
-PARSE_OUTPUT_FILE="$(mktemp /tmp/ccgm-parse-out-XXXXXX.jsonl)"
+PARSE_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/ccgm-parse-out.XXXXXX")"
 printf '%s\n' "$PARSE_OUTPUT" > "$PARSE_OUTPUT_FILE"
 trap 'rm -f "$SYNTHETIC_INPUT" "$PARSE_OUTPUT_FILE"' EXIT
 
