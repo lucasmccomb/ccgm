@@ -171,7 +171,7 @@ def validate_finding(obj: dict) -> None:
     if not _RE_FINGERPRINT.match(obj["fingerprint"]):
         raise ValidationError(
             f"fingerprint '{obj['fingerprint']}' does not match "
-            "^[A-Za-z0-9_.:+/=-]{{8,128}}$"
+            "^[A-Za-z0-9_.:+/=-]{8,128}$"
         )
 
 
