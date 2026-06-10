@@ -70,6 +70,26 @@
       "confidence": "high",
       "fix_confidence": "low"
     },
+    "dependencies/postinstall-script": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "dependencies/typosquat": {
+      "severity": "high",
+      "confidence": "low",
+      "fix_confidence": "low"
+    },
+    "dependencies/lockfile-integrity": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "dependencies/unpinned-version-range": {
+      "severity": "medium",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
     "code-quality/eslint-violation": {
       "severity": "medium",
       "confidence": "high",
