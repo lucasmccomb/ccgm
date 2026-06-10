@@ -11,8 +11,9 @@
       "id": "ccgm/shipped-todo-marker",
       "severity": "info",
       "confidence": "high",
-      "detection": "tool",
-      "fallback": "grep"
+      "detection": "hybrid",
+      "tool": "grep",
+      "fallback": "llm"
     },
     {
       "id": "ccgm/env-example-drift",
@@ -25,8 +26,9 @@
       "id": "ccgm/cloudflare-pages-no-git",
       "severity": "high",
       "confidence": "high",
-      "detection": "tool",
-      "fallback": "grep"
+      "detection": "hybrid",
+      "tool": "grep",
+      "fallback": "llm"
     }
   ]
 }

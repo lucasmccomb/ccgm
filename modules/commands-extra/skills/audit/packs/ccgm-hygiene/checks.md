@@ -41,7 +41,7 @@ respective packs.
 
 **Severity:** `info`
 **Confidence:** `high`
-**Detection:** `tool`
+**Detection:** `hybrid`
 
 #### Detection
 
@@ -58,18 +58,22 @@ grep (built-in to all POSIX systems; no additional tool required)
 
 Rule / rule-id: n/a (grep pattern: `\b(TODO|FIXME|XXX|HACK)\b`)
 
-Fallback when tool absent: grep is always available; no fallback needed.
+Fallback when tool absent: llm (LLM worker scans source files for TODO/FIXME/XXX/HACK markers
+when grep is unavailable).
 
 **LLM instruction (if detection = llm or hybrid):**
-n/a — detection is grep-only.
+Grep pre-screen finds candidate lines containing TODO, FIXME, XXX, or HACK. If grep is
+unavailable, the LLM worker scans source files directly for those patterns and reports
+each match as a finding. The LLM confirms grep candidates and may suppress false positives
+(e.g., markers inside generated files or vendor directories).
 
 #### Spine Wiring
 
 ```yaml
 check_id: ccgm/shipped-todo-marker
-detection: tool
+detection: hybrid
 tool: grep
-fallback: grep
+fallback: llm
 ```
 
 Grep command (for reference):
@@ -251,7 +255,7 @@ STRIPE_SECRET_KEY=sk_test_your_key_here
 
 **Severity:** `high`
 **Confidence:** `high`
-**Detection:** `tool`
+**Detection:** `hybrid`
 
 #### Detection
 
@@ -271,21 +275,23 @@ grep (built-in; no additional tool required)
 
 Rule / rule-id: n/a (grep pattern: `wrangler pages deploy`)
 
-Fallback when tool absent: grep is always available; no fallback needed.
+Fallback when tool absent: llm (LLM worker scans workflow and script files for
+`wrangler pages deploy` invocations when grep is unavailable).
 
 **LLM instruction (if detection = llm or hybrid):**
-n/a — primary detection is grep-based. An LLM clarification step is optional: if grep
-finds a `wrangler pages deploy` invocation, the LLM may inspect context to determine
-whether the invocation targets an existing Git-connected project (acceptable) vs. creates
-a new project name (flagged). When in doubt, flag and note for human review.
+Grep pre-screen finds candidate lines containing `wrangler pages deploy`. The LLM
+confirms each candidate: inspect context to determine whether the invocation targets an
+existing Git-connected project (acceptable) vs. creates a new project name (flagged).
+When in doubt, flag and note for human review. If grep is unavailable, the LLM worker
+scans workflow files (*.yml, *.yaml, *.sh, *.json, Makefile) directly for the pattern.
 
 #### Spine Wiring
 
 ```yaml
 check_id: ccgm/cloudflare-pages-no-git
-detection: tool
+detection: hybrid
 tool: grep
-fallback: grep
+fallback: llm
 ```
 
 Grep command (for reference):
