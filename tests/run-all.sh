@@ -30,6 +30,18 @@ if [[ -x "$SCRIPT_DIR/run-unit-tests.sh" ]]; then
   fi
 fi
 
+# /audit skill test suite (24 suites).
+if [[ -x "$SCRIPT_DIR/run-audit-suite.sh" ]]; then
+  echo ""
+  echo "=== Running run-audit-suite.sh ==="
+  if bash "$SCRIPT_DIR/run-audit-suite.sh"; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_TESTS+=("run-audit-suite.sh")
+  fi
+fi
+
 echo ""
 echo "=== Test Summary ==="
 echo "Passed: $PASS"

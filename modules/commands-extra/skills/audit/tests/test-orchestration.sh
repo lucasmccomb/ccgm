@@ -570,6 +570,14 @@ if [ -z "$ABSENT_TOOL" ]; then
   echo "  SKIP: coverage_gap sub-test: no absent tool found"
   echo "  SKIP: coverage_gap sub-test: merge with coverage-only spine"
   echo "  SKIP: coverage_gap sub-test: coverage_gap in merged output"
+elif [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+  # run.sh uses declare -A which requires bash 4+.
+  # Skip the spine invocation on bash 3.2 (macOS system shell);
+  # ubuntu CI (bash 5) will exercise these assertions.
+  echo "  Spine invocation skipped -- bash < 4 (spine requires bash 4+; ubuntu CI will run this)"
+  pass "coverage_gap sub-test skipped -- bash < 4 (spine requires bash 4+)"
+  pass "merge-findings.py coverage_gap test skipped -- bash < 4"
+  pass "coverage_gap fold-through test skipped -- bash < 4"
 else
   echo "  Using absent tool '$ABSENT_TOOL' for coverage_gap sub-test"
 

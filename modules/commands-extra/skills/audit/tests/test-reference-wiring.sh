@@ -159,16 +159,22 @@ echo "--- [2] Pack checks.md files: each wires >=1 READ AND APPLY reference doc 
 
 # Per-pack expected reference docs (space-separated for each pack).
 # Each pack must contain at least one READ AND APPLY pointing to one of its listed docs.
-declare -A PACK_EXPECTED_REFS
-PACK_EXPECTED_REFS["security"]="security-patterns.md"
-PACK_EXPECTED_REFS["code-quality"]="code-quality.md fix-patterns.md"
-PACK_EXPECTED_REFS["architecture"]="architecture.md"
-PACK_EXPECTED_REFS["dependencies"]="fix-patterns.md"
-PACK_EXPECTED_REFS["documentation"]="fix-patterns.md"
-PACK_EXPECTED_REFS["performance"]="fix-patterns.md"
-PACK_EXPECTED_REFS["testing"]="fix-patterns.md"
-PACK_EXPECTED_REFS["tos-compliance"]="fix-patterns.md"
-PACK_EXPECTED_REFS["typescript-react"]="fix-patterns.md"
+# Implemented as a function for bash 3.2 compatibility (no declare -A).
+get_expected_refs() {
+  local pack_name="$1"
+  case "$pack_name" in
+    security)         printf '%s' "security-patterns.md" ;;
+    code-quality)     printf '%s' "code-quality.md fix-patterns.md" ;;
+    architecture)     printf '%s' "architecture.md" ;;
+    dependencies)     printf '%s' "fix-patterns.md" ;;
+    documentation)    printf '%s' "fix-patterns.md" ;;
+    performance)      printf '%s' "fix-patterns.md" ;;
+    testing)          printf '%s' "fix-patterns.md" ;;
+    tos-compliance)   printf '%s' "fix-patterns.md" ;;
+    typescript-react) printf '%s' "fix-patterns.md" ;;
+    *)                printf '%s' "" ;;
+  esac
+}
 
 NINE_PACKS=(security code-quality architecture dependencies documentation performance testing tos-compliance typescript-react)
 
@@ -192,7 +198,7 @@ for pack_dir in "${NINE_PACKS[@]}"; do
   fi
 
   # Check that at least one of the expected reference docs is referenced
-  expected_refs="${PACK_EXPECTED_REFS[$pack_dir]:-}"
+  expected_refs="$(get_expected_refs "$pack_dir")"
   found_expected=0
   for ref_doc in $expected_refs; do
     set +e
