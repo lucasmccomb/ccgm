@@ -238,6 +238,81 @@
       "severity": "medium",
       "confidence": "medium",
       "fix_confidence": "low"
+    },
+    "tos-compliance/rate-limit-circumvention": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "tos-compliance/paywall-bypass": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "tos-compliance/trademark-misuse": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "tos-compliance/store-policy-violation": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "tos-compliance/missing-privacy-policy": {
+      "severity": "medium",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
+    "tos-compliance/ai-prohibited-use": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "tos-compliance/ai-output-misrepresentation": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "tos-compliance/ai-data-retention-violation": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "tos-compliance/platform-tos-violation": {
+      "severity": "medium",
+      "confidence": "low",
+      "fix_confidence": "low"
+    },
+    "tos-compliance/iap-bypass": {
+      "severity": "critical",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "deps/vulnerable-dependency": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "dead-code/unused-dependency": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "high"
+    },
+    "dead-code/unused-file": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "dead-code/unused-export": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "dead-code/unlisted-dependency": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
     }
   }
 }

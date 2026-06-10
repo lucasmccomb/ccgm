@@ -1,0 +1,49 @@
+{
+  "id": "ccgm/dependencies",
+  "name": "Dependencies Audit",
+  "version": "1.0.0",
+  "applies_when": ["language:javascript"],
+  "tags": ["dependencies", "npm", "vulnerabilities", "supply-chain"],
+  "severity_floor": "low",
+  "tools": ["dep-audit", "knip"],
+  "checks": [
+    {
+      "id": "dependencies/npm-audit-vulnerability",
+      "severity": "high",
+      "confidence": "high",
+      "detection": "tool",
+      "tool": "dep-audit",
+      "auto_fixable": true
+    },
+    {
+      "id": "dependencies/outdated-minor",
+      "severity": "low",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "dependencies/outdated-major",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "dependencies/unused-dependency",
+      "severity": "low",
+      "confidence": "medium",
+      "detection": "hybrid",
+      "tool": "knip",
+      "fallback": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "dependencies/duplicate-dependency",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}

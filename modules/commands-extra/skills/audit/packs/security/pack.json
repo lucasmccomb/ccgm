@@ -1,0 +1,59 @@
+{
+  "id": "ccgm/security",
+  "name": "Security Audit",
+  "version": "1.0.0",
+  "applies_when": ["always"],
+  "tags": ["security", "vulnerabilities", "owasp"],
+  "severity_floor": "high",
+  "tools": ["gitleaks", "semgrep"],
+  "checks": [
+    {
+      "id": "security/hardcoded-secret",
+      "severity": "critical",
+      "confidence": "medium",
+      "detection": "hybrid",
+      "tool": "gitleaks",
+      "fallback": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "security/sensitive-console-log",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "security/sql-injection",
+      "severity": "critical",
+      "confidence": "medium",
+      "detection": "hybrid",
+      "tool": "semgrep",
+      "fallback": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "security/xss-vulnerability",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "hybrid",
+      "tool": "semgrep",
+      "fallback": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "security/missing-security-headers",
+      "severity": "high",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "security/edge-function-auth-bypass",
+      "severity": "critical",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}

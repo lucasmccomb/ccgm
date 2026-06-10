@@ -1,0 +1,161 @@
+{
+  "id": "ccgm/tos-compliance",
+  "name": "Terms of Service & Policy Compliance Audit",
+  "version": "1.0.0",
+  "applies_when": [
+    "always"
+  ],
+  "tags": [
+    "compliance",
+    "legal",
+    "license",
+    "tos",
+    "privacy",
+    "store-policy",
+    "ai"
+  ],
+  "severity_floor": "medium",
+  "tools": [],
+  "checks": [
+    {
+      "id": "tos-compliance/copyleft-in-proprietary",
+      "severity": "critical",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/non-commercial-in-commercial",
+      "severity": "critical",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/missing-attribution",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "tos-compliance/unlicensed-dependency",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/scraping-prohibited-site",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/credential-misuse",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/remote-code-extension",
+      "severity": "critical",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/iap-bypass",
+      "severity": "critical",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/overbroad-extension-permissions",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/store-policy-violation",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/ai-output-training-competitor",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/undisclosed-telemetry",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/rate-limit-circumvention",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/paywall-bypass",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/trademark-misuse",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/missing-privacy-policy",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/ai-prohibited-use",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/ai-output-misrepresentation",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/ai-data-retention-violation",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/platform-tos-violation",
+      "severity": "medium",
+      "confidence": "low",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}
