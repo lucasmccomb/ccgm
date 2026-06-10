@@ -1,0 +1,32 @@
+{
+  "id": "ccgm/observability",
+  "name": "Observability & Logging Quality",
+  "version": "1.0.0",
+  "applies_when": ["always"],
+  "tags": ["observability", "logging", "error-reporting", "telemetry"],
+  "severity_floor": "low",
+  "tools": [],
+  "checks": [
+    {
+      "id": "observability/pii-in-logs",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "observability/missing-structured-logging",
+      "severity": "low",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "observability/missing-error-reporting",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}
