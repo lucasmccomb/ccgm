@@ -271,6 +271,11 @@ printf 'const evil = 1;\n' > "$REPO2/$EVIL_NAME"
 git -C "$REPO2" add -- "$EVIL_NAME"
 git -C "$REPO2" commit -q -m "add hostile-named file"
 
+# Critical: pre-clean any PWNED artifacts BEFORE the changed-set computation
+# so the existence check below is non-vacuous (any PWNED file found here was
+# created by the computation itself, not left over from a prior test step).
+rm -f "$REPO2/PWNED.js" "$(pwd)/PWNED.js" "/tmp/PWNED.js" 2>/dev/null || true
+
 # Compute changed set
 EVIL_Z=$(make_tmp)/evil-changed.z
 git -C "$REPO2" diff --name-only -z "HEAD~1...HEAD" > "$EVIL_Z"
@@ -284,8 +289,9 @@ else
   fail "hostile filename '$EVIL_NAME' missing from changed-set (got: $EVIL_PATHS)"
 fi
 
-# Critical: no PWNED file created during changed-set computation
-rm -f "$REPO2/PWNED.js" "$(pwd)/PWNED.js" "/tmp/PWNED.js" 2>/dev/null || true
+# Critical: no PWNED file created during changed-set computation.
+# (pre-clean ran before the computation above, so any PWNED file here was
+# created by it -- shell injection evidence that must fail loudly.)
 PWNED_FOUND=0
 for PWNED_PATH in "$REPO2/PWNED.js" "$(pwd)/PWNED.js" "/tmp/PWNED.js"; do
   if [ -f "$PWNED_PATH" ]; then
@@ -354,6 +360,21 @@ PYEOF
 
 EVIL_FILTER_OUT=$(make_tmp)/evil-filtered.jsonl
 apply_diff_filter "$SYNTH_SPINE" "$EVIL_Z" "$EVIL_FILTER_OUT"
+
+# Critical: apply_diff_filter must NOT have created any PWNED artifacts
+# (guards the python filter path, not just the shell computation above).
+PWNED_FOUND_POST=0
+for PWNED_PATH in "$REPO2/PWNED.js" "$(pwd)/PWNED.js" "/tmp/PWNED.js"; do
+  if [ -f "$PWNED_PATH" ]; then
+    PWNED_FOUND_POST=$((PWNED_FOUND_POST + 1))
+    echo "  PWNED found at: $PWNED_PATH" >&2
+  fi
+done
+if [ "$PWNED_FOUND_POST" -eq 0 ]; then
+  pass "hostile filename: no PWNED.js created during apply_diff_filter (python filter path)"
+else
+  fail "hostile filename: PWNED.js created by apply_diff_filter -- injection in filter path (CRITICAL)"
+fi
 
 # Verify: hostile-named finding SURVIVES
 EVIL_FINDING_FOUND=$(python3 - "$EVIL_FILTER_OUT" "$EVIL_NAME" << 'PYEOF'
@@ -459,6 +480,182 @@ if [ "$EVIL_Z_ROUNDTRIP" = "$EVIL_NAME" ]; then
   pass "hostile filename: path round-trips byte-exact through null-delimited .z file"
 else
   fail "hostile filename: path did not round-trip byte-exact (got '$EVIL_Z_ROUNDTRIP' expected '$EVIL_NAME')"
+fi
+
+# ---------------------------------------------------------------------------
+# GROUP 2b: Newline-named hostile file
+# A file whose name contains a literal newline exercises the case where
+# null-delimiting (-z) genuinely differs from line-splitting.  A plain
+# `git diff --name-only` (without -z) would split the name across two
+# lines, corrupting adjacent entries.  With -z the name is preserved as
+# a single opaque token in the binary stream.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- [2b] Newline-named hostile file: null-delimited .z handles embedded newline ---"
+echo ""
+
+REPO2B=$(make_repo)
+
+# Build the newline-embedded filename using printf into a variable;
+# never interpolate the raw name into an unquoted shell string.
+NEWLINE_NAME="$(printf 'evil\nname.js')"
+
+printf 'const safe = 1;\n' > "$REPO2B/clean.js"
+git -C "$REPO2B" add clean.js
+git -C "$REPO2B" commit -q -m "base"
+
+# Create the newline-named file; address it via the variable, not an inline name.
+printf 'const evil = 1;\n' > "$REPO2B/$NEWLINE_NAME"
+git -C "$REPO2B" add -- "$REPO2B/$NEWLINE_NAME"
+git -C "$REPO2B" commit -q -m "add newline-named file"
+
+# Compute changed set with -z (null-delimited)
+NEWLINE_Z=$(make_tmp)/newline-changed.z
+git -C "$REPO2B" diff --name-only -z "HEAD~1...HEAD" > "$NEWLINE_Z"
+
+# Round-trip: parse the .z file with python3; must produce the exact
+# embedded-newline name as a single opaque token.
+NEWLINE_ROUNDTRIP=$(python3 - "$NEWLINE_Z" "$NEWLINE_NAME" << 'PYEOF'
+import sys
+with open(sys.argv[1], 'rb') as fh:
+    data = fh.read()
+names = [p.decode('utf-8', errors='surrogateescape')
+         for p in data.rstrip(b'\x00').split(b'\x00') if p]
+expected = sys.argv[2]
+if expected in names:
+    print('FOUND')
+else:
+    print('NOT_FOUND: ' + repr(names))
+PYEOF
+)
+
+if [ "$NEWLINE_ROUNDTRIP" = "FOUND" ]; then
+  pass "newline-named file: path round-trips byte-exact through null-delimited .z file"
+else
+  fail "newline-named file: .z round-trip failed ($NEWLINE_ROUNDTRIP)"
+fi
+
+# The .z file is canonical for machine consumers.  The .txt (newline-delimited)
+# view is intentionally lossy for names that contain newlines -- the embedded
+# newline renders as a line break that looks like a path boundary in the txt.
+# We document this but assert only on the canonical .z parse.
+NEWLINE_TXT=$(make_tmp)/newline-changed.txt
+python3 - "$NEWLINE_Z" "$NEWLINE_TXT" << 'PYEOF'
+import sys
+with open(sys.argv[1], 'rb') as fh:
+    data = fh.read()
+paths = [p.decode('utf-8', errors='surrogateescape')
+         for p in data.rstrip(b'\x00').split(b'\x00') if p]
+# Note: writing a newline-embedded path to a newline-delimited .txt is
+# intentionally lossy -- the embedded newline becomes a line separator.
+# This is the known-lossy human-readable view; the .z file is canonical.
+with open(sys.argv[2], 'w', encoding='utf-8') as out:
+    for p in paths:
+        out.write(p + '\n')
+PYEOF
+# .txt view is known-lossy for newline-embedded names; only .z is canonical.
+pass "newline-named file: .txt view is known-lossy for embedded newlines (documented); .z is canonical"
+
+# Apply diff filter: the newline-named file IS in the changed set and must survive.
+NL_SYNTH_SPINE=$(make_tmp)/nl-synth.jsonl
+python3 - "$NL_SYNTH_SPINE" "$NEWLINE_NAME" << 'PYEOF'
+import json, sys
+spine_file, nl_name = sys.argv[1], sys.argv[2]
+lines = []
+lines.append(json.dumps({
+    'check_id': 'security/leaked-credential',
+    'rule_id': 'test-rule',
+    'severity': 'high',
+    'confidence': 'high',
+    'detection': 'tool',
+    'source': 'tool',
+    'message': 'test finding in newline-named file',
+    'location': {'path': nl_name, 'line': 1},
+    'fingerprint': 'CcDdEe1234567890CcDdEe1234567890CcDdEe12',
+}))
+# Finding for clean.js -- should be excluded (not in changed set)
+lines.append(json.dumps({
+    'check_id': 'security/leaked-credential',
+    'rule_id': 'test-rule',
+    'severity': 'high',
+    'confidence': 'high',
+    'detection': 'tool',
+    'source': 'tool',
+    'message': 'test finding in clean.js',
+    'location': {'path': 'clean.js', 'line': 1},
+    'fingerprint': 'DdEeFf1234567890DdEeFf1234567890DdEeFf12',
+}))
+with open(spine_file, 'w') as fh:
+    for l in lines:
+        fh.write(l + '\n')
+PYEOF
+
+NL_FILTER_OUT=$(make_tmp)/nl-filtered.jsonl
+apply_diff_filter "$NL_SYNTH_SPINE" "$NEWLINE_Z" "$NL_FILTER_OUT"
+
+# Assert: newline-named finding SURVIVES (path is in changed set)
+NL_FINDING=$(python3 - "$NL_FILTER_OUT" "$NEWLINE_NAME" << 'PYEOF'
+import json, sys
+out_file, nl_name = sys.argv[1], sys.argv[2]
+for raw in open(out_file):
+    raw = raw.strip()
+    if not raw:
+        continue
+    try:
+        rec = json.loads(raw)
+    except Exception:
+        continue
+    if 'type' in rec:
+        continue
+    if rec.get('location', {}).get('path') == nl_name:
+        print('FOUND')
+        import sys; sys.exit(0)
+print('NOT_FOUND')
+PYEOF
+)
+if [ "$NL_FINDING" = "FOUND" ]; then
+  pass "newline-named file: finding SURVIVES apply_diff_filter (path in changed set)"
+else
+  fail "newline-named file: finding should survive apply_diff_filter"
+fi
+
+# Assert: clean.js finding EXCLUDED (not in changed set)
+NL_CLEAN_FINDING=$(python3 - "$NL_FILTER_OUT" << 'PYEOF'
+import json, sys
+for raw in open(sys.argv[1]):
+    raw = raw.strip()
+    if not raw:
+        continue
+    try:
+        rec = json.loads(raw)
+    except Exception:
+        continue
+    if 'type' in rec:
+        continue
+    if rec.get('location', {}).get('path') == 'clean.js':
+        print('FOUND')
+        import sys; sys.exit(0)
+print('NOT_FOUND')
+PYEOF
+)
+if [ "$NL_CLEAN_FINDING" = "NOT_FOUND" ]; then
+  pass "newline-named file: clean.js finding EXCLUDED by apply_diff_filter (not in changed set)"
+else
+  fail "newline-named file: clean.js finding should be excluded by apply_diff_filter"
+fi
+
+# Assert: no PWNED artifacts created during newline-named file operations
+PWNED_FOUND_NL=0
+for PWNED_PATH in "$REPO2B/PWNED.js" "$(pwd)/PWNED.js" "/tmp/PWNED.js"; do
+  if [ -f "$PWNED_PATH" ]; then
+    PWNED_FOUND_NL=$((PWNED_FOUND_NL + 1))
+    echo "  PWNED found at: $PWNED_PATH" >&2
+  fi
+done
+if [ "$PWNED_FOUND_NL" -eq 0 ]; then
+  pass "newline-named file: no PWNED.js created during any operation"
+else
+  fail "newline-named file: PWNED.js was created -- injection succeeded (CRITICAL)"
 fi
 
 # ---------------------------------------------------------------------------
