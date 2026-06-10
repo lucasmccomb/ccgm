@@ -1,5 +1,6 @@
 {
   "name": "commands-extra",
+  "version": "1.0.0",
   "displayName": "Extra Commands",
   "description": "Additional slash commands: /audit (codebase audit), /pwv (Playwright visual verify), /walkthrough (step-by-step guide), /promote-rule (promote repo rules to global), /freeze + /unfreeze + /guard (safety-hook state management), /checkpoint (save/resume WIP session state).",
   "category": "commands",
@@ -140,6 +141,11 @@
     },
     "skills/audit/scripts/lint-pack.py": {
       "target": "skills/audit/scripts/lint-pack.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/provenance.py": {
+      "target": "skills/audit/scripts/provenance.py",
       "type": "script",
       "template": false
     },
