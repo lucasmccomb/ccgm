@@ -49,8 +49,7 @@
       "id": "dependencies/postinstall-script",
       "severity": "high",
       "confidence": "medium",
-      "detection": "hybrid",
-      "fallback": "llm",
+      "detection": "llm",
       "auto_fixable": false
     },
     {
@@ -64,16 +63,14 @@
       "id": "dependencies/lockfile-integrity",
       "severity": "high",
       "confidence": "medium",
-      "detection": "hybrid",
-      "fallback": "llm",
+      "detection": "llm",
       "auto_fixable": false
     },
     {
       "id": "dependencies/unpinned-version-range",
       "severity": "medium",
       "confidence": "high",
-      "detection": "hybrid",
-      "fallback": "llm",
+      "detection": "llm",
       "auto_fixable": false
     }
   ]

@@ -412,16 +412,11 @@ detection: llm
 
 **Severity:** `high`
 **Confidence:** `medium`
-**Detection:** `hybrid`
+**Detection:** `llm`
 
 #### Detection
 
-**Tool (if detection = tool or hybrid):**
-n/a — grep-based detection in the hybrid path; no dedicated spine tool
-
-Fallback when tool absent: `llm`
-
-**LLM instruction (if detection = llm or hybrid):**
+**LLM instruction:**
 
 ```
 READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
@@ -459,11 +454,10 @@ Do NOT flag:
 
 ```yaml
 check_id: dependencies/postinstall-script
-detection: hybrid
-fallback: llm
+detection: llm
 ```
 
-No dedicated spine tool — grep pattern matching + LLM triage for the hybrid path.
+No dedicated spine tool — worker-run grep + LLM triage.
 
 #### Severity / Confidence
 
@@ -598,16 +592,11 @@ No tool — LLM-only check. The LLM reasons about edit distance and naming conve
 
 **Severity:** `high`
 **Confidence:** `medium`
-**Detection:** `hybrid`
+**Detection:** `llm`
 
 #### Detection
 
-**Tool (if detection = tool or hybrid):**
-n/a — grep-based detection; no dedicated spine tool
-
-Fallback when tool absent: `llm`
-
-**LLM instruction (if detection = llm or hybrid):**
+**LLM instruction:**
 
 ```
 READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
@@ -645,11 +634,10 @@ Do NOT flag:
 
 ```yaml
 check_id: dependencies/lockfile-integrity
-detection: hybrid
-fallback: llm
+detection: llm
 ```
 
-No dedicated spine tool — the hybrid path uses file-existence checks + LLM comparison.
+No dedicated spine tool — worker-run file-existence checks + LLM comparison.
 
 #### Severity / Confidence
 
@@ -683,16 +671,11 @@ package-lock.json     ← exists, versions in sync
 
 **Severity:** `medium`
 **Confidence:** `high`
-**Detection:** `hybrid`
+**Detection:** `llm`
 
 #### Detection
 
-**Tool (if detection = tool or hybrid):**
-n/a — grep-based detection; no dedicated spine tool
-
-Fallback when tool absent: `llm`
-
-**LLM instruction (if detection = llm or hybrid):**
+**LLM instruction:**
 
 ```
 READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
@@ -738,11 +721,10 @@ For each finding:
 
 ```yaml
 check_id: dependencies/unpinned-version-range
-detection: hybrid
-fallback: llm
+detection: llm
 ```
 
-No dedicated spine tool — grep for `^`, `~`, `>=`, `*` in manifest files + LLM triage for sensitivity.
+No dedicated spine tool — worker-run grep for `^`, `~`, `>=`, `*` in manifest files + LLM triage for sensitivity.
 
 #### Severity / Confidence
 

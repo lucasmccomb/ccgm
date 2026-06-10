@@ -46,7 +46,8 @@ Assumed output shape (cargo-audit >= 0.17, rustsec advisory DB):
   }
 
 The "vulnerabilities.list" array is the primary signal.
-The "warnings" section (unmaintained, unsound, notice) is parsed as medium/low.
+The "warnings" section (unmaintained, unsound, notice) is NOT parsed; only CVE vulnerabilities
+are emitted.
 """
 
 import json
