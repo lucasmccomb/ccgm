@@ -31,9 +31,12 @@ TMPFILES_LIST="$(mktemp /tmp/ccgm-hadolint-files-XXXXXX.txt)"
 TMPFILE="$(mktemp /tmp/ccgm-hadolint-XXXXXX.json)"
 trap 'rm -f "$TMPFILES_LIST" "$TMPFILE"' EXIT
 
-# Collect Dockerfiles via find -- paths null-delimited internally, then
-# read into array safely
-mapfile -d '' DOCKERFILES < <(
+# Collect Dockerfiles via find -- NUL-delimited read loop.
+# Bash-3.2-portable: mapfile -d '' requires bash 4+; use while-read instead.
+DOCKERFILES=()
+while IFS= read -r -d '' f; do
+  DOCKERFILES+=("$f")
+done < <(
   find "$REPO_ROOT" \
     -type f \
     \( -name "Dockerfile" -o -name "Dockerfile.*" \) \

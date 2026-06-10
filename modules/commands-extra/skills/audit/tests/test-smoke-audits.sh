@@ -102,11 +102,7 @@ if command -v gitleaks >/dev/null 2>&1; then
   GITLEAKS_AVAILABLE=true
 fi
 
-# Check bash version (spine requires bash 4+ for declare -A)
-BASH_GE4=true
-if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
-  BASH_GE4=false
-fi
+# run.sh is bash-3.2-portable; BASH_GE4 guard removed.
 
 # ---------------------------------------------------------------------------
 # ADV-009: assemble the fake AWS key from fragments at runtime.
@@ -153,7 +149,7 @@ PYEOF
 # ---------------------------------------------------------------------------
 # Helper: run the full deterministic pipeline for a fixture repo.
 # Returns paths to spine output and merged findings via env vars.
-# Spine step gated on BASH_GE4 (bash 4+ required for declare -A in run.sh).
+# Spine step -- run.sh is bash-3.2-portable; no version gate needed.
 # ---------------------------------------------------------------------------
 run_pipeline() {
   local fixture_name="$1"   # human label for messages
@@ -193,25 +189,19 @@ run_pipeline() {
     return 1
   fi
 
-  # Step 3: spine/run.sh (bash-4 gate)
-  if [ "$BASH_GE4" = "false" ]; then
-    skip "$fixture_name: spine invocation skipped -- bash ${BASH_VERSINFO[0]} < 4 (spine requires bash 4+; ubuntu CI will run this)"
-    # Create an empty spine file so merge step is also skipped cleanly below
-    printf '{"type":"provenance","tool":"ccgm-spine-skipped","version":"1.0"}\n' > "$spine_jsonl"
+  # Step 3: spine/run.sh (bash-3.2-portable; no version gate needed)
+  set +e
+  bash "$SPINE" \
+    --repo   "$repo_abs" \
+    --tools  "$tools" \
+    --output "$spine_jsonl" 2>/dev/null
+  SPINE_EC=$?
+  set -e
+  if [ "$SPINE_EC" -eq 0 ] && [ -f "$spine_jsonl" ]; then
+    pass "$fixture_name: spine/run.sh exited 0"
   else
-    set +e
-    bash "$SPINE" \
-      --repo   "$repo_abs" \
-      --tools  "$tools" \
-      --output "$spine_jsonl" 2>/dev/null
-    SPINE_EC=$?
-    set -e
-    if [ "$SPINE_EC" -eq 0 ] && [ -f "$spine_jsonl" ]; then
-      pass "$fixture_name: spine/run.sh exited 0"
-    else
-      fail "$fixture_name: spine/run.sh failed (exit $SPINE_EC) or output missing"
-      return 1
-    fi
+    fail "$fixture_name: spine/run.sh failed (exit $SPINE_EC) or output missing"
+    return 1
   fi
 
   # Step 4: merge-findings.py
@@ -239,17 +229,12 @@ run_pipeline() {
 
 # ---------------------------------------------------------------------------
 # Helper: assert the critical secrets finding is present in findings.jsonl.
-# Gated on both GITLEAKS_AVAILABLE and BASH_GE4.
+# Gated on GITLEAKS_AVAILABLE only (spine is bash-3.2-portable, always runs).
 # ---------------------------------------------------------------------------
 assert_critical_finding() {
   local fixture_name="$1"
   local findings_jsonl="$2"
   local fake_key="$3"
-
-  if [ "$BASH_GE4" = "false" ]; then
-    skip "$fixture_name: gitleaks finding asserts skipped -- bash < 4 (spine not run)"
-    return
-  fi
 
   if [ "$GITLEAKS_AVAILABLE" = "false" ]; then
     skip "$fixture_name: gitleaks not installed -- critical-finding asserts skipped (SKIP, not FAIL)"
@@ -295,16 +280,11 @@ PYEOF
 # ---------------------------------------------------------------------------
 # Helper: assert a coverage_gap record exists in findings.jsonl for an
 # absent tool (verifies the spine coverage-gap passthrough).
-# Gated on BASH_GE4 (spine must have run).
+# Spine is bash-3.2-portable; no version guard needed.
 # ---------------------------------------------------------------------------
 assert_coverage_gap() {
   local fixture_name="$1"
   local findings_jsonl="$2"
-
-  if [ "$BASH_GE4" = "false" ]; then
-    skip "$fixture_name: coverage_gap assert skipped -- bash < 4 (spine not run)"
-    return
-  fi
 
   # Check for at least one coverage_gap record (tool absent = gap emitted by spine)
   GAP_COUNT="$(python3 - "$findings_jsonl" << 'PYEOF'
