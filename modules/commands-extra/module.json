@@ -98,6 +98,11 @@
       "type": "script",
       "template": false
     },
+    "skills/audit/scripts/assign-packs.py": {
+      "target": "skills/audit/scripts/assign-packs.py",
+      "type": "script",
+      "template": false
+    },
     "skills/audit/scripts/detect-ecosystems.sh": {
       "target": "skills/audit/scripts/detect-ecosystems.sh",
       "type": "script",
