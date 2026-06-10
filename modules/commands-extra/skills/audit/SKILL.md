@@ -875,8 +875,8 @@ file is a YAML list of mapping blocks.  Supported keys per entry:
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `id` (or `check_id`) | yes | The `check_id` to suppress.  Supports `fnmatch` globs (e.g. `security/*`). |
-| `paths` | no | Inline list of repo-relative `fnmatch` globs.  When absent, the rule matches any path. |
+| `id` (or `check_id`) | yes | The `check_id` to suppress.  Supports `fnmatch` globs (e.g. `security/*`).  Note: Python `fnmatch` `*` crosses `/`, so `security/*` also matches `security/sub/deep` — matching is recursive; there is no separate `**`. |
+| `paths` | no | Inline list of repo-relative `fnmatch` globs.  When absent, the rule matches any path.  Note: Python `fnmatch` `*` crosses `/`, so `src/*.js` also matches `src/sub/deep.js` — matching is recursive; there is no separate `**`. |
 | `reason` | **required** | Human-readable justification.  Entries missing `reason` emit a warning and are skipped. |
 | `expires` | no | ISO date `YYYY-MM-DD`.  When present and strictly before today's date, the suppression is **ignored** and a warning is emitted. |
 

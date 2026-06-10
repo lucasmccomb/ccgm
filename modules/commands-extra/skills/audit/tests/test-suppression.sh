@@ -480,6 +480,115 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test (f): Trailing inline # comment on id line -> suppression still applies (FIX 1)
+# ---------------------------------------------------------------------------
+printf '\nTest (f): trailing inline comment on id -> suppression still applies\n'
+
+TF_DIR="$TESTRUN_DIR/tf"
+mkdir -p "$TF_DIR/src"
+printf 'x = 1\n' > "$TF_DIR/src/main.py"
+
+FP_F="ffff6666aaaa7777:1"
+
+FINDING_F="$(make_finding "security/foo" "src/main.py" "1" "high" "$FP_F")"
+write_findings_jsonl "$TF_DIR/findings.jsonl" "$FINDING_F"
+
+# Entry with a trailing inline comment on the id line
+cat > "$TF_DIR/.auditignore.yaml" << 'YAML_EOF'
+- id: security/foo  # legacy check, still suppressed
+  reason: known false-positive in generated code
+YAML_EOF
+
+set +e
+TF_OUT="$(python3 "$SUPPRESS_SCRIPT" \
+  --findings "$TF_DIR/findings.jsonl" \
+  --auditignore "$TF_DIR/.auditignore.yaml" \
+  --repo "$TF_DIR" \
+  --today 2026-06-10 2>/dev/null)"
+TF_EXIT=$?
+set -e
+
+if [[ $TF_EXIT -eq 0 ]]; then
+  pass "(f): suppress.py exits 0 with trailing comment on id"
+else
+  fail "(f): suppress.py exits $TF_EXIT (expected 0)"
+fi
+
+# The finding MUST be suppressed — the comment must have been stripped
+TF_JUST="$(get_suppression_justification "$TF_OUT" "$FP_F")"
+if [[ "$TF_JUST" == "known false-positive in generated code" ]]; then
+  pass "(f): trailing comment stripped from id; suppression applied correctly"
+else
+  fail "(f): suppression.justification='$TF_JUST' (expected the reason — trailing comment was not stripped)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test (g): flow-map scalar value -> suppress.py exits 1 (FIX 2 fail-closed)
+# ---------------------------------------------------------------------------
+printf '\nTest (g): flow-map value in reason -> suppress.py exits 1\n'
+
+TG_DIR="$TESTRUN_DIR/tg"
+mkdir -p "$TG_DIR/src"
+printf 'x = 1\n' > "$TG_DIR/src/main.py"
+
+FP_G="gggg7777hhhh8888:1"
+FINDING_G="$(make_finding "security/foo" "src/main.py" "1" "high" "$FP_G")"
+write_findings_jsonl "$TG_DIR/findings.jsonl" "$FINDING_G"
+
+# Entry where reason is a flow-map (out-of-subset)
+cat > "$TG_DIR/.auditignore.yaml" << 'YAML_EOF'
+- id: security/foo
+  reason: {x: y}
+YAML_EOF
+
+set +e
+python3 "$SUPPRESS_SCRIPT" \
+  --findings "$TG_DIR/findings.jsonl" \
+  --auditignore "$TG_DIR/.auditignore.yaml" \
+  --repo "$TG_DIR" \
+  --today 2026-06-10 > /dev/null 2>&1
+TG_EXIT=$?
+set -e
+
+if [[ $TG_EXIT -eq 1 ]]; then
+  pass "(g): flow-map scalar value causes exit 1 (fail-closed)"
+else
+  fail "(g): suppress.py exited $TG_EXIT (expected 1 for flow-map value)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test (h): tab-indented entry -> suppress.py exits 1 (FIX 2 fail-closed)
+# ---------------------------------------------------------------------------
+printf '\nTest (h): tab-indented entry -> suppress.py exits 1\n'
+
+TH_DIR="$TESTRUN_DIR/th"
+mkdir -p "$TH_DIR/src"
+printf 'x = 1\n' > "$TH_DIR/src/main.py"
+
+FP_H="hhhh8888iiii9999:1"
+FINDING_H="$(make_finding "security/foo" "src/main.py" "1" "high" "$FP_H")"
+write_findings_jsonl "$TH_DIR/findings.jsonl" "$FINDING_H"
+
+# Entry where continuation key uses a TAB for indentation
+printf -- '- id: security/foo\n' > "$TH_DIR/.auditignore.yaml"
+printf '\treason: tab-indented value\n' >> "$TH_DIR/.auditignore.yaml"
+
+set +e
+python3 "$SUPPRESS_SCRIPT" \
+  --findings "$TH_DIR/findings.jsonl" \
+  --auditignore "$TH_DIR/.auditignore.yaml" \
+  --repo "$TH_DIR" \
+  --today 2026-06-10 > /dev/null 2>&1
+TH_EXIT=$?
+set -e
+
+if [[ $TH_EXIT -eq 1 ]]; then
+  pass "(h): tab-indented entry causes exit 1 (fail-closed)"
+else
+  fail "(h): suppress.py exited $TH_EXIT (expected 1 for tab-indented entry)"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 printf '\n-------------------------------------------------\n'

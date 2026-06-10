@@ -34,7 +34,10 @@ Arguments
 .auditignore.yaml format — supported subset
 --------------------------------------------
 The parser handles a STRICT, fixed YAML subset. Shapes outside this subset
-cause a hard error (exit 1) — they are NEVER silently mis-parsed.
+cause a hard error (exit 1) — they are NEVER silently mis-parsed.  In
+particular: flow collections (``{...}`` or ``[...]``) as scalar values
+are rejected, and lines indented with a TAB character cause an immediate
+parse error.
 
   Supported top-level structure:
     A sequence (YAML list) of mapping blocks.
@@ -148,7 +151,21 @@ def _parse_scalar(raw: str) -> str:
     # Anchors / aliases are unsupported
     if raw[0] in ("&", "*"):
         raise _YAMLParseError(f"anchors and aliases are not supported: {raw!r}")
-    # Unquoted scalar — return as-is (stripped)
+    # Flow collections (out-of-subset) — reject so the docstring's "never silently
+    # mis-parse" claim holds.  A value like `reason: {a: b}` would otherwise be
+    # returned as the literal string "{a: b}" with no indication something was wrong.
+    if raw[0] in ("{", "["):
+        raise _YAMLParseError(
+            f"flow collections ({{ }} or [ ]) are not supported as scalar values: {raw!r}; "
+            "use a plain string value instead"
+        )
+    # Unquoted scalar — strip any trailing inline comment (whitespace + '#' to end of
+    # line) so that `id: security/foo  # legacy` parses as "security/foo", matching
+    # standard YAML comment semantics.  A '#' at the start of a word (e.g. a hex
+    # colour "#abc") is NOT a comment because it is not preceded by whitespace.
+    comment_match = re.search(r"\s+#.*$", raw)
+    if comment_match:
+        raw = raw[: comment_match.start()]
     return raw
 
 
@@ -203,6 +220,13 @@ def _parse_auditignore_yaml(path: str) -> list:
         # Ignore blank lines and full-line comments
         if not stripped or stripped.lstrip().startswith("#"):
             continue
+        # Reject tab-indented lines — tabs are not part of the supported subset and
+        # can silently mis-parse indentation levels (YAML spec §6.1).
+        if stripped and stripped[0] == "	":
+            raise _YAMLParseError(
+                f"line {i}: tab character used for indentation; "
+                "use spaces only (tabs are not supported in this YAML subset)"
+            )
         effective.append((i, stripped))
 
     if not effective:
