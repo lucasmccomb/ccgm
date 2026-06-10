@@ -1,0 +1,52 @@
+{
+  "id": "ccgm/data-migrations",
+  "name": "Data & Migrations Audit",
+  "version": "1.0.0",
+  "applies_when": ["has_migrations"],
+  "tags": ["database", "migrations", "postgresql", "sql"],
+  "severity_floor": "medium",
+  "tools": ["squawk", "sqlfluff"],
+  "checks": [
+    {
+      "id": "dm/unquoted-reserved-keyword",
+      "severity": "high",
+      "confidence": "high",
+      "detection": "hybrid",
+      "tool": "squawk",
+      "fallback": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "dm/index-without-concurrently",
+      "severity": "high",
+      "confidence": "high",
+      "detection": "hybrid",
+      "tool": "squawk",
+      "fallback": "llm",
+      "auto_fixable": true
+    },
+    {
+      "id": "dm/missing-rls",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "dm/on-conflict-without-unique",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "dm/security-definer-function",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "hybrid",
+      "tool": "sqlfluff",
+      "fallback": "llm",
+      "auto_fixable": false
+    }
+  ]
+}
