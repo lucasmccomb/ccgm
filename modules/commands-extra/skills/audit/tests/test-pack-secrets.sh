@@ -50,7 +50,8 @@ fail() {
 }
 
 TESTRUN_DIR="$(mktemp -d /tmp/ccgm-test-pack-secrets-XXXXXX)"
-trap 'rm -rf "$TESTRUN_DIR"' EXIT
+CLEANUP_DIRS=("$TESTRUN_DIR")
+trap 'rm -rf "${CLEANUP_DIRS[@]}"' EXIT
 
 # ---------------------------------------------------------------------------
 # Test 1: lint-pack passes on the secrets pack
@@ -154,7 +155,7 @@ if ! command -v gitleaks > /dev/null 2>&1; then
   printf '  [SKIP] gitleaks not installed -- history e2e test skipped\n'
 else
   E2E_DIR="$(mktemp -d /tmp/ccgm-secrets-e2e-XXXXXX)"
-  TESTRUN_DIR="$TESTRUN_DIR $E2E_DIR"  # track for cleanup
+  CLEANUP_DIRS+=("$E2E_DIR")
 
   # Build a throwaway git repo.
   # ADV-009: the fake key is assembled at runtime from two string fragments.
@@ -375,7 +376,7 @@ PYEOF
   printf '\nTest 7: working-tree mode regression guard (no CCGM_GITLEAKS_HISTORY)\n'
 
   WT_E2E_DIR="$(mktemp -d /tmp/ccgm-secrets-wt-XXXXXX)"
-  TESTRUN_DIR="$TESTRUN_DIR $WT_E2E_DIR"  # track for cleanup
+  CLEANUP_DIRS+=("$WT_E2E_DIR")
 
   git init "$WT_E2E_DIR/repo" --quiet 2>/dev/null
   git -C "$WT_E2E_DIR/repo" config user.email "test@test.test"

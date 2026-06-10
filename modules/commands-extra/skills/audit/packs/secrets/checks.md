@@ -91,8 +91,13 @@ step does not affect confidence scoring. HIGH.
 **True positive** (`config/prod.env` committed in a prior commit):
 
 ```bash
-# FINDS: AWS access key committed in history
-AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+# Pattern gitleaks flags: a 20-char AKIA-prefixed AWS access key id committed in source.
+# Access key id shown redacted here (AKIA<NONEXAMPLE_PLACEHOLDER>) because the AWS-docs
+# example value (prefix AKIA + suffix IOSFODNN7EXAMPLE) is on gitleaks' allow-list and
+# produces 0 findings. The pack's runtime test assembles a non-allowlisted value at
+# runtime so gitleaks actually fires. Real-world credentials matching the
+# AKIA[A-Z0-9]{16} pattern are detected.
+AWS_ACCESS_KEY_ID=AKIA<NONEXAMPLE_PLACEHOLDER>
 AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 ```
 
