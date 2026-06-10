@@ -479,8 +479,10 @@ else
   fail "spine exits $SPINE_EXIT (expected 0)"
 fi
 
-SKIP_OR_GAP="$(grep -c '"type":"skipped"\|"type":"coverage_gap"' "$SPINE_OUT" 2>/dev/null || printf '0')"
-if [[ "$SKIP_OR_GAP" -gt 0 ]]; then
+# Use { grep ... || true; } so a zero-match exit-1 doesn't fire the ||, preventing
+# double-output under bash 3.2 when grep exits non-zero (no matches).
+SKIP_OR_GAP="$({ grep -c '"type":"skipped"\|"type":"coverage_gap"' "$SPINE_OUT" || true; } 2>/dev/null)"
+if [[ ${SKIP_OR_GAP:-0} -gt 0 ]]; then
   pass "spine emits $SKIP_OR_GAP skip/gap note(s) for absent tools on fixture repo"
 else
   fail "spine emits no skip/gap notes for absent tools on fixture repo"
