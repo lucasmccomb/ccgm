@@ -40,8 +40,15 @@ trap 'rm -f "$TMPFILE"' EXIT
 # --quiet: suppress progress bars and logging
 # --compact: omit passed checks from JSON output (findings only)
 # --soft-fail: exit 0 regardless of findings (we handle them ourselves)
-# Config isolation: --no-guide suppresses network calls;
-# we do NOT load any .checkov.yaml from the repo (no --config-file).
+#
+# Config isolation caveat: checkov auto-discovers .checkov.yaml/.checkov.yml
+# from the scanned --directory, then the process cwd, then ~/.checkov.yaml
+# (via configargparse default_config_files).  There is no CLI flag that
+# suppresses this discovery — --config-file adds to the list rather than
+# replacing it.  A repo-local .checkov.yaml can therefore silently skip or
+# alter checks.  Accepted limitation: the pack rubric and normalizer
+# (parse-checkov.py) own severity/confidence regardless of what the repo
+# config does to the check list.
 set +e
 checkov \
   --directory "$REPO_ROOT" \

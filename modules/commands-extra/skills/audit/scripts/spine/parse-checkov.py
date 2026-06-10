@@ -66,7 +66,16 @@ _HIGH_SEVERITY_PREFIXES = {
 
 
 def _severity_for(check_id):
-    """Assign severity based on check_id prefix heuristic."""
+    """Assign severity based on check_id prefix heuristic.
+
+    The heuristic only keys on the check_id string; it does NOT map every
+    possible CKV_* to a precise severity.  That is intentional: pack-level
+    rubric entries (packs/infra-iac/checks.md) are the authoritative severity
+    owners for named check categories (iac/public-ingress, iac/missing-
+    encryption, etc.).  The catch-all "return medium" here is the correct
+    default for the generic iac/checkov-violation check_id — the rubric entry
+    for that check_id specifies medium confidence/severity by design.
+    """
     if check_id in _HIGH_SEVERITY_PREFIXES:
         return "high"
     check_upper = check_id.upper()

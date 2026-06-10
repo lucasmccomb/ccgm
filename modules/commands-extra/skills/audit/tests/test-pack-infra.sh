@@ -38,6 +38,10 @@ fail() {
   FAIL=$((FAIL + 1))
 }
 
+skip() {
+  printf '  [SKIP] %s\n' "$1"
+}
+
 # ---------------------------------------------------------------------------
 # Temp directory for all runtime fixtures
 # ---------------------------------------------------------------------------
@@ -533,7 +537,7 @@ if command -v shellcheck > /dev/null 2>&1; then
     printf '%s\n' "$SC_OUTPUT" | head -10
   fi
 else
-  fail "shellcheck not installed -- cannot verify shell safety"
+  skip "shellcheck not installed -- wrap-checkov.sh shell-safety check skipped"
 fi
 
 # ---------------------------------------------------------------------------
