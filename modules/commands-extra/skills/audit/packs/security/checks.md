@@ -4,6 +4,15 @@
 
 This pack audits source code for security vulnerabilities including hardcoded credentials, injection risks, cross-site scripting vectors, missing security headers, and edge function authentication bypasses. It applies OWASP Top 10 guidance and uses tool-assisted detection (gitleaks for secrets, semgrep for injection/XSS patterns) backed by LLM confirmation. It does NOT audit dependency CVEs (covered by the dependencies pack), infrastructure misconfigurations, or runtime security controls.
 
+**Defense-in-depth cross-reference:** The `ccgm/secrets` pack provides deeper coverage of
+committed secrets: full git history scanning (`secrets/leaked-credential`), tracked `.env`
+files (`secrets/tracked-env-file`), tracked private key material (`secrets/tracked-key-material`),
+and history-only credentials (`secrets/history-only-credential`). When both packs run, the
+security pack's `security/hardcoded-secret` check covers LLM-originated findings and
+live-source-file patterns, while the secrets pack handles tool-detected history and file-tracking
+issues. Running both packs is the recommended defense-in-depth posture for comprehensive
+secrets coverage.
+
 **Pack ID:** `ccgm/security`
 **Applies when:** `always`
 
@@ -503,6 +512,56 @@ Deno.serve(async (req) => {
   return new Response(JSON.stringify(data));
 });
 ```
+
+---
+
+## Migration Mapping
+
+Every bullet from the original Agent 1 Security Audit category prompt is mapped to its owning check-id:
+
+| Original prompt bullet | Check-id |
+|------------------------|----------|
+| Hardcoded secrets, API keys, tokens (NOT auto-fixable - needs env var setup) | `security/hardcoded-secret` |
+| Console.logs with sensitive data (auto-fixable: remove line) | `security/sensitive-console-log` |
+| SQL injection risks (NOT auto-fixable - needs refactor) | `security/sql-injection` |
+| XSS vulnerabilities (NOT auto-fixable - needs sanitization) | `security/xss-vulnerability` |
+| Missing security headers (auto-fixable if config file exists) | `security/missing-security-headers` |
+| Edge function auth bypasses (NOT auto-fixable) | `security/edge-function-auth-bypass` |
+
+All 6 original bullets are covered. No bullet dropped.
+
+---
+
+## Defense-in-Depth Guidance
+
+The checks in this pack are designed as a **layered defence**. No single check is sufficient
+on its own; together they cover progressively deeper attack surfaces:
+
+| Layer | Check | Coverage |
+|-------|-------|----------|
+| 1 — Entry point | `security/hardcoded-secret` | Secrets visible in current source files |
+| 2 — Runtime logging | `security/sensitive-console-log` | Secrets accidentally logged at runtime |
+| 3 — Business logic | `security/sql-injection`, `security/xss-vulnerability` | Input not sanitised before use in queries or HTML |
+| 4 — Environment | `security/missing-security-headers` | Browser-level attack surface left open |
+| 5 — Auth boundary | `security/edge-function-auth-bypass` | Auth checks absent at the function entry point |
+
+**Cross-pack layering with ccgm/secrets:**
+For full secrets coverage, run the `ccgm/secrets` pack alongside this one. The secrets
+pack extends Layer 1 with:
+- `secrets/leaked-credential` — full git history scan for any committed credential
+- `secrets/tracked-env-file` — `.env` files committed to the index
+- `secrets/tracked-key-material` — private key files committed to the index
+- `secrets/history-only-credential` — credentials removed from HEAD but still in history
+
+These two packs are complementary and do not overlap on check-ids.
+
+**Validation-layering principle:**
+When fixing a finding from this pack, apply validation at every layer the unsafe value
+passes through — not just at the point of the symptom. For example, fixing
+`security/sql-injection` by parameterising the query also warrants adding input validation
+at the API entry point (layer 1) and an integration test that sends malicious input and
+asserts it is rejected. A single fix is correct but fragile; layered validation makes the
+class of bug structurally impossible.
 
 ---
 

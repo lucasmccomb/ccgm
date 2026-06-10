@@ -14,6 +14,21 @@
       "confidence": "high",
       "fix_confidence": "low"
     },
+    "secrets/tracked-env-file": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
+    "secrets/tracked-key-material": {
+      "severity": "critical",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
+    "secrets/history-only-credential": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
     "security/hardcoded-secret": {
       "severity": "critical",
       "confidence": "medium",
