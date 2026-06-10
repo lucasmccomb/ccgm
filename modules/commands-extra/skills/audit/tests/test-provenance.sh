@@ -229,13 +229,16 @@ run_scenario_a() {
     fail "scenario-a: expected tool_versions={}, got '$got_tv'"
   fi
 
-  # skill_version is a non-empty string
+  # skill_version matches the version field in module.json
+  local module_json="$SCRIPT_DIR/../../../module.json"
+  local expected_sv
+  expected_sv="$(python3 -c "import json; d=json.load(open('$module_json')); print(d.get('version',''))")"
   local got_sv
   got_sv="$(jsonl_header_field "$out_file" skill_version)"
-  if [[ -n "$got_sv" ]]; then
-    pass "scenario-a: skill_version='$got_sv' is non-empty"
+  if [[ -n "$expected_sv" && "$got_sv" == "$expected_sv" ]]; then
+    pass "scenario-a: skill_version='$got_sv' matches module.json version"
   else
-    fail "scenario-a: skill_version is empty"
+    fail "scenario-a: expected skill_version='$expected_sv', got '$got_sv'"
   fi
 }
 
@@ -474,6 +477,71 @@ run_scenario_d() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario E: CODEOWNERS directory-prefix matching without trailing slash
+# ---------------------------------------------------------------------------
+
+run_scenario_e() {
+  local tmpdir
+  tmpdir="$(mktemp -d /tmp/ccgm-test-provenance-XXXXXX)"
+  trap "rm -rf '$tmpdir'" RETURN
+
+  git -C "$tmpdir" init -q
+  git -C "$tmpdir" -c core.hooksPath=/dev/null \
+      -c user.email="test@test.invalid" \
+      -c user.name="Test" \
+      commit --allow-empty -m "init" -q
+
+  # "apps/web" without trailing slash — GitHub treats this as a directory prefix
+  mkdir -p "$tmpdir/.github"
+  cat > "$tmpdir/.github/CODEOWNERS" << 'EOF'
+* @default-owner
+apps/web @web-team
+EOF
+
+  {
+    make_finding "apps/web/x.ts"
+    make_finding "apps/web/nested/y.ts"
+    make_finding "apps/other/z.ts"
+  } > "$tmpdir/findings.jsonl"
+
+  local out_file="$tmpdir/out.jsonl"
+
+  python3 "$PROV_SCRIPT" \
+    --findings "$tmpdir/findings.jsonl" \
+    --repo "$tmpdir" \
+    --rubric "$RUBRIC_FILE" \
+    --skip-tool-versions \
+    --output "$out_file"
+
+  # apps/web/x.ts must be tagged @web-team (direct child)
+  local owner_direct
+  owner_direct="$(finding_owner "$out_file" "apps/web/x.ts")"
+  if [[ "$owner_direct" == "@web-team" ]]; then
+    pass "scenario-e: apps/web/x.ts tagged @web-team (no-trailing-slash dir pattern)"
+  else
+    fail "scenario-e: expected @web-team for apps/web/x.ts, got '$owner_direct'"
+  fi
+
+  # apps/web/nested/y.ts must also be tagged @web-team (deeper child)
+  local owner_nested
+  owner_nested="$(finding_owner "$out_file" "apps/web/nested/y.ts")"
+  if [[ "$owner_nested" == "@web-team" ]]; then
+    pass "scenario-e: apps/web/nested/y.ts tagged @web-team (nested child)"
+  else
+    fail "scenario-e: expected @web-team for apps/web/nested/y.ts, got '$owner_nested'"
+  fi
+
+  # apps/other/z.ts must fall through to @default-owner (not prefixed by apps/web)
+  local owner_other
+  owner_other="$(finding_owner "$out_file" "apps/other/z.ts")"
+  if [[ "$owner_other" == "@default-owner" ]]; then
+    pass "scenario-e: apps/other/z.ts tagged @default-owner (not under apps/web)"
+  else
+    fail "scenario-e: expected @default-owner for apps/other/z.ts, got '$owner_other'"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Run all scenarios
 # ---------------------------------------------------------------------------
 
@@ -490,6 +558,9 @@ run_scenario_c
 
 printf '\nScenario D: live tool_versions — gitleaks key\n'
 run_scenario_d
+
+printf '\nScenario E: CODEOWNERS directory-prefix matching (no trailing slash)\n'
+run_scenario_e
 
 # ---------------------------------------------------------------------------
 # Report

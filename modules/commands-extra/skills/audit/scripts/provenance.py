@@ -204,7 +204,7 @@ def _probe_tool_version(tool: str) -> "str | None":
             line = line.strip()
             if line:
                 return line
-    except (OSError, FileNotFoundError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
         pass
     return None
 
@@ -310,6 +310,10 @@ def _codeowners_match(path: str, pattern: str) -> bool:
         stripped = pattern.lstrip("/")
         if "**" in stripped:
             return _fnmatch_with_doublestar(path, stripped)
+        # No glob metacharacters and no trailing slash: treat as directory prefix
+        # (e.g. "apps/web" matches "apps/web/x.ts" and "apps/web" itself).
+        if "*" not in stripped and "?" not in stripped:
+            return path == stripped or path.startswith(stripped + "/")
         return fnmatch.fnmatchcase(path, stripped)
 
     # No slash: match basename anywhere in the tree

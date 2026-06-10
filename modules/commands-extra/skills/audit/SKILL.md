@@ -867,7 +867,7 @@ After `merge-findings.py` produces `findings.jsonl` (or `findings-delta.jsonl` i
 run `provenance.py` to prepend an audit-level provenance header and tag findings for routing:
 
 ```bash
-python3 skills/audit/scripts/provenance.py \
+python3 "$SKILL_ROOT/scripts/provenance.py" \
   --findings .audit/current/findings.jsonl \
   --repo "$REPO_ROOT" \
   --model "$AUDIT_MODEL" \
@@ -897,7 +897,7 @@ different `rubric_version` values explain severity shifts (see ADV-007).
 **CODEOWNERS owner tagging** — if a `CODEOWNERS` file exists in the repo (checked in order:
 `.github/CODEOWNERS`, `CODEOWNERS`, `docs/CODEOWNERS`), each finding whose `location.path`
 matches a CODEOWNERS rule gains `properties.owner` set to the owning team or user handle(s).
-Uses last-match-wins semantics identical to GitHub's own evaluation.  Owner tags enable
+Follows GitHub CODEOWNERS last-match-wins with directory-prefix and glob matching.  Owner tags enable
 per-team issue routing and allow the issue-creation step (Phase M7) to notify the right team.
 Findings with no matching CODEOWNERS rule receive no `owner` field (omitted, not null).
 
