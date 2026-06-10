@@ -15,10 +15,20 @@
 #       "has_dockerfile": bool,
 #       "has_workflows": bool,
 #       "is_extension": bool,
-#       "is_mobile": bool
+#       "is_mobile": bool,
+#       "has_iac": bool
 #     },
 #     "available_tools": [...]
 #   }
+#
+# has_iac detection heuristic (any one of):
+#   - Dockerfile (also sets has_dockerfile)
+#   - *.tf or *.tf.json files (Terraform HCL)
+#   - k8s manifest heuristic: *.yaml under k8s/, manifests/, or .k8s/ dirs
+#     containing both "kind:" and "apiVersion:" lines (grep -l, depth 5)
+#   - CloudFormation template: any YAML/JSON with
+#     AWSTemplateFormatVersion or a top-level "Resources" key alongside
+#     "AWSTemplateFormatVersion" string in the file (depth 4 search)
 #
 # BSD-safe: avoids GNU-only Perl-regex grep flags.
 
@@ -348,6 +358,67 @@ if find_files "*.xcodeproj" 3 || find_files "*.xcworkspace" 3 \
   is_mobile=true
 fi
 
+# --- has_iac ---
+# TRUE when ANY of the following Infrastructure-as-Code signals are present:
+#   1. Dockerfile (already tracked in has_dockerfile — IaC subsumes it)
+#   2. Terraform: *.tf or *.tf.json files
+#   3. Kubernetes manifests: *.yaml files under k8s/, manifests/, or .k8s/
+#      dirs that contain both "kind:" and "apiVersion:" lines
+#   4. CloudFormation: any file containing "AWSTemplateFormatVersion" text
+has_iac=false
+
+# Signal 1: Dockerfile already present
+if [ "$has_dockerfile" = "true" ]; then
+  has_iac=true
+fi
+
+# Signal 2: Terraform HCL files
+if [ "$has_iac" = "false" ]; then
+  if find_ext "tf" 4 || find "$TARGET_DIR" -maxdepth 4 -name "*.tf.json" 2>/dev/null \
+      | head -1 | grep -q .; then
+    has_iac=true
+  fi
+fi
+
+# Signal 3: Kubernetes manifests (yaml files under common k8s dirs that have
+# both "kind:" and "apiVersion:" lines — simple grep heuristic, depth 5)
+if [ "$has_iac" = "false" ]; then
+  for k8s_dir in k8s manifests .k8s; do
+    if has_dir "$k8s_dir"; then
+      # Search for a yaml file containing both "kind:" and "apiVersion:"
+      k8s_hit=$(find "$TARGET_DIR/$k8s_dir" -maxdepth 5 \
+        \( -name "*.yaml" -o -name "*.yml" \) 2>/dev/null \
+        | while IFS= read -r f; do
+            if grep -q "kind:" "$f" 2>/dev/null && \
+               grep -q "apiVersion:" "$f" 2>/dev/null; then
+              echo "$f"
+              break
+            fi
+          done)
+      if [ -n "$k8s_hit" ]; then
+        has_iac=true
+        break
+      fi
+    fi
+  done
+fi
+
+# Signal 4: CloudFormation templates (any file with AWSTemplateFormatVersion)
+if [ "$has_iac" = "false" ]; then
+  cf_hit=$(find "$TARGET_DIR" -maxdepth 4 \
+    \( -name "*.yaml" -o -name "*.yml" -o -name "*.json" \) \
+    -not -path "*/.git/*" 2>/dev/null \
+    | while IFS= read -r f; do
+        if grep -q "AWSTemplateFormatVersion" "$f" 2>/dev/null; then
+          echo "$f"
+          break
+        fi
+      done)
+  if [ -n "$cf_hit" ]; then
+    has_iac=true
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Available tools (spine tool list)
 # ---------------------------------------------------------------------------
@@ -432,6 +503,7 @@ jq -n \
   --arg     workflows  "$has_workflows" \
   --arg     extension  "$is_extension" \
   --arg     mobile     "$is_mobile" \
+  --arg     iac        "$has_iac" \
   --argjson tools      "$tools_json" \
   '{
     detected_ecosystems: $ecosystems,
@@ -442,7 +514,8 @@ jq -n \
       has_dockerfile:    ($dockerfile == "true"),
       has_workflows:     ($workflows  == "true"),
       is_extension:      ($extension  == "true"),
-      is_mobile:         ($mobile     == "true")
+      is_mobile:         ($mobile     == "true"),
+      has_iac:           ($iac        == "true")
     },
     available_tools: $tools
   }'

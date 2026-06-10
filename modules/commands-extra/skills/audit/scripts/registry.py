@@ -41,7 +41,8 @@ _VALID_SEVERITIES = {"critical", "high", "medium", "low", "info"}
 _VALID_CONFIDENCES = {"high", "medium", "low"}
 _VALID_DETECTIONS = {"tool", "llm", "hybrid"}
 _VALID_SHAPE_FLAGS = {
-    "has_migrations", "has_dockerfile", "has_workflows", "is_extension", "is_mobile"
+    "has_migrations", "has_dockerfile", "has_workflows", "is_extension", "is_mobile",
+    "has_iac"
 }
 
 

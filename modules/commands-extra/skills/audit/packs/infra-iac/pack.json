@@ -1,0 +1,51 @@
+{
+  "id": "ccgm/infra-iac",
+  "name": "Infrastructure & IaC Security",
+  "version": "1.0.0",
+  "applies_when": ["has_iac"],
+  "tags": ["security", "iac", "infrastructure", "docker", "terraform", "kubernetes"],
+  "severity_floor": "medium",
+  "tools": ["hadolint", "checkov", "trivy"],
+  "checks": [
+    {
+      "id": "iac/dockerfile-root-user",
+      "severity": "high",
+      "confidence": "high",
+      "detection": "hybrid",
+      "tool": "hadolint",
+      "rule": "DL3002",
+      "fallback": "grep"
+    },
+    {
+      "id": "iac/dockerfile-latest-tag",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "tool",
+      "tool": "hadolint",
+      "rule": "DL3007"
+    },
+    {
+      "id": "iac/public-ingress",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "hybrid",
+      "tool": "checkov",
+      "fallback": "llm"
+    },
+    {
+      "id": "iac/missing-encryption",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "tool",
+      "tool": "checkov"
+    },
+    {
+      "id": "iac/hardcoded-secret-in-iac",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "hybrid",
+      "tool": "checkov",
+      "fallback": "grep"
+    }
+  ]
+}
