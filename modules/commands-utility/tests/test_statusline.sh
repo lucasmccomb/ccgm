@@ -43,7 +43,18 @@ check() {  # $1 = display_name, $2 = expected model field
 
 echo "=== statusline model rendering ==="
 
+# --- Source parity: the installed module copy must match lib/statusline.sh ---
+# Both files ship the same script; an edit to one without the other silently
+# desyncs the installed statusline from the tested one.
+if diff -q "$STATUSLINE" "$REPO_ROOT/modules/commands-utility/statusline-command.sh" >/dev/null 2>&1; then
+  PASS=$((PASS + 1)); echo "  PASS: lib/statusline.sh == modules/commands-utility/statusline-command.sh"
+else
+  FAIL=$((FAIL + 1)); echo "  FAIL: lib/statusline.sh and modules/commands-utility/statusline-command.sh differ"
+fi
+
 # --- Current models (must match prior behavior exactly) ---
+check "Fable 5"               "🧠 F-5"
+check "Fable 5 (1M context)"  "🧠 F-5"
 check "Opus 4.8 (1M context)" "🧠 O-4.8"
 check "Opus 4.8"              "🧠 O-4.8"
 check "Opus 4.7"              "🧠 O-4.7"
@@ -57,6 +68,8 @@ check "Haiku 4.5"             "⚠️ H-4.5"
 check "Haiku"                 "⚠️ H"
 
 # --- Future models: NO code edit should ever be needed for these ---
+check "Fable 5.1"             "🧠 F-5.1"
+check "Fable 6"               "🧠 F-6"
 check "Opus 4.9"              "🧠 O-4.9"
 check "Opus 4.10"             "🧠 O-4.10"
 check "Opus 5"                "🧠 O-5"
@@ -94,6 +107,10 @@ M='{"model":{"display_name":"Opus 4.8"},"cwd":"'"$TMPHOME"'"'
 # Baseline effort labels (no ultracode) — must be unchanged.
 check_effort "max"               "$M,\"effort\":{\"level\":\"max\"}}"                     "$TMPHOME" "🧠 O-4.8 Max"
 check_effort "xhigh"             "$M,\"effort\":{\"level\":\"xhigh\"}}"                   "$TMPHOME" "🧠 O-4.8 XH"
+# Fable at xhigh — the exact scenario from the "Fable Max" bug report. stdin
+# effort must win over any stale persisted/env source and render XH, not Max.
+F='{"model":{"display_name":"Fable 5"},"cwd":"'"$TMPHOME"'"'
+check_effort "fable xhigh"       "$F,\"effort\":{\"level\":\"xhigh\"}}"                   "$TMPHOME" "🧠 F-5 XH"
 # Ultracode keeps the accurate effort (always xhigh -> XH) and bookends with ✨.
 # Via stdin .effort.level=="ultracode" (defensive: no effort case -> forced XH).
 check_effort "effort=ultracode"  "$M,\"effort\":{\"level\":\"ultracode\"}}"               "$TMPHOME" "🧠 O-4.8 ✨XH✨"
