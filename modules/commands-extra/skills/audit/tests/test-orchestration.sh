@@ -274,10 +274,12 @@ fi
 # Balance check: assert no worker receives more than ceil(total_packs/workers)+1 packs
 # (pack-count bound). The greedy algorithm minimizes check-load imbalance, but the pack-count
 # bound is the weaker structural assertion we can make deterministically from the fixture.
-# No starved workers when packs >= workers.
+# No-starvation property: when packs >= workers, every worker must receive >= 1 pack.
+# The greedy assignment guarantees this because it assigns packs one-by-one in sorted order;
+# with 9 packs and 4 workers the first 4 iterations each touch a different worker.
 set +e
 BALANCE_CHECK=$(python3 - "$ASSIGN_OUT_1" "$FIXED_PACKS_FILE" << 'PYEOF'
-import json, sys
+import json, sys, math
 assignment = json.load(open(sys.argv[1]))
 packs_by_id = {p["id"]: p for p in json.load(open(sys.argv[2]))}
 
@@ -294,14 +296,20 @@ pack_count_per_worker = [len(v) for v in assignment.values()]
 max_packs = max(pack_count_per_worker)
 
 # No worker should have more than ceil(total_packs / workers) + 1 packs
-import math
 total_packs = sum(pack_count_per_worker)
 num_workers = len(loads)
 ceil_share = math.ceil(total_packs / num_workers)
 overloaded = [k for k, v in assignment.items() if len(v) > ceil_share + 1]
 
+# No-starvation assertion: when packs >= workers, every worker gets >= 1 pack
+starved = []
+if total_packs >= num_workers:
+    starved = [k for k, v in assignment.items() if len(v) == 0]
+
 if overloaded:
     print(f"OVERLOADED: workers {overloaded} have too many packs (ceil_share={ceil_share})")
+elif starved:
+    print(f"STARVED: workers {starved} have 0 packs despite packs({total_packs}) >= workers({num_workers})")
 else:
     print(f"OK: max_check_load={max_load} min_check_load={min_load} max_packs_per_worker={max_packs}")
 PYEOF
@@ -309,7 +317,7 @@ PYEOF
 set -e
 
 if echo "$BALANCE_CHECK" | grep -q "^OK"; then
-  pass "assign-packs.py: worker pack distribution is balanced ($BALANCE_CHECK)"
+  pass "assign-packs.py: worker pack distribution is balanced (no overload, no starvation) ($BALANCE_CHECK)"
 else
   fail "assign-packs.py: pack distribution imbalanced ($BALANCE_CHECK)"
 fi
@@ -618,7 +626,7 @@ PYEOF
     fail "merge-findings.py: failed on coverage-only spine (exit $COVERAGE_MERGE_EC)"
   fi
 
-  # Assert the coverage_gap record appears in the MERGED output (not just the spine)
+  # Assert the coverage_gap record in the MERGED output names the absent tool
   set +e
   MERGED_GAP=$(python3 - "$COVERAGE_MERGE" "$ABSENT_TOOL" << 'PYEOF'
 import json, sys
@@ -632,25 +640,20 @@ for line in open(merged_file):
     except Exception:
         continue
     if rec.get("type") == "coverage_gap":
-        # The coverage_gap should name the absent tool in its tool field or message
+        # Require the absent tool's NAME to appear in the tool field
         tool = rec.get("tool", "")
-        msg = rec.get("message", "")
-        if absent_tool in tool or absent_tool in msg:
+        if absent_tool in tool:
             print("FOUND")
             sys.exit(0)
-        # Even without the tool name, the presence of a coverage_gap record is sufficient
-        print("FOUND_GENERIC")
-        sys.exit(0)
 print("NOT_FOUND")
 PYEOF
   )
   set -e
 
-  if [ "${MERGED_GAP:-}" = "FOUND" ] || [ "${MERGED_GAP:-}" = "FOUND_GENERIC" ]; then
-    pass "merge-findings.py: coverage_gap record appears in merged output (fold-through verified)"
+  if [ "${MERGED_GAP:-}" = "FOUND" ]; then
+    pass "merge-findings.py: coverage_gap record in merged output names absent tool '$ABSENT_TOOL'"
   else
-    fail "merge-findings.py: expected coverage_gap in merged output for absent tool '$ABSENT_TOOL'" \
-      "merge-findings.py must fold coverage_gap records from the spine through to the output"
+    fail "merge-findings.py: expected coverage_gap in merged output with tool='$ABSENT_TOOL' (fold-through + tool-name check)"
   fi
 fi
 

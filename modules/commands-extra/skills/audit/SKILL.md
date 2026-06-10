@@ -336,9 +336,11 @@ A finding belongs in a pack's slice when any of these is true:
   - The finding's `check_id` namespace (the part before `/`) matches a check-id prefix declared
     in the pack's `checks` array (e.g. pack has check `"id": "security/leaked-credential"` → the
     `security` namespace matches findings with `check_id` starting with `security/`).
-  - The finding's `tool` field matches a tool listed in the pack's `tools[]`.
-  - The finding has no `tool` field (un-attributed): assign it to ALL workers whose packs declare
-    any tool (broad assignment to avoid silent gaps).
+  - The finding's `properties.tool` value (where spine normalizers store the tool name — e.g.
+    `parse-gitleaks.py` emits `{"properties": {"tool": "gitleaks"}}`) matches a tool listed in
+    the pack's `tools[]`. There is no top-level `tool` field on findings.
+  - The finding has no `properties.tool` value (un-attributed): assign it to ALL packs that
+    declare at least one tool (broad assignment to avoid silent gaps).
 
 ```bash
 python3 - \
@@ -386,14 +388,17 @@ for pack_dir, criteria in pack_criteria.items():
             if "type" in rec:
                 continue
             check_id = rec.get("check_id", "")
-            tool = rec.get("tool", "")
+            # Spine normalizers store the tool name in properties.tool
+            # (e.g. parse-gitleaks.py emits {"properties": {"tool": "gitleaks"}}).
+            # Findings have no top-level "tool" field.
+            props_tool = rec.get("properties", {}).get("tool", "")
             ns = check_id.split("/")[0] if "/" in check_id else ""
 
             if ns in criteria["namespaces"]:
                 out.write(line + "\n")
-            elif tool and tool in criteria["tools"]:
+            elif props_tool and props_tool in criteria["tools"]:
                 out.write(line + "\n")
-            elif not tool and any_tool_packs:
+            elif not props_tool and any_tool_packs:
                 # Un-attributed: broadcast to all tool-using packs
                 if pack_dir in any_tool_packs:
                     out.write(line + "\n")
@@ -408,9 +413,11 @@ python3 - \
   "$AUDIT_DIR/current/selected-packs.json" \
   "$SKILL_ROOT" \
   "$AUDIT_DIR" \
-  "$REPO_DIR" << 'PYEOF'
+  "$REPO_DIR" \
+  "${FIX_MODE:-false}" << 'PYEOF'
 import json, os, sys
-assignment_file, packs_file, skill_root, audit_dir, repo_dir = sys.argv[1:]
+assignment_file, packs_file, skill_root, audit_dir, repo_dir, fix_mode_str = sys.argv[1:]
+FIX_MODE = fix_mode_str.lower() in ("true", "1", "yes")
 
 assignment = json.load(open(assignment_file))
 all_packs = {p["id"]: p for p in json.load(open(packs_file))}
@@ -465,7 +472,7 @@ for worker_id, pack_ids in assignment.items():
         "rubric_slice": rubric_slice,
         "results_file_path": results_path,
         "repo_dir": repo_dir,
-        "fix_mode": False,
+        "fix_mode": FIX_MODE,   # passed in from the coordinator — True when --fix was selected
     }
 
     task_path = os.path.join(tasks_dir, f"worker-{worker_id}.json")
@@ -542,15 +549,15 @@ After all workers complete:
 
 1. **Run the merge pipeline:**
    ```bash
-   # Collect all worker result files
-   LLM_ARGS=""
+   # Collect all worker result files (array — safe for paths with spaces)
+   LLM_ARGS=()
    for f in "$AUDIT_DIR/current/results"/worker-*.json; do
-     LLM_ARGS="$LLM_ARGS --llm $f"
+     LLM_ARGS+=(--llm "$f")
    done
 
    python3 "$SKILL_ROOT/scripts/merge-findings.py" \
      --spine  "$AUDIT_DIR/current/spine/findings.jsonl" \
-     $LLM_ARGS \
+     "${LLM_ARGS[@]}" \
      --rubric "$SKILL_ROOT/schemas/severity-rubric.json" \
      --repo   "$REPO_DIR" \
      --output "$AUDIT_DIR/current/findings.jsonl"
@@ -657,7 +664,37 @@ for i in 0 1 2 3; do
 done
 ```
 
-Display a clear summary and launch commands using the active worker ids from `assignment.json`.
+Display a clear summary and, for each active worker id (those with a non-empty pack assignment),
+output the exact launch command block so the user can copy-paste into separate terminals:
+
+```
+## Audit Setup Complete — Manual Launch Required
+
+Run each of the following commands in a separate Claude Code terminal:
+
+--- Worker 0 ---
+cd {AUDIT_DIR}/worktrees/agent-0
+/audit --worker --task {AUDIT_DIR}/current/tasks/worker-0.json
+# (worktree strategy) No push needed — the coordinator merges local refs.
+# (multi-clone strategy only) After worker finishes: git push origin audit/agent-0-{AUDIT_DATE}
+
+--- Worker 1 ---
+cd {AUDIT_DIR}/worktrees/agent-1
+/audit --worker --task {AUDIT_DIR}/current/tasks/worker-1.json
+# (worktree strategy) No push needed — the coordinator merges local refs.
+# (multi-clone strategy only) After worker finishes: git push origin audit/agent-1-{AUDIT_DATE}
+
+... (omit workers with empty pack assignments)
+
+After all workers complete, run from the repo root:
+/audit --collect
+```
+
+Notes:
+- For the **worktree strategy** (default): do NOT push — workers commit to their local audit branch
+  and the coordinator merges local refs directly in M6-fix.
+- For the **multi-clone strategy**: the `git push origin` step is required — the coordinator merges
+  from origin refs and cannot see the branch without the push.
 
 ---
 
@@ -881,7 +918,9 @@ wait
 
 ### M5-fix: Worker Prompts Include Fix Instructions
 
-The Task agent prompts are extended with:
+The Task agent prompts are extended with strategy-specific instructions:
+
+**Worktree strategy** (default `--fix` path):
 ```
 WORKING DIRECTORY: {AUDIT_DIR}/worktrees/agent-{N}
 Use `git -C {AUDIT_DIR}/worktrees/agent-{N}` for all git commands.
@@ -892,6 +931,27 @@ For auto-fixable findings (rubric fix_confidence=high AND pack check auto_fixabl
 - If verification passes: git add <files> && git commit -m "audit(<pack>): <title>"
 - If verification fails: git checkout -- . && git clean -fd
 - Record fix success/failure in results
+
+IMPORTANT (worktree strategy): When finished, commit your changes to your audit branch.
+Do NOT push — your branch is a LOCAL ref (audit/agent-{N}-{DATE}). The coordinator
+merges it directly from local refs. Pushing is not needed and not expected.
+```
+
+**Multi-clone strategy** (`--fix` with USE_CLONES=true):
+```
+WORKING DIRECTORY: {CLONE_DIR}
+Use git commands within {CLONE_DIR}.
+
+For auto-fixable findings (rubric fix_confidence=high AND pack check auto_fixable=true):
+- Implement fixes using Edit tool with absolute paths
+- Run verification using commands from the verification_commands field
+- If verification passes: git add <files> && git commit -m "audit(<pack>): <title>"
+- If verification fails: git checkout -- . && git clean -fd
+- Record fix success/failure in results
+
+IMPORTANT (multi-clone strategy): When finished, push your branch:
+  git push origin audit/agent-{N}-{DATE}
+The coordinator merges origin refs (not local), so the push is required.
 ```
 
 ### W4-fix: Fix Cycle
@@ -909,6 +969,14 @@ ordered by fix_confidence (high first, then medium):
 
 After collecting results, merge the fix branches into a combined branch, verify, push, and create a PR targeting `$BASE_BRANCH`.
 
+The merge strategy differs by execution mode:
+
+**Worktree strategy** (default): worker branches are LOCAL refs in the main repo's ref namespace
+(worktrees share refs with the main checkout). Merge them directly — no push required from workers.
+
+**Multi-clone strategy**: worker branches live in separate repos and were pushed to origin.
+Merge from `origin/audit/agent-$i-$AUDIT_DATE`.
+
 1. **Create collector worktree**:
    ```bash
    git worktree add "$AUDIT_DIR/worktrees/combined" -b "audit/$AUDIT_DATE" "origin/$BASE_BRANCH"
@@ -920,35 +988,82 @@ After collecting results, merge the fix branches into a combined branch, verify,
    cd "$AUDIT_DIR/worktrees/combined"
    CONFLICT_REPORT="$AUDIT_DIR/current/merge-conflicts.md"
    MERGE_OK=true
+   MERGED_COUNT=0
+   EXPECTED_BRANCHES=()
+
    for i in 0 1 2 3; do
-     BRANCH="origin/audit/agent-$i-$AUDIT_DATE"
-     git ls-remote --exit-code origin "audit/agent-$i-$AUDIT_DATE" 2>/dev/null || continue
-     if ! git merge "$BRANCH" --no-edit 2>/dev/null; then
-       MERGE_OK=false
-       # 1. Capture evidence BEFORE aborting
-       CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
-       cat >> "$CONFLICT_REPORT" <<EOF
-   ## Merge conflict: agent-$i branch
-
-   Conflicted files (captured before abort):
-   $CONFLICTED_FILES
-
-   Resolution required: Manually review and resolve conflicts between
-   audit/agent-$((i-1))-$AUDIT_DATE and audit/agent-$i-$AUDIT_DATE.
-   EOF
-       # 2. Abort the merge
-       git merge --abort 2>/dev/null || true
-       # 3. Halt
-       echo "MERGE CONFLICT on agent-$i branch. See $CONFLICT_REPORT"
-       echo "STOPPING: resolve conflicts manually then re-run --collect."
-       break
-     fi
+     EXPECTED_BRANCHES+=("audit/agent-$i-$AUDIT_DATE")
    done
+
+   if [ "${USE_CLONES:-false}" = "true" ]; then
+     # Multi-clone: branches were pushed to origin — merge from origin refs
+     for i in 0 1 2 3; do
+       BRANCH="origin/audit/agent-$i-$AUDIT_DATE"
+       git rev-parse --verify --quiet "origin/audit/agent-$i-$AUDIT_DATE" 2>/dev/null || continue
+       if ! git merge "$BRANCH" --no-edit 2>/dev/null; then
+         MERGE_OK=false
+         CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
+         cat >> "$CONFLICT_REPORT" <<EOF
+## Merge conflict: agent-$i branch
+
+Conflicted files (captured before abort):
+$CONFLICTED_FILES
+
+Resolution required: Manually review and resolve conflicts between
+the already-merged branches and audit/agent-$i-$AUDIT_DATE.
+EOF
+         git merge --abort 2>/dev/null || true
+         echo "MERGE CONFLICT on agent-$i branch. See $CONFLICT_REPORT"
+         echo "STOPPING: resolve conflicts manually then re-run --collect."
+         break
+       fi
+       MERGED_COUNT=$((MERGED_COUNT + 1))
+     done
+   else
+     # Worktree strategy: branches are local refs — no push needed from workers
+     for i in 0 1 2 3; do
+       BRANCH="audit/agent-$i-$AUDIT_DATE"
+       git rev-parse --verify --quiet "$BRANCH" 2>/dev/null || continue
+       if ! git merge "$BRANCH" --no-edit 2>/dev/null; then
+         MERGE_OK=false
+         CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
+         cat >> "$CONFLICT_REPORT" <<EOF
+## Merge conflict: agent-$i branch
+
+Conflicted files (captured before abort):
+$CONFLICTED_FILES
+
+Resolution required: Manually review and resolve conflicts between
+the already-merged branches and audit/agent-$i-$AUDIT_DATE.
+EOF
+         git merge --abort 2>/dev/null || true
+         echo "MERGE CONFLICT on agent-$i branch. See $CONFLICT_REPORT"
+         echo "STOPPING: resolve conflicts manually then re-run --collect."
+         break
+       fi
+       MERGED_COUNT=$((MERGED_COUNT + 1))
+     done
+   fi
+
    if [ "$MERGE_OK" != "true" ]; then
      echo "Merge incomplete. Review $CONFLICT_REPORT before proceeding."
      exit 1
    fi
+
+   # Zero-merge guard: if fix mode ran but NO branches merged, halt loudly
+   if [ "$MERGED_COUNT" -eq 0 ]; then
+     echo "ERROR: Fix mode ran but ZERO worker branches were merged." >&2
+     echo "  Expected branches:" >&2
+     for b in "${EXPECTED_BRANCHES[@]}"; do echo "    $b" >&2; done
+     echo "  No combined branch was pushed and no PR was created." >&2
+     echo "  Possible causes: workers did not commit, wrong AUDIT_DATE, or branches" >&2
+     echo "  were removed before M6-fix ran." >&2
+     exit 1
+   fi
    ```
+
+   If `MERGED_COUNT` is less than the number of active workers, continue but include a note
+   in the PR body listing which branches were merged and which were missing.
 
 3. **Install deps and verify** using the detected package manager:
    ```bash
@@ -961,7 +1076,8 @@ After collecting results, merge the fix branches into a combined branch, verify,
    git push origin "audit/$AUDIT_DATE"
    gh pr create \
      --title "Audit fixes: $AUDIT_DATE" \
-     --body "Auto-fixes from /audit --fix run on $AUDIT_DATE. Review each commit." \
+     --body "Auto-fixes from /audit --fix run on $AUDIT_DATE. Review each commit.
+Merged $MERGED_COUNT of ${#EXPECTED_BRANCHES[@]} worker branches." \
      --base "$BASE_BRANCH"
    ```
 
@@ -1078,15 +1194,15 @@ IMPORTANT: READ-ONLY. Do NOT modify files, create branches, or make commits.
 After all subagents complete, run the merge pipeline:
 
 ```bash
-# Collect single-session result files
-LLM_ARGS=""
+# Collect single-session result files (array — safe for paths with spaces)
+LLM_ARGS=()
 for f in "$AUDIT_DIR/current/results"/single-*.json; do
-  [ -f "$f" ] && LLM_ARGS="$LLM_ARGS --llm $f"
+  [ -f "$f" ] && LLM_ARGS+=(--llm "$f")
 done
 
 python3 "$SKILL_ROOT/scripts/merge-findings.py" \
   --spine  "$AUDIT_DIR/current/spine/findings.jsonl" \
-  $LLM_ARGS \
+  "${LLM_ARGS[@]}" \
   --rubric "$SKILL_ROOT/schemas/severity-rubric.json" \
   --repo   "$REPO_DIR" \
   --output "$AUDIT_DIR/current/findings.jsonl"
@@ -1101,7 +1217,9 @@ Display the summary table and critical/high findings to the user.
 
 ### Phase 7: Optional Issue Creation + Cleanup
 
-Ask about issue creation (same as Phase M7). Ask about cleanup. Archive results.
+Ask about issue creation (same as Phase M7, except `--single` never creates an epic issue —
+it creates standalone issues with no `Parent:` link and no epic-update step). Ask about cleanup.
+Archive results.
 
 ---
 
@@ -1191,7 +1309,7 @@ For each pack a worker handles:
 
 ### Worker results-file contract
 
-Each worker writes a single JSON file. The ABSOLUTE path to this file (`.audit/current/results/<worker-id>.json`) is embedded in the worker's task file at the same time as `spine_slice_path`, so workers always receive it as an absolute path and never need to derive it from cwd.
+Each worker writes a single JSON file. The ABSOLUTE path to this file (`.audit/current/results/worker-<id>.json`) is embedded in the worker's task file at the same time as `spine_slice_path`, so workers always receive it as an absolute path and never need to derive it from cwd.
 
 ```json
 {

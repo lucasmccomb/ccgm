@@ -3,7 +3,7 @@
 CCGM /audit pack-to-worker load balancer (Epic 1.7b).
 
 Reads the registry-selected packs JSON (from stdin or a file argument) and
-outputs a JSON mapping worker ids (1..N) to ordered pack-id lists.
+outputs a JSON mapping worker ids (0..N-1) to ordered pack-id lists.
 
 Usage
 -----
