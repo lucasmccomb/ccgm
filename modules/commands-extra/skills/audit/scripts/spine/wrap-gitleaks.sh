@@ -1,9 +1,28 @@
 #!/usr/bin/env bash
 # CCGM audit spine -- gitleaks wrapper
-# Detects hard-coded secrets in the working tree.
+# Detects hard-coded secrets in the working tree (default) or full git history.
 #
 # Usage: wrap-gitleaks.sh <repo_root>
 #   repo_root: absolute path to the repository root
+#
+# Scan modes:
+#   Working-tree (default):
+#     Uses `gitleaks detect --no-git` -- scans files present in the working
+#     directory. Works in worktrees and detached-HEAD states.
+#
+#   History (opt-in):
+#     Set CCGM_GITLEAKS_HISTORY=1 before invoking to use `gitleaks git`
+#     instead. Walks every commit in the full git history -- finds secrets
+#     that were committed and later removed. Requires a real git repo with
+#     at least one commit. No network calls are made.
+#
+# --verify-secrets (opt-in, NOT wired by default):
+#   Live verification of detected secrets by calling credential-issuer APIs
+#   is intentionally out of scope for the default path; it makes network calls
+#   to external services and triggers security-review gate C1. To add opt-in
+#   verification, set CCGM_GITLEAKS_VERIFY=1 only after obtaining approval.
+#   The trufflehog wrapper (currently not installed) provides this capability
+#   as an independent optional step; do not rely on it being present.
 #
 # Output (stdout): JSONL -- one JSON object per line.
 # Exit code: always 0
@@ -31,17 +50,32 @@ fi
 TMPFILE="$(mktemp /tmp/ccgm-gitleaks-XXXXXX.json)"
 trap 'rm -f "$TMPFILE"' EXIT
 
-# Run gitleaks -- repo root passed as positional arg (never shell-interpolated)
-# --no-git: scan working tree (works in worktrees / detached heads)
-# --exit-code 0: we handle non-zero ourselves
+# Determine scan mode: history or working-tree
+HISTORY_MODE="${CCGM_GITLEAKS_HISTORY:-0}"
+
 set +e
-gitleaks detect \
-  --source "$REPO_ROOT" \
-  --report-format json \
-  --report-path "$TMPFILE" \
-  --no-git \
-  --exit-code 0 \
-  > /dev/null 2>&1
+if [[ "$HISTORY_MODE" == "1" ]]; then
+  # Full-history scan: walks every commit in the repository.
+  # Uses `gitleaks git` which requires a real git repo.
+  # --no-banner: suppress the gitleaks ASCII banner (keeps output clean)
+  gitleaks git \
+    --report-format json \
+    --report-path "$TMPFILE" \
+    --exit-code 0 \
+    --no-banner \
+    "$REPO_ROOT" \
+    > /dev/null 2>&1
+else
+  # Working-tree scan (default): scans files present in the working directory.
+  # --no-git: works in worktrees / detached heads
+  gitleaks detect \
+    --source "$REPO_ROOT" \
+    --report-format json \
+    --report-path "$TMPFILE" \
+    --no-git \
+    --exit-code 0 \
+    > /dev/null 2>&1
+fi
 GL_EXIT=$?
 set -e
 
