@@ -102,24 +102,26 @@ done
 echo "--- [1] Pack selection: detector + registry against fixture repos ---"
 echo ""
 
-# Expected pack id sets (derived from pack.json applies_when values, Wave 2 state):
-#   Always-packs (applies_when=["always"]): 8 packs:
-#     ccgm/architecture, ccgm/code-quality, ccgm/documentation, ccgm/performance,
+# Expected pack id sets (derived from pack.json applies_when values, Wave 4 state):
+#   Always-packs (applies_when=["always"]): 12 packs:
+#     ccgm/architecture, ccgm/ccgm-hygiene, ccgm/ccgm-standards, ccgm/code-quality,
+#     ccgm/documentation, ccgm/observability, ccgm/performance, ccgm/privacy,
 #     ccgm/secrets, ccgm/security, ccgm/testing, ccgm/tos-compliance
-#   JS-gated (applies_when=["language:javascript"]): 5 packs:
-#     ccgm/accessibility, ccgm/correctness, ccgm/dependencies, ccgm/reliability,
-#     ccgm/typescript-react
+#   JS-gated (applies_when=["language:javascript"]): 6 packs:
+#     ccgm/accessibility, ccgm/api-contract, ccgm/correctness, ccgm/dependencies,
+#     ccgm/reliability, ccgm/typescript-react
 #   has_migrations-gated: ccgm/data-migrations
+#   has_iac-gated:        ccgm/infra-iac
 #   has_workflows-gated:  ccgm/ci-cd
 #
-# Fixture A: JS+TS -> 13 packs (8 always + 5 JS-gated, no migrations/workflows)
-EXPECTED_A="ccgm/accessibility,ccgm/architecture,ccgm/code-quality,ccgm/correctness,ccgm/dependencies,ccgm/documentation,ccgm/performance,ccgm/reliability,ccgm/secrets,ccgm/security,ccgm/testing,ccgm/tos-compliance,ccgm/typescript-react"
+# Fixture A: JS+TS -> 18 packs (12 always + 6 JS-gated, no migrations/iac/workflows)
+EXPECTED_A="ccgm/accessibility,ccgm/api-contract,ccgm/architecture,ccgm/ccgm-hygiene,ccgm/ccgm-standards,ccgm/code-quality,ccgm/correctness,ccgm/dependencies,ccgm/documentation,ccgm/observability,ccgm/performance,ccgm/privacy,ccgm/reliability,ccgm/secrets,ccgm/security,ccgm/testing,ccgm/tos-compliance,ccgm/typescript-react"
 
-# Fixture B: Go only -> 8 always-packs (no JS/TS files, no migrations, no workflows)
-EXPECTED_B="ccgm/architecture,ccgm/code-quality,ccgm/documentation,ccgm/performance,ccgm/secrets,ccgm/security,ccgm/testing,ccgm/tos-compliance"
+# Fixture B: Go only -> 12 always-packs (no JS/TS files, no migrations, no iac, no workflows)
+EXPECTED_B="ccgm/architecture,ccgm/ccgm-hygiene,ccgm/ccgm-standards,ccgm/code-quality,ccgm/documentation,ccgm/observability,ccgm/performance,ccgm/privacy,ccgm/secrets,ccgm/security,ccgm/testing,ccgm/tos-compliance"
 
-# Fixture C: migrations + JS -> 14 packs (8 always + 5 JS-gated + data-migrations)
-EXPECTED_C="ccgm/accessibility,ccgm/architecture,ccgm/code-quality,ccgm/correctness,ccgm/data-migrations,ccgm/dependencies,ccgm/documentation,ccgm/performance,ccgm/reliability,ccgm/secrets,ccgm/security,ccgm/testing,ccgm/tos-compliance,ccgm/typescript-react"
+# Fixture C: migrations + JS -> 19 packs (12 always + 6 JS-gated + data-migrations)
+EXPECTED_C="ccgm/accessibility,ccgm/api-contract,ccgm/architecture,ccgm/ccgm-hygiene,ccgm/ccgm-standards,ccgm/code-quality,ccgm/correctness,ccgm/data-migrations,ccgm/dependencies,ccgm/documentation,ccgm/observability,ccgm/performance,ccgm/privacy,ccgm/reliability,ccgm/secrets,ccgm/security,ccgm/testing,ccgm/tos-compliance,ccgm/typescript-react"
 
 # Fixture A: JS+TS
 FIX_A=$(make_tmp)
@@ -147,7 +149,7 @@ ACTUAL_A=$(pack_ids_sorted "$REG_A_FILE" 2>/dev/null || echo "ERROR")
 set -e
 
 if [ "$ACTUAL_A" = "$EXPECTED_A" ]; then
-  pass "fixture A (JS+TS): selected 13 packs (8 always + 5 JS-gated)"
+  pass "fixture A (JS+TS): selected 18 packs (12 always + 6 JS-gated)"
 else
   fail "fixture A (JS+TS): expected '$EXPECTED_A' but got '$ACTUAL_A'"
 fi
@@ -161,7 +163,7 @@ ACTUAL_B=$(pack_ids_sorted "$REG_B_FILE" 2>/dev/null || echo "ERROR")
 set -e
 
 if [ "$ACTUAL_B" = "$EXPECTED_B" ]; then
-  pass "fixture B (Go): selected 8 always-packs (no JS-gated packs)"
+  pass "fixture B (Go): selected 12 always-packs (no JS-gated packs)"
 else
   fail "fixture B (Go): expected '$EXPECTED_B' but got '$ACTUAL_B'"
 fi
@@ -175,7 +177,7 @@ ACTUAL_C=$(pack_ids_sorted "$REG_C_FILE" 2>/dev/null || echo "ERROR")
 set -e
 
 if [ "$ACTUAL_C" = "$EXPECTED_C" ]; then
-  pass "fixture C (migrations+JS): selected 14 packs (8 always + 5 JS-gated + data-migrations)"
+  pass "fixture C (migrations+JS): selected 19 packs (12 always + 6 JS-gated + data-migrations)"
 else
   fail "fixture C (migrations+JS): expected '$EXPECTED_C' but got '$ACTUAL_C'"
 fi
