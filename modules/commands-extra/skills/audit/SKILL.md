@@ -10,13 +10,18 @@ Comprehensive codebase audit. Produces a findings document and creates GitHub is
 
 # Direct flags (skip the prompt)
 /audit --fix              # Audit WITH auto-fixes (uses worktrees, creates PR)
-/audit --single           # Single-session audit (8 subagents, lightweight)
+/audit --single           # Single-session audit (one subagent per selected pack, read-only)
 /audit --manual           # Set up tasks + output launch commands for manual orchestration
 /audit --worker           # Worker mode (run from worktree/clone after --manual setup)
 /audit --collect          # Compile results + create issues (after workers complete)
 /audit --collect --force  # Collect even if some agents haven't completed
 /audit --max-fixes 10     # Limit number of auto-fixes (only with --fix)
 ```
+
+> **Note on `--single` and `--fix`**: `--single` is always read-only. It never applies
+> fixes even if `--fix` is also passed. If you invoke `/audit --single --fix`, the `--fix`
+> flag is silently ignored and a note is printed:
+> `Note: --single is read-only; --fix ignored. Use parallel-worktrees strategy for auto-fix.`
 
 ### Interactive Configuration
 
@@ -31,19 +36,20 @@ This ensures the user always knows exactly what the audit will do before it star
 
 | Strategy | Agents | Isolation | Depth | Speed |
 |----------|--------|-----------|-------|-------|
-| **Parallel worktrees** | 4 Task agents | Git worktrees in `.audit/worktrees/` | Good | Fast |
-| **Single session** | 8 Explore subagents | None (all read from same dir) | Light | Fastest |
-| **Multi-clone** | 4 Task agents | Sibling clone dirs | Deep | Fast |
-| **Manual setup** | 4 full Claude sessions | Worktrees (or clones) | Deepest | Slowest |
+| **Parallel worktrees** | N workers (one per non-empty assignment) | Git worktrees in `.audit/worktrees/` | Good | Fast |
+| **Single session** | One Explore subagent per selected pack | None (all read from same dir) | Light | Fastest |
+| **Multi-clone** | N workers | Sibling clone dirs | Deep | Fast |
+| **Manual setup** | N full Claude sessions | Worktrees (or clones) | Deepest | Slowest |
 
 ---
 
 ## CRITICAL: Isolation Rules
 
 1. **Read-only by default** - The audit does NOT modify any files, create branches, or make commits unless the user explicitly chooses "Analyze + auto-fix".
-2. **Worktree isolation (recommended)** - When worktrees or auto-fix are used, all work happens in git worktrees under `.audit/worktrees/`. The user's working directory is never touched.
-3. **Multi-clone is opt-in only** - Sibling clones are ONLY used when the user explicitly selects "Multi-clone" execution. Before using clones, ALL must be verified as clean (no uncommitted changes, no active feature branches). If any clone has active work, warn the user and suggest worktrees instead.
-4. **Always prompt first** - When `/audit` is called without flags, always ask the user to configure scope and execution strategy before doing anything.
+2. **`--single` is always read-only** - It never applies fixes regardless of other flags.
+3. **Worktree isolation (recommended)** - When worktrees or auto-fix are used, all work happens in git worktrees under `.audit/worktrees/`. The user's working directory is never touched.
+4. **Multi-clone is opt-in only** - Sibling clones are ONLY used when the user explicitly selects "Multi-clone" execution. Before using clones, ALL must be verified as clean (no uncommitted changes, no active feature branches). If any clone has active work, warn the user and suggest worktrees instead.
+5. **Always prompt first** - When `/audit` is called without flags, always ask the user to configure scope and execution strategy before doing anything.
 
 ---
 
@@ -52,11 +58,11 @@ This ensures the user always knows exactly what the audit will do before it star
 ### Mode Detection & Routing
 
 **If flags are passed, use them directly (skip the interactive prompt):**
-- `--single` -> Single-Session Mode (Phases 1-7)
+- `--single` -> Single-Session Mode (Phases 1-7), always read-only
 - `--worker` -> Worker Mode (Phases W1-W5)
 - `--collect` -> Collector Mode (Phases C1-C4)
 - `--force` -> sets FORCE_COLLECT=true (only used with --collect)
-- `--fix` -> sets FIX_MODE=true
+- `--fix` -> sets FIX_MODE=true (ignored silently when combined with --single)
 - `--max-fixes N` -> sets MAX_FIXES=N (only with --fix)
 - `--manual` -> Coordinator-Only Mode (Phases M1-M4 + output launch commands)
 - Remaining argument is the target path (default: entire repo)
@@ -72,21 +78,21 @@ Options:
 
 **Question 2** - header: "Execution", question: "How should the audit run?"
 Options:
-1. **Parallel worktrees (Recommended)** - description: "4 Task agents in isolated git worktrees within this repo. Good balance of depth and speed. Your working directory is never touched."
-2. **Single session** - description: "8 lightweight subagents in the current session. Fastest but least thorough - agents have limited context windows."
-3. **Multi-clone** - description: "4 agents across sibling clone directories. Deepest analysis with full context per agent. WARNING: Requires all clones to be on clean branches with no active work."
+1. **Parallel worktrees (Recommended)** - description: "Task agents in isolated git worktrees within this repo. Good balance of depth and speed. Your working directory is never touched."
+2. **Single session** - description: "Lightweight read-only subagents in the current session. One subagent per selected pack. Fastest but least thorough."
+3. **Multi-clone** - description: "Agents across sibling clone directories. Deepest analysis with full context per agent. WARNING: Requires all clones to be on clean branches with no active work."
 4. **Manual setup** - description: "Set up worktrees and task files, then output launch commands so you can run each agent yourself in separate terminals."
 
 **Map user choices to configuration:**
 
 | Scope | Execution | Result |
 |-------|-----------|--------|
-| Read-only | Parallel worktrees | Default autonomous mode (M1-M7, FIX_MODE=false) - agents read from worktrees |
-| Read-only | Single session | Single-session mode (Phases 1-7) |
+| Read-only | Parallel worktrees | Default autonomous mode (M1-M7, FIX_MODE=false) |
+| Read-only | Single session | Single-session mode (Phases 1-7, always read-only) |
 | Read-only | Multi-clone | Clone-based autonomous mode (M1-M7, FIX_MODE=false, USE_CLONES=true) |
 | Read-only | Manual setup | Manual mode (M1-M4 + launch commands) |
 | Analyze + auto-fix | Parallel worktrees | Autonomous mode with fixes (M1-M7, FIX_MODE=true) |
-| Analyze + auto-fix | Single session | Single-session mode with fixes (Phases 1-7, FIX_MODE=true) |
+| Analyze + auto-fix | Single session | Single-session mode (Phases 1-7, read-only; --fix silently ignored) |
 | Analyze + auto-fix | Multi-clone | Clone-based mode with fixes (M1-M7, FIX_MODE=true, USE_CLONES=true) |
 | Analyze + auto-fix | Manual setup | Manual mode with fixes (M1-M4 + launch commands, FIX_MODE=true) |
 
@@ -128,8 +134,8 @@ else
   PKG_MANAGER="npm"  # safe fallback: npm is always present in Node projects
 fi
 
-# Number of agents (always 4 - one per category pair)
-AGENT_COUNT=4
+# Skill root (absolute path to the installed skill directory)
+SKILL_ROOT="$HOME/.claude/skills/audit"
 ```
 
 ---
@@ -173,6 +179,7 @@ Run from any clone. The default is **read-only** - no code changes unless `--fix
 ```bash
 mkdir -p "$AUDIT_DIR/current/tasks"
 mkdir -p "$AUDIT_DIR/current/results"
+mkdir -p "$AUDIT_DIR/current/spine"
 mkdir -p "$AUDIT_DIR/history"
 ```
 
@@ -182,7 +189,6 @@ Write `config.json`:
   "audit_date": "YYYYMMDD",
   "started_at": "ISO-8601",
   "base_branch": "<detected base branch>",
-  "agent_count": 4,
   "scope": "entire repo",
   "fix_mode": false,
   "repo_dir": "<absolute path to repo root>",
@@ -192,7 +198,7 @@ Write `config.json`:
 
 ### Phase M2.5: Create Epic Issue
 
-Create a GitHub epic issue to serve as the parent tracker for this audit run. All downstream category issues (created during collection) will reference this epic.
+Create a GitHub epic issue to serve as the parent tracker for this audit run. All downstream findings issues (created during collection) will reference this epic.
 
 ```bash
 gh issue create \
@@ -203,24 +209,12 @@ gh issue create \
 
 Tracking issue for the YYYY-MM-DD codebase audit.
 
-### Categories
-- [ ] Security
-- [ ] Dependencies
-- [ ] Terms of Service & Policy Compliance
-- [ ] Code Quality
-- [ ] TypeScript/React
-- [ ] Architecture
-- [ ] Performance
-- [ ] Testing
-- [ ] Documentation
-
 ### Status
 - **Started**: YYYY-MM-DD
-- **Agents**: 4
 - **Mode**: Read-only audit
 
 ### Downstream Issues
-Category-specific findings issues will be linked here as they are created.
+Pack-specific findings issues will be linked here as they are created.
 
 ---
 *Generated by `/audit` skill*
@@ -230,183 +224,346 @@ EOF
 
 Save the epic issue number in `config.json` as `"epic_issue"`.
 
-### Phase M3: Prepare Agent Environment
+### Phase M3: Ecosystem Detection + Pack Selection + Pack Assignment
 
-The preparation depends on the execution strategy chosen by the user:
+This phase replaces the legacy hardcoded 9-category model with the pack registry pipeline.
 
-**Worktree mode (parallel worktrees):**
-Create worktrees for agent isolation:
-```bash
-git fetch origin
-mkdir -p "$AUDIT_DIR/worktrees"
-for i in 0 1 2 3; do
-  git worktree add "$AUDIT_DIR/worktrees/agent-$i" -b "audit/agent-$i-$AUDIT_DATE" "origin/$BASE_BRANCH"
-done
-```
-If FIX_MODE is true, also install dependencies in each worktree using the detected package manager:
-```bash
-case "$PKG_MANAGER" in
-  bun)  INSTALL_CMD="bun install --frozen-lockfile" ;;
-  pnpm) INSTALL_CMD="pnpm install --frozen-lockfile" ;;
-  yarn) INSTALL_CMD="yarn install --frozen-lockfile" ;;
-  *)    INSTALL_CMD="npm ci" ;;
-esac
-for i in 0 1 2 3; do
-  (cd "$AUDIT_DIR/worktrees/agent-$i" && $INSTALL_CMD 2>&1 | tail -1) &
-done
-wait
-```
+1. **Run the ecosystem detector:**
+   ```bash
+   bash "$SKILL_ROOT/scripts/detect-ecosystems.sh" "$REPO_DIR" \
+     > "$AUDIT_DIR/current/detection.json"
+   ```
 
-**Multi-clone mode:**
-Derive the sibling clone pattern from the repo's remote URL (NOT the directory basename — a flat
-clone named `myapp-0` would yield `myapp-0`, making the loop search for `myapp-0-0` through
-`myapp-0-3`, which never exist):
+2. **Run the pack registry to select applicable packs:**
+   ```bash
+   python3 "$SKILL_ROOT/scripts/registry.py" "$AUDIT_DIR/current/detection.json" \
+     > "$AUDIT_DIR/current/selected-packs.json"
+   ```
+
+3. **HALT if zero packs selected** — do NOT silently proceed:
+   ```bash
+   PACK_COUNT=$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))))" \
+     "$AUDIT_DIR/current/selected-packs.json")
+   if [ "$PACK_COUNT" -eq 0 ]; then
+     echo "ERROR: registry selected zero packs for this repository." >&2
+     echo "  Detection output: $AUDIT_DIR/current/detection.json" >&2
+     echo "  Review the detected ecosystems and project shape, then re-run." >&2
+     exit 1
+   fi
+   ```
+
+4. **Run the pack assignment balancer** (default 4 workers):
+   ```bash
+   python3 "$SKILL_ROOT/scripts/assign-packs.py" \
+     "$AUDIT_DIR/current/selected-packs.json" \
+     --workers 4 \
+     > "$AUDIT_DIR/current/assignment.json"
+   ```
+   The assignment maps worker ids 0..N-1 to ordered pack-id lists.
+   Workers with empty lists will NOT be launched (see M5).
+
+5. **Prepare agent environment** (worktree/clone/none per strategy — same as before):
+
+   **Worktree mode:**
+   ```bash
+   git fetch origin
+   mkdir -p "$AUDIT_DIR/worktrees"
+   for i in 0 1 2 3; do
+     git worktree add "$AUDIT_DIR/worktrees/agent-$i" \
+       -b "audit/agent-$i-$AUDIT_DATE" "origin/$BASE_BRANCH"
+   done
+   ```
+   If FIX_MODE is true, install dependencies in each worktree using the detected package manager.
+
+   **Multi-clone mode:**
+   ```bash
+   REPOS_DIR=$(dirname "$REPO_DIR")
+   REPO_BASE=$(git remote get-url origin 2>/dev/null | sed 's|.*/||; s|\.git$||')
+   if [ -z "$REPO_BASE" ]; then
+     REPO_BASE=$(basename "$REPO_DIR" | sed -E 's/-[0-9]+$//')
+   fi
+   CLONE_DIRS=()
+   for i in 0 1 2 3; do
+     candidate="$REPOS_DIR/${REPO_BASE}-$i"
+     [ -d "$candidate/.git" ] || [ -f "$candidate/.git" ] && CLONE_DIRS+=("$candidate")
+   done
+   if [ "${#CLONE_DIRS[@]}" -eq 0 ]; then
+     echo "ERROR: Multi-clone discovery found zero sibling clone directories." >&2
+     echo "  Searched: $REPOS_DIR/${REPO_BASE}-{0..3}" >&2
+     echo "  Suggest: use 'Parallel worktrees' mode instead." >&2
+     exit 1
+   fi
+   for dir in "${CLONE_DIRS[@]}"; do
+     git -C "$dir" status --porcelain
+   done
+   ```
+   Verify all clones are clean. Create audit branches in each clone.
+
+   **Single-session mode:** No preparation needed. Skip to M4.
+
+### Phase M4: Run Spine + Write Task Files
+
+**Run the deterministic spine** (coordinator responsibility, once per audit run):
 ```bash
-REPOS_DIR=$(dirname "$REPO_DIR")
-# Derive base name from the remote URL (strips path prefix and .git suffix).
-# Fallback: strip a trailing -<digits> suffix from the directory basename so both
-# flat-clone layouts (myapp-0, myapp-1, ...) and workspace layouts resolve correctly.
-REPO_BASE=$(git remote get-url origin 2>/dev/null | sed 's|.*/||; s|\.git$||')
-if [ -z "$REPO_BASE" ]; then
-  REPO_BASE=$(basename "$REPO_DIR" | sed -E 's/-[0-9]+$//')
+# Compute union of tools[] across all selected packs
+SPINE_TOOLS=$(python3 - "$AUDIT_DIR/current/selected-packs.json" << 'PYEOF'
+import json, sys
+packs = json.load(open(sys.argv[1]))
+tools = set()
+for p in packs:
+    tools.update(p.get("tools", []))
+print(",".join(sorted(tools)) if tools else "")
+PYEOF
+)
+
+mkdir -p "$AUDIT_DIR/current/spine"
+
+if [ -z "$SPINE_TOOLS" ]; then
+  echo "Note: no selected packs declare tools[]; skipping spine run." >&2
+  touch "$AUDIT_DIR/current/spine/findings.jsonl"
+else
+  bash "$SKILL_ROOT/scripts/spine/run.sh" \
+    --repo  "$REPO_DIR" \
+    --tools "$SPINE_TOOLS" \
+    --output "$AUDIT_DIR/current/spine/findings.jsonl"
 fi
-# Clones are expected as {repo-base}-0 through {repo-base}-3 in the parent dir
-CLONE_DIRS=()
-for i in 0 1 2 3; do
-  candidate="$REPOS_DIR/${REPO_BASE}-$i"
-  [ -d "$candidate/.git" ] || [ -f "$candidate/.git" ] && CLONE_DIRS+=("$candidate")
-done
-# HALT if discovery found zero clones — do NOT silently proceed with no agents.
-if [ "${#CLONE_DIRS[@]}" -eq 0 ]; then
-  echo "ERROR: Multi-clone discovery found zero sibling clone directories." >&2
-  echo "  Searched: $REPOS_DIR/${REPO_BASE}-{0..3}" >&2
-  echo "  Remote URL: $(git remote get-url origin 2>/dev/null || echo '(none)')" >&2
-  echo "  Suggest: use 'Parallel worktrees' mode instead, or verify clone layout." >&2
-  exit 1
-fi
-for dir in "${CLONE_DIRS[@]}"; do
-  echo "=== $(basename "$dir") ==="
-  git -C "$dir" status --porcelain
-done
 ```
-Verify all clones are clean (no uncommitted changes, no active feature branches). If any are dirty, STOP and warn the user.
-Then create audit branches in each clone:
+
+**Slice the spine output per pack:**
+
+For each selected pack, filter `spine/findings.jsonl` to produce a per-pack slice.
+A finding belongs in a pack's slice when any of these is true:
+  - The finding's `check_id` namespace (the part before `/`) matches a check-id prefix declared
+    in the pack's `checks` array (e.g. pack has check `"id": "security/leaked-credential"` → the
+    `security` namespace matches findings with `check_id` starting with `security/`).
+  - The finding's `properties.tool` value (where spine normalizers store the tool name — e.g.
+    `parse-gitleaks.py` emits `{"properties": {"tool": "gitleaks"}}`) matches a tool listed in
+    the pack's `tools[]`. There is no top-level `tool` field on findings.
+  - The finding has no `properties.tool` value (un-attributed): assign it to ALL packs that
+    declare at least one tool (broad assignment to avoid silent gaps).
+
 ```bash
-for i in "${!CLONE_DIRS[@]}"; do
-  dir="${CLONE_DIRS[$i]}"
-  git -C "$dir" fetch origin
-  git -C "$dir" checkout -b "audit/agent-$i-$AUDIT_DATE" "origin/$BASE_BRANCH"
-done
+python3 - \
+  "$AUDIT_DIR/current/spine/findings.jsonl" \
+  "$AUDIT_DIR/current/selected-packs.json" \
+  "$AUDIT_DIR/current/spine" << 'PYEOF'
+import json, os, sys
+spine_file, packs_file, out_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+
+packs = json.load(open(packs_file))
+
+# Build per-pack filtering criteria
+pack_criteria = {}
+for p in packs:
+    pack_dir = p["id"].split("/")[-1]   # e.g. "ccgm/security" -> "security"
+    namespaces = set()
+    tools = set(p.get("tools", []))
+    for check in p.get("checks", []):
+        ns = check["id"].split("/")[0]
+        namespaces.add(ns)
+    pack_criteria[pack_dir] = {"namespaces": namespaces, "tools": tools}
+
+# Any-tool packs (packs that declare at least one tool)
+any_tool_packs = {d for d, c in pack_criteria.items() if c["tools"]}
+
+lines = []
+try:
+    with open(spine_file) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                lines.append(line)
+except FileNotFoundError:
+    pass  # empty spine
+
+for pack_dir, criteria in pack_criteria.items():
+    slice_path = os.path.join(out_dir, f"{pack_dir}.jsonl")
+    with open(slice_path, "w") as out:
+        for line in lines:
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            # Skip non-finding records (provenance, coverage_gap type records)
+            if "type" in rec:
+                continue
+            check_id = rec.get("check_id", "")
+            # Spine normalizers store the tool name in properties.tool
+            # (e.g. parse-gitleaks.py emits {"properties": {"tool": "gitleaks"}}).
+            # Findings have no top-level "tool" field.
+            props_tool = rec.get("properties", {}).get("tool", "")
+            ns = check_id.split("/")[0] if "/" in check_id else ""
+
+            if ns in criteria["namespaces"]:
+                out.write(line + "\n")
+            elif props_tool and props_tool in criteria["tools"]:
+                out.write(line + "\n")
+            elif not props_tool and any_tool_packs:
+                # Un-attributed: broadcast to all tool-using packs
+                if pack_dir in any_tool_packs:
+                    out.write(line + "\n")
+PYEOF
 ```
-If FIX_MODE is true, install dependencies in each clone.
 
-**Single-session mode:**
-No preparation needed. Skip to M4.
+**Write task files:** For each worker with a non-empty pack assignment:
 
-**Read-only worktree-less mode (fallback):**
-No worktrees needed. All agents read from the main repo directory. Skip to M4.
+```bash
+python3 - \
+  "$AUDIT_DIR/current/assignment.json" \
+  "$AUDIT_DIR/current/selected-packs.json" \
+  "$SKILL_ROOT" \
+  "$AUDIT_DIR" \
+  "$REPO_DIR" \
+  "${FIX_MODE:-false}" << 'PYEOF'
+import json, os, sys
+assignment_file, packs_file, skill_root, audit_dir, repo_dir, fix_mode_str = sys.argv[1:]
+FIX_MODE = fix_mode_str.lower() in ("true", "1", "yes")
 
-### Phase M4: Write Task Files
+assignment = json.load(open(assignment_file))
+all_packs = {p["id"]: p for p in json.load(open(packs_file))}
 
-For each agent, write `tasks/agent-N.json`. **Embed all needed reference material directly** so workers are self-contained.
+tasks_dir = os.path.join(audit_dir, "current", "tasks")
+os.makedirs(tasks_dir, exist_ok=True)
+results_dir = os.path.join(audit_dir, "current", "results")
+os.makedirs(results_dir, exist_ok=True)
 
-Reference the agent assignment table from `~/.claude/skills/audit/reference/multi-agent-config.md`:
+rubric_path = os.path.join(skill_root, "schemas", "severity-rubric.json")
+try:
+    rubric = json.load(open(rubric_path))
+    # Extract rubric check-ids for this worker's packs
+except Exception:
+    rubric = {}
 
-| Agent | Categories | Merge Priority |
-|-------|-----------|----------------|
-| 0 | Security, Dependencies, ToS & Compliance | 1 (highest) |
-| 1 | Code Quality, TypeScript/React | 2 |
-| 2 | Architecture, Performance | 3 |
-| 3 | Testing, Documentation | 4 (lowest) |
+for worker_id, pack_ids in assignment.items():
+    if not pack_ids:
+        continue  # skip empty workers
 
-For each agent's task file:
-1. Read the category instructions from the Category Prompts section below (Agent 1-8 prompts)
-2. Read `~/.claude/skills/audit/reference/fix-patterns.md` for the fix reference (even in read-only mode, used to classify fix_confidence)
-3. Read category-specific reference files if they exist (e.g., `reference/security-patterns.md`)
-4. Discover verification commands from the project's `package.json`
-5. Embed all of this into the task JSON per the schema in `reference/multi-agent-config.md`
+    # Build rubric slice for this worker's packs
+    worker_check_ids = set()
+    for pid in pack_ids:
+        p = all_packs.get(pid, {})
+        for check in p.get("checks", []):
+            worker_check_ids.add(check["id"])
 
-**Category-to-Agent mapping for task file creation:**
-- Agent 0: Embed Agent 1 (Security) + Agent 2 (Dependencies) + Agent 9 (ToS & Compliance) instructions
-- Agent 1: Embed Agent 3 (Code Quality) + Agent 5 (TypeScript/React) instructions
-- Agent 2: Embed Agent 4 (Architecture) + Agent 8 (Performance) instructions
-- Agent 3: Embed Agent 6 (Testing) + Agent 7 (Documentation) instructions
+    rubric_slice = {}
+    if isinstance(rubric, dict):
+        rubric_checks = rubric.get("checks", rubric)  # unwrap top-level "checks" key
+        for cid, val in rubric_checks.items():
+            if cid in worker_check_ids:
+                rubric_slice[cid] = val
 
-### Phase M5: Launch Audit Agents
+    packs_info = []
+    for pid in pack_ids:
+        p = all_packs.get(pid, {})
+        pack_dir = pid.split("/")[-1]
+        checks_path = os.path.join(skill_root, "packs", pack_dir, "checks.md")
+        spine_slice = os.path.join(audit_dir, "current", "spine", f"{pack_dir}.jsonl")
+        packs_info.append({
+            "pack_id": pid,
+            "checks_md_path": checks_path,
+            "spine_slice_path": spine_slice,
+        })
 
-**CRITICAL**: Launch all 4 Task agents in a SINGLE message with 4 parallel Task tool calls. Each agent uses `subagent_type: "general-purpose"` and `run_in_background: true`.
+    results_path = os.path.join(audit_dir, "current", "results", f"worker-{worker_id}.json")
+
+    task = {
+        "worker_id": worker_id,
+        "packs": packs_info,
+        "rubric_slice": rubric_slice,
+        "results_file_path": results_path,
+        "repo_dir": repo_dir,
+        "fix_mode": FIX_MODE,   # passed in from the coordinator — True when --fix was selected
+    }
+
+    task_path = os.path.join(tasks_dir, f"worker-{worker_id}.json")
+    with open(task_path, "w") as f:
+        json.dump(task, f, indent=2)
+    print(f"Wrote {task_path}")
+PYEOF
+```
+
+### Phase M5: Launch Audit Workers
+
+**CRITICAL**: Determine which workers have non-empty pack assignments, then launch only those workers — in a SINGLE message with parallel Task tool calls (`subagent_type: "general-purpose"`, `run_in_background: true`).
+
+```bash
+# Determine active worker ids
+ACTIVE_WORKERS=$(python3 -c "
+import json, sys
+a = json.load(open(sys.argv[1]))
+print(' '.join(k for k,v in sorted(a.items()) if v))
+" "$AUDIT_DIR/current/assignment.json")
+```
 
 Display progress summary before launching:
 ```
-## Launching Audit Agents
+## Launching Audit Workers
 
-| Agent | Categories | Working Dir | Mode |
-|-------|-----------|------------|------|
-| 0 | Security, Dependencies, ToS & Compliance | {agent_dir} | {mode} |
-| 1 | Code Quality, TypeScript/React | {agent_dir} | {mode} |
-| 2 | Architecture, Performance | {agent_dir} | {mode} |
-| 3 | Testing, Documentation | {agent_dir} | {mode} |
+| Worker | Packs | Working Dir | Mode |
+|--------|-------|------------|------|
+| 0 | <pack-ids> | {agent_dir} | {mode} |
+...
 
-Running 4 audit agents in parallel...
+Running {N} audit workers in parallel...
 ```
-
-Where `{agent_dir}` is:
-- **Worktree mode**: `$AUDIT_DIR/worktrees/agent-N`
-- **Multi-clone mode**: `${CLONE_DIRS[N]}` (the discovered sibling clone for agent N)
-- **Plain read-only**: `$REPO_DIR` (all agents read from same directory)
-
-And `{mode}` is "Read-only" or "Read + auto-fix".
 
 **Prompt template for each Task agent (read-only mode):**
 
 ```
-You are audit agent {N} performing a READ-ONLY codebase audit.
+You are audit worker {WORKER_ID} performing a READ-ONLY codebase audit using the pack registry.
 
 CODEBASE ROOT: {AGENT_WORKING_DIR}
-TASK FILE: {AUDIT_DIR}/current/tasks/agent-{N}.json
-RESULTS FILE: {AUDIT_DIR}/current/results/agent-{N}.json
+TASK FILE: {AUDIT_DIR}/current/tasks/worker-{WORKER_ID}.json
+RESULTS FILE: {AUDIT_DIR}/current/results/worker-{WORKER_ID}.json
 
 IMPORTANT: This is a READ-ONLY audit. Do NOT modify any source files. Do NOT create branches or make commits.
 Use ABSOLUTE PATHS for ALL file operations. Your codebase root is {AGENT_WORKING_DIR}.
 
 ## Instructions
 
-1. Read your task file to get your assigned categories and instructions.
+1. Read your task file to get your assigned pack ids, checks.md paths, spine slice path, and rubric slice.
 
 2. Write an initial results file to signal you've started:
-   Write to {AUDIT_DIR}/current/results/agent-{N}.json:
-   {"agent": {N}, "status": "in_progress", "started_at": "<current ISO timestamp>"}
+   Write {"worker_id": "{WORKER_ID}", "status": "in_progress", "started_at": "<ISO timestamp>"}
 
-3. For each assigned category:
-   - Systematically search the codebase using Grep, Glob, and Read with absolute paths
-   - Record findings in the standard format from the task file
-   - Assign finding IDs as agent-{N}-{category}-NNN
-   - For each finding, assess whether it COULD be auto-fixed and with what confidence
-     (this classification helps prioritize issue creation, but DO NOT make any changes)
+3. For each assigned pack:
+   a. Read the pack's checks.md from the absolute path in your task file.
+   b. Run each check described in checks.md against the codebase.
+   c. For findings with detection="hybrid" in your spine slice: triage (confirmed/dismissed).
+      A finding should be confirmed if your LLM analysis agrees it is a real issue.
+      Dismissed means you are confident it is a false positive.
+   d. Add any LLM-only findings with source:"llm".
+   e. Source all severity/confidence/fix_confidence from the rubric_slice in your task file.
+      For check_ids not in the rubric, set confidence:"low" and flag for rubric expansion.
 
-4. Write final results with all findings and summary to {AUDIT_DIR}/current/results/agent-{N}.json with status "completed".
+4. Write final results to your results file per the worker results-file contract.
 
-Be thorough. Read entire files when needed. Trace patterns across the codebase. This is a deep audit, not a surface scan.
+Be thorough. Read entire files when needed. Trace patterns across the codebase. This is a deep audit.
 ```
 
-After launching all 4 agents, display:
-```
-All 4 audit agents launched. Waiting for completion...
-```
+After launching all workers, poll for completion using TaskOutput. Once all active workers complete (or timeout), proceed to Phase M6.
 
-**Poll for completion** using TaskOutput to check each agent. Once all 4 have returned results (or after a reasonable timeout), proceed to Phase M6.
+### Phase M6: Merge Findings + Compile Report
 
-### Phase M6: Compile Audit Document
+After all workers complete:
 
-After all agents complete:
+1. **Run the merge pipeline:**
+   ```bash
+   # Collect all worker result files (array — safe for paths with spaces)
+   LLM_ARGS=()
+   for f in "$AUDIT_DIR/current/results"/worker-*.json; do
+     LLM_ARGS+=(--llm "$f")
+   done
 
-1. **Read all result files** from `$AUDIT_DIR/current/results/agent-*.json`
+   python3 "$SKILL_ROOT/scripts/merge-findings.py" \
+     --spine  "$AUDIT_DIR/current/spine/findings.jsonl" \
+     "${LLM_ARGS[@]}" \
+     --rubric "$SKILL_ROOT/schemas/severity-rubric.json" \
+     --repo   "$REPO_DIR" \
+     --output "$AUDIT_DIR/current/findings.jsonl"
+   ```
 
-2. **Deduplicate findings**: Match by `file` + approximate `line` (within 5 lines) + `category`. Keep the finding with more detail.
-
-3. **Sort**: By severity (critical > high > medium > low), then by category.
-
-4. **Write the compiled audit document** to `$AUDIT_DIR/current/audit-report.md`:
+2. **Compile the audit document** from `$AUDIT_DIR/current/findings.jsonl`:
 
 ```markdown
 # Codebase Audit Report - YYYY-MM-DD
@@ -420,31 +577,22 @@ After all agents complete:
 | High | X |
 | Medium | X |
 | Low | X |
-| Positive Observations | X |
-| Auto-fixable (high confidence) | X |
-| Needs Human Review | X |
 
-## Findings by Category
+## Findings by Pack
 
-| Category | Critical | High | Medium | Low | Total |
-|----------|----------|------|--------|-----|-------|
-| Security | X | X | X | X | X |
-| Dependencies | X | X | X | X | X |
-| ToS & Policy Compliance | X | X | X | X | X |
-| Code Quality | X | X | X | X | X |
-| TypeScript/React | X | X | X | X | X |
-| Architecture | X | X | X | X | X |
-| Performance | X | X | X | X | X |
-| Testing | X | X | X | X | X |
-| Documentation | X | X | X | X | X |
+| Pack | Critical | High | Medium | Low | Total |
+|------|----------|------|--------|-----|-------|
+| security | X | X | X | X | X |
+| dependencies | X | X | X | X | X |
+| code-quality | X | X | X | X | X |
+...
 
 ## Critical & High Severity Findings
 
-### Security
-- **[agent-0-security-001]** (HIGH) Title - `file:line`
-  Description of the finding...
+### security
+- **[security/leaked-credential]** (CRITICAL) ...
 
-### Code Quality
+### code-quality
 ...
 
 ## Medium Severity Findings
@@ -453,15 +601,20 @@ After all agents complete:
 ## Low Severity Findings
 ...
 
-## Positive Observations
-...
+## Coverage Gaps
+
+Tools that were absent, wrappers that were skipped, or checks that could not run:
+
+| Tool | Reason |
+|------|--------|
+| <tool> | <description from coverage_gap record> |
 
 ---
 *Generated by `/audit` skill on YYYY-MM-DD*
-*Agents: 4 | Duration: Xm*
 ```
 
-5. **Display the summary** to the user (the summary table and critical/high findings - NOT the full document).
+3. **Write** the compiled document to `$AUDIT_DIR/current/audit-report.md`.
+4. **Display** the summary table and critical/high findings to the user.
 
 ### Phase M7: Issue Creation
 
@@ -487,7 +640,7 @@ Would you like me to create GitHub issues for these?
    gh label create "needs-human-review" --color "fbca04" 2>/dev/null || true
    ```
 
-3. Group findings by category and create one issue per category (for selected severity levels).
+3. Group findings by pack and create one issue per pack (for selected severity levels).
 
 4. Use the issue template from `reference/output-template.md`.
 
@@ -511,49 +664,47 @@ for i in 0 1 2 3; do
 done
 ```
 
-Display a clear summary and launch commands:
+Display a clear summary and, for each active worker id (those with a non-empty pack assignment),
+output the exact launch command block so the user can copy-paste into separate terminals:
 
 ```
-## Multi-Agent Audit Setup Complete
+## Audit Setup Complete — Manual Launch Required
 
-### Agent Assignments
-| Agent | Worktree | Categories | Branch |
-|-------|----------|-----------|--------|
-| 0 | .audit/worktrees/agent-0 | Security, Dependencies, ToS & Compliance | audit/agent-0-YYYYMMDD |
-| 1 | .audit/worktrees/agent-1 | Code Quality, TypeScript/React | audit/agent-1-YYYYMMDD |
-| 2 | .audit/worktrees/agent-2 | Architecture, Performance | audit/agent-2-YYYYMMDD |
-| 3 | .audit/worktrees/agent-3 | Testing, Documentation | audit/agent-3-YYYYMMDD |
+Run each of the following commands in a separate Claude Code terminal:
 
-### Launch Commands
+--- Worker 0 ---
+cd {AUDIT_DIR}/worktrees/agent-0
+/audit --worker --task {AUDIT_DIR}/current/tasks/worker-0.json
+# (worktree strategy) No push needed — the coordinator merges local refs.
+# (multi-clone strategy only) After worker finishes: git push origin audit/agent-0-{AUDIT_DATE}
 
-Run each in a separate terminal/tmux pane:
+--- Worker 1 ---
+cd {AUDIT_DIR}/worktrees/agent-1
+/audit --worker --task {AUDIT_DIR}/current/tasks/worker-1.json
+# (worktree strategy) No push needed — the coordinator merges local refs.
+# (multi-clone strategy only) After worker finishes: git push origin audit/agent-1-{AUDIT_DATE}
 
-  cd {AUDIT_DIR}/worktrees/agent-0 && claude "/audit --worker"
-  cd {AUDIT_DIR}/worktrees/agent-1 && claude "/audit --worker"
-  cd {AUDIT_DIR}/worktrees/agent-2 && claude "/audit --worker"
-  cd {AUDIT_DIR}/worktrees/agent-3 && claude "/audit --worker"
+... (omit workers with empty pack assignments)
 
-### Monitor Progress
-
-  watch -n 10 'for i in 0 1 2 3; do echo "Agent $i: $(jq -r ".status // \"pending\"" {AUDIT_DIR}/current/results/agent-$i.json 2>/dev/null || echo "waiting")"; done'
-
-### After All Complete
-
-  cd {REPO_DIR} && claude "/audit --collect"
+After all workers complete, run from the repo root:
+/audit --collect
 ```
+
+Notes:
+- For the **worktree strategy** (default): do NOT push — workers commit to their local audit branch
+  and the coordinator merges local refs directly in M6-fix.
+- For the **multi-clone strategy**: the `git push origin` step is required — the coordinator merges
+  from origin refs and cannot see the branch without the push.
 
 ---
 
 ## Worker Mode: `--worker` (Phases W1-W5)
 
-Run from a worktree (manual mode) or invoked as a Task agent (autonomous mode). Reads its task file and performs audit of assigned categories.
+Run from a worktree (manual mode) or invoked as a Task agent (autonomous mode). Reads its pack-based task file and performs the audit of assigned packs.
 
 ### Phase W1: Self-ID & Task Load
 
-1. **Derive agent number** from current directory:
-   ```bash
-   AGENT_NUMBER=$(basename "$PWD" | sed -E 's/.*[^0-9]([0-9]+)$/\1/')
-   ```
+1. **Derive worker id** from current directory or environment.
 
 2. **Derive AUDIT_DIR** from git common directory:
    ```bash
@@ -564,77 +715,95 @@ Run from a worktree (manual mode) or invoked as a Task agent (autonomous mode). 
 
 3. **Read task file**:
    ```bash
-   cat "$AUDIT_DIR/current/tasks/agent-$AGENT_NUMBER.json"
+   cat "$AUDIT_DIR/current/tasks/worker-${WORKER_ID}.json"
    ```
    If task file doesn't exist, error out with a message pointing to `/audit`.
 
-4. **Load project CLAUDE.md** from the path specified in the task file for project-specific context.
-
 ### Phase W2: Init Results File
 
-Write initial results file to signal this agent has started:
+Write initial results file to signal this worker has started:
 ```json
 {
-  "agent": N,
+  "worker_id": "<id>",
   "status": "in_progress",
   "started_at": "ISO-8601",
   "completed_at": null,
-  "branch": "audit/agent-N-YYYYMMDD",
-  "categories_audited": [],
   "findings": [],
-  "cross_category_findings": [],
-  "fixes_applied": [],
-  "fixes_failed": [],
-  "summary": null
+  "spine_triage": []
 }
 ```
 
-Write to `$AUDIT_DIR/current/results/agent-$AGENT_NUMBER.json`.
+Write to the absolute path from `task.results_file_path`.
 
-### Phase W3: Deep Audit
+### Phase W3: Pack Audit + Spine Triage
 
-For each assigned category from the task file:
+For each pack assigned in the task file:
 
-1. **Read the embedded category instructions** from the task JSON
-2. **Systematically explore the codebase** using full tool access (Grep, Glob, Read):
-   - Trace data flows across files
-   - Cross-reference imports and exports
-   - Read entire files when needed, not just snippets
-   - Follow call chains through hooks, components, and utilities
-   - Check database queries against RLS policies
-   - Verify edge function auth patterns
-3. **Record each finding** in the standard JSON format from the task file
-4. **Assign finding IDs** as `agent-N-{category}-NNN` (e.g., `agent-0-security-001`)
-5. **For findings in other categories**, add to `cross_category_findings` with a note
-6. **Classify each finding's fixability**: auto_fixable, fix_confidence, fix_type (for prioritization, NOT for making changes)
+1. **Read the pack's checks.md** from the absolute path `task.packs[N].checks_md_path`.
+2. **Read the pack's spine slice** from the absolute path `task.packs[N].spine_slice_path`.
+3. **Run the checks** described in checks.md against the codebase (using Grep, Glob, Read with absolute paths).
+4. **Triage hybrid candidates**: for every finding in the spine slice with `detection: "hybrid"`,
+   decide `confirmed` or `dismissed` and add a `spine_triage` entry:
+   - `confirmed`: LLM analysis agrees the finding is real.
+   - `dismissed`: LLM is confident it is a false positive.
+   - A finding is only dropped if ALL workers that named its fingerprint voted `dismissed`
+     (the merge step enforces unanimity).
+5. **Add LLM-only findings** with `source: "llm"`.
+6. **Source all severity/confidence/fix_confidence from `task.rubric_slice`**. For check_ids not
+   in the rubric slice, set `confidence: "low"` and note for rubric expansion.
+
+Workers must NOT invent severity from intuition. Use the rubric only.
 
 ### Phase W4: Fix Cycle (--fix mode only)
 
 **Skip entirely unless FIX_MODE is true (from task file).**
 
 See "Fix Mode Addendum" below for the full fix cycle.
+Auto-fix eligibility requires BOTH: the pack's `auto_fixable: true` flag AND the rubric's
+`fix_confidence` being `"high"` OR `"medium"`. See the **Auto-Fix Confidence Reference** section
+for the complete rule. `"high"` checks are auto-applied without extra checks; `"medium"` checks
+are attempted with extra verification steps before committing. All others (`"low"`) are flagged
+for human review and never auto-applied.
 
-### Phase W5: Write Final Results & Signal
+### Phase W5: Write Final Results
 
-Update the results JSON with:
-- All findings (including cross-category)
-- All fixes applied (empty array in read-only mode)
-- Summary counts
-- `"status": "completed"`
-- `"completed_at": "ISO-8601"`
+Write the results file to the absolute path from `task.results_file_path`:
 
-**If in a worktree (manual mode) and fix mode:**
-```bash
-git push origin "audit/agent-$AGENT_NUMBER-$AUDIT_DATE"
+```json
+{
+  "worker_id": "<id>",
+  "status": "completed",
+  "started_at": "ISO-8601",
+  "completed_at": "ISO-8601",
+  "findings": [
+    {
+      "check_id":      "<pack-dir>/<check-id-suffix>",
+      "severity":      "critical|high|medium|low|info",
+      "confidence":    "high|medium|low",
+      "detection":     "llm|hybrid",
+      "source":        "llm",
+      "message":       "<human-readable description>",
+      "location":      {"path": "<repo-relative path>", "line": 1},
+      "fix_confidence":"high|medium|low"
+    }
+  ],
+  "spine_triage": [
+    {
+      "fingerprint": "<fingerprint from spine slice>",
+      "verdict":     "confirmed|dismissed",
+      "note":        "<optional explanation>"
+    }
+  ]
+}
 ```
 
 Display completion summary:
 ```
-## Agent N Audit Complete
+## Worker {N} Audit Complete
 
-Categories: [list]
+Packs: [list]
 Findings: X (Critical: X, High: X, Medium: X, Low: X)
-Human review needed: X
+Spine triage: X confirmed, X dismissed
 ```
 
 ---
@@ -645,26 +814,61 @@ Run from the repo root (NOT from a worktree) after all workers complete. Compile
 
 ### Phase C1: Verify Completion
 
-Check all result files:
+Check all result files listed in `assignment.json`:
 ```bash
-for i in 0 1 2 3; do
-  STATUS=$(jq -r '.status // "missing"' "$AUDIT_DIR/current/results/agent-$i.json" 2>/dev/null || echo "no file")
-  echo "Agent $i: $STATUS"
-done
+python3 -c "
+import json, sys, os
+a = json.load(open(sys.argv[1]))
+audit_dir = sys.argv[2]
+for wid, packs in sorted(a.items()):
+    if not packs:
+        continue
+    rf = os.path.join(audit_dir, 'current', 'results', f'worker-{wid}.json')
+    try:
+        status = json.load(open(rf)).get('status', 'missing')
+    except Exception:
+        status = 'no file'
+    print(f'Worker {wid}: {status}')
+" "$AUDIT_DIR/current/assignment.json" "$AUDIT_DIR"
 ```
 
-- If all show `"completed"`, proceed.
+- If all active workers show `"completed"`, proceed.
 - If any show `"in_progress"` or `"missing"`:
   - Without `--force`: Report status and wait.
   - With `--force`: Warn and proceed with available results.
 
-### Phase C2: Compile Audit Document
+### Phase C2: Merge + Compile Report
 
-Same as Phase M6 above - read all results, deduplicate, sort, write `audit-report.md`.
+Run the merge pipeline (same as Phase M6 above) and compile the pack-grouped audit report with Coverage Gaps section.
+
+**Merge conflict handling (--fix only):** If a git merge step produces conflicts:
+
+1. **Capture the conflicted files first** — before aborting, record the evidence:
+   ```bash
+   CONFLICT_REPORT="$AUDIT_DIR/current/merge-conflicts.md"
+   CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
+   cat >> "$CONFLICT_REPORT" <<EOF
+   ## Merge conflict
+
+   Conflicted files (captured before abort):
+   $CONFLICTED_FILES
+
+   Resolution required: Manually review and resolve conflicts, then re-run --collect.
+   EOF
+   ```
+2. **Then abort the merge**:
+   ```bash
+   git merge --abort 2>/dev/null || true
+   ```
+3. **HALT** with message:
+   "MERGE CONFLICT on worker branch. See $CONFLICT_REPORT. Resolve manually then re-run --collect."
+
+The conflict report is written BEFORE the abort so the file list is preserved.
+After `git merge --abort` the conflict markers are gone — the report is the only record.
 
 ### Phase C3: Issue Creation
 
-Same as Phase M7 above - present the report, ask about issue creation.
+Same as Phase M7 above — present the report, ask about issue creation.
 
 ### Phase C4: Archive & Cleanup
 
@@ -675,24 +879,12 @@ Same as Phase M7 above - present the report, ask about issue creation.
    for i in 0 1 2 3; do
      git worktree remove "$AUDIT_DIR/worktrees/agent-$i" --force 2>/dev/null || true
    done
-   git worktree remove "$AUDIT_DIR/worktrees/combined" --force 2>/dev/null || true
    git worktree prune
    ```
 
-3. **If multi-clone mode was used**, reset clones to base branch (using the `CLONE_DIRS` array derived during M3):
-   ```bash
-   for dir in "${CLONE_DIRS[@]}"; do
-     git -C "$dir" checkout "$BASE_BRANCH"
-     git -C "$dir" pull origin "$BASE_BRANCH"
-   done
-   ```
+3. **If multi-clone mode was used**, reset clones to base branch.
 
-4. **Delete remote agent branches** (if they were pushed in fix mode):
-   ```bash
-   for i in 0 1 2 3; do
-     git push origin --delete "audit/agent-$i-$AUDIT_DATE" 2>/dev/null || true
-   done
-   ```
+4. **Delete remote agent branches** (if they were pushed in fix mode).
 
 5. **Ask about cleanup**: Keep or archive `.audit/current/`.
 
@@ -700,7 +892,8 @@ Same as Phase M7 above - present the report, ask about issue creation.
 
 ## Fix Mode Addendum (--fix)
 
-When `--fix` is passed, these additional steps are added to the default workflow:
+When `--fix` is passed, these additional steps are added to the workflow.
+`--fix` is silently ignored when combined with `--single`.
 
 ### M3-fix: Create Worktrees
 
@@ -723,401 +916,319 @@ done
 wait
 ```
 
-### M5-fix: Agent Prompts Include Fix Instructions
+### M5-fix: Worker Prompts Include Fix Instructions
 
-The Task agent prompts are extended with:
+The Task agent prompts are extended with strategy-specific instructions:
+
+**Worktree strategy** (default `--fix` path):
 ```
 WORKING DIRECTORY: {AUDIT_DIR}/worktrees/agent-{N}
 Use `git -C {AUDIT_DIR}/worktrees/agent-{N}` for all git commands.
 
-For auto-fixable findings:
+For auto-fixable findings (rubric fix_confidence=high AND pack check auto_fixable=true):
 - Implement fixes using Edit tool with absolute paths
-- Run verification using the commands from your task file's verification_commands field
-- If verification passes: git add <files> && git commit -m "audit({category}): {title}"
+- Run verification using commands from the verification_commands field
+- If verification passes: git add <files> && git commit -m "audit(<pack>): <title>"
 - If verification fails: git checkout -- . && git clean -fd
 - Record fix success/failure in results
 
-Push when done: git push origin audit/agent-{N}-{AUDIT_DATE}
+IMPORTANT (worktree strategy): When finished, commit your changes to your audit branch.
+Do NOT push — your branch is a LOCAL ref (audit/agent-{N}-{DATE}). The coordinator
+merges it directly from local refs. Pushing is not needed and not expected.
+```
+
+**Multi-clone strategy** (`--fix` with USE_CLONES=true):
+```
+WORKING DIRECTORY: {CLONE_DIR}
+Use git commands within {CLONE_DIR}.
+
+For auto-fixable findings (rubric fix_confidence=high AND pack check auto_fixable=true):
+- Implement fixes using Edit tool with absolute paths
+- Run verification using commands from the verification_commands field
+- If verification passes: git add <files> && git commit -m "audit(<pack>): <title>"
+- If verification fails: git checkout -- . && git clean -fd
+- Record fix success/failure in results
+
+IMPORTANT (multi-clone strategy): When finished, push your branch:
+  git push origin audit/agent-{N}-{DATE}
+The coordinator merges origin refs (not local), so the push is required.
 ```
 
 ### W4-fix: Fix Cycle
 
-For each auto-fixable finding, ordered by fix_confidence (high first, then medium):
+For each auto-fixable finding (rubric `fix_confidence: "high"` AND pack check `auto_fixable: true`),
+ordered by fix_confidence (high first, then medium):
 
-1. **Verify this is YOUR category** - never fix cross-category findings
-2. **Implement the fix** using Edit/Write tools
-3. **Run verification** using verification commands from the task file (which contains the project's detected commands):
-   ```bash
-   ${LINT_CMD} 2>&1 || echo "LINT_FAILED"
-   ${TYPECHECK_CMD} 2>&1 || echo "TYPECHECK_FAILED"
-   ```
-4. **If verification passes**: Commit:
-   ```bash
-   git add <affected_files>
-   git commit -m "audit({category}): {brief title}"
-   ```
-5. **If verification fails**: Revert:
-   ```bash
-   git checkout -- .
-   git clean -fd
-   ```
-6. **Continue** to next finding. Stop if MAX_FIXES reached.
+1. **Implement the fix** using Edit/Write tools
+2. **Run verification** using verification commands from the task file
+3. **If verification passes**: Commit
+4. **If verification fails**: Revert and continue to next finding
+5. Stop if MAX_FIXES reached.
 
 ### M6-fix: Merge & Create PR
 
-After collecting results, merge the fix branches:
+After collecting results, merge the fix branches into a combined branch, verify, push, and create a PR targeting `$BASE_BRANCH`.
+
+The merge strategy differs by execution mode:
+
+**Worktree strategy** (default): worker branches are LOCAL refs in the main repo's ref namespace
+(worktrees share refs with the main checkout). Merge them directly — no push required from workers.
+
+**Multi-clone strategy**: worker branches live in separate repos and were pushed to origin.
+Merge from `origin/audit/agent-$i-$AUDIT_DATE`.
 
 1. **Create collector worktree**:
    ```bash
    git worktree add "$AUDIT_DIR/worktrees/combined" -b "audit/$AUDIT_DATE" "origin/$BASE_BRANCH"
    ```
 
-2. **Merge each agent branch** in priority order (0 first, 3 last).
+2. **Merge each worker branch** in order (worker-0 first, ascending).
    **CRITICAL: merge conflicts HALT the process — do NOT auto-resolve with `--ours`.**
    ```bash
    cd "$AUDIT_DIR/worktrees/combined"
    CONFLICT_REPORT="$AUDIT_DIR/current/merge-conflicts.md"
    MERGE_OK=true
+   MERGED_COUNT=0
+   EXPECTED_BRANCHES=()
+
    for i in 0 1 2 3; do
-     if ! git merge "origin/audit/agent-$i-$AUDIT_DATE" --no-edit 2>/dev/null; then
-       MERGE_OK=false
-       # Write conflict report — DO NOT resolve automatically
-       CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
-       cat >> "$CONFLICT_REPORT" <<EOF
-   ## Merge conflict: agent-$i branch
-
-   Conflicted files:
-   $CONFLICTED_FILES
-
-   Resolution required: Manually review and resolve conflicts between
-   audit/agent-$((i-1))-$AUDIT_DATE and audit/agent-$i-$AUDIT_DATE.
-   Both agents' fixes are preserved in conflict markers. Do NOT silently
-   discard either agent's changes.
-   EOF
-       git merge --abort 2>/dev/null || true
-       echo "MERGE CONFLICT on agent-$i branch. See $CONFLICT_REPORT"
-       echo "STOPPING: resolve conflicts manually then re-run --collect."
-       break
-     fi
+     EXPECTED_BRANCHES+=("audit/agent-$i-$AUDIT_DATE")
    done
+
+   if [ "${USE_CLONES:-false}" = "true" ]; then
+     # Multi-clone: branches were pushed to origin — merge from origin refs
+     for i in 0 1 2 3; do
+       BRANCH="origin/audit/agent-$i-$AUDIT_DATE"
+       git rev-parse --verify --quiet "origin/audit/agent-$i-$AUDIT_DATE" 2>/dev/null || continue
+       if ! git merge "$BRANCH" --no-edit 2>/dev/null; then
+         MERGE_OK=false
+         CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
+         cat >> "$CONFLICT_REPORT" <<EOF
+## Merge conflict: agent-$i branch
+
+Conflicted files (captured before abort):
+$CONFLICTED_FILES
+
+Resolution required: Manually review and resolve conflicts between
+the already-merged branches and audit/agent-$i-$AUDIT_DATE.
+EOF
+         git merge --abort 2>/dev/null || true
+         echo "MERGE CONFLICT on agent-$i branch. See $CONFLICT_REPORT"
+         echo "STOPPING: resolve conflicts manually then re-run --collect."
+         break
+       fi
+       MERGED_COUNT=$((MERGED_COUNT + 1))
+     done
+   else
+     # Worktree strategy: branches are local refs — no push needed from workers
+     for i in 0 1 2 3; do
+       BRANCH="audit/agent-$i-$AUDIT_DATE"
+       git rev-parse --verify --quiet "$BRANCH" 2>/dev/null || continue
+       if ! git merge "$BRANCH" --no-edit 2>/dev/null; then
+         MERGE_OK=false
+         CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
+         cat >> "$CONFLICT_REPORT" <<EOF
+## Merge conflict: agent-$i branch
+
+Conflicted files (captured before abort):
+$CONFLICTED_FILES
+
+Resolution required: Manually review and resolve conflicts between
+the already-merged branches and audit/agent-$i-$AUDIT_DATE.
+EOF
+         git merge --abort 2>/dev/null || true
+         echo "MERGE CONFLICT on agent-$i branch. See $CONFLICT_REPORT"
+         echo "STOPPING: resolve conflicts manually then re-run --collect."
+         break
+       fi
+       MERGED_COUNT=$((MERGED_COUNT + 1))
+     done
+   fi
+
    if [ "$MERGE_OK" != "true" ]; then
      echo "Merge incomplete. Review $CONFLICT_REPORT before proceeding."
      exit 1
    fi
+
+   # Zero-merge guard: if fix mode ran but NO branches merged, halt loudly
+   if [ "$MERGED_COUNT" -eq 0 ]; then
+     echo "ERROR: Fix mode ran but ZERO worker branches were merged." >&2
+     echo "  Expected branches:" >&2
+     for b in "${EXPECTED_BRANCHES[@]}"; do echo "    $b" >&2; done
+     echo "  No combined branch was pushed and no PR was created." >&2
+     echo "  Possible causes: workers did not commit, wrong AUDIT_DATE, or branches" >&2
+     echo "  were removed before M6-fix ran." >&2
+     exit 1
+   fi
    ```
+
+   If `MERGED_COUNT` is less than the number of active workers, continue but include a note
+   in the PR body listing which branches were merged and which were missing.
 
 3. **Install deps and verify** using the detected package manager:
    ```bash
    $INSTALL_CMD
-   ${LINT_CMD} && ${TYPECHECK_CMD} && ${BUILD_CMD}
+   ${LINT_CMD:-true} && ${TYPECHECK_CMD:-true} && ${BUILD_CMD:-true}
    ```
 
 4. **Push and create PR**:
    ```bash
    git push origin "audit/$AUDIT_DATE"
-   gh pr create --base "$BASE_BRANCH" --head "audit/$AUDIT_DATE" \
-     --title "Audit: $(date +%Y-%m-%d) - Codebase Audit Fixes" \
-     --label "audit,ai-generated" --body "..."
+   gh pr create \
+     --title "Audit fixes: $AUDIT_DATE" \
+     --body "Auto-fixes from /audit --fix run on $AUDIT_DATE. Review each commit.
+Merged $MERGED_COUNT of ${#EXPECTED_BRANCHES[@]} worker branches." \
+     --base "$BASE_BRANCH"
    ```
 
 ---
 
 ## Single-Session Mode: `--single` (Phases 1-7)
 
-Lightweight single-session audit using 8 subagents within the current Claude Code session. Always read-only (no fixes in single-session mode).
+**Always read-only.** If invoked with `--fix`, print:
+```
+Note: --single is read-only; --fix ignored. Use parallel-worktrees strategy for auto-fix.
+```
+Then proceed as read-only.
 
-### Phase 1: Pre-Flight Checks
+Dispatches one read-only Explore subagent per **selected pack** (not a fixed 9) after running
+the detector, registry, spine, and merge scripts inline.
 
-**Parse arguments first:**
-- Remaining argument is the target path (default: entire repo)
+### Phase 1: Pre-Flight
 
-### Phase 2: Discovery
+Parse arguments. Verify git repo. Set up `REPO_DIR`, `AUDIT_DIR`, `SKILL_ROOT`.
 
-1. **Check for monorepo structure**:
-   - Look for `apps/`, `packages/`, `libs/`, `modules/` directories
-   - Check `package.json` for `workspaces` field
-
-2. **Identify tech stack**:
-   - Check for `tsconfig.json`, React, Node.js patterns
-   - Note the package manager
-
-3. **Find existing rules**:
-   - Read any `CLAUDE.md` files
-   - Note ESLint configurations
-
-4. **Determine scope**: Use path argument or audit entire repo.
-
-### Phase 3: Parallel Audit (9 Agents)
-
-Launch **9 Task agents in parallel** (in a single message with multiple tool calls). Each agent should use `subagent_type: "Explore"` and `run_in_background: true`.
-
-**CRITICAL**: Send all 9 Task tool calls in ONE message to run them truly in parallel.
-
-**Each agent must report findings in this format:**
-```json
-{
-  "category": "category_name",
-  "findings": [
-    {
-      "id": "unique-id",
-      "severity": "critical|high|medium|low",
-      "title": "Brief title",
-      "file": "path/to/file.ts",
-      "line": 123,
-      "description": "What's wrong",
-      "auto_fixable": true|false,
-      "fix_confidence": "high|medium|low",
-      "fix_type": "eslint_fix|remove_line|add_type|custom",
-      "reason_not_fixable": "Why human review needed (if not auto_fixable)"
-    }
-  ]
-}
+```bash
+REPO_DIR=$(git rev-parse --show-toplevel)
+AUDIT_DIR="$REPO_DIR/.audit"
+SKILL_ROOT="$HOME/.claude/skills/audit"
+mkdir -p "$AUDIT_DIR/current/spine"
+mkdir -p "$AUDIT_DIR/current/results"
+grep -qxF '.audit/' .gitignore 2>/dev/null || echo '.audit/' >> .gitignore
 ```
 
-See "Category Prompts" section below for each agent's instructions.
+### Phase 2: Ecosystem Detection + Pack Selection
 
-### Phase 4: Collect & Compile
+Run the detector and registry inline:
 
-After all agents complete:
+```bash
+bash "$SKILL_ROOT/scripts/detect-ecosystems.sh" "$REPO_DIR" \
+  > "$AUDIT_DIR/current/detection.json"
 
-1. **Read each agent's output**
-2. **Compile all findings** into a master list
-3. **Deduplicate** overlapping issues
-4. **Write audit report** to `.audit/current/audit-report.md`
+python3 "$SKILL_ROOT/scripts/registry.py" "$AUDIT_DIR/current/detection.json" \
+  > "$AUDIT_DIR/current/selected-packs.json"
 
-### Phase 5: Summary
+PACK_COUNT=$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))))" \
+  "$AUDIT_DIR/current/selected-packs.json")
+
+if [ "$PACK_COUNT" -eq 0 ]; then
+  echo "ERROR: registry selected zero packs for this repository." >&2
+  exit 1
+fi
+```
+
+### Phase 3: Run the Spine Inline
+
+Compute the union of tools from selected packs and run the spine:
+
+```bash
+SPINE_TOOLS=$(python3 - "$AUDIT_DIR/current/selected-packs.json" << 'PYEOF'
+import json, sys
+packs = json.load(open(sys.argv[1]))
+tools = set()
+for p in packs:
+    tools.update(p.get("tools", []))
+print(",".join(sorted(tools)) if tools else "")
+PYEOF
+)
+
+if [ -z "$SPINE_TOOLS" ]; then
+  echo "Note: no selected packs declare tools[]; skipping spine run." >&2
+  touch "$AUDIT_DIR/current/spine/findings.jsonl"
+else
+  bash "$SKILL_ROOT/scripts/spine/run.sh" \
+    --repo  "$REPO_DIR" \
+    --tools "$SPINE_TOOLS" \
+    --output "$AUDIT_DIR/current/spine/findings.jsonl"
+fi
+```
+
+Then produce per-pack spine slices using the same slicing logic as Phase M4.
+
+### Phase 4: Dispatch Read-Only Pack Subagents
+
+Launch **one Task agent per SELECTED pack** (not a fixed 9) in a SINGLE message with parallel
+Task tool calls (`subagent_type: "Explore"`, `run_in_background: true`).
+
+For each pack, the subagent receives:
+- The absolute path to the pack's `checks.md` (`$SKILL_ROOT/packs/<pack-dir>/checks.md`)
+- The rubric slice for this pack's check-ids
+- The absolute path to the pack's spine slice (`$AUDIT_DIR/current/spine/<pack-dir>.jsonl`)
+- The absolute results-file path (`$AUDIT_DIR/current/results/single-<pack-dir>.json`)
+- Instruction to write results per the worker results-file contract
+
+**Prompt template for each Explore subagent:**
+
+```
+You are a read-only pack auditor for the '{PACK_ID}' pack.
+
+CODEBASE ROOT: {REPO_DIR}
+CHECKS FILE: {CHECKS_MD_PATH}
+SPINE SLICE: {SPINE_SLICE_PATH}
+RESULTS FILE: {RESULTS_FILE_PATH}
+RUBRIC SLICE: {RUBRIC_SLICE_JSON}
+
+IMPORTANT: READ-ONLY. Do NOT modify files, create branches, or make commits.
+
+1. Read the checks.md from CHECKS FILE.
+2. Read the spine slice from SPINE SLICE.
+3. Run each check from checks.md against the codebase using Grep, Glob, Read.
+4. For each "hybrid" detection finding in the spine slice: triage as confirmed/dismissed.
+5. Add any LLM-only findings with source:"llm".
+6. Source severity/confidence/fix_confidence from RUBRIC SLICE only.
+7. Write results to RESULTS FILE per the worker results-file contract.
+```
+
+### Phase 5: Run Merge Inline
+
+After all subagents complete, run the merge pipeline:
+
+```bash
+# Collect single-session result files (array — safe for paths with spaces)
+LLM_ARGS=()
+for f in "$AUDIT_DIR/current/results"/single-*.json; do
+  [ -f "$f" ] && LLM_ARGS+=(--llm "$f")
+done
+
+python3 "$SKILL_ROOT/scripts/merge-findings.py" \
+  --spine  "$AUDIT_DIR/current/spine/findings.jsonl" \
+  "${LLM_ARGS[@]}" \
+  --rubric "$SKILL_ROOT/schemas/severity-rubric.json" \
+  --repo   "$REPO_DIR" \
+  --output "$AUDIT_DIR/current/findings.jsonl"
+```
+
+### Phase 6: Compile Report + Display Summary
+
+Compile the pack-grouped audit report from `$AUDIT_DIR/current/findings.jsonl` — same format
+as Phase M6, including the **Coverage Gaps** section. Write to `$AUDIT_DIR/current/audit-report.md`.
 
 Display the summary table and critical/high findings to the user.
 
-### Phase 6: Issue Creation
+### Phase 7: Optional Issue Creation + Cleanup
 
-Same as Phase M7 - ask the user what issues to create.
-
-### Phase 7: Cleanup
-
-Archive results and optionally clean up `.audit/current/`.
-
----
-
-## Category Prompts
-
-These prompts are used by both single-session mode (directly) and multi-agent mode (embedded in task files).
-
-### Agent 1: Security Audit
-```
-Audit for security vulnerabilities. For each finding, classify its fixability.
-
-READ AND APPLY: ~/.claude/skills/audit/reference/security-patterns.md
-Use the pattern regexes, severity guidelines, and OWASP Top 10 quick reference from that file
-to guide every check below. Do not rely on memory — open and apply the file.
-
-Check for:
-- Hardcoded secrets, API keys, tokens (NOT auto-fixable - needs env var setup)
-- Console.logs with sensitive data (auto-fixable: remove line)
-- SQL injection risks (NOT auto-fixable - needs refactor)
-- XSS vulnerabilities (NOT auto-fixable - needs sanitization)
-- Missing security headers (auto-fixable if config file exists)
-- Edge function auth bypasses (NOT auto-fixable)
-
-Report with severity, file:line, and auto_fixable classification.
-```
-
-### Agent 2: Dependencies Audit
-```
-Audit dependencies. For each finding, classify its fixability.
-
-READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
-Consult the Fix Type Reference table and confidence levels from that file when classifying
-each finding's fix_type and fix_confidence. Do not rely on memory — open and apply the file.
-
-Check for:
-- npm audit vulnerabilities (auto-fixable: npm audit fix for non-breaking)
-- Outdated packages - minor versions (auto-fixable: npm update)
-- Outdated packages - major versions (NOT auto-fixable - breaking changes)
-- Unused dependencies (auto-fixable: npm uninstall)
-- Duplicate dependencies (NOT auto-fixable - needs investigation)
-
-Run: npm audit --json, npm outdated --json
-Report with severity and auto_fixable classification.
-```
-
-### Agent 3: Code Quality Audit
-```
-Audit code quality. For each finding, classify its fixability.
-
-READ AND APPLY: ~/.claude/skills/audit/reference/code-quality.md
-Use the code smell categories, thresholds, and severity guidelines from that file to inform
-your checks. Do not rely on memory — open and apply the file.
-
-READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
-Use the Fix Type Reference table from that file to assign fix_type and fix_confidence to
-each finding. Do not rely on memory — open and apply the file.
-
-Check for:
-- ESLint violations (auto-fixable: eslint --fix)
-- Prettier violations (auto-fixable: prettier --write)
-- Unused imports/variables (auto-fixable: eslint --fix)
-- Long methods >50 lines (NOT auto-fixable - needs refactor)
-- Large files >500 lines (NOT auto-fixable - needs split)
-- Empty catch blocks (NOT auto-fixable - needs error handling)
-
-Report with severity, file:line, and auto_fixable classification.
-```
-
-### Agent 4: Architecture Audit
-```
-Audit architecture patterns. Most findings need human review.
-
-READ AND APPLY: ~/.claude/skills/audit/reference/architecture.md
-Use the structural antipattern indicators, dependency detection patterns, and severity
-guidelines from that file to guide every check below. Do not rely on memory — open and apply the file.
-
-Check for:
-- Circular dependencies (NOT auto-fixable)
-- God objects (NOT auto-fixable)
-- Improper layering (NOT auto-fixable)
-- Import from wrong layer (MAYBE auto-fixable with verification)
-
-Report with severity and file references.
-```
-
-### Agent 5: TypeScript/React Audit
-```
-Audit TypeScript and React patterns.
-
-READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
-Use the Fix Type Reference table from that file to assign fix_type and fix_confidence to
-each finding. Do not rely on memory — open and apply the file.
-
-Check for:
-- Excessive `any` types (auto-fixable if type is inferable)
-- Missing return types (auto-fixable: add inferred type)
-- React hooks violations (NOT auto-fixable)
-- Fast Refresh violations (NOT auto-fixable)
-- Missing key props (NOT auto-fixable: array index as key is an anti-pattern; requires a
-  stable, unique identifier — flag for human review to supply the correct key)
-
-Report with severity, file:line, and auto_fixable classification.
-```
-
-### Agent 6: Testing Audit
-```
-Audit test coverage and quality. Most findings need human review.
-
-READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
-Use the Fix Type Reference table from that file when classifying findings (in particular,
-`test_implementation` fix_type is NOT auto-fixable). Do not rely on memory — open and apply the file.
-
-Check for:
-- Missing test files for components (NOT auto-fixable)
-- Test files without assertions (NOT auto-fixable)
-- Missing edge case tests (NOT auto-fixable)
-
-Report with severity and specific test gaps.
-```
-
-### Agent 7: Documentation Audit
-```
-Audit documentation.
-
-READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
-Use the Fix Type Reference table from that file when classifying findings. In particular:
-the `documentation` fix_type is NOT auto-fixable (auto-fixable = No) — generated stubs
-do not substitute for meaningful documentation and require human authorship.
-Do not rely on memory — open and apply the file.
-
-Check for:
-- Missing JSDoc on exports (NOT auto-fixable: requires human-authored documentation)
-- Stale comments (NOT auto-fixable)
-- README completeness (NOT auto-fixable)
-
-Report with severity and file references.
-```
-
-### Agent 8: Performance Audit
-```
-Audit performance patterns. Most findings need human review.
-
-READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
-Use the Fix Type Reference table and confidence levels from that file when classifying findings.
-Do not rely on memory — open and apply the file.
-
-Check for:
-- N+1 query patterns (NOT auto-fixable)
-- Missing React.memo (auto-fixable: add memo wrapper — medium confidence per fix-patterns.md)
-- Large bundle imports (NOT auto-fixable - needs tree shaking)
-
-Report with severity and file:line references.
-```
-
-### Agent 9: Terms of Service & Policy Compliance Audit
-```
-Audit for terms-of-service, license, and platform-policy violations. This is a COMPLIANCE audit: flag legal/policy risk for human review. Be ULTRA-COMPREHENSIVE - cover every ToS surface relevant to THIS project's type. Most findings are NOT auto-fixable (they need human/legal judgment): default auto_fixable=false unless a fix is purely mechanical.
-
-READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
-Use the Fix Type Reference table from that file when assigning fix_type and fix_confidence.
-Do not rely on memory — open and apply the file.
-
-First detect the project type and which policy regimes apply:
-- package.json / requirements.txt / go.mod / Cargo.toml / *.csproj  -> dependency-license compliance
-- manifest.json with "manifest_version"                            -> Chrome/Edge Web Store policy
-- Info.plist / *.xcodeproj / Podfile / fastlane                    -> Apple App Store Review Guidelines
-- AndroidManifest.xml / build.gradle                               -> Google Play policy
-- SDK calls to openai/anthropic/@anthropic-ai/google-generativeai/cohere/replicate -> AI/LLM provider ToS
-- HTTP clients to third-party hosts, headless browsers (puppeteer/playwright/selenium), yt-dlp, scrapers -> third-party service ToS
-
-(1) OSS / DEPENDENCY LICENSE COMPLIANCE
-- Read the project's own license (LICENSE file, package.json "license", "private": true).
-- Enumerate dependency licenses (npm: `npx license-checker --summary`; python: `pip-licenses`; or read each package's metadata / parse the lockfile).
-- CRITICAL: copyleft (GPL-2.0/3.0, AGPL-3.0, LGPL, SSPL, OSL, EUPL) linked into a proprietary or differently-licensed product. AGPL/SSPL in a network-served/SaaS app triggers source-disclosure obligations.
-- CRITICAL: "non-commercial" / "source-available" licenses (CC-BY-NC, BUSL-1.1, Elastic-2.0, Commons Clause, Polyform Noncommercial) used in a commercial product.
-- HIGH: missing attribution - MIT/BSD/Apache-2.0/ISC require preserving copyright + license text in distributions. Check for a NOTICE / THIRD-PARTY-LICENSES bundle, especially for shipped binaries, extensions, and bundled frontends. Apache-2.0 also requires stating changes.
-- MEDIUM: "UNLICENSED" / missing-license dependencies (unknown obligations); license incompatibility (e.g. a GPL-3.0 dep in a GPL-2.0-only or Apache-2.0 project).
-- Vendored/copied third-party code (vendor/, copied source) shipped without its original license header.
-- Fonts, icons, images, datasets, and ML model weights with restrictive or unstated licenses (e.g. weights "non-commercial research only", icon sets needing a paid license, datasets forbidding commercial/redistribution use).
-
-(2) THIRD-PARTY API & SERVICE ToS
-- Scraping/crawling sites whose ToS forbid automated access (LinkedIn, Meta/Instagram/Facebook, X/Twitter, Amazon, Google SERP, Ticketmaster, etc.); bulk crawling; ignoring robots.txt; headless automation of authenticated third-party sites.
-- Prohibited storage/caching of provider data (e.g. Google Maps/Places content stored beyond cache limits, market/financial data redistributed, geocoding cached against ToS).
-- Rate-limit / anti-abuse circumvention: IP/proxy rotation, randomized user-agents to evade detection, CAPTCHA-solving services, key rotation to exceed quotas.
-- Paywall / login-wall / DRM / license-check bypass of a third party.
-- Credential misuse: one API key shared across many users; free/personal-tier keys serving commercial/multi-tenant traffic; provider keys embedded client-side against ToS.
-- Trademark/brand misuse against a provider's brand guidelines.
-
-(3) APP / EXTENSION STORE & PLATFORM POLICY
-- Chrome/Edge Web Store: remotely-hosted code, or eval/new Function executing remote strings (Manifest V3 forbids remote code); overbroad permissions or <all_urls> host access not justified by features; obfuscated/minified-only source with no readable build; tabs/webRequest/cookies/scripting access beyond stated purpose; undisclosed analytics/ads.
-- Apple App Store: private/undocumented API use; bypassing In-App Purchase for digital goods; hot-code-push / downloading executable code; missing NS*UsageDescription strings; tracking without App Tracking Transparency consent; production secrets in the shipped bundle.
-- Google Play: sensitive permissions (SMS, Call Log, accessibility, QUERY_ALL_PACKAGES, MANAGE_EXTERNAL_STORAGE) without a qualifying use; background location without disclosure; ad-ID misuse.
-- General: undisclosed data collection/telemetry contradicting a stated privacy policy; PII / children's data (COPPA, GDPR-K) collected without controls; missing privacy policy referenced by the store listing.
-
-(4) AI / LLM PROVIDER ToS
-- HIGH: using a provider's model outputs to train, fine-tune, or distill a COMPETING model (OpenAI/Anthropic/Google terms prohibit this).
-- Prohibited / disallowed-use categories wired into product code.
-- Scraping or reverse-engineering provider endpoints; using non-public/undocumented endpoints; circumventing safety systems or rate limits.
-- Missing required attribution; misrepresenting AI output as human (or vice-versa) where disclosure is required.
-- Storing user prompts/outputs in ways the provider's data-use terms restrict.
-
-(5) ANY OTHER RELEVANT ToS SURFACE
-- Email/SMS (missing unsubscribe, sending without consent), payment processors (Stripe/PayPal restricted/prohibited businesses), cloud-provider AUPs, OAuth scope over-request, font/CDN hotlinking against ToS, "not for production" sample/demo licenses shipped in prod.
-
-For each finding report: severity, file:line, the specific clause/principle at risk, why it is a risk, and a concrete remediation path (e.g. "replace AGPL dep X with MIT alternative Y", "add THIRD-PARTY-LICENSES generated from dependency metadata", "move the remote-code call to a bundled local module", "switch to a commercial API tier", "remove stored field Z"). Set auto_fixable=true ONLY for mechanical fixes (generate a NOTICE/THIRD-PARTY-LICENSES file from dependency metadata = low confidence; add a missing `license` field = low confidence); everything else is auto_fixable=false.
-
-Severity guidance:
-- CRITICAL: AGPL/SSPL/GPL copyleft in a closed-source distributed/SaaS product; non-commercial-licensed code in a commercial product; AI outputs used to train a competitor; IAP-bypass or remote-code that causes store rejection/removal.
-- HIGH: missing required attribution in a shipped artifact; scraping/circumvention against a major provider's ToS; overbroad extension permissions or private-API use likely to fail review; storing data a provider forbids retaining.
-- MEDIUM: UNLICENSED/unknown dependency; undisclosed telemetry; trademark/brand issues; cache-retention edge cases.
-- LOW: minor attribution gaps; missing `license` field; demo/sample code carrying "not for production" notices.
-
-OPTIONAL - internet-powered deep checks (supplementary; the audit works offline too):
-- Resolve an exact license: `npm view {package} license` or `WebFetch https://registry.npmjs.org/{package}`.
-- Confirm a service's current ToS or a copyleft/compat question: `WebSearch: "{service} terms of service {action} prohibited"`, then WebFetch the ToS / usage-policy page.
-- Detect a relicense (e.g. a package that moved to BUSL): `WebSearch: "{package} license change relicense BUSL"`.
-Never block on the network - fall back to offline pattern + metadata analysis.
-```
+Ask about issue creation (same as Phase M7, except `--single` never creates an epic issue —
+it creates standalone issues with no `Parent:` link and no epic-update step). Ask about cleanup.
+Archive results.
 
 ---
 
 ## Auto-Fix Confidence Reference
+
+Auto-fix eligibility is keyed off both the rubric's `fix_confidence` AND the pack's `auto_fixable`
+flag on the specific check. A check is eligible for autonomous fix only when:
+- The pack's check entry has `"auto_fixable": true`, AND
+- The rubric's `fix_confidence` for that `check_id` is `"high"` or `"medium"`.
 
 ### HIGH Confidence (auto-fix with --fix)
 - `eslint --fix` for fixable rules
@@ -1144,14 +1255,16 @@ Never block on the network - fall back to offline pattern + metadata analysis.
 
 | Scenario | Response |
 |----------|----------|
-| Agent crashes mid-audit | Results show `"in_progress"`. `--collect` reports incomplete agents. `--force` collects available. |
-| Fix breaks the build (--fix) | Fix is reverted, recorded in `fixes_failed`, agent continues. |
-| Merge conflict (--fix) | HALT: write conflict report to `.audit/current/merge-conflicts.md`, abort the merge, stop. Resolve manually and re-run `--collect`. Neither agent's fixes are silently dropped. |
+| Zero packs selected | HALT with message: "registry selected zero packs". Do NOT silently proceed. |
+| Worker crashes mid-audit | Results show `"in_progress"`. `--collect` reports incomplete workers. `--force` collects available. |
+| Fix breaks the build (--fix) | Fix is reverted, recorded in results, worker continues. |
+| Merge conflict (--fix) | HALT: (1) capture conflicted files to `.audit/current/merge-conflicts.md` FIRST, (2) run `git merge --abort`, (3) stop with message pointing to the report. |
 | `.audit/current/` already exists | Coordinator asks: clean start, resume, or cancel. |
 | Worktree already exists | Remove stale worktree first, then create fresh. |
 | Task file missing | Worker errors with message to run `/audit` first. |
-| Task agent times out | Collect proceeds with completed agents, reports incomplete ones. |
+| Task agent times out | Collect proceeds with completed workers, reports incomplete ones. |
 | All Task agents fail | Report failure, suggest `--manual` mode. |
+| `--single` with `--fix` | Print note: `--single is read-only; --fix ignored`. Proceed read-only. |
 
 ---
 
@@ -1196,7 +1309,7 @@ For each pack a worker handles:
 
 ### Worker results-file contract
 
-Each worker writes a single JSON file. The ABSOLUTE path to this file (`.audit/current/results/<worker-id>.json`) is embedded in the worker's task file at the same time as `spine_slice_path`, so workers always receive it as an absolute path and never need to derive it from cwd.
+Each worker writes a single JSON file. The ABSOLUTE path to this file (`.audit/current/results/worker-<id>.json`) is embedded in the worker's task file at the same time as `spine_slice_path`, so workers always receive it as an absolute path and never need to derive it from cwd.
 
 ```json
 {
@@ -1235,6 +1348,8 @@ In `--single` mode there is no coordinator/worker split. The single session:
 2. Dispatches read-only subagents per pack (they receive the absolute spine slice path and produce results files).
 3. Runs the merge itself after all subagents complete.
 
+`--single` is always read-only. `--fix` is silently ignored when combined with `--single`.
+
 ### Merge invocation
 
 After all workers complete, the coordinator runs:
@@ -1271,9 +1386,12 @@ The merger:
 
 - **Always prompt the user** when `/audit` is called without flags - let them choose scope and execution strategy
 - **Default mode is read-only** - no code changes, no branches, no PR
+- **`--single` is always read-only** - `--fix` is silently ignored when combined with `--single`
 - Auto-fix is opt-in (user selects "Analyze + auto-fix" or passes `--fix`)
 - **Three execution strategies**: Parallel worktrees (recommended), single session, or multi-clone
 - Multi-clone is opt-in and requires explicit verification that all clones are clean
 - Worktrees are the safest isolation method - they never touch the user's working directory or sibling clones
-- The output is always an audit report document + optional GitHub issues
+- Pack selection is registry-driven: `scripts/detect-ecosystems.sh` + `scripts/registry.py` + `scripts/assign-packs.py`
+- The spine runs once per audit run via `scripts/spine/run.sh`; findings are merged via `scripts/merge-findings.py`
+- The output is always an audit report document + optional GitHub issues grouped by pack
 - The `reference/multi-agent-config.md` file has full JSON schemas for coordination files

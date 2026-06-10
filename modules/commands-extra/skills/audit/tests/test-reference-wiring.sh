@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # test-reference-wiring.sh
-# Tests for Epic 0.3: reference doc wiring, 9-category coordination doc, contradiction fixes.
+# Tests that reference docs are genuinely wired into the pack registry (no orphan reference docs,
+# no orphan pack pointers), and that key policy statements live inside the pack checks.md files.
 #
 # Tests:
 #   1. multi-agent-config.md assignment table includes ToS & Compliance and lists 9 categories
-#   2. Every category prompt in SKILL.md contains a READ AND APPLY instruction
-#   2b. Per-section: each ### Agent N section individually contains READ AND APPLY
-#   3. Agent 7 (Documentation) marks JSDoc as NOT auto-fixable (aligns with fix-patterns.md)
-#   4. Agent 5 (TypeScript/React) does not recommend array index as key (key-prop fix)
+#   2. Each of the 9 pack checks.md files contains >=1 READ AND APPLY referencing an existing
+#      reference doc (per-pack expected doc mapping checked).
+#   2b. The READ AND APPLY lines are non-trivially present: count >= 1 per pack and all referenced
+#       reference docs actually exist on disk.
+#   3. packs/documentation/checks.md states JSDoc/documentation findings are NOT auto-fixable
+#      (human-authorship rationale required).
+#   4. packs/typescript-react/checks.md states missing-key-prop is NOT auto-fixable
+#      (array-index anti-pattern rationale required).
 #   5. output-template.md does not contain hardcoded 'development' branch (genericized)
 #   6. security-patterns.md still contains NODE_ENV=development (legitimate detection pattern)
 #
@@ -44,6 +49,8 @@ MULTI_AGENT_DOC="$SCRIPT_DIR/../reference/multi-agent-config.md"
 FIX_PATTERNS_DOC="$SCRIPT_DIR/../reference/fix-patterns.md"
 OUTPUT_TEMPLATE_DOC="$SCRIPT_DIR/../reference/output-template.md"
 SECURITY_PATTERNS_DOC="$SCRIPT_DIR/../reference/security-patterns.md"
+PACKS_DIR="$SCRIPT_DIR/../packs"
+REFERENCE_DIR="$SCRIPT_DIR/../reference"
 
 # Fallback to repo-root-relative paths
 for var in SKILL_DOC MULTI_AGENT_DOC FIX_PATTERNS_DOC OUTPUT_TEMPLATE_DOC SECURITY_PATTERNS_DOC; do
@@ -59,6 +66,14 @@ for var in SKILL_DOC MULTI_AGENT_DOC FIX_PATTERNS_DOC OUTPUT_TEMPLATE_DOC SECURI
   fi
 done
 
+# Resolve PACKS_DIR and REFERENCE_DIR if they didn't resolve above
+if [ ! -d "$PACKS_DIR" ]; then
+  PACKS_DIR="modules/commands-extra/skills/audit/packs"
+fi
+if [ ! -d "$REFERENCE_DIR" ]; then
+  REFERENCE_DIR="modules/commands-extra/skills/audit/reference"
+fi
+
 for var in SKILL_DOC MULTI_AGENT_DOC FIX_PATTERNS_DOC OUTPUT_TEMPLATE_DOC SECURITY_PATTERNS_DOC; do
   file_var="${!var}"
   if [ ! -f "$file_var" ]; then
@@ -68,12 +83,14 @@ for var in SKILL_DOC MULTI_AGENT_DOC FIX_PATTERNS_DOC OUTPUT_TEMPLATE_DOC SECURI
 done
 
 echo ""
-echo "=== /audit reference wiring tests (Epic 0.3) ==="
+echo "=== /audit reference wiring tests (pack-registry architecture) ==="
 echo "  SKILL.md:           $SKILL_DOC"
 echo "  multi-agent-config: $MULTI_AGENT_DOC"
 echo "  fix-patterns:       $FIX_PATTERNS_DOC"
 echo "  output-template:    $OUTPUT_TEMPLATE_DOC"
 echo "  security-patterns:  $SECURITY_PATTERNS_DOC"
+echo "  packs dir:          $PACKS_DIR"
+echo "  reference dir:      $REFERENCE_DIR"
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -134,178 +151,217 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# TEST 2: Every category prompt in SKILL.md contains a READ AND APPLY instruction
+# TEST 2: Each of the 9 pack checks.md files contains >=1 READ AND APPLY
+#         referencing an existing reference doc (per-pack expected mapping).
 # ---------------------------------------------------------------------------
 echo ""
-echo "--- [2] SKILL.md: every category prompt wires its reference doc ---"
+echo "--- [2] Pack checks.md files: each wires >=1 READ AND APPLY reference doc ---"
 
-# The 9 agent headers we expect in the Category Prompts section
-AGENT_HEADERS=(
-  "Agent 1: Security Audit"
-  "Agent 2: Dependencies Audit"
-  "Agent 3: Code Quality Audit"
-  "Agent 4: Architecture Audit"
-  "Agent 5: TypeScript/React Audit"
-  "Agent 6: Testing Audit"
-  "Agent 7: Documentation Audit"
-  "Agent 8: Performance Audit"
-  "Agent 9: Terms of Service"
-)
+# Per-pack expected reference docs (space-separated for each pack).
+# Each pack must contain at least one READ AND APPLY pointing to one of its listed docs.
+declare -A PACK_EXPECTED_REFS
+PACK_EXPECTED_REFS["security"]="security-patterns.md"
+PACK_EXPECTED_REFS["code-quality"]="code-quality.md fix-patterns.md"
+PACK_EXPECTED_REFS["architecture"]="architecture.md"
+PACK_EXPECTED_REFS["dependencies"]="fix-patterns.md"
+PACK_EXPECTED_REFS["documentation"]="fix-patterns.md"
+PACK_EXPECTED_REFS["performance"]="fix-patterns.md"
+PACK_EXPECTED_REFS["testing"]="fix-patterns.md"
+PACK_EXPECTED_REFS["tos-compliance"]="fix-patterns.md"
+PACK_EXPECTED_REFS["typescript-react"]="fix-patterns.md"
 
-# Global count check: "READ AND APPLY" must appear at least once per agent.
-set +e
-READ_APPLY_COUNT=$(grep -c 'READ AND APPLY' "$SKILL_DOC" 2>/dev/null || true)
-set -e
+NINE_PACKS=(security code-quality architecture dependencies documentation performance testing tos-compliance typescript-react)
 
-if [ "${READ_APPLY_COUNT:-0}" -ge "${#AGENT_HEADERS[@]}" ]; then
-  pass "SKILL.md contains READ AND APPLY instructions for all ${#AGENT_HEADERS[@]} agent prompts (found ${READ_APPLY_COUNT})"
-else
-  fail "SKILL.md needs READ AND APPLY instructions for all ${#AGENT_HEADERS[@]} agent prompts" \
-    "found only ${READ_APPLY_COUNT:-0} occurrences"
-fi
-
-# Verify each specific agent header is present (guards against stray header renames)
-for header in "${AGENT_HEADERS[@]}"; do
-  set +e
-  FOUND=$(grep -c "$header" "$SKILL_DOC" 2>/dev/null || true)
-  set -e
-  if [ "${FOUND:-0}" -gt 0 ]; then
-    pass "SKILL.md contains agent header: '$header'"
-  else
-    fail "SKILL.md is missing agent header: '$header'" \
-      "ensure the Category Prompts section contains this header"
+for pack_dir in "${NINE_PACKS[@]}"; do
+  checks_file="$PACKS_DIR/$pack_dir/checks.md"
+  if [ ! -f "$checks_file" ]; then
+    fail "pack $pack_dir: checks.md not found at $checks_file"
+    continue
   fi
-done
 
-# ---------------------------------------------------------------------------
-# TEST 2b: Per-section READ AND APPLY verification
-# For EACH ### Agent N section, assert that a READ AND APPLY line appears
-# between that header and the next ### Agent header (or end of file).
-# This catches the case where occurrences cluster under one agent while
-# another agent's section has none.
-# ---------------------------------------------------------------------------
-echo ""
-echo "--- [2b] SKILL.md: per-section READ AND APPLY verification ---"
-
-for header in "${AGENT_HEADERS[@]}"; do
-  # Use awk to extract lines from this agent's header up to (not including)
-  # the next "### Agent" header.
   set +e
-  SECTION_CONTENT=$(awk \
-    -v hdr="### $header" \
-    'BEGIN{found=0}
-     $0 ~ hdr {found=1; next}
-     found && /^### Agent / {exit}
-     found {print}
-    ' "$SKILL_DOC" 2>/dev/null || true)
+  READ_APPLY_COUNT=$(grep -c 'READ AND APPLY' "$checks_file" 2>/dev/null || true)
   set -e
 
-  if [ -z "$SECTION_CONTENT" ]; then
-    fail "per-section: could not extract section for '$header'" \
-      "header may be missing or malformed in SKILL.md"
+  if [ "${READ_APPLY_COUNT:-0}" -ge 1 ]; then
+    pass "pack $pack_dir: contains $READ_APPLY_COUNT READ AND APPLY instruction(s)"
   else
+    fail "pack $pack_dir: no READ AND APPLY found in $checks_file" \
+      "add 'READ AND APPLY: ~/.claude/skills/audit/reference/<doc>.md' inside check blocks"
+    continue
+  fi
+
+  # Check that at least one of the expected reference docs is referenced
+  expected_refs="${PACK_EXPECTED_REFS[$pack_dir]:-}"
+  found_expected=0
+  for ref_doc in $expected_refs; do
     set +e
-    SECTION_READ_APPLY=$(echo "$SECTION_CONTENT" | grep -c 'READ AND APPLY' 2>/dev/null || true)
+    REF_FOUND=$(grep -c "READ AND APPLY.*$ref_doc" "$checks_file" 2>/dev/null || true)
     set -e
-    if [ "${SECTION_READ_APPLY:-0}" -gt 0 ]; then
-      pass "per-section: '$header' contains READ AND APPLY"
-    else
-      fail "per-section: '$header' is missing a READ AND APPLY instruction" \
-        "add 'READ AND APPLY: ~/.claude/skills/audit/reference/<doc>.md' inside this agent's prompt block"
+    if [ "${REF_FOUND:-0}" -ge 1 ]; then
+      found_expected=1
+      break
     fi
+  done
+
+  if [ "$found_expected" -eq 1 ]; then
+    pass "pack $pack_dir: references expected doc(s) ($expected_refs)"
+  else
+    fail "pack $pack_dir: expected READ AND APPLY referencing one of: $expected_refs" \
+      "found READ AND APPLY lines but none match the expected reference docs"
   fi
 done
 
 # ---------------------------------------------------------------------------
-# TEST 3: Agent 7 (Documentation) marks JSDoc as NOT auto-fixable
+# TEST 2b: READ AND APPLY lines exist inside check blocks AND
+#          all referenced reference docs exist on disk.
 # ---------------------------------------------------------------------------
 echo ""
-echo "--- [3] SKILL.md Agent 7: JSDoc is NOT auto-fixable (aligns with fix-patterns.md) ---"
+echo "--- [2b] Pack checks.md files: READ AND APPLY lines reference existing docs ---"
 
-# Extract the Agent 7 section and verify it does NOT recommend auto-fixing JSDoc
-set +e
-AGENT7_BLOCK=$(awk '/### Agent 7: Documentation Audit/,/### Agent [89]/' "$SKILL_DOC" 2>/dev/null || true)
-set -e
-
-if [ -z "$AGENT7_BLOCK" ]; then
-  fail "could not extract Agent 7 block from SKILL.md" \
-    "check that '### Agent 7: Documentation Audit' header exists"
-else
-  # Check that the block does NOT claim JSDoc is auto-fixable.
-  # The old anti-pattern was: "Missing JSDoc on exports (auto-fixable: generate from types)"
-  # We look for the specific positive auto-fixable claim, not for "NOT auto-fixable" mentions.
-  set +e
-  JSDOC_AUTOFIXABLE=$(echo "$AGENT7_BLOCK" \
-    | grep -i 'jsdoc' \
-    | grep -iv 'NOT auto-fixable\|not.*auto.fix\|requires human' \
-    | grep -ic 'auto-fixable\|auto.fix' 2>/dev/null || true)
-  set -e
-
-  if [ "${JSDOC_AUTOFIXABLE:-0}" -gt 0 ]; then
-    fail "Agent 7 prompt marks JSDoc as auto-fixable — contradicts fix-patterns.md (documentation = No)" \
-      "change to NOT auto-fixable with a note that it requires human authorship"
-  else
-    pass "Agent 7 prompt does not mark JSDoc as auto-fixable"
+for pack_dir in "${NINE_PACKS[@]}"; do
+  checks_file="$PACKS_DIR/$pack_dir/checks.md"
+  if [ ! -f "$checks_file" ]; then
+    fail "pack $pack_dir (2b): checks.md not found"
+    continue
   fi
 
-  # Check that it does positively say NOT auto-fixable
+  # Extract all referenced doc names from READ AND APPLY lines
+  # Pattern: READ AND APPLY: ~/.claude/skills/audit/reference/<doc>.md
   set +e
-  JSDOC_NOT_FIXABLE=$(echo "$AGENT7_BLOCK" | grep -ic 'JSDoc.*NOT auto-fixable\|NOT auto-fixable.*JSDoc\|JSDoc.*requires human' 2>/dev/null || true)
+  REFERENCED_DOCS=$(grep 'READ AND APPLY' "$checks_file" 2>/dev/null \
+    | sed 's|.*reference/||' \
+    | sed 's|\.md.*||' \
+    | sort -u || true)
   set -e
-  if [ "${JSDOC_NOT_FIXABLE:-0}" -gt 0 ]; then
-    pass "Agent 7 prompt explicitly marks JSDoc as NOT auto-fixable"
+
+  if [ -z "$REFERENCED_DOCS" ]; then
+    fail "pack $pack_dir (2b): no READ AND APPLY lines found"
+    continue
+  fi
+
+  all_exist=1
+  while IFS= read -r doc_name; do
+    [ -z "$doc_name" ] && continue
+    ref_path="$REFERENCE_DIR/${doc_name}.md"
+    if [ -f "$ref_path" ]; then
+      pass "pack $pack_dir (2b): referenced doc '${doc_name}.md' exists on disk"
+    else
+      fail "pack $pack_dir (2b): referenced doc '${doc_name}.md' does NOT exist at $ref_path" \
+        "create the reference doc or update the READ AND APPLY pointer"
+      all_exist=0
+    fi
+  done <<< "$REFERENCED_DOCS"
+done
+
+# ---------------------------------------------------------------------------
+# TEST 3: packs/documentation/checks.md states JSDoc is NOT auto-fixable
+#         (human-authorship rationale must be present)
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- [3] packs/documentation/checks.md: JSDoc is NOT auto-fixable ---"
+
+DOC_CHECKS="$PACKS_DIR/documentation/checks.md"
+if [ ! -f "$DOC_CHECKS" ]; then
+  fail "documentation checks.md not found at $DOC_CHECKS"
+else
+  # Check that the pack explicitly marks documentation as NOT auto-fixable
+  set +e
+  DOC_NOT_FIXABLE=$(grep -ic \
+    'NOT auto.fixable\|not.*auto.*fix\|auto.fixable.*No\|auto_fixable.*false\|requires human' \
+    "$DOC_CHECKS" 2>/dev/null || true)
+  set -e
+
+  if [ "${DOC_NOT_FIXABLE:-0}" -ge 1 ]; then
+    pass "documentation pack: marks documentation findings as NOT auto-fixable"
   else
-    fail "Agent 7 prompt should explicitly state JSDoc is NOT auto-fixable" \
-      "add 'NOT auto-fixable' or 'requires human-authored documentation'"
+    fail "documentation pack: must explicitly state documentation findings are NOT auto-fixable" \
+      "add 'NOT auto-fixable' or 'requires human-authored documentation' in checks.md"
+  fi
+
+  # Specifically check for JSDoc-related not-auto-fixable mention
+  set +e
+  JSDOC_MENTIONED=$(grep -ic 'jsdoc\|JSDoc' "$DOC_CHECKS" 2>/dev/null || true)
+  set -e
+  if [ "${JSDOC_MENTIONED:-0}" -ge 1 ]; then
+    pass "documentation pack: mentions JSDoc in checks.md"
+  else
+    fail "documentation pack: should mention JSDoc in checks.md" \
+      "the check for missing JSDoc on exports must be documented"
+  fi
+
+  # The NOT auto-fixable claim must appear in or near the documentation context
+  set +e
+  DOC_HUMAN_AUTHORED=$(grep -ic 'human.*authored\|human.*author\|auto.fixable.*No\|not.*auto.*fixable' \
+    "$DOC_CHECKS" 2>/dev/null || true)
+  set -e
+  if [ "${DOC_HUMAN_AUTHORED:-0}" -ge 1 ]; then
+    pass "documentation pack: states human-authored documentation requirement"
+  else
+    fail "documentation pack: should state that documentation requires human authorship" \
+      "add rationale like 'NOT auto-fixable -- requires human-authored documentation'"
+  fi
+
+  # Also confirm fix-patterns.md itself says documentation is not auto-fixable (reference check)
+  set +e
+  # shellcheck disable=SC2016  # literal backtick in pattern is intentional, not a variable
+  FIX_TABLE_DOC=$(grep -A1 '| `documentation`' "$FIX_PATTERNS_DOC" 2>/dev/null | head -2 || true)
+  set -e
+  if echo "$FIX_TABLE_DOC" | grep -q 'No\|no'; then
+    pass "fix-patterns.md Fix Type Reference confirms documentation is not auto-fixable (No)"
+  else
+    fail "fix-patterns.md Fix Type Reference should list documentation as 'No' for auto-fixable" \
+      "check the fix_type table row for 'documentation'"
   fi
 fi
 
-# Also confirm fix-patterns.md itself says documentation is not auto-fixable (reference check)
-set +e
-# shellcheck disable=SC2016  # literal backtick in pattern is intentional, not a variable
-FIX_TABLE_DOC=$(grep -A1 '| `documentation`' "$FIX_PATTERNS_DOC" 2>/dev/null | head -2 || true)
-set -e
-if echo "$FIX_TABLE_DOC" | grep -q 'No\|no'; then
-  pass "fix-patterns.md Fix Type Reference confirms documentation is not auto-fixable (No)"
-else
-  fail "fix-patterns.md Fix Type Reference should list documentation as 'No' for auto-fixable" \
-    "check the fix_type table row for 'documentation'"
-fi
-
 # ---------------------------------------------------------------------------
-# TEST 4: Agent 5 does NOT recommend array index as key prop
+# TEST 4: packs/typescript-react/checks.md states missing-key-prop is NOT auto-fixable
+#         (array-index anti-pattern rationale required)
 # ---------------------------------------------------------------------------
 echo ""
-echo "--- [4] SKILL.md Agent 5: no array-index-as-key recommendation ---"
+echo "--- [4] packs/typescript-react/checks.md: missing-key-prop is NOT auto-fixable ---"
 
-set +e
-AGENT5_BLOCK=$(awk '/### Agent 5: TypeScript\/React Audit/,/### Agent [6789]/' "$SKILL_DOC" 2>/dev/null || true)
-set -e
-
-if [ -z "$AGENT5_BLOCK" ]; then
-  fail "could not extract Agent 5 block from SKILL.md" \
-    "check that '### Agent 5: TypeScript/React Audit' header exists"
+TS_CHECKS="$PACKS_DIR/typescript-react/checks.md"
+if [ ! -f "$TS_CHECKS" ]; then
+  fail "typescript-react checks.md not found at $TS_CHECKS"
 else
-  # The old wording: "auto-fixable: add index as key"
+  # Check that missing key prop is explicitly marked NOT auto-fixable
   set +e
-  INDEX_AS_KEY=$(echo "$AGENT5_BLOCK" | grep -ic 'add index as key\|index.*as.*key.*auto' 2>/dev/null || true)
+  KEY_NOT_FIXABLE=$(grep -ic \
+    'key.*NOT auto.fixable\|NOT auto.fixable.*key\|key.*not.*auto.*fix\|array.*index.*anti.pattern\|auto_fixable.*false' \
+    "$TS_CHECKS" 2>/dev/null || true)
   set -e
-  if [ "${INDEX_AS_KEY:-0}" -gt 0 ]; then
-    fail "Agent 5 prompt recommends using array index as key — this is an anti-pattern" \
-      "keys should be stable unique IDs; remove 'add index as key' auto-fix recommendation"
+
+  if [ "${KEY_NOT_FIXABLE:-0}" -ge 1 ]; then
+    pass "typescript-react pack: marks missing-key-prop as NOT auto-fixable"
   else
-    pass "Agent 5 prompt does not recommend array index as React key"
+    fail "typescript-react pack: must explicitly mark missing-key-prop as NOT auto-fixable" \
+      "add 'NOT auto-fixable' and array-index anti-pattern rationale in checks.md"
   fi
 
-  # Confirm missing key props are flagged as NOT auto-fixable
+  # The array-index anti-pattern must be mentioned
   set +e
-  KEY_NOT_FIXABLE=$(echo "$AGENT5_BLOCK" | grep -ic 'key.*NOT auto-fixable\|NOT auto-fixable.*key\|key.*flag for.*review' 2>/dev/null || true)
+  ARRAY_INDEX_MENTIONED=$(grep -ic 'array.*index\|index.*key\|anti.pattern' \
+    "$TS_CHECKS" 2>/dev/null || true)
   set -e
-  if [ "${KEY_NOT_FIXABLE:-0}" -gt 0 ]; then
-    pass "Agent 5 prompt marks missing key props as NOT auto-fixable (requires human review)"
+  if [ "${ARRAY_INDEX_MENTIONED:-0}" -ge 1 ]; then
+    pass "typescript-react pack: documents array-index-as-key anti-pattern"
   else
-    fail "Agent 5 prompt should mark missing key props as NOT auto-fixable" \
-      "add NOT auto-fixable with a note about stable unique IDs"
+    fail "typescript-react pack: should document why array index as key is an anti-pattern" \
+      "add rationale about stable unique identifiers vs array index"
+  fi
+
+  # Confirm key prop check exists (not just a random mention)
+  set +e
+  KEY_PROP_CHECK=$(grep -ic 'key.*prop\|missing.*key\|typescript/missing-key-prop' \
+    "$TS_CHECKS" 2>/dev/null || true)
+  set -e
+  if [ "${KEY_PROP_CHECK:-0}" -ge 1 ]; then
+    pass "typescript-react pack: has a key-prop check defined in checks.md"
+  else
+    fail "typescript-react pack: should have a key-prop check defined" \
+      "add 'typescript/missing-key-prop' check or equivalent"
   fi
 fi
 
