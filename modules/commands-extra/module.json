@@ -123,6 +123,11 @@
       "type": "script",
       "template": false
     },
+    "skills/audit/scripts/suppress.py": {
+      "target": "skills/audit/scripts/suppress.py",
+      "type": "script",
+      "template": false
+    },
     "skills/audit/schemas/severity-rubric.json": {
       "target": "skills/audit/schemas/severity-rubric.json",
       "type": "doc",

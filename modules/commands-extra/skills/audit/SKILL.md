@@ -861,6 +861,88 @@ after `merge-findings.py` in the same inline step; then compile the report (Phas
 directory (e.g., `.audit/history/YYYY-MM-DD.jsonl`). The script never auto-writes a baseline;
 the caller controls when to advance it.
 
+### Suppression (optional, after merge step)
+
+Suppression lets you acknowledge known findings that cannot be fixed immediately, without
+hiding them entirely.  Suppressed findings **remain in the JSONL** with a `suppression`
+field; they are never omitted.  In the audit report, suppressed CRITICAL and HIGH findings
+appear tagged `[SUPPRESSED]` so they remain visible.
+
+#### .auditignore.yaml format
+
+Place a `.auditignore.yaml` file at the repo root (or pass `--auditignore <path>`).  The
+file is a YAML list of mapping blocks.  Supported keys per entry:
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `id` (or `check_id`) | yes | The `check_id` to suppress.  Supports `fnmatch` globs (e.g. `security/*`).  Note: Python `fnmatch` `*` crosses `/`, so `security/*` also matches `security/sub/deep` — matching is recursive; there is no separate `**`. |
+| `paths` | no | Inline list of repo-relative `fnmatch` globs.  When absent, the rule matches any path.  Note: Python `fnmatch` `*` crosses `/`, so `src/*.js` also matches `src/sub/deep.js` — matching is recursive; there is no separate `**`. |
+| `reason` | **required** | Human-readable justification.  Entries missing `reason` emit a warning and are skipped. |
+| `expires` | no | ISO date `YYYY-MM-DD`.  When present and strictly before today's date, the suppression is **ignored** and a warning is emitted. |
+
+Example:
+
+```yaml
+- id: security/no-console
+  paths: [src/scripts/*.js]
+  reason: console.log intentional in CLI scripts
+  expires: 2027-01-01
+```
+
+#### Inline comment format
+
+Add a comment on the same line as a problematic line **or the line immediately before it**:
+
+```python
+# audit-ignore: code-quality/unused-import kept for re-export
+import logging
+```
+
+```typescript
+// audit-ignore: typescript-react/missing-prop-types legacy component
+```
+
+Scoping rule: `# audit-ignore: <check-id> [reason]` on line N suppresses a finding with
+`location.line == N` (same line) **or** `location.line == N+1` (the line immediately
+following).  Only the named `check-id` is suppressed at that location.
+
+Both `#` (Python, shell, YAML) and `//` (JavaScript, TypeScript) comment markers are
+supported.
+
+#### Wiring suppression into the emit/report step
+
+Run `suppress.py` **after** `merge-findings.py` writes `findings.jsonl` and (when used)
+after `baseline.py` writes `findings-delta.jsonl`.  The suppressor runs by default whenever
+`.auditignore.yaml` exists in the repo root.
+
+```bash
+# After merge-findings.py (or baseline.py) has written its output:
+SUPPRESS_INPUT="$AUDIT_DIR/current/findings.jsonl"
+
+# When .auditignore.yaml exists or --auditignore is passed:
+if [ -f "$REPO_DIR/.auditignore.yaml" ]; then
+  python3 "$SKILL_ROOT/scripts/suppress.py" \
+    --findings "$SUPPRESS_INPUT" \
+    --auditignore "$REPO_DIR/.auditignore.yaml" \
+    --repo "$REPO_DIR" \
+    --output "$AUDIT_DIR/current/findings-suppressed.jsonl"
+  SUPPRESS_INPUT="$AUDIT_DIR/current/findings-suppressed.jsonl"
+fi
+```
+
+Use `findings-suppressed.jsonl` (instead of `findings.jsonl`) as the input to the report
+compiler.  In the report:
+
+- CRITICAL/HIGH findings with a `suppression` field are shown with `[SUPPRESSED]` after the
+  severity label, e.g. `**[security/leaked-credential]** (CRITICAL) [SUPPRESSED] ...`
+- The Summary table includes a **Suppressed** row showing the count of suppressed findings.
+
+**`--single` mode:** the same suppression step applies after Phase 5 (Run Merge Inline).
+Run `suppress.py` before compiling the Phase 6 report.
+
+**Expiry and missing-reason behaviour:** expired entries and entries missing `reason` are
+skipped with a warning to stderr; their findings are treated as unsuppressed.
+
 ### Phase M7: Issue Creation
 
 Ask the user:
