@@ -410,37 +410,45 @@ No finding: `waitFor` polls for the condition rather than guessing a duration.
 
 #### Detection
 
-Grep the test files for `.only(`, `.skip(`, `fdescribe(`, `fit(`, `xit(`, `xdescribe(`, and
-`xtest(` — focus/skip modifiers left committed to the repo. These silently narrow the test suite
-(`.only`/`fdescribe`/`fit`) or disable individual tests (`.skip`/`xit`/`xdescribe`/`xtest`),
-producing false confidence in a CI green status.
+The worker agent scans test files for `.only(`, `.skip(`, `fdescribe(`, `fit(`, `xit(`,
+`xdescribe(`, and `xtest(` — focus/skip modifiers left committed to the repo. These silently
+narrow the test suite (`.only`/`fdescribe`/`fit`) or disable individual tests
+(`.skip`/`xit`/`xdescribe`/`xtest`), producing false confidence in a CI green status.
 
 **LLM instruction (if detection = llm or hybrid):**
-n/a — detection is tool (grep) only.
 
-**Tool:** `grep` (POSIX built-in, no external binary dependency).
+```
+Scan test files for committed focus/skip modifiers that silently narrow or disable the suite.
 
-Pattern:
-```
-grep -rn --include="*.test.*" --include="*.spec.*" \
-  -E '\.(only|skip)\s*\(|^[[:space:]]*(fdescribe|fit|xit|xdescribe|xtest)\s*\(' \
-  <test-dir>
-```
+Flag as a finding when a test file contains any of:
+- .only( or .skip( (Jasmine/Jest/Mocha focus/skip)
+- fdescribe( or fit( (Jasmine/Jest focused describe/test)
+- xit( or xdescribe( or xtest( (Jasmine/Jest/Mocha disabled test/describe)
+
+These modifiers prevent the full suite from running. A committed .only narrows CI to one block;
+a committed .skip hides a known failure. Both produce false confidence.
 
 Exclude:
-- Lines that are in a comment (`//`, `#`, `/* ... */`)
-- Files under `node_modules/`, `.git/`, `dist/`, `build/`
+- Lines that are in a comment (// or # or /* ... */)
+- Files under node_modules/, .git/, dist/, build/
+
+For each finding report: file:line, the modifier found, and whether it narrows (only/fdescribe/fit)
+or disables (skip/xit/xdescribe/xtest) the suite.
+```
 
 #### Spine Wiring
 
-This check uses `detection: tool` with `tool: grep`. `grep` is a POSIX built-in with no
-external binary required. The spine runs the pattern above and emits a finding for each match.
+This check is LLM-only (grep pre-screen for candidates). No spine tool is involved.
 
 ```yaml
 check_id: testing/only-or-skip-committed
-detection: tool
-tool: grep
+detection: llm
+tool: ~
 ```
+
+Grep pre-screen (advisory, narrows LLM context): `.only(` | `.skip(` | `fdescribe(` | `fit(` |
+`xit(` | `xdescribe(` | `xtest(` in test files. The worker agent runs this grep as a deterministic
+pre-screen; no LLM judgment is needed once the pattern matches because the signal is unambiguous.
 
 #### Severity / Confidence
 
@@ -732,7 +740,7 @@ that now owns it, proving no check was dropped.
 ## Quality Checklist
 
 - [x] Each check-id in this file exactly matches `pack.json`'s `checks[].id`
-- [x] Every check with `detection: tool` or `detection: hybrid` names a real spine tool
+- [x] No check uses `detection: tool` or `detection: hybrid`; all grep-backed checks use `detection: llm` with a documented grep pre-screen (no spine tool claimed)
 - [x] Every check with `detection: llm` or `detection: hybrid` has a filled-in LLM instruction
 - [x] Each fixture has both a true positive AND a true negative
 - [x] Severity / confidence rationale is present for every check

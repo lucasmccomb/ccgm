@@ -2,8 +2,14 @@
   "id": "ccgm/testing",
   "name": "Testing Audit",
   "version": "1.1.0",
-  "applies_when": ["always"],
-  "tags": ["testing", "coverage", "quality"],
+  "applies_when": [
+    "always"
+  ],
+  "tags": [
+    "testing",
+    "coverage",
+    "quality"
+  ],
   "severity_floor": "low",
   "tools": [],
   "checks": [
@@ -39,8 +45,7 @@
       "id": "testing/only-or-skip-committed",
       "severity": "high",
       "confidence": "high",
-      "detection": "tool",
-      "tool": "grep",
+      "detection": "llm",
       "auto_fixable": false
     },
     {
