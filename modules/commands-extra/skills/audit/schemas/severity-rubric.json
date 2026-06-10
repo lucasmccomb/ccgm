@@ -313,6 +313,31 @@
       "severity": "medium",
       "confidence": "medium",
       "fix_confidence": "low"
+    },
+    "cicd/unpinned-action": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "cicd/dangerous-trigger": {
+      "severity": "critical",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
+    "cicd/excessive-permissions": {
+      "severity": "medium",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "cicd/script-injection": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
+    "cicd/actionlint-error": {
+      "severity": "medium",
+      "confidence": "high",
+      "fix_confidence": "low"
     }
   }
 }

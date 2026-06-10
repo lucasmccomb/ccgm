@@ -313,6 +313,36 @@
       "type": "script",
       "template": false
     },
+    "skills/audit/scripts/spine/wrap-zizmor.sh": {
+      "target": "skills/audit/scripts/spine/wrap-zizmor.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-zizmor.py": {
+      "target": "skills/audit/scripts/spine/parse-zizmor.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-pinact.sh": {
+      "target": "skills/audit/scripts/spine/wrap-pinact.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-pinact.py": {
+      "target": "skills/audit/scripts/spine/parse-pinact.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/packs/ci-cd/pack.json": {
+      "target": "skills/audit/packs/ci-cd/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/ci-cd/checks.md": {
+      "target": "skills/audit/packs/ci-cd/checks.md",
+      "type": "doc",
+      "template": false
+    },
     "skills/audit/packs/code-quality/pack.json": {
       "target": "skills/audit/packs/code-quality/pack.json",
       "type": "doc",
