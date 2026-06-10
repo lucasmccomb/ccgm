@@ -17,13 +17,13 @@ Usage
 Output
 ------
   {
-    "1": ["pack/id-a", "pack/id-b"],
-    "2": ["pack/id-c"],
-    "3": [],
-    "4": []
+    "0": ["pack/id-a", "pack/id-b"],
+    "1": ["pack/id-c"],
+    "2": [],
+    "3": []
   }
 
-  Keys are string integers 1..N (JSON object keys are always strings).
+  Keys are string integers 0..N-1 (JSON object keys are always strings).
   Workers with no packs get an empty list -- the caller should launch only
   workers whose list is non-empty.
 
@@ -120,7 +120,7 @@ def assign_packs(packs: list, num_workers: int) -> dict:
     """
     Greedy load-balanced assignment.
 
-    Returns a dict: {worker_id_str: [pack_id, ...]} for worker ids 1..N.
+    Returns a dict: {worker_id_str: [pack_id, ...]} for worker ids 0..N-1.
     Workers with no packs get an empty list.
 
     Sorting key: (checks_count DESC, pack_id ASC)
@@ -132,7 +132,7 @@ def assign_packs(packs: list, num_workers: int) -> dict:
         key=lambda p: (-len(p.get("checks", [])), p.get("id", "")),
     )
 
-    # Worker loads: keyed by index 0..N-1 (worker ids are index+1)
+    # Worker loads: keyed by index 0..N-1
     worker_loads = [0] * num_workers       # current load (check count)
     worker_packs = [[] for _ in range(num_workers)]   # assigned pack ids
 
@@ -149,10 +149,10 @@ def assign_packs(packs: list, num_workers: int) -> dict:
         worker_packs[lightest].append(pack_id)
         worker_loads[lightest] += pack_weight
 
-    # Build output dict with 1-based string keys (JSON object keys are strings)
+    # Build output dict with 0-based string keys (JSON object keys are strings)
     result = {}
     for idx in range(num_workers):
-        result[str(idx + 1)] = worker_packs[idx]
+        result[str(idx)] = worker_packs[idx]
 
     return result
 

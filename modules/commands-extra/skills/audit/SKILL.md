@@ -259,7 +259,7 @@ This phase replaces the legacy hardcoded 9-category model with the pack registry
      --workers 4 \
      > "$AUDIT_DIR/current/assignment.json"
    ```
-   The assignment maps worker ids 1..4 to ordered pack-id lists.
+   The assignment maps worker ids 0..N-1 to ordered pack-id lists.
    Workers with empty lists will NOT be launched (see M5).
 
 5. **Prepare agent environment** (worktree/clone/none per strategy — same as before):
@@ -440,7 +440,8 @@ for worker_id, pack_ids in assignment.items():
 
     rubric_slice = {}
     if isinstance(rubric, dict):
-        for cid, val in rubric.items():
+        rubric_checks = rubric.get("checks", rubric)  # unwrap top-level "checks" key
+        for cid, val in rubric_checks.items():
             if cid in worker_check_ids:
                 rubric_slice[cid] = val
 
@@ -493,7 +494,7 @@ Display progress summary before launching:
 
 | Worker | Packs | Working Dir | Mode |
 |--------|-------|------------|------|
-| 1 | <pack-ids> | {agent_dir} | {mode} |
+| 0 | <pack-ids> | {agent_dir} | {mode} |
 ...
 
 Running {N} audit workers in parallel...
@@ -721,11 +722,11 @@ Workers must NOT invent severity from intuition. Use the rubric only.
 **Skip entirely unless FIX_MODE is true (from task file).**
 
 See "Fix Mode Addendum" below for the full fix cycle.
-Auto-fix eligibility is keyed off the rubric's `fix_confidence` AND the pack's `auto_fixable`
-flag on the specific check (per `checks.md`). Only checks marked `auto_fixable: true` in the
-pack manifest AND with `fix_confidence: "high"` in the rubric are eligible for autonomous fix.
-`fix_confidence: "medium"` checks may be attempted with extra verification. All others are
-flagged for human review.
+Auto-fix eligibility requires BOTH: the pack's `auto_fixable: true` flag AND the rubric's
+`fix_confidence` being `"high"` OR `"medium"`. See the **Auto-Fix Confidence Reference** section
+for the complete rule. `"high"` checks are auto-applied without extra checks; `"medium"` checks
+are attempted with extra verification steps before committing. All others (`"low"`) are flagged
+for human review and never auto-applied.
 
 ### Phase W5: Write Final Results
 
@@ -803,13 +804,30 @@ for wid, packs in sorted(a.items()):
 
 Run the merge pipeline (same as Phase M6 above) and compile the pack-grouped audit report with Coverage Gaps section.
 
-**Merge conflict handling (--fix only):** If a git merge step produces conflicts, run:
-```bash
-git merge --abort 2>/dev/null || true
-```
-Write a conflict report to `.audit/current/merge-conflicts.md`, then HALT with message:
-"MERGE CONFLICT on worker branch. Resolve manually then re-run --collect."
-Both workers' changes are preserved in conflict markers — do NOT silently discard either.
+**Merge conflict handling (--fix only):** If a git merge step produces conflicts:
+
+1. **Capture the conflicted files first** — before aborting, record the evidence:
+   ```bash
+   CONFLICT_REPORT="$AUDIT_DIR/current/merge-conflicts.md"
+   CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
+   cat >> "$CONFLICT_REPORT" <<EOF
+   ## Merge conflict
+
+   Conflicted files (captured before abort):
+   $CONFLICTED_FILES
+
+   Resolution required: Manually review and resolve conflicts, then re-run --collect.
+   EOF
+   ```
+2. **Then abort the merge**:
+   ```bash
+   git merge --abort 2>/dev/null || true
+   ```
+3. **HALT** with message:
+   "MERGE CONFLICT on worker branch. See $CONFLICT_REPORT. Resolve manually then re-run --collect."
+
+The conflict report is written BEFORE the abort so the file list is preserved.
+After `git merge --abort` the conflict markers are gone — the report is the only record.
 
 ### Phase C3: Issue Creation
 
@@ -889,7 +907,63 @@ ordered by fix_confidence (high first, then medium):
 
 ### M6-fix: Merge & Create PR
 
-After collecting results, merge the fix branches per the existing merge logic, verify, push, and create a PR targeting `$BASE_BRANCH`.
+After collecting results, merge the fix branches into a combined branch, verify, push, and create a PR targeting `$BASE_BRANCH`.
+
+1. **Create collector worktree**:
+   ```bash
+   git worktree add "$AUDIT_DIR/worktrees/combined" -b "audit/$AUDIT_DATE" "origin/$BASE_BRANCH"
+   ```
+
+2. **Merge each worker branch** in order (worker-0 first, ascending).
+   **CRITICAL: merge conflicts HALT the process — do NOT auto-resolve with `--ours`.**
+   ```bash
+   cd "$AUDIT_DIR/worktrees/combined"
+   CONFLICT_REPORT="$AUDIT_DIR/current/merge-conflicts.md"
+   MERGE_OK=true
+   for i in 0 1 2 3; do
+     BRANCH="origin/audit/agent-$i-$AUDIT_DATE"
+     git ls-remote --exit-code origin "audit/agent-$i-$AUDIT_DATE" 2>/dev/null || continue
+     if ! git merge "$BRANCH" --no-edit 2>/dev/null; then
+       MERGE_OK=false
+       # 1. Capture evidence BEFORE aborting
+       CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
+       cat >> "$CONFLICT_REPORT" <<EOF
+   ## Merge conflict: agent-$i branch
+
+   Conflicted files (captured before abort):
+   $CONFLICTED_FILES
+
+   Resolution required: Manually review and resolve conflicts between
+   audit/agent-$((i-1))-$AUDIT_DATE and audit/agent-$i-$AUDIT_DATE.
+   EOF
+       # 2. Abort the merge
+       git merge --abort 2>/dev/null || true
+       # 3. Halt
+       echo "MERGE CONFLICT on agent-$i branch. See $CONFLICT_REPORT"
+       echo "STOPPING: resolve conflicts manually then re-run --collect."
+       break
+     fi
+   done
+   if [ "$MERGE_OK" != "true" ]; then
+     echo "Merge incomplete. Review $CONFLICT_REPORT before proceeding."
+     exit 1
+   fi
+   ```
+
+3. **Install deps and verify** using the detected package manager:
+   ```bash
+   $INSTALL_CMD
+   ${LINT_CMD:-true} && ${TYPECHECK_CMD:-true} && ${BUILD_CMD:-true}
+   ```
+
+4. **Push and create PR**:
+   ```bash
+   git push origin "audit/$AUDIT_DATE"
+   gh pr create \
+     --title "Audit fixes: $AUDIT_DATE" \
+     --body "Auto-fixes from /audit --fix run on $AUDIT_DATE. Review each commit." \
+     --base "$BASE_BRANCH"
+   ```
 
 ---
 
@@ -1031,82 +1105,6 @@ Ask about issue creation (same as Phase M7). Ask about cleanup. Archive results.
 
 ---
 
-## Category Prompts (Compatibility Stubs)
-
-The full check instructions have moved into the pack registry under `packs/<dir>/checks.md`.
-These stubs preserve backwards-compatibility pointers and keep tooling anchors intact.
-For the full check lists, read the referenced checks.md files directly.
-
-### Agent 1: Security Audit
-```
-READ AND APPLY: packs/security/checks.md
-Full check list: security vulnerabilities, hardcoded secrets, injection risks, auth bypasses.
-See packs/security/checks.md for the complete check definitions and fix classifications.
-```
-
-### Agent 2: Dependencies Audit
-```
-READ AND APPLY: packs/dependencies/checks.md
-Full check list: dependency vulnerabilities, outdated packages, unused dependencies.
-See packs/dependencies/checks.md for the complete check definitions and fix classifications.
-```
-
-### Agent 3: Code Quality Audit
-```
-READ AND APPLY: packs/code-quality/checks.md
-Full check list: ESLint/Prettier violations, unused imports, long methods, empty catches.
-See packs/code-quality/checks.md for the complete check definitions and fix classifications.
-```
-
-### Agent 4: Architecture Audit
-```
-READ AND APPLY: packs/architecture/checks.md
-Full check list: circular dependencies, god objects, improper layering.
-See packs/architecture/checks.md for the complete check definitions and fix classifications.
-```
-
-### Agent 5: TypeScript/React Audit
-```
-READ AND APPLY: packs/typescript-react/checks.md
-Full check list: excessive any types, missing return types, hooks violations.
-Missing key props: NOT auto-fixable — array index as key is an anti-pattern;
-requires a stable unique identifier. Flag for human review.
-See packs/typescript-react/checks.md for the complete check definitions.
-```
-
-### Agent 6: Testing Audit
-```
-READ AND APPLY: packs/testing/checks.md
-Full check list: missing test files, test files without assertions, missing edge cases.
-See packs/testing/checks.md for the complete check definitions and fix classifications.
-```
-
-### Agent 7: Documentation Audit
-```
-READ AND APPLY: packs/documentation/checks.md
-Full check list: missing JSDoc on exports, stale comments, README completeness.
-Missing JSDoc: NOT auto-fixable — requires human-authored documentation.
-Generated stubs do not substitute for meaningful documentation.
-See packs/documentation/checks.md for the complete check definitions.
-```
-
-### Agent 8: Performance Audit
-```
-READ AND APPLY: packs/performance/checks.md
-Full check list: N+1 query patterns, missing React.memo, large bundle imports.
-See packs/performance/checks.md for the complete check definitions and fix classifications.
-```
-
-### Agent 9: Terms of Service & Policy Compliance Audit
-```
-READ AND APPLY: packs/tos-compliance/checks.md
-Full check list: license compliance, third-party API/service ToS, store/platform policy,
-AI/LLM provider ToS.
-See packs/tos-compliance/checks.md for the complete check definitions (20 checks).
-```
-
----
-
 ## Auto-Fix Confidence Reference
 
 Auto-fix eligibility is keyed off both the rubric's `fix_confidence` AND the pack's `auto_fixable`
@@ -1142,7 +1140,7 @@ flag on the specific check. A check is eligible for autonomous fix only when:
 | Zero packs selected | HALT with message: "registry selected zero packs". Do NOT silently proceed. |
 | Worker crashes mid-audit | Results show `"in_progress"`. `--collect` reports incomplete workers. `--force` collects available. |
 | Fix breaks the build (--fix) | Fix is reverted, recorded in results, worker continues. |
-| Merge conflict (--fix) | HALT: write conflict report to `.audit/current/merge-conflicts.md`, abort the merge, stop. |
+| Merge conflict (--fix) | HALT: (1) capture conflicted files to `.audit/current/merge-conflicts.md` FIRST, (2) run `git merge --abort`, (3) stop with message pointing to the report. |
 | `.audit/current/` already exists | Coordinator asks: clean start, resume, or cancel. |
 | Worktree already exists | Remove stale worktree first, then create fresh. |
 | Task file missing | Worker errors with message to run `/audit` first. |
@@ -1241,8 +1239,8 @@ After all workers complete, the coordinator runs:
 ```
 scripts/merge-findings.py \
   --spine  <ABSOLUTE>/.audit/current/spine/findings.jsonl \
+  --llm    <ABSOLUTE>/.audit/current/results/worker-0.json \
   --llm    <ABSOLUTE>/.audit/current/results/worker-1.json \
-  --llm    <ABSOLUTE>/.audit/current/results/worker-2.json \
   ...
   --rubric <ABSOLUTE>/schemas/severity-rubric.json \
   --repo   <ABSOLUTE repo root> \

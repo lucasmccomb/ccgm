@@ -271,11 +271,10 @@ else
   fail "assign-packs.py: assignment coverage error: $COVERAGE_CHECK"
 fi
 
-# Balance check: the weight-based greedy algorithm balances by check-count, not pack-count.
-# With 9 packs (one has 20 checks, others 3-6), weight balancing isolates the heavy pack.
-# Assert: each worker's check-load differs from the others by at most the weight of the
-# heaviest single pack (a weaker but correct bound for weight-based assignment).
-# Also assert that every worker with packs has at least 1 pack (no starved workers if packs >= workers).
+# Balance check: assert no worker receives more than ceil(total_packs/workers)+1 packs
+# (pack-count bound). The greedy algorithm minimizes check-load imbalance, but the pack-count
+# bound is the weaker structural assertion we can make deterministically from the fixture.
+# No starved workers when packs >= workers.
 set +e
 BALANCE_CHECK=$(python3 - "$ASSIGN_OUT_1" "$FIXED_PACKS_FILE" << 'PYEOF'
 import json, sys
@@ -388,7 +387,8 @@ git -C "$PIPELINE_REPO" commit -q -m "init"
 # Now write the fake key into a file in the working tree AFTER the commit.
 # The spine uses --no-git (filesystem scan), so it detects this without needing git history.
 # ADV-009: high-entropy alphanum key assembled from two fragments at runtime.
-# We do NOT use AKIAIOSFODNN7EXAMPLE: gitleaks explicitly allowlists that AWS docs example.
+# We do NOT use the gitleaks-allowlisted AWS docs example key -- that key is explicitly
+# excluded from detection. We use a different high-entropy AWS-format key instead.
 KEY_PREFIX="AKIAZ12345"
 KEY_SUFFIX="6789ABCDEFGH"
 FAKE_KEY="${KEY_PREFIX}${KEY_SUFFIX}"
@@ -497,37 +497,88 @@ PYEOF
     pass "merge-findings.py: assembled fake key NOT in merged output (redaction held)"
   fi
 
+  # Assert the merged output contains a finding with check_id==secrets/leaked-credential,
+  # severity==critical, and source==tool (rubric applied through merge -- ADV-001 gate).
+  set +e
+  CRITICAL_LEAKED=$(python3 - "$PIPELINE_MERGE_OUT" << 'PYEOF'
+import json, sys
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        rec = json.loads(line)
+    except Exception:
+        continue
+    if "type" in rec:
+        continue
+    cid = rec.get("check_id", "")
+    sev = rec.get("severity", "")
+    src = rec.get("source", "")
+    if cid == "secrets/leaked-credential" and sev == "critical" and src == "tool":
+        print("FOUND")
+        sys.exit(0)
+print("NOT_FOUND")
+PYEOF
+  )
+  set -e
+
+  if [ "${CRITICAL_LEAKED:-}" = "FOUND" ]; then
+    pass "merge-findings.py: merged output has check_id=secrets/leaked-credential, severity=critical, source=tool"
+  else
+    fail "merge-findings.py: expected finding with check_id=secrets/leaked-credential + severity=critical + source=tool" \
+      "rubric must be applied at merge time; verify severity-rubric.json has secrets/leaked-credential:critical"
+  fi
+
 else
-  echo "  gitleaks not installed -- skipping spine e2e (marking as SKIP, not FAIL)"
-  pass "spine e2e: gitleaks not available -- test skipped (not a failure)"
-  pass "spine e2e: (placeholder) gitleaks test skipped"
-  pass "spine e2e: (placeholder) merge with spine output skipped"
-  pass "spine e2e: (placeholder) redaction check skipped"
+  echo "  gitleaks not installed -- skipping spine e2e (SKIP, not FAIL)"
+  echo "  SKIP: spine e2e: gitleaks not available"
+  echo "  SKIP: spine e2e: merge with spine output"
+  echo "  SKIP: spine e2e: redaction check"
+  echo "  SKIP: spine e2e: critical-finding rubric assert"
 fi
 
-# Test coverage_gap passthrough with an uninstalled tool
-# Run spine with a clearly-absent tool (actionlint is often absent)
+# Test coverage_gap passthrough with an uninstalled tool.
+# Dynamically find the first spine tool NOT on PATH; skip the sub-test if all are installed.
 COVERAGE_SPINE=$(make_tmp)/coverage-spine.jsonl
 COVERAGE_MERGE=$(make_tmp)/coverage-merged.jsonl
-ABSENT_TOOL="actionlint"
 
-set +e
-bash "$SPINE" \
-  --repo  "$PIPELINE_REPO" \
-  --tools "$ABSENT_TOOL" \
-  --output "$COVERAGE_SPINE" 2>/dev/null
-COVERAGE_SPINE_EC=$?
-set -e
+# Discover spine tool list from selected-packs or fall back to a known list.
+# The spine supports: gitleaks, actionlint, eslint, shellcheck, semgrep.
+SPINE_TOOLS_KNOWN="gitleaks actionlint semgrep shellcheck"
+ABSENT_TOOL=""
+for t in $SPINE_TOOLS_KNOWN; do
+  if ! command -v "$t" >/dev/null 2>&1; then
+    ABSENT_TOOL="$t"
+    break
+  fi
+done
 
-if [ "$COVERAGE_SPINE_EC" -eq 0 ]; then
-  pass "spine: runs successfully even when tool is absent"
+if [ -z "$ABSENT_TOOL" ]; then
+  echo "  All known spine tools are installed -- skipping coverage_gap sub-test (SKIP, not FAIL)"
+  echo "  SKIP: coverage_gap sub-test: no absent tool found"
+  echo "  SKIP: coverage_gap sub-test: merge with coverage-only spine"
+  echo "  SKIP: coverage_gap sub-test: coverage_gap in merged output"
 else
-  fail "spine: should exit 0 even when tool '$ABSENT_TOOL' is absent (got exit $COVERAGE_SPINE_EC)"
-fi
+  echo "  Using absent tool '$ABSENT_TOOL' for coverage_gap sub-test"
 
-# Check that a coverage_gap record exists
-set +e
-GAP_COUNT=$(python3 - "$COVERAGE_SPINE" << 'PYEOF'
+  set +e
+  bash "$SPINE" \
+    --repo  "$PIPELINE_REPO" \
+    --tools "$ABSENT_TOOL" \
+    --output "$COVERAGE_SPINE" 2>/dev/null
+  COVERAGE_SPINE_EC=$?
+  set -e
+
+  if [ "$COVERAGE_SPINE_EC" -eq 0 ]; then
+    pass "spine: runs successfully even when tool '$ABSENT_TOOL' is absent"
+  else
+    fail "spine: should exit 0 even when tool '$ABSENT_TOOL' is absent (got exit $COVERAGE_SPINE_EC)"
+  fi
+
+  # Check that a coverage_gap record exists in the spine output
+  set +e
+  GAP_COUNT=$(python3 - "$COVERAGE_SPINE" << 'PYEOF'
 import json, sys
 count = 0
 for line in open(sys.argv[1]):
@@ -542,29 +593,65 @@ for line in open(sys.argv[1]):
         count += 1
 print(count)
 PYEOF
-)
-set -e
+  )
+  set -e
 
-if [ "${GAP_COUNT:-0}" -ge 1 ]; then
-  pass "spine: emits coverage_gap record when tool is absent/fails (got $GAP_COUNT)"
-else
-  fail "spine: expected >= 1 coverage_gap record for absent tool, got ${GAP_COUNT:-0}"
-fi
+  if [ "${GAP_COUNT:-0}" -ge 1 ]; then
+    pass "spine: emits coverage_gap record when tool '$ABSENT_TOOL' is absent (got $GAP_COUNT)"
+  else
+    fail "spine: expected >= 1 coverage_gap record for absent tool '$ABSENT_TOOL', got ${GAP_COUNT:-0}"
+  fi
 
-# Merge with the coverage-only spine -- coverage_gaps should fold through
-set +e
-python3 "$MERGE" \
-  --spine  "$COVERAGE_SPINE" \
-  --rubric "$RUBRIC" \
-  --repo   "$PIPELINE_REPO" \
-  --output "$COVERAGE_MERGE" 2>/dev/null
-COVERAGE_MERGE_EC=$?
-set -e
+  # Merge with the coverage-only spine -- coverage_gaps should fold through to merged output
+  set +e
+  python3 "$MERGE" \
+    --spine  "$COVERAGE_SPINE" \
+    --rubric "$RUBRIC" \
+    --repo   "$PIPELINE_REPO" \
+    --output "$COVERAGE_MERGE" 2>/dev/null
+  COVERAGE_MERGE_EC=$?
+  set -e
 
-if [ "$COVERAGE_MERGE_EC" -eq 0 ]; then
-  pass "merge-findings.py: handles spine with only coverage_gap records (exit 0)"
-else
-  fail "merge-findings.py: failed on coverage-only spine (exit $COVERAGE_MERGE_EC)"
+  if [ "$COVERAGE_MERGE_EC" -eq 0 ]; then
+    pass "merge-findings.py: handles spine with only coverage_gap records (exit 0)"
+  else
+    fail "merge-findings.py: failed on coverage-only spine (exit $COVERAGE_MERGE_EC)"
+  fi
+
+  # Assert the coverage_gap record appears in the MERGED output (not just the spine)
+  set +e
+  MERGED_GAP=$(python3 - "$COVERAGE_MERGE" "$ABSENT_TOOL" << 'PYEOF'
+import json, sys
+merged_file, absent_tool = sys.argv[1], sys.argv[2]
+for line in open(merged_file):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        rec = json.loads(line)
+    except Exception:
+        continue
+    if rec.get("type") == "coverage_gap":
+        # The coverage_gap should name the absent tool in its tool field or message
+        tool = rec.get("tool", "")
+        msg = rec.get("message", "")
+        if absent_tool in tool or absent_tool in msg:
+            print("FOUND")
+            sys.exit(0)
+        # Even without the tool name, the presence of a coverage_gap record is sufficient
+        print("FOUND_GENERIC")
+        sys.exit(0)
+print("NOT_FOUND")
+PYEOF
+  )
+  set -e
+
+  if [ "${MERGED_GAP:-}" = "FOUND" ] || [ "${MERGED_GAP:-}" = "FOUND_GENERIC" ]; then
+    pass "merge-findings.py: coverage_gap record appears in merged output (fold-through verified)"
+  else
+    fail "merge-findings.py: expected coverage_gap in merged output for absent tool '$ABSENT_TOOL'" \
+      "merge-findings.py must fold coverage_gap records from the spine through to the output"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -574,17 +661,24 @@ echo ""
 echo "--- [4] SKILL.md consistency: legacy markers gone, new markers present ---"
 echo ""
 
-# 4a. "Category Prompts" section as a primary section heading must NOT be present
-#     (the stubs section has a different title, not "## Category Prompts")
-# The test checks that the legacy standalone "## Category Prompts" section header is gone
-# (the new file uses "## Category Prompts (Compatibility Stubs)").
+# 4a. NO "## Category Prompts" heading in any form (the stubs section is fully deleted).
+#     Also assert no "### Agent N:" headers remain (old 9-agent architecture is gone).
 set +e
-LEGACY_SECTION=$(grep -c '^## Category Prompts$' "$SKILL_MD" 2>/dev/null || true)
+CATEGORY_PROMPTS_SECTION=$(grep -c '^## Category Prompts' "$SKILL_MD" 2>/dev/null || true)
 set -e
-if [ "${LEGACY_SECTION:-0}" -eq 0 ]; then
-  pass "SKILL.md: '## Category Prompts' (old standalone section) is gone"
+if [ "${CATEGORY_PROMPTS_SECTION:-0}" -eq 0 ]; then
+  pass "SKILL.md: no '## Category Prompts' heading of any form (stubs section deleted)"
 else
-  fail "SKILL.md: '## Category Prompts' (legacy standalone heading) is still present -- rewrite required"
+  fail "SKILL.md: '## Category Prompts' heading is still present -- delete the stubs section"
+fi
+
+set +e
+AGENT_HEADERS=$(grep -cE '^### Agent [0-9]+:' "$SKILL_MD" 2>/dev/null || true)
+set -e
+if [ "${AGENT_HEADERS:-0}" -eq 0 ]; then
+  pass "SKILL.md: no '### Agent N:' headers (old 9-agent architecture fully removed)"
+else
+  fail "SKILL.md: '### Agent N:' headers are still present -- remove all category-model agent headers"
 fi
 
 # 4b. No hardcoded Agent→category table like "Agent 0 | Security, Dependencies"
