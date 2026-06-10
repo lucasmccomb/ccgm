@@ -574,6 +574,31 @@
       "severity": "medium",
       "confidence": "medium",
       "fix_confidence": "low"
+    },
+    "ccgm/shipped-todo-marker": {
+      "severity": "info",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
+    "ccgm/env-example-drift": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "ccgm/cloudflare-pages-no-git": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
+    "ccgm/project-standards-conformance": {
+      "severity": "medium",
+      "confidence": "low",
+      "fix_confidence": "low"
+    },
+    "ccgm/mcp-tool-annotations": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
     }
   }
 }
