@@ -165,16 +165,20 @@ See [Commands Reference](commands.md) for detailed usage of each command.
 
 ### commands-extra
 
-Additional slash commands for code quality and guided workflows.
+Additional slash commands for codebase audits, visual verification, guided walkthroughs, rule promotion, safety-hook state management, and session-state checkpoints.
 
-**Installs**: 4 command files
+**Installs**: 8 command files + audit skill (21 packs, deterministic tool spine, schemas, reference docs)
 
 | Command | Description |
 |---------|-------------|
-| `/audit` | Multi-phase codebase audit across 9 categories |
+| `/audit` | Pack-based codebase audit across 21 packs with deterministic spine + LLM workers |
 | `/pwv` | Playwright visual verification |
 | `/walkthrough` | Step-by-step guided mode |
 | `/promote-rule` | Review and promote repo rules to global |
+| `/freeze` | Scope-lock Edit/Write to a directory |
+| `/unfreeze` | Clear the active freeze scope |
+| `/guard` | Compose careful + freeze for focused, safe sessions |
+| `/checkpoint` | Save or resume a WIP session-state checkpoint |
 
 See [Commands Reference](commands.md) for detailed usage of each command.
 

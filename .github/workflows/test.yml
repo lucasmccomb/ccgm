@@ -30,6 +30,9 @@ jobs:
       - name: Test link mode
         run: bash tests/test-link-mode.sh
 
+      - name: Audit skill test suite
+        run: bash tests/run-audit-suite.sh
+
   test-macos:
     runs-on: macos-latest
     steps:
@@ -52,3 +55,6 @@ jobs:
 
       - name: Test link mode
         run: bash tests/test-link-mode.sh
+
+      - name: Audit skill test suite
+        run: bash tests/run-audit-suite.sh

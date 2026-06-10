@@ -127,31 +127,27 @@ Installed by the **commands-extra** module.
 
 ### /audit
 
-**Multi-phase codebase audit.**
+**Pack-based codebase audit.**
 
-Runs a comprehensive audit across 9 categories using parallel specialized agents, then optionally applies auto-fixes and creates GitHub issues for manual findings.
+Runs a comprehensive audit using 21 self-contained packs, each with an ecosystem detector, deterministic tool spine, and parallel LLM worker agents. Packs are gated by `applies_when` rules so only relevant packs run on a given codebase. Findings are emitted as stable-fingerprint JSONL with severity and confidence scores from a shared rubric.
 
-**Audit categories**:
-1. Security (injection, auth, secrets, dependencies)
-2. Dependencies (outdated, unused, duplicated, license issues)
-3. Code quality (complexity, duplication, naming, dead code)
-4. Architecture (coupling, layering, circular dependencies)
-5. TypeScript/React (type safety, component patterns, hooks usage)
-6. Testing (coverage gaps, test quality, missing edge cases)
-7. Documentation (outdated docs, missing API docs)
-8. Performance (bundle size, render performance, memory leaks)
-9. Terms of Service & Policy Compliance (OSS/dependency license violations, third-party API/service ToS, app/extension store policy, AI/LLM provider ToS)
+**Packs** (21 total): security, secrets, dependencies, code-quality, correctness, architecture, typescript-react, testing, documentation, performance, privacy, observability, reliability, ci-cd, data-migrations, infra-iac, accessibility, api-contract, ccgm-hygiene, ccgm-standards, tos-compliance
 
 **Severity levels**: Critical, High, Medium, Low
 
-**Usage**:
+**Flags**:
 ```
-/audit                         # Full audit, all categories
-/audit security                # Single category
-/audit security,testing        # Multiple categories
-/audit --fix                   # Auto-fix applicable findings
-/audit --no-issues             # Skip GitHub issue creation
+/audit                    # Full audit — prompts for scope and execution strategy
+/audit --single           # Single-session (all packs, one session, 8 subagents)
+/audit --diff             # Audit only files changed vs detected base branch
+/audit --diff main        # Audit only files changed vs a specific ref
+/audit --staged           # Audit only staged files (always read-only)
+/audit --baseline <file>  # Classify findings vs a prior run's findings.jsonl
+/audit --new-only         # With --baseline: report only newly introduced findings
+/audit --fix              # Apply auto-fixes and create a PR
 ```
+
+**Suppression**: `# audit:ignore reason` inline, or `.auditignore.yaml` at repo root for path/check-id patterns.
 
 ---
 

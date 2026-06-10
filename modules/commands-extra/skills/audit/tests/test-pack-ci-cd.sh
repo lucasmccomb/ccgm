@@ -387,10 +387,16 @@ fi
 # ---------------------------------------------------------------------------
 printf '\nTest 4: wrap-zizmor.sh graceful skip when zizmor absent\n'
 
-# Build a minimal repo with a workflows dir
-WRAP_REPO="${TESTRUN_TMPDIR}/repo-with-workflows"
-mkdir -p "${WRAP_REPO}/.github/workflows"
-cat > "${WRAP_REPO}/.github/workflows/ci.yml" << 'YAML'
+# wrap-zizmor.sh uses mapfile -d '' which requires bash 4+.
+# On bash 3.2 (macOS system shell), skip these wrapper invocation tests;
+# ubuntu CI (bash 5) will exercise them.
+if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+  pass "Test 4: wrap-zizmor.sh wrapper skip test skipped -- bash < 4 (wrapper requires bash 4+; ubuntu CI will run this)"
+else
+  # Build a minimal repo with a workflows dir
+  WRAP_REPO="${TESTRUN_TMPDIR}/repo-with-workflows"
+  mkdir -p "${WRAP_REPO}/.github/workflows"
+  cat > "${WRAP_REPO}/.github/workflows/ci.yml" << 'YAML'
 on: [push]
 jobs:
   build:
@@ -399,59 +405,60 @@ jobs:
       - uses: actions/checkout@v4
 YAML
 
-# Restricted PATH (no zizmor)
-SYSTEM_BINS=""
-for bin in python3 bash find date mktemp cp rm mv printf head grep; do
-  BINPATH="$(command -v "$bin" 2>/dev/null || true)"
-  if [[ -n "$BINPATH" ]]; then
-    BINDIR="$(dirname "$BINPATH")"
-    case ":$SYSTEM_BINS:" in
-      *":$BINDIR:"*) ;;
-      *) SYSTEM_BINS="${SYSTEM_BINS:+$SYSTEM_BINS:}$BINDIR" ;;
-    esac
+  # Restricted PATH (no zizmor)
+  SYSTEM_BINS=""
+  for bin in python3 bash find date mktemp cp rm mv printf head grep; do
+    BINPATH="$(command -v "$bin" 2>/dev/null || true)"
+    if [[ -n "$BINPATH" ]]; then
+      BINDIR="$(dirname "$BINPATH")"
+      case ":$SYSTEM_BINS:" in
+        *":$BINDIR:"*) ;;
+        *) SYSTEM_BINS="${SYSTEM_BINS:+$SYSTEM_BINS:}$BINDIR" ;;
+      esac
+    fi
+  done
+  RESTRICTED_PATH="$SYSTEM_BINS:/usr/bin:/bin"
+
+  ZI_SKIP_OUT="${TESTRUN_TMPDIR}/zi-skip.jsonl"
+  set +e
+  PATH="$RESTRICTED_PATH" bash "${SPINE_DIR}/wrap-zizmor.sh" "$WRAP_REPO" > "$ZI_SKIP_OUT" 2>/dev/null
+  ZI_SKIP_EXIT=$?
+  set -e
+
+  if [[ $ZI_SKIP_EXIT -eq 0 ]]; then
+    pass "wrap-zizmor.sh exits 0 when zizmor absent"
+  else
+    fail "wrap-zizmor.sh exits $ZI_SKIP_EXIT (expected 0) when zizmor absent"
   fi
-done
-RESTRICTED_PATH="$SYSTEM_BINS:/usr/bin:/bin"
 
-ZI_SKIP_OUT="${TESTRUN_TMPDIR}/zi-skip.jsonl"
-set +e
-PATH="$RESTRICTED_PATH" bash "${SPINE_DIR}/wrap-zizmor.sh" "$WRAP_REPO" > "$ZI_SKIP_OUT" 2>/dev/null
-ZI_SKIP_EXIT=$?
-set -e
+  SKIP_COUNT="$(grep -c '"type":"skipped"' "$ZI_SKIP_OUT" 2>/dev/null || printf '0')"
+  GAP_COUNT="$(grep -c '"type":"coverage_gap"' "$ZI_SKIP_OUT" 2>/dev/null || printf '0')"
 
-if [[ $ZI_SKIP_EXIT -eq 0 ]]; then
-  pass "wrap-zizmor.sh exits 0 when zizmor absent"
-else
-  fail "wrap-zizmor.sh exits $ZI_SKIP_EXIT (expected 0) when zizmor absent"
-fi
-
-SKIP_COUNT="$(grep -c '"type":"skipped"' "$ZI_SKIP_OUT" 2>/dev/null || printf '0')"
-GAP_COUNT="$(grep -c '"type":"coverage_gap"' "$ZI_SKIP_OUT" 2>/dev/null || printf '0')"
-
-if [[ $SKIP_COUNT -ge 1 ]]; then
-  pass "wrap-zizmor.sh emits skipped note when absent"
-else
-  fail "wrap-zizmor.sh emitted no skipped note"
-fi
-
-if [[ $GAP_COUNT -ge 1 ]]; then
-  pass "wrap-zizmor.sh emits coverage_gap entries when absent"
-else
-  fail "wrap-zizmor.sh emitted no coverage_gap entries"
-fi
-
-# Verify all output lines are valid JSON
-INVALID_JSON_ZI=0
-while IFS= read -r line; do
-  [[ -z "$line" ]] && continue
-  if ! python3 -c "import json,sys; json.loads(sys.argv[1])" "$line" 2>/dev/null; then
-    INVALID_JSON_ZI=$((INVALID_JSON_ZI + 1))
+  if [[ $SKIP_COUNT -ge 1 ]]; then
+    pass "wrap-zizmor.sh emits skipped note when absent"
+  else
+    fail "wrap-zizmor.sh emitted no skipped note"
   fi
-done < "$ZI_SKIP_OUT"
-if [[ $INVALID_JSON_ZI -eq 0 ]]; then
-  pass "all wrap-zizmor.sh skip output lines are valid JSON"
-else
-  fail "$INVALID_JSON_ZI invalid JSON lines from wrap-zizmor.sh skip"
+
+  if [[ $GAP_COUNT -ge 1 ]]; then
+    pass "wrap-zizmor.sh emits coverage_gap entries when absent"
+  else
+    fail "wrap-zizmor.sh emitted no coverage_gap entries"
+  fi
+
+  # Verify all output lines are valid JSON
+  INVALID_JSON_ZI=0
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    if ! python3 -c "import json,sys; json.loads(sys.argv[1])" "$line" 2>/dev/null; then
+      INVALID_JSON_ZI=$((INVALID_JSON_ZI + 1))
+    fi
+  done < "$ZI_SKIP_OUT"
+  if [[ $INVALID_JSON_ZI -eq 0 ]]; then
+    pass "all wrap-zizmor.sh skip output lines are valid JSON"
+  else
+    fail "$INVALID_JSON_ZI invalid JSON lines from wrap-zizmor.sh skip"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -459,44 +466,49 @@ fi
 # ---------------------------------------------------------------------------
 printf '\nTest 5: wrap-pinact.sh graceful skip when pinact absent\n'
 
-PI_SKIP_OUT="${TESTRUN_TMPDIR}/pi-skip.jsonl"
-set +e
-PATH="$RESTRICTED_PATH" bash "${SPINE_DIR}/wrap-pinact.sh" "$WRAP_REPO" > "$PI_SKIP_OUT" 2>/dev/null
-PI_SKIP_EXIT=$?
-set -e
-
-if [[ $PI_SKIP_EXIT -eq 0 ]]; then
-  pass "wrap-pinact.sh exits 0 when pinact absent"
+# wrap-pinact.sh uses mapfile -d '' which requires bash 4+; skip on bash 3.2.
+if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+  pass "Test 5: wrap-pinact.sh wrapper skip test skipped -- bash < 4 (wrapper requires bash 4+; ubuntu CI will run this)"
 else
-  fail "wrap-pinact.sh exits $PI_SKIP_EXIT (expected 0) when pinact absent"
-fi
+  PI_SKIP_OUT="${TESTRUN_TMPDIR}/pi-skip.jsonl"
+  set +e
+  PATH="$RESTRICTED_PATH" bash "${SPINE_DIR}/wrap-pinact.sh" "$WRAP_REPO" > "$PI_SKIP_OUT" 2>/dev/null
+  PI_SKIP_EXIT=$?
+  set -e
 
-PI_SKIP_COUNT="$(grep -c '"type":"skipped"' "$PI_SKIP_OUT" 2>/dev/null || printf '0')"
-PI_GAP_COUNT="$(grep -c '"type":"coverage_gap"' "$PI_SKIP_OUT" 2>/dev/null || printf '0')"
-
-if [[ $PI_SKIP_COUNT -ge 1 ]]; then
-  pass "wrap-pinact.sh emits skipped note when absent"
-else
-  fail "wrap-pinact.sh emitted no skipped note"
-fi
-
-if [[ $PI_GAP_COUNT -ge 1 ]]; then
-  pass "wrap-pinact.sh emits coverage_gap entries when absent"
-else
-  fail "wrap-pinact.sh emitted no coverage_gap entries"
-fi
-
-INVALID_JSON_PI=0
-while IFS= read -r line; do
-  [[ -z "$line" ]] && continue
-  if ! python3 -c "import json,sys; json.loads(sys.argv[1])" "$line" 2>/dev/null; then
-    INVALID_JSON_PI=$((INVALID_JSON_PI + 1))
+  if [[ $PI_SKIP_EXIT -eq 0 ]]; then
+    pass "wrap-pinact.sh exits 0 when pinact absent"
+  else
+    fail "wrap-pinact.sh exits $PI_SKIP_EXIT (expected 0) when pinact absent"
   fi
-done < "$PI_SKIP_OUT"
-if [[ $INVALID_JSON_PI -eq 0 ]]; then
-  pass "all wrap-pinact.sh skip output lines are valid JSON"
-else
-  fail "$INVALID_JSON_PI invalid JSON lines from wrap-pinact.sh skip"
+
+  PI_SKIP_COUNT="$(grep -c '"type":"skipped"' "$PI_SKIP_OUT" 2>/dev/null || printf '0')"
+  PI_GAP_COUNT="$(grep -c '"type":"coverage_gap"' "$PI_SKIP_OUT" 2>/dev/null || printf '0')"
+
+  if [[ $PI_SKIP_COUNT -ge 1 ]]; then
+    pass "wrap-pinact.sh emits skipped note when absent"
+  else
+    fail "wrap-pinact.sh emitted no skipped note"
+  fi
+
+  if [[ $PI_GAP_COUNT -ge 1 ]]; then
+    pass "wrap-pinact.sh emits coverage_gap entries when absent"
+  else
+    fail "wrap-pinact.sh emitted no coverage_gap entries"
+  fi
+
+  INVALID_JSON_PI=0
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    if ! python3 -c "import json,sys; json.loads(sys.argv[1])" "$line" 2>/dev/null; then
+      INVALID_JSON_PI=$((INVALID_JSON_PI + 1))
+    fi
+  done < "$PI_SKIP_OUT"
+  if [[ $INVALID_JSON_PI -eq 0 ]]; then
+    pass "all wrap-pinact.sh skip output lines are valid JSON"
+  else
+    fail "$INVALID_JSON_PI invalid JSON lines from wrap-pinact.sh skip"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -610,7 +622,7 @@ if command -v shellcheck > /dev/null 2>&1; then
     fi
   done
 else
-  fail "shellcheck not installed -- cannot verify shell safety"
+  pass "shellcheck not installed -- shell safety check skipped (install shellcheck for full coverage)"
 fi
 
 # ---------------------------------------------------------------------------
