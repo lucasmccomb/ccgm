@@ -57,7 +57,7 @@ Usage: parse-zizmor.py <zizmor_sarif_json> <repo_root>
 #   - artipacked                  -> cicd/excessive-permissions (medium)
 #   - pull-request-target         -> cicd/dangerous-trigger (critical)
 #   - unpinned-uses               -> cicd/unpinned-action (high)
-#   - (any other)                 -> cicd/dangerous-trigger (medium, fallback)
+#   - (any other)                 -> cicd/workflow-security-issue (medium, fallback)
 #
 # Level mapping:  error -> high, warning -> medium, note/none -> low
 # -------------------------------------------------------------------------
@@ -75,7 +75,7 @@ import normalize  # noqa: E402
 # Matched by prefix/substring so "template-injection" and "expression-injection"
 # both land on cicd/script-injection.
 _RULE_MAP = {
-    "dangerous-trigger":    ("cicd/dangerous-trigger",    "critical"),
+    "dangerous-triggers":   ("cicd/dangerous-trigger",    "critical"),
     "pull-request-target":  ("cicd/dangerous-trigger",    "critical"),
     "template-injection":   ("cicd/script-injection",     "high"),
     "expression-injection": ("cicd/script-injection",     "high"),
@@ -98,7 +98,7 @@ def _map_rule(rule_id_raw):
     for key, val in _RULE_MAP.items():
         if key in rule_lower:
             return val
-    return ("cicd/dangerous-trigger", "medium")
+    return ("cicd/workflow-security-issue", "medium")
 
 
 def process_zizmor_sarif(data, repo_root):

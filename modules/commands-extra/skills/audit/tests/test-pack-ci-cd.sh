@@ -614,6 +614,103 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 8: parse-zizmor.py fallback -- unmapped rule -> cicd/workflow-security-issue
+# ---------------------------------------------------------------------------
+printf '\nTest 8: parse-zizmor.py fallback routes unmapped rule to cicd/workflow-security-issue\n'
+
+SARIF_UNMAPPED="${TESTRUN_TMPDIR}/zizmor-unmapped.json"
+cat > "$SARIF_UNMAPPED" << 'JSON'
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "zizmor",
+          "rules": [
+            {"id": "cache-poisoning", "name": "cache-poisoning"}
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "cache-poisoning",
+          "level": "warning",
+          "message": {"text": "Cache key derived from untrusted input"},
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {"uri": ".github/workflows/ci.yml"},
+                "region": {"startLine": 22}
+              }
+            }
+          ],
+          "partialFingerprints": {}
+        }
+      ]
+    }
+  ]
+}
+JSON
+
+UNMAPPED_OUT="${TESTRUN_TMPDIR}/zizmor-unmapped-findings.jsonl"
+python3 "${SPINE_DIR}/parse-zizmor.py" "$SARIF_UNMAPPED" "/repo" > "$UNMAPPED_OUT"
+
+# Assert exactly one line emitted
+UNMAPPED_LINES="$(grep -c . "$UNMAPPED_OUT" 2>/dev/null || printf '0')"
+if [[ $UNMAPPED_LINES -ge 1 ]]; then
+  pass "parse-zizmor.py fallback emitted $UNMAPPED_LINES line(s) for unmapped rule"
+else
+  fail "parse-zizmor.py fallback emitted no output for unmapped rule"
+fi
+
+# Assert check_id == cicd/workflow-security-issue
+UNMAPPED_CID="$(python3 -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    lines = [l.strip() for l in f if l.strip()]
+if not lines:
+    print('')
+else:
+    print(json.loads(lines[0]).get('check_id', ''))
+" "$UNMAPPED_OUT" 2>/dev/null || true)"
+
+if [[ "$UNMAPPED_CID" == "cicd/workflow-security-issue" ]]; then
+  pass "parse-zizmor.py fallback emits check_id=cicd/workflow-security-issue"
+else
+  fail "parse-zizmor.py fallback emitted wrong check_id: '$UNMAPPED_CID' (expected cicd/workflow-security-issue)"
+fi
+
+# Assert cicd/workflow-security-issue exists in rubric
+if python3 -c "
+import json, sys
+with open('${RUBRIC}') as f:
+    r = json.load(f)
+sys.exit(0 if 'cicd/workflow-security-issue' in r.get('checks', {}) else 1)
+" 2>/dev/null; then
+  pass "rubric covers cicd/workflow-security-issue (fallback check-id)"
+else
+  fail "rubric missing cicd/workflow-security-issue"
+fi
+
+# Assert rule_id preserves the original zizmor rule (zizmor/cache-poisoning)
+UNMAPPED_RULEID="$(python3 -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    lines = [l.strip() for l in f if l.strip()]
+if not lines:
+    print('')
+else:
+    print(json.loads(lines[0]).get('rule_id', ''))
+" "$UNMAPPED_OUT" 2>/dev/null || true)"
+
+if [[ "$UNMAPPED_RULEID" == "zizmor/cache-poisoning" ]]; then
+  pass "parse-zizmor.py fallback preserves rule_id=zizmor/cache-poisoning"
+else
+  fail "parse-zizmor.py fallback rule_id wrong: '$UNMAPPED_RULEID' (expected zizmor/cache-poisoning)"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 printf '\n-------------------------------------------------\n'

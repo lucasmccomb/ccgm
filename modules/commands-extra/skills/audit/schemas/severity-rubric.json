@@ -338,6 +338,11 @@
       "severity": "medium",
       "confidence": "high",
       "fix_confidence": "low"
+    },
+    "cicd/workflow-security-issue": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
     }
   }
 }
