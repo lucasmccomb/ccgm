@@ -147,7 +147,7 @@ Runs a comprehensive audit using 21 self-contained packs, each with an ecosystem
 /audit --fix              # Apply auto-fixes and create a PR
 ```
 
-**Suppression**: `# audit:ignore reason` inline, or `.auditignore.yaml` at repo root for path/check-id patterns.
+**Suppression**: `# audit-ignore: <check-id> [optional reason]` inline (also `// audit-ignore: <check-id> [reason]` for JS/TS), or `.auditignore.yaml` at repo root for path/check-id patterns.
 
 ---
 

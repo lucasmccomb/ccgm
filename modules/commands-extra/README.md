@@ -62,7 +62,7 @@ The audit skill uses a **pack-based architecture**. Each pack is a self-containe
 
 Findings can be suppressed at two levels:
 
-- **Inline**: add a `# audit:ignore reason` comment on the triggering line
+- **Inline**: add a `# audit-ignore: <check-id> [optional reason]` comment on the triggering line (or the line above it)
 - **File-level**: create `.auditignore.yaml` at the repo root with path/check-id patterns
 
 ### Provenance, CODEOWNERS, and per-package scoping
