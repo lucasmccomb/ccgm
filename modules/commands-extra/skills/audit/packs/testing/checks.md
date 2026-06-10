@@ -406,7 +406,7 @@ No finding: `waitFor` polls for the condition rather than guessing a duration.
 
 **Severity:** `high`
 **Confidence:** `high`
-**Detection:** `tool`
+**Detection:** `llm`
 
 #### Detection
 
@@ -431,6 +431,12 @@ a committed .skip hides a known failure. Both produce false confidence.
 Exclude:
 - Lines that are in a comment (// or # or /* ... */)
 - Files under node_modules/, .git/, dist/, build/
+
+Note on justified skips: a committed `.skip` / `xit` / `xtest` IS always flagged — a disabled
+test removes CI signal regardless of the reason. However, if the skipped line has an adjacent
+comment explaining why it is skipped (e.g. "// TODO: flaky on Windows — tracked in #123"), include
+that reason in the finding message so a human reviewer can triage quickly rather than assume the
+skip is unintentional.
 
 For each finding report: file:line, the modifier found, and whether it narrows (only/fdescribe/fit)
 or disables (skip/xit/xdescribe/xtest) the suite.
@@ -508,7 +514,11 @@ No finding: no focus or skip modifiers present.
 
 #### Detection
 
-The LLM agent scans test files for tests that assert exclusively on mock call-logs (`.toHaveBeenCalled()`, `.toHaveBeenCalledWith(...)`, call count checks) without any assertion on the actual output or observable side effect of the system under test. These tests verify that a mock was called, not that the system produced the correct result. When the mock's contract drifts from the real implementation, the test keeps passing while production breaks.
+The LLM agent scans test files for tests that assert exclusively on mock call-logs
+(`.toHaveBeenCalled()`, `.toHaveBeenCalledWith(...)`, call count checks) without any assertion
+on the actual output or observable side effect of the system under test. These tests verify that
+a mock was called, not that the system produced the correct result. When the mock's contract
+drifts from the real implementation, the test keeps passing while production breaks.
 
 **LLM instruction (if detection = llm or hybrid):**
 
