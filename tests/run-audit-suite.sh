@@ -22,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AUDIT_TESTS_DIR="$REPO_ROOT/modules/commands-extra/skills/audit/tests"
 
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 1
 
 PASS=0
 FAIL=0

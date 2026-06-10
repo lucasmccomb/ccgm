@@ -59,7 +59,7 @@ Findings are classified as: **critical**, **high**, **medium**, or **low**.
 
 ## Suppression
 
-- **Inline**: add `# audit:ignore reason` on the triggering line
+- **Inline**: add `# audit-ignore: <check-id> [optional reason]` on the triggering line (or `// audit-ignore: <check-id> [reason]` for JS/TS)
 - **File-level**: create `.auditignore.yaml` at the repo root with path/check-id patterns
 
 ## Interactive Mode (no flags)
