@@ -11,7 +11,8 @@
 #   --repo  <path>   Absolute path to the repo root (default: cwd)
 #   --tools <list>   Comma-separated subset of tools to run (default: all)
 #                    Valid: gitleaks,semgrep,dep-audit,knip,eslint,
-#                           govulncheck,bandit,hadolint,actionlint,trivy
+#                           govulncheck,bandit,hadolint,actionlint,trivy,
+#                           squawk,sqlfluff
 #   --output <file>  Write aggregated JSONL to this file instead of stdout
 #
 # Output: JSONL -- one JSON object per line, either a finding or a note.
@@ -32,7 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Defaults
 # ---------------------------------------------------------------------------
 REPO_ROOT=""
-REQUESTED_TOOLS="gitleaks,semgrep,dep-audit,knip,eslint,govulncheck,bandit,hadolint,actionlint,trivy"
+REQUESTED_TOOLS="gitleaks,semgrep,dep-audit,knip,eslint,govulncheck,bandit,hadolint,actionlint,trivy,squawk,sqlfluff"
 OUTPUT_FILE=""
 
 # ---------------------------------------------------------------------------
@@ -85,9 +86,11 @@ TOOL_WRAPPERS["bandit"]="$SCRIPT_DIR/wrap-bandit.sh"
 TOOL_WRAPPERS["hadolint"]="$SCRIPT_DIR/wrap-hadolint.sh"
 TOOL_WRAPPERS["actionlint"]="$SCRIPT_DIR/wrap-actionlint.sh"
 TOOL_WRAPPERS["trivy"]="$SCRIPT_DIR/wrap-trivy.sh"
+TOOL_WRAPPERS["squawk"]="$SCRIPT_DIR/wrap-squawk.sh"
+TOOL_WRAPPERS["sqlfluff"]="$SCRIPT_DIR/wrap-sqlfluff.sh"
 
 # Ordered execution list (stable, deterministic)
-TOOL_ORDER=(gitleaks semgrep dep-audit knip eslint govulncheck bandit hadolint actionlint trivy)
+TOOL_ORDER=(gitleaks semgrep dep-audit knip eslint govulncheck bandit hadolint actionlint trivy squawk sqlfluff)
 
 # ---------------------------------------------------------------------------
 # Parse requested tools into a set (using associative array for O(1) lookup)

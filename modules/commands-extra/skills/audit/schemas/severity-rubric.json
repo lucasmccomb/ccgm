@@ -438,6 +438,41 @@
       "severity": "high",
       "confidence": "high",
       "fix_confidence": "low"
+    },
+    "dm/unquoted-reserved-keyword": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "high"
+    },
+    "dm/index-without-concurrently": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "dm/missing-rls": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "dm/on-conflict-without-unique": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "dm/security-definer-function": {
+      "severity": "medium",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
+    "dm/squawk-violation": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "dm/sqlfluff-violation": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
     }
   }
 }

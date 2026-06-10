@@ -438,6 +438,8 @@ if command -v shellcheck > /dev/null 2>&1; then
     "$SPINE_DIR/wrap-hadolint.sh"
     "$SPINE_DIR/wrap-actionlint.sh"
     "$SPINE_DIR/wrap-trivy.sh"
+    "$SPINE_DIR/wrap-squawk.sh"
+    "$SPINE_DIR/wrap-sqlfluff.sh"
   )
 
   for script in "${SHELL_SCRIPTS[@]}"; do
