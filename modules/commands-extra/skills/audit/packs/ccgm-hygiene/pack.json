@@ -1,0 +1,34 @@
+{
+  "id": "ccgm/ccgm-hygiene",
+  "name": "CCGM Hygiene",
+  "version": "1.0.0",
+  "applies_when": ["always"],
+  "tags": ["hygiene", "conventions", "env", "cloudflare", "todo"],
+  "severity_floor": "info",
+  "tools": [],
+  "checks": [
+    {
+      "id": "ccgm/shipped-todo-marker",
+      "severity": "info",
+      "confidence": "high",
+      "detection": "hybrid",
+      "tool": "grep",
+      "fallback": "llm"
+    },
+    {
+      "id": "ccgm/env-example-drift",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "ccgm/cloudflare-pages-no-git",
+      "severity": "high",
+      "confidence": "high",
+      "detection": "hybrid",
+      "tool": "grep",
+      "fallback": "llm"
+    }
+  ]
+}

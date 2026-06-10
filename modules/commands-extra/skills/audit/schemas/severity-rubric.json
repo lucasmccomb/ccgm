@@ -180,6 +180,26 @@
       "confidence": "low",
       "fix_confidence": "low"
     },
+    "testing/sleep-based-flake": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "testing/only-or-skip-committed": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "testing/mock-not-behavior": {
+      "severity": "medium",
+      "confidence": "low",
+      "fix_confidence": "low"
+    },
+    "testing/test-only-prod-method": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
     "documentation/missing-jsdoc": {
       "severity": "low",
       "confidence": "high",
@@ -522,6 +542,81 @@
     },
     "cicd/workflow-security-issue": {
       "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "api/missing-input-validation": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "api/mass-assignment": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "api/unbounded-list": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "api/missing-versioning": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "privacy/pii-without-consent": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "privacy/pii-no-retention": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "privacy/pii-in-url": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "observability/pii-in-logs": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "observability/missing-structured-logging": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "observability/missing-error-reporting": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "ccgm/shipped-todo-marker": {
+      "severity": "info",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
+    "ccgm/env-example-drift": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "ccgm/cloudflare-pages-no-git": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "low"
+    },
+    "ccgm/project-standards-conformance": {
+      "severity": "medium",
+      "confidence": "low",
+      "fix_confidence": "low"
+    },
+    "ccgm/mcp-tool-annotations": {
+      "severity": "low",
       "confidence": "medium",
       "fix_confidence": "low"
     }
