@@ -342,6 +342,16 @@
       "target": "skills/audit/packs/architecture/checks.md",
       "type": "doc",
       "template": false
+    },
+    "skills/audit/packs/correctness/pack.json": {
+      "target": "skills/audit/packs/correctness/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/correctness/checks.md": {
+      "target": "skills/audit/packs/correctness/checks.md",
+      "type": "doc",
+      "template": false
     }
   },
   "tags": [

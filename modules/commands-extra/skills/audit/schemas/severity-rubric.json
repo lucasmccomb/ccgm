@@ -313,6 +313,56 @@
       "severity": "medium",
       "confidence": "medium",
       "fix_confidence": "low"
+    },
+    "lint/eqeqeq": {
+      "severity": "medium",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "lint/use-isnan": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "lint/valid-typeof": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "lint/no-unreachable": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "lint/no-constant-condition": {
+      "severity": "medium",
+      "confidence": "high",
+      "fix_confidence": "medium"
+    },
+    "lint/no-fallthrough": {
+      "severity": "medium",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "lint/default-case": {
+      "severity": "medium",
+      "confidence": "high",
+      "fix_confidence": "medium"
+    },
+    "correctness/off-by-one": {
+      "severity": "high",
+      "confidence": "low",
+      "fix_confidence": "low"
+    },
+    "correctness/float-equality": {
+      "severity": "medium",
+      "confidence": "low",
+      "fix_confidence": "medium"
+    },
+    "correctness/wrong-branch-logic": {
+      "severity": "high",
+      "confidence": "low",
+      "fix_confidence": "low"
     }
   }
 }

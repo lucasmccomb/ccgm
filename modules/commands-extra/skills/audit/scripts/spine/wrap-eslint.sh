@@ -8,6 +8,13 @@
 #
 # Output (stdout): JSONL
 # Exit code: always 0
+#
+# Active rules (all core ESLint, all config-free, all require no type information):
+#   Security surface (Epic 2.1):
+#     no-eval, no-implied-eval, no-new-func
+#   Correctness/Logic surface (Epic 2.4):
+#     eqeqeq, use-isnan, valid-typeof, no-unreachable,
+#     no-constant-condition, no-fallthrough, default-case
 
 set -euo pipefail
 
@@ -34,16 +41,16 @@ TMPFILE="$(mktemp /tmp/ccgm-eslint-XXXXXX.json)"
 trap 'rm -f "$TMPFILE"' EXIT
 
 # Config isolation: --no-config-lookup is the critical flag.
-# We pass a fixed minimal eval-rule set (no-eval, no-implied-eval, no-new-func)
-# so only the audit spine's known security rules run -- the repo's own lint
-# config is never loaded.  repo_root is passed via cd in subshell, glob is
-# a static pattern.
+# We pass a fixed rule set (10 rules: 3 security + 7 correctness); all are
+# core ESLint rules that run correctly with only --no-config-lookup and no
+# type information.  The repo's own lint config is never loaded.
+# repo_root is passed via cd in subshell, glob is a static pattern.
 set +e
 (
   cd "$REPO_ROOT"
   eslint \
     --no-config-lookup \
-    --rule '{"no-eval":["error"],"no-implied-eval":["error"],"no-new-func":["error"]}' \
+    --rule '{"no-eval":["error"],"no-implied-eval":["error"],"no-new-func":["error"],"eqeqeq":["error","always"],"use-isnan":["error"],"valid-typeof":["error"],"no-unreachable":["error"],"no-constant-condition":["error"],"no-fallthrough":["error"],"default-case":["error"]}' \
     --format json \
     --output-file "$TMPFILE" \
     "$GLOB_PATTERN" \
