@@ -861,6 +861,59 @@ after `merge-findings.py` in the same inline step; then compile the report (Phas
 directory (e.g., `.audit/history/YYYY-MM-DD.jsonl`). The script never auto-writes a baseline;
 the caller controls when to advance it.
 
+### Provenance & Routing
+
+After `merge-findings.py` produces `findings.jsonl` (or `findings-delta.jsonl` in delta mode),
+run `provenance.py` to prepend an audit-level provenance header and tag findings for routing:
+
+```bash
+python3 skills/audit/scripts/provenance.py \
+  --findings .audit/current/findings.jsonl \
+  --repo "$REPO_ROOT" \
+  --model "$AUDIT_MODEL" \
+  --output .audit/current/findings-tagged.jsonl
+```
+
+Pass `findings-tagged.jsonl` (instead of `findings.jsonl`) to the report compiler and any
+downstream consumers.  In `--single` mode the same invocation applies; use `--single` only
+when suppression/baseline is not needed, but provenance tagging is always beneficial.
+
+**audit_provenance header** — the first record in output has `type: "audit_provenance"` and
+carries these fields for traceability and report display:
+
+| Field | Source |
+|---|---|
+| `commit` | `git -C <repo> rev-parse HEAD` |
+| `rubric_version` | `version` field from `severity-rubric.json` |
+| `skill_version` | `version` field from `module.json` |
+| `tool_versions` | `{tool: version_string}` for spine tools present on PATH |
+| `model` | `--model` arg or `AUDIT_MODEL` env var |
+| `optional_checks_ran` | list of check IDs passed via `--optional-check` |
+
+The report header (Phase 6) should display `commit`, `rubric_version`, and `model` so readers
+can trace any finding back to its rubric snapshot.  When the rubric changes between runs,
+different `rubric_version` values explain severity shifts (see ADV-007).
+
+**CODEOWNERS owner tagging** — if a `CODEOWNERS` file exists in the repo (checked in order:
+`.github/CODEOWNERS`, `CODEOWNERS`, `docs/CODEOWNERS`), each finding whose `location.path`
+matches a CODEOWNERS rule gains `properties.owner` set to the owning team or user handle(s).
+Uses last-match-wins semantics identical to GitHub's own evaluation.  Owner tags enable
+per-team issue routing and allow the issue-creation step (Phase M7) to notify the right team.
+Findings with no matching CODEOWNERS rule receive no `owner` field (omitted, not null).
+
+**Per-package monorepo scoping** — for monorepos, `provenance.py` detects package roots from
+`pnpm-workspace.yaml` or the root `package.json#workspaces` field (pass `--packages` to
+override).  Each finding in a detected package root gains `properties.package` set to the
+package directory path.  After tagging, the script emits one `package_summary` record per
+package with per-severity counts:
+
+```json
+{"type":"package_summary","package":"packages/auth","counts":{"critical":0,"high":1,"medium":2,"low":0,"info":3}}
+```
+
+Package summaries appear after all finding records in the output and can drive per-package
+report sections or Slack/issue routing.
+
 ### Phase M7: Issue Creation
 
 Ask the user:
