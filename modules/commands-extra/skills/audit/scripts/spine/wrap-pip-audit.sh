@@ -5,7 +5,7 @@
 # Usage: wrap-pip-audit.sh <repo_root>
 #
 # Detects Python projects by presence of requirements.txt or pyproject.toml.
-# Runs: pip-audit --format json (or --json on older versions)
+# Runs: pip-audit --format json
 #
 # Output (stdout): JSONL
 # Exit code: always 0
