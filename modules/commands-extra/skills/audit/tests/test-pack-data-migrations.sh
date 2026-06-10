@@ -344,6 +344,51 @@ else
   fail "parse-squawk.py fingerprint field is missing or invalid"
 fi
 
+# Test: parse-squawk.py empty-messages -> "squawk rule <rule>" (no doubled tail)
+SQUAWK_EMPTY_MSG="$TESTRUN_TMPDIR/squawk-empty-msg.json"
+cat > "$SQUAWK_EMPTY_MSG" <<'JSON'
+[
+  {
+    "file": "/repo/supabase/migrations/0003_test.sql",
+    "violations": [
+      {
+        "rule": "prefer-robust-stmts",
+        "level": "Warning",
+        "messages": [],
+        "position": {
+          "start": {"line": 3, "col": 1},
+          "end":   {"line": 3, "col": 10}
+        }
+      }
+    ]
+  }
+]
+JSON
+
+SQUAWK_EMPTY_OUT="$TESTRUN_TMPDIR/squawk-empty-parsed.jsonl"
+python3 "$PARSE_SQUAWK" "$SQUAWK_EMPTY_MSG" "/repo" > "$SQUAWK_EMPTY_OUT"
+
+if python3 - "$SQUAWK_EMPTY_OUT" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        obj = json.loads(line)
+        msg = obj.get("message", "")
+        # Must be exactly "squawk rule <rule>" -- no "squawk violation" tail
+        if msg != "squawk rule prefer-robust-stmts":
+            print("Bad message: {!r}".format(msg), file=sys.stderr)
+            sys.exit(1)
+sys.exit(0)
+PYEOF
+then
+  pass "parse-squawk.py empty-messages yields 'squawk rule <rule>' (no doubled tail)"
+else
+  fail "parse-squawk.py empty-messages: wrong message (expected 'squawk rule prefer-robust-stmts')"
+fi
+
 # ---------------------------------------------------------------------------
 # Synthetic JSON fixtures for parse-sqlfluff.py unit tests
 # ---------------------------------------------------------------------------

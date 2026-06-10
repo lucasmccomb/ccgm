@@ -129,7 +129,7 @@ def main(argv):
             severity = _SEVERITY_MAP.get(level, "medium")
             message = _extract_message(messages)
             if message == "squawk violation":
-                message = "squawk rule {0}: {1}".format(rule, _extract_message(messages))
+                message = "squawk rule {0}".format(rule)
 
             fp = normalize.make_content_fingerprint(
                 "{0}:{1}:{2}".format(file_path, line_no, rule)
