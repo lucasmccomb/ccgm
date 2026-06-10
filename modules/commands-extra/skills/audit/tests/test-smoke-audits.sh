@@ -335,6 +335,23 @@ PYEOF
 }
 
 # ---------------------------------------------------------------------------
+# Helper: assert the registry-selected pack count equals an expected value.
+# No bash-4 gate: registry.py is pure python/stdlib and runs on bash 3.2+.
+# ---------------------------------------------------------------------------
+assert_pack_count() {
+  local fixture_name="$1"
+  local selected_json="$2"
+  local expected="$3"
+
+  ACTUAL_COUNT="$(python3 -c "import json; packs=json.load(open('$selected_json')); print(len(packs))")"
+  if [ "${ACTUAL_COUNT}" -eq "${expected}" ]; then
+    pass "$fixture_name: registry selected exactly $expected pack(s) (count=$ACTUAL_COUNT)"
+  else
+    fail "$fixture_name: expected $expected pack(s), registry selected $ACTUAL_COUNT"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Smoke A: JS app fixture
 # ---------------------------------------------------------------------------
 echo "--- [A] Smoke: JS app (package.json + tsconfig.json + index.ts + config.ts) ---"
@@ -367,6 +384,9 @@ git -C "$REPO_A" commit -q -m "init js app fixture"
 
 # Run pipeline (gitleaks is the sole tool for the smoke; semgrep for coverage-gap)
 run_pipeline "smoke-A (JS)" "$REPO_A" "gitleaks,semgrep" "$OUT_A"
+
+# Assert exact registry-selected pack count (post-Wave-4 registry: JS app = 18)
+assert_pack_count "smoke-A" "$OUT_A/selected.json" 18
 
 # Sanity: JS fixture selects language:javascript packs
 SELECTED_A_IDS="$(python3 - "$OUT_A/selected.json" << 'PYEOF'
@@ -425,6 +445,9 @@ git -C "$REPO_B" add -A
 git -C "$REPO_B" commit -q -m "init go service fixture"
 
 run_pipeline "smoke-B (Go)" "$REPO_B" "gitleaks,semgrep" "$OUT_B"
+
+# Assert exact registry-selected pack count (post-Wave-4 registry: Go service = 12)
+assert_pack_count "smoke-B" "$OUT_B/selected.json" 12
 
 # Sanity: Go fixture should NOT select JS-gated packs
 SELECTED_B_IDS="$(python3 - "$OUT_B/selected.json" << 'PYEOF'
@@ -487,6 +510,9 @@ git -C "$REPO_C" add -A
 git -C "$REPO_C" commit -q -m "init migrations repo fixture"
 
 run_pipeline "smoke-C (migrations)" "$REPO_C" "gitleaks,squawk" "$OUT_C"
+
+# Assert exact registry-selected pack count (post-Wave-4 registry: migrations repo = 19)
+assert_pack_count "smoke-C" "$OUT_C/selected.json" 19
 
 # Sanity: migrations fixture must select ccgm/data-migrations (has_migrations=true)
 SELECTED_C_IDS="$(python3 - "$OUT_C/selected.json" << 'PYEOF'
