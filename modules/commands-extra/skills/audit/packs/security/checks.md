@@ -71,6 +71,12 @@ tool: gitleaks
 fallback: llm
 ```
 
+**Spine-namespace note:** When gitleaks runs, the spine parser (`parse-gitleaks.py`) emits
+findings with `check_id: secrets/leaked-credential` (rubric entry: critical, confidence: high).
+The LLM worker triages these spine candidates via `spine_triage`. The check-id
+`security/hardcoded-secret` is the id for LLM-originated findings (detected without gitleaks,
+or LLM additions beyond the tool stream). Do not expect the spine to emit `security/hardcoded-secret`.
+
 #### Severity / Confidence
 
 **Severity rationale:** A hardcoded secret gives any reader of the repository (including malicious actors with git history access) direct, persistent access to the protected resource. Impact is immediate and potentially irreversible (revocation + rotation required).
@@ -213,6 +219,13 @@ rule: p/sql-injection
 fallback: llm
 ```
 
+**Spine-namespace note:** When semgrep runs, the spine parser (`parse-semgrep.py`) emits
+findings with dynamic `check_id: sast/<rule-short-name>` (e.g. `sast/sqli-detected`).
+These `sast/*` ids are intentionally unrubriced — merge-findings.py forces `confidence: low`
+and sets `properties.unrubriced: true` on them. The LLM worker triages these `sast/*` candidates
+via `spine_triage`. The check-id `security/sql-injection` is the id for LLM-confirmed or
+LLM-originated SQL injection findings. The spine does NOT emit `security/sql-injection` directly.
+
 #### Severity / Confidence
 
 **Severity rationale:** SQL injection allows attackers to read, modify, or delete database contents and can lead to full database exfiltration or authentication bypass. CRITICAL per OWASP Top 10 (A03:2021).
@@ -290,6 +303,13 @@ tool: semgrep
 rule: p/xss
 fallback: llm
 ```
+
+**Spine-namespace note:** When semgrep runs, the spine parser (`parse-semgrep.py`) emits
+findings with dynamic `check_id: sast/<rule-short-name>` (e.g. `sast/xss-detected`).
+These `sast/*` ids are intentionally unrubriced — merge-findings.py forces `confidence: low`
+and sets `properties.unrubriced: true` on them. The LLM worker triages these `sast/*` candidates
+via `spine_triage`. The check-id `security/xss-vulnerability` is the id for LLM-confirmed or
+LLM-originated XSS findings. The spine does NOT emit `security/xss-vulnerability` directly.
 
 #### Severity / Confidence
 

@@ -240,7 +240,7 @@
       "fix_confidence": "low"
     },
     "tos-compliance/rate-limit-circumvention": {
-      "severity": "medium",
+      "severity": "high",
       "confidence": "medium",
       "fix_confidence": "low"
     },
@@ -275,7 +275,7 @@
       "fix_confidence": "low"
     },
     "tos-compliance/ai-data-retention-violation": {
-      "severity": "medium",
+      "severity": "high",
       "confidence": "medium",
       "fix_confidence": "low"
     },
@@ -283,276 +283,36 @@
       "severity": "medium",
       "confidence": "low",
       "fix_confidence": "low"
+    },
+    "tos-compliance/iap-bypass": {
+      "severity": "critical",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "deps/vulnerable-dependency": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "dead-code/unused-dependency": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "high"
+    },
+    "dead-code/unused-file": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "dead-code/unused-export": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "dead-code/unlisted-dependency": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
     }
-  },
-  "security/hardcoded-secret": {
-    "severity": "critical",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "security/sensitive-console-log": {
-    "severity": "high",
-    "confidence": "medium",
-    "fix_confidence": "high"
-  },
-  "security/sql-injection": {
-    "severity": "critical",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "security/xss-vulnerability": {
-    "severity": "high",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "security/missing-security-headers": {
-    "severity": "high",
-    "confidence": "high",
-    "fix_confidence": "medium"
-  },
-  "security/edge-function-auth-bypass": {
-    "severity": "critical",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "dependencies/npm-audit-vulnerability": {
-    "severity": "high",
-    "confidence": "high",
-    "fix_confidence": "high"
-  },
-  "dependencies/outdated-minor": {
-    "severity": "low",
-    "confidence": "high",
-    "fix_confidence": "high"
-  },
-  "dependencies/outdated-major": {
-    "severity": "medium",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "dependencies/unused-dependency": {
-    "severity": "low",
-    "confidence": "medium",
-    "fix_confidence": "high"
-  },
-  "dependencies/duplicate-dependency": {
-    "severity": "medium",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "code-quality/eslint-violation": {
-    "severity": "medium",
-    "confidence": "high",
-    "fix_confidence": "high"
-  },
-  "code-quality/prettier-violation": {
-    "severity": "low",
-    "confidence": "high",
-    "fix_confidence": "high"
-  },
-  "code-quality/unused-import": {
-    "severity": "low",
-    "confidence": "high",
-    "fix_confidence": "high"
-  },
-  "code-quality/long-method": {
-    "severity": "medium",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "code-quality/large-file": {
-    "severity": "medium",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "code-quality/empty-catch-block": {
-    "severity": "medium",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "architecture/circular-dependency": {
-    "severity": "high",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "architecture/god-object": {
-    "severity": "high",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "architecture/improper-layering": {
-    "severity": "medium",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "architecture/wrong-layer-import": {
-    "severity": "medium",
-    "confidence": "medium",
-    "fix_confidence": "medium"
-  },
-  "typescript/excessive-any": {
-    "severity": "medium",
-    "confidence": "high",
-    "fix_confidence": "medium"
-  },
-  "typescript/missing-return-type": {
-    "severity": "low",
-    "confidence": "high",
-    "fix_confidence": "medium"
-  },
-  "typescript/react-hooks-violation": {
-    "severity": "high",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "typescript/fast-refresh-violation": {
-    "severity": "medium",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "typescript/missing-key-prop": {
-    "severity": "medium",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "testing/missing-test-file": {
-    "severity": "medium",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "testing/no-assertions": {
-    "severity": "high",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "testing/missing-edge-cases": {
-    "severity": "low",
-    "confidence": "low",
-    "fix_confidence": "low"
-  },
-  "documentation/missing-jsdoc": {
-    "severity": "low",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "documentation/stale-comment": {
-    "severity": "low",
-    "confidence": "low",
-    "fix_confidence": "low"
-  },
-  "documentation/incomplete-readme": {
-    "severity": "medium",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "performance/n-plus-one-query": {
-    "severity": "high",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "performance/missing-react-memo": {
-    "severity": "low",
-    "confidence": "medium",
-    "fix_confidence": "medium"
-  },
-  "performance/large-bundle-import": {
-    "severity": "medium",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/copyleft-in-proprietary": {
-    "severity": "critical",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/non-commercial-in-commercial": {
-    "severity": "critical",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/missing-attribution": {
-    "severity": "high",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/unlicensed-dependency": {
-    "severity": "medium",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/scraping-prohibited-site": {
-    "severity": "high",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/credential-misuse": {
-    "severity": "high",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/remote-code-extension": {
-    "severity": "critical",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/overbroad-extension-permissions": {
-    "severity": "high",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/ai-output-training-competitor": {
-    "severity": "high",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/undisclosed-telemetry": {
-    "severity": "medium",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/rate-limit-circumvention": {
-    "severity": "medium",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/paywall-bypass": {
-    "severity": "high",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/trademark-misuse": {
-    "severity": "medium",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/store-policy-violation": {
-    "severity": "high",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/missing-privacy-policy": {
-    "severity": "medium",
-    "confidence": "high",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/ai-prohibited-use": {
-    "severity": "high",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/ai-output-misrepresentation": {
-    "severity": "medium",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/ai-data-retention-violation": {
-    "severity": "medium",
-    "confidence": "medium",
-    "fix_confidence": "low"
-  },
-  "tos-compliance/platform-tos-violation": {
-    "severity": "medium",
-    "confidence": "low",
-    "fix_confidence": "low"
   }
 }

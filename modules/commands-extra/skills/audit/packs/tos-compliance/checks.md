@@ -44,6 +44,7 @@ Then enumerate dependency licenses:
   Python: run `pip-licenses` or parse site-packages metadata
   Go: inspect go.sum + vendor/ LICENSE files
   Rust: inspect Cargo.lock + crates.io metadata
+  .NET: inspect *.csproj / NuGet PackageReference entries + nuget.org license metadata
 
 Identify dependencies carrying copyleft licenses that are LINKED INTO a proprietary or
 differently-licensed product:
@@ -62,7 +63,8 @@ Also check fonts, icon sets, images, datasets, and ML model weights with restric
 (e.g. "non-commercial research only" weights, icon sets requiring a paid commercial license,
 datasets forbidding commercial or redistribution use).
 
-OPTIONAL internet-powered confirmation:
+OPTIONAL internet-powered confirmation (do not block on the network — fall back to
+offline pattern + metadata analysis if unavailable):
 - Resolve exact license: `npm view {package} license` or
   `WebFetch https://registry.npmjs.org/{package}`
 - Check for a relicense: `WebSearch: "{package} license change relicense BUSL"`
@@ -229,8 +231,11 @@ Check for missing attribution in the following contexts:
 4. Apache-2.0 dependencies: if any Apache-2.0 dependency is shipped, a NOTICE file is
    required aggregating change notices.
 
-auto_fixable=false — generating a THIRD-PARTY-LICENSES file is mechanically possible
-(npx generate-license-file, etc.) but low confidence because the output needs review.
+auto_fixable=true (low confidence) — generating a THIRD-PARTY-LICENSES file from
+dependency metadata is mechanically possible (npx generate-license-file, license-checker --out
+THIRD-PARTY-LICENSES --files, go-license-detector, etc.) but requires human review because the
+tool output may be incomplete or formatted incorrectly. The fix agent may generate the file as a
+starting point; it must be reviewed before commit.
 
 For each finding: the artifact type, what attribution is missing, and the tool to use for
 remediation (e.g. license-checker, generate-license-file, go-license-detector).
@@ -302,8 +307,10 @@ Also check for license incompatibilities between dependencies:
 - A GPL-3.0 dependency in a project that is GPL-2.0-only
 - A mix of strong copyleft licenses with conflicting viral clauses
 
-OPTIONAL internet check: `npm view {package} license` or
-`WebFetch https://registry.npmjs.org/{package}` to resolve unclear license metadata.
+OPTIONAL internet check (do not block on the network — fall back to offline pattern
++ metadata analysis if unavailable):
+- `npm view {package} license` or
+  `WebFetch https://registry.npmjs.org/{package}` to resolve unclear license metadata.
 
 For each finding: package name, its license metadata (or lack thereof), and why the
 obligation is unclear. Recommend resolving via the registry, the package's repository, or
@@ -384,7 +391,8 @@ Also check for:
   geocoding results cached against the provider's ToS; social media posts stored beyond
   what the API terms permit.
 
-OPTIONAL internet check:
+OPTIONAL internet check (do not block on the network — fall back to offline pattern
++ metadata analysis if unavailable):
 - `WebSearch: "{service} terms of service automated access prohibited"`
 - `WebFetch` the service's robots.txt or ToS page to confirm current policy
 
@@ -516,10 +524,11 @@ READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
 Use the Fix Type Reference table from that file when assigning fix_type and fix_confidence.
 Do not rely on memory — open and apply the file.
 
-Surface (3): APP / EXTENSION STORE & PLATFORM POLICY — remote code execution
+Surface (3): APP / EXTENSION STORE & PLATFORM POLICY — remote code execution and hot-code-push
 
-This check applies when manifest.json with "manifest_version" is detected (Chrome/Edge extension).
+This check covers two related prohibited patterns:
 
+A. Browser extension remote code (when manifest.json with "manifest_version" is detected):
 Scan the extension source for patterns prohibited by Manifest V3 and Chrome Web Store policy:
 - Fetching JavaScript, WebAssembly, or other executable code from a remote URL and executing
   it (fetch().then(eval), import() from a remote URL, dynamic script tag injection with
@@ -529,13 +538,21 @@ Scan the extension source for patterns prohibited by Manifest V3 and Chrome Web 
   a remote source or user input
 - Obfuscated source code with no readable build: minified-only submissions without a
   corresponding human-readable source link are rejected by the Web Store
-
-Also check for:
 - Dynamically generated content scripts or background scripts
 - WebSocket or SSE connections used to receive and execute code strings
 
-For each finding: the file and line, the specific remote-code pattern, the MV3 rule being
-violated, and remediation (bundle all code, use a server API for data — not code execution).
+B. Mobile app hot-code-push / executable code download (when iOS/Android project indicators
+are detected — Info.plist, *.xcodeproj, Podfile, fastlane, AndroidManifest.xml, build.gradle):
+- OTA update mechanisms (CodePush, Expo OTA for native modules, JSPatch) that change app
+  functionality beyond JS content without App Store review
+- Downloading and executing JS, bytecode, or native code from a CDN at runtime in ways that
+  alter core app functionality (bypasses Apple's review requirement for code changes)
+- RCTBridge or equivalent hooks used to load remote native modules
+
+For each finding: the file and line, the specific remote-code or hot-code-push pattern, the
+applicable platform rule being violated (MV3 policy / Apple Review Guideline 2.5.2), and
+remediation (bundle all code, use a server API for data — not code execution; for iOS use
+only permitted JS update frameworks that do not change native behavior).
 auto_fixable=false.
 ```
 
@@ -548,7 +565,7 @@ detection: llm
 
 #### Severity / Confidence
 
-**Severity rationale:** Remote code execution in a browser extension bypasses the Chrome Web Store review process, is explicitly prohibited by Manifest V3, and causes immediate store removal. CRITICAL because it results in delistment and potential user harm.
+**Severity rationale:** Remote code execution in a browser extension bypasses the Chrome Web Store review process, is explicitly prohibited by Manifest V3, and causes immediate store removal. Mobile app hot-code-push that changes native functionality bypasses App Store review and results in removal or rejection. Both patterns are CRITICAL per the ToS prompt severity guidance ("IAP-bypass or remote-code causing store rejection/removal" listed under CRITICAL).
 
 **Confidence rationale:** `eval()`, `new Function()`, and remote `<script>` patterns are syntactically identifiable. HIGH confidence.
 
@@ -571,6 +588,98 @@ fetch("https://cdn.example.com/plugin.js")
 // OK: all code is bundled; no remote execution
 import { processData } from "./processors.js";
 chrome.runtime.onMessage.addListener(processData);
+```
+
+---
+
+### `tos-compliance/iap-bypass`
+
+**Severity:** `critical`
+**Confidence:** `medium`
+**Detection:** `llm`
+
+#### Detection
+
+**LLM instruction (if detection = llm or hybrid):**
+
+```
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Use the Fix Type Reference table from that file when assigning fix_type and fix_confidence.
+Do not rely on memory — open and apply the file.
+
+Surface (3): APP / EXTENSION STORE & PLATFORM POLICY — Apple In-App Purchase bypass
+
+This check applies when Apple App Store project indicators are present:
+Info.plist, *.xcodeproj, *.xcworkspace, Podfile, fastlane/, or iOS-targeted React Native /
+Flutter project files.
+
+Look for digital goods (content, features, subscriptions) sold or unlocked through a
+payment processor other than Apple In-App Purchase:
+- Payment SDK calls (Stripe, PayPal, Braintree, Square, Paddle, LemonSqueezy) inside
+  iOS app code that complete a transaction which then unlocks digital content, premium
+  features, or subscription tiers within the app
+- Server-side payment completion webhooks that grant in-app entitlements based on a
+  non-Apple payment processor transaction
+- "Unlock" or "purchase" flows that call a backend payment endpoint instead of
+  StoreKit / StoreKit 2 Product.purchase()
+- Web views that redirect to a checkout page on the developer's own website to complete
+  a digital purchase
+
+EXEMPT (do NOT flag):
+- Physical goods, services rendered outside the app, or digital goods consumed outside
+  the app (e.g. restaurant orders, ride shares, Airbnb reservations, online courses)
+- Reader apps granted an explicit App Store exception (Netflix, Kindle — no purchase
+  button required)
+- Tipping or donations handled outside the app
+
+For each finding: the file/function performing the non-Apple payment, the digital good
+or feature being unlocked, the Apple guideline being violated (3.1.1 — In-App Purchase),
+and remediation (migrate to StoreKit / StoreKit 2). auto_fixable=false.
+```
+
+#### Spine Wiring
+
+```yaml
+check_id: tos-compliance/iap-bypass
+detection: llm
+```
+
+#### Severity / Confidence
+
+**Severity rationale:** Apple IAP bypass for digital goods violates App Store Review Guideline 3.1.1 and is a CRITICAL violation per the ToS prompt severity guidance ("IAP-bypass or remote-code that causes store rejection/removal" listed under CRITICAL). Apple enforces this actively: apps with IAP bypass are rejected on review or removed from the store with no grace period.
+
+**Confidence rationale:** Detecting a payment SDK call that unlocks digital content requires tracing the entitlement grant path. Clear cases (Stripe in a subscription paywall flow) are reliable; ambiguous cases (generic backend purchase call) need context. Medium confidence.
+
+**Rubric entry:** `tos-compliance/iap-bypass`
+
+#### Fixture
+
+**True positive** (`src/screens/SubscriptionScreen.tsx` in an iOS React Native app):
+
+```tsx
+// FINDS: digital subscription unlocked through Stripe — violates Apple IAP requirement
+const handleSubscribe = async () => {
+  const { paymentIntent } = await stripe.confirmPayment({
+    elements,
+    confirmParams: { return_url: "myapp://subscription-success" },
+  });
+  if (paymentIntent.status === "succeeded") {
+    await unlockPremiumTier(user.id); // unlocks in-app digital features
+  }
+};
+```
+
+**True negative** (should produce NO finding):
+
+```swift
+// OK: using StoreKit 2 for in-app purchases
+let product = try await Product.products(for: ["com.example.premium_monthly"]).first!
+let result = try await product.purchase()
+if case .success(let verification) = result {
+  let transaction = try verification.payloadValue
+  await transaction.finish()
+  await grantPremiumAccess()
+}
 ```
 
 ---
@@ -796,7 +905,7 @@ console.error("Auth failed", { timestamp: Date.now(), errorCode: err.code });
 
 ### `tos-compliance/rate-limit-circumvention`
 
-**Severity:** `medium`
+**Severity:** `high`
 **Confidence:** `medium`
 **Detection:** `llm`
 
@@ -834,7 +943,7 @@ detection: llm
 
 #### Severity / Confidence
 
-**Severity rationale:** Rate-limit circumvention violates provider ToS and can constitute unauthorized access under computer fraud laws. MEDIUM because impact and enforceability vary significantly by provider and pattern.
+**Severity rationale:** Rate-limit circumvention violates provider ToS and can constitute unauthorized access under computer fraud laws. HIGH per the ToS prompt severity guidance (circumvention is listed under HIGH alongside scraping). Impact and enforcement vary by provider, but the category itself is HIGH.
 
 **Confidence rationale:** IP rotation and CAPTCHA-solving library imports are detectable; subtle header manipulation is harder to distinguish from legitimate customization. Medium confidence.
 
@@ -1029,20 +1138,18 @@ Detect the store/platform context from project indicators:
   - manifest.json with "manifest_version"          → Chrome/Edge Web Store (see also
     remote-code-extension and overbroad-extension-permissions checks)
 
+NOTE: Apple IAP bypass (digital goods sold through non-Apple payment processor) is covered
+by the separate tos-compliance/iap-bypass check. Hot-code-push is covered by
+tos-compliance/remote-code-extension. This check covers the remaining store policy violations.
+
 For Apple App Store projects, check for:
-- IAP bypass: digital goods (content, features, subscriptions) sold or unlocked through a
-  payment processor other than Apple In-App Purchase (Stripe, PayPal, etc. for digital
-  goods sold within the app — prohibited; physical goods or services rendered outside
-  the app are exempt)
-- Hot-code push / executable code download: OTA update mechanisms (CodePush, Expo OTA
-  for native modules, JSPatch, downloading and executing JS from a CDN) that change app
-  functionality without App Store review
 - Missing NS*UsageDescription strings in Info.plist for any permission used (camera,
   microphone, location, contacts, photos, etc.)
 - App Tracking Transparency: collecting device advertising identifiers (IDFA) without
   ATT consent prompt
 - Production secrets embedded in the shipped binary (API keys, credentials in .plist or
   compiled strings)
+- Private or undocumented API use (UIKit internals, non-public frameworks)
 
 For Google Play projects, check for:
 - Sensitive permissions (READ_SMS, CALL_LOG, PROCESS_OUTGOING_CALLS, RECORD_AUDIO for
@@ -1066,7 +1173,7 @@ detection: llm
 
 #### Severity / Confidence
 
-**Severity rationale:** Store policy violations lead to app rejection on submission or removal from the store (for in-review or live apps). Apple IAP bypass is a CRITICAL violation that causes immediate removal; other violations are HIGH because they trigger mandatory remediation to maintain store presence.
+**Severity rationale:** Store policy violations lead to app rejection on submission or removal from the store (for in-review or live apps). Apple IAP bypass is covered separately by tos-compliance/iap-bypass (CRITICAL); the remaining violations in this check are HIGH because they trigger mandatory remediation to maintain store presence.
 
 **Confidence rationale:** Detecting IAP bypass (payment SDK in digital goods flow) and missing NS*UsageDescription strings is relatively reliable. Determining whether a permission has a qualifying use requires knowing the feature set. Medium confidence overall.
 
@@ -1074,24 +1181,23 @@ detection: llm
 
 #### Fixture
 
-**True positive** (`src/PurchaseScreen.tsx` in an iOS app):
+**True positive** (`Info.plist` in an iOS app):
 
-```tsx
-// FINDS: digital content purchase through Stripe instead of Apple IAP
-const handlePurchase = async () => {
-  const result = await stripe.confirmPayment({ ... }); // digital subscription
-  if (result.paymentIntent.status === "succeeded") {
-    await unlockPremiumContent();
-  }
-};
+```xml
+<!-- FINDS: camera permission used in code but NSCameraUsageDescription missing -->
+<key>NSMicrophoneUsageDescription</key>
+<string>For audio recording</string>
+<!-- NSCameraUsageDescription absent, but camera API is called in source -->
 ```
 
 **True negative** (should produce NO finding):
 
-```swift
-// OK: using StoreKit for in-app purchases
-let product = try await Product.products(for: ["com.example.premium"]).first!
-let result = try await product.purchase()
+```xml
+<!-- OK: all used permissions have usage description strings -->
+<key>NSCameraUsageDescription</key>
+<string>To scan QR codes</string>
+<key>NSMicrophoneUsageDescription</key>
+<string>For audio recording</string>
 ```
 
 ---
@@ -1215,7 +1321,8 @@ Also check for:
   internal endpoints not in the official API docs)
 - Circumventing safety systems or rate limits through multi-account API key rotation
 
-OPTIONAL internet check:
+OPTIONAL internet check (do not block on the network — fall back to offline pattern
++ metadata analysis if unavailable):
 - `WebFetch https://openai.com/policies/usage-policies` for current policy text
 - `WebFetch https://www.anthropic.com/legal/aup` for Anthropic's acceptable use policy
 
@@ -1336,7 +1443,7 @@ If asked whether you are an AI, confirm that you are and explain your capabiliti
 
 ### `tos-compliance/ai-data-retention-violation`
 
-**Severity:** `medium`
+**Severity:** `high`
 **Confidence:** `medium`
 **Detection:** `llm`
 
@@ -1382,7 +1489,7 @@ detection: llm
 
 #### Severity / Confidence
 
-**Severity rationale:** Retaining user prompts that contain sensitive data against provider terms creates both ToS violation and privacy risk. MEDIUM because the most severe form (using stored data for training) is covered by ai-output-training-competitor; this covers storage-level violations.
+**Severity rationale:** Storing data a provider forbids retaining creates both ToS violation and privacy risk. HIGH per the ToS prompt severity guidance ("storing data a provider forbids retaining" is listed under HIGH). The most severe form (using stored data for training a competitor) is also covered by ai-output-training-competitor; this check covers the retention violation itself.
 
 **Confidence rationale:** Identifying database writes that store AI prompt/response data requires reading both the AI API call and the persistence layer. Medium confidence.
 
@@ -1462,7 +1569,8 @@ Font/CDN hotlinking:
 - Google Fonts, Adobe Fonts, or other CDN resources used in production in ways that
   violate their ToS (e.g. Adobe Fonts requires a valid Creative Cloud license)
 
-OPTIONAL internet check:
+OPTIONAL internet check (do not block on the network — fall back to offline pattern
++ metadata analysis if unavailable):
 - `WebSearch: "{service} acceptable use policy prohibited"` for any service whose AUP
   terms are unclear
 
@@ -1520,6 +1628,8 @@ Every bullet and sub-bullet from the original Agent 9 Terms of Service & Policy 
 
 | Original prompt bullet / sub-bullet | Check-id |
 |--------------------------------------|----------|
+| Read the project's own license (LICENSE file, package.json license field, "private": true) | `tos-compliance/copyleft-in-proprietary` + `tos-compliance/unlicensed-dependency` |
+| Enumerate dependency licenses (npm: license-checker / package-lock.json; Python: pip-licenses; Go: go.sum + vendor; Rust: Cargo.lock; .NET: *.csproj / NuGet) | `tos-compliance/copyleft-in-proprietary` + `tos-compliance/unlicensed-dependency` |
 | CRITICAL: copyleft (GPL-2.0/3.0, AGPL-3.0, LGPL, SSPL, OSL, EUPL) linked into a proprietary or differently-licensed product | `tos-compliance/copyleft-in-proprietary` |
 | AGPL/SSPL in a network-served/SaaS app triggers source-disclosure obligations | `tos-compliance/copyleft-in-proprietary` |
 | CRITICAL: "non-commercial" / "source-available" licenses (CC-BY-NC, BUSL-1.1, Elastic-2.0, Commons Clause, Polyform Noncommercial) used in a commercial product | `tos-compliance/non-commercial-in-commercial` |
@@ -1550,8 +1660,8 @@ Every bullet and sub-bullet from the original Agent 9 Terms of Service & Policy 
 | Obfuscated/minified-only source with no readable build | `tos-compliance/remote-code-extension` |
 | Chrome/Edge: overbroad permissions or <all_urls> host access not justified by features; tabs/webRequest/cookies/scripting access beyond stated purpose; undisclosed analytics/ads | `tos-compliance/overbroad-extension-permissions` |
 | Apple App Store: private/undocumented API use | `tos-compliance/store-policy-violation` |
-| Apple App Store: bypassing In-App Purchase for digital goods | `tos-compliance/store-policy-violation` |
-| Apple App Store: hot-code-push / downloading executable code | `tos-compliance/store-policy-violation` |
+| Apple App Store: bypassing In-App Purchase for digital goods | `tos-compliance/iap-bypass` (critical) |
+| Apple App Store: hot-code-push / downloading executable code | `tos-compliance/remote-code-extension` (critical) |
 | Apple App Store: missing NS*UsageDescription strings | `tos-compliance/store-policy-violation` |
 | Apple App Store: tracking without App Tracking Transparency consent | `tos-compliance/store-policy-violation` |
 | Apple App Store: production secrets in the shipped bundle | `tos-compliance/store-policy-violation` |
@@ -1590,17 +1700,18 @@ Every bullet and sub-bullet from the original Agent 9 Terms of Service & Policy 
 | CRITICAL: AGPL/SSPL/GPL copyleft in a closed-source distributed/SaaS product | `tos-compliance/copyleft-in-proprietary` (critical) |
 | CRITICAL: non-commercial-licensed code in a commercial product | `tos-compliance/non-commercial-in-commercial` (critical) |
 | CRITICAL: AI outputs used to train a competitor | `tos-compliance/ai-output-training-competitor` (high — prompt says critical for this scenario, mapped to high per rubric; human escalation expected) |
-| CRITICAL: IAP-bypass or remote-code causing store rejection/removal | `tos-compliance/remote-code-extension` (critical), `tos-compliance/store-policy-violation` (high) |
+| CRITICAL: IAP-bypass causing store rejection/removal | `tos-compliance/iap-bypass` (critical) |
 | HIGH: missing required attribution in a shipped artifact | `tos-compliance/missing-attribution` (high) |
-| HIGH: scraping/circumvention against a major provider's ToS | `tos-compliance/scraping-prohibited-site` (high), `tos-compliance/paywall-bypass` (high) |
+| CRITICAL: remote-code or hot-code-push causing store rejection/removal | `tos-compliance/remote-code-extension` (critical) |
+| HIGH: scraping/circumvention against a major provider's ToS | `tos-compliance/scraping-prohibited-site` (high), `tos-compliance/paywall-bypass` (high), `tos-compliance/rate-limit-circumvention` (high) |
 | HIGH: overbroad extension permissions or private-API use likely to fail review | `tos-compliance/overbroad-extension-permissions` (high), `tos-compliance/store-policy-violation` (high) |
-| HIGH: storing data a provider forbids retaining | `tos-compliance/ai-data-retention-violation` (medium — lower than prompt guidance; human can escalate) |
+| HIGH: storing data a provider forbids retaining | `tos-compliance/ai-data-retention-violation` (high) |
 | MEDIUM: UNLICENSED/unknown dependency | `tos-compliance/unlicensed-dependency` (medium) |
 | MEDIUM: undisclosed telemetry | `tos-compliance/undisclosed-telemetry` (medium) |
 | MEDIUM: trademark/brand issues | `tos-compliance/trademark-misuse` (medium) |
 | LOW: minor attribution gaps; missing `license` field; demo/sample code | `tos-compliance/missing-attribution` (high for shipped artifact) / `tos-compliance/platform-tos-violation` (medium) |
 
-All sub-bullets from all 5 surfaces are covered. No sub-bullet dropped. The OPTIONAL internet-powered deep checks instructions (WebFetch, WebSearch patterns) are preserved in the relevant LLM instructions.
+All sub-bullets from all 5 surfaces are covered, including the Surface 1 procedural sub-bullets (read own license, enumerate dependency licenses). No sub-bullet dropped. The OPTIONAL internet-powered deep checks instructions (WebFetch, WebSearch patterns) are preserved in the relevant LLM instructions, each guarded by the offline-fallback instruction (Never block on the network — fall back to offline pattern + metadata analysis).
 
 ---
 

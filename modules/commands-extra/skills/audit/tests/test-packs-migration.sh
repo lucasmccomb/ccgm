@@ -84,6 +84,13 @@ fail() { printf "  FAIL: %s\n" "$1"; FAIL=$((FAIL + 1)); }
 skip() { printf "  SKIP: %s\n" "$1"; SKIP=$((SKIP + 1)); }
 
 # ---------------------------------------------------------------------------
+# Run lint-pack.py once for the entire packs directory before the per-pack loop
+# ---------------------------------------------------------------------------
+LINT_OUTPUT=""
+LINT_OVERALL_PASS=true
+LINT_OUTPUT=$(python3 "${LINTER}" --packs-dir "${PACKS_DIR}" 2>&1) || LINT_OVERALL_PASS=false
+
+# ---------------------------------------------------------------------------
 # Check each canonical pack
 # ---------------------------------------------------------------------------
 for pack_name in "${CANONICAL_PACKS[@]}"; do
@@ -127,17 +134,13 @@ for pack_name in "${CANONICAL_PACKS[@]}"; do
         pass "${pack_name}: checks.md present"
     fi
 
-    # ---- 3. lint-pack.py passes for this pack (schema + sections + rubric) ----
-    lint_output=""
-    lint_exit=0
-    lint_output=$(python3 "${LINTER}" --packs-dir "${PACKS_DIR}" 2>&1) || lint_exit=$?
-
-    # Filter lint output to just this pack's result
-    if echo "${lint_output}" | grep -q "^PASS: ${pack_name}$"; then
+    # ---- 3. lint-pack.py result for this pack (from pre-run output above) ----
+    # Filter the single lint run's output to this pack's result line
+    if echo "${LINT_OUTPUT}" | grep -q "^PASS: ${pack_name}$"; then
         pass "${pack_name}: lint-pack.py passed"
-    elif echo "${lint_output}" | grep -q "^FAIL: ${pack_name}$"; then
+    elif echo "${LINT_OUTPUT}" | grep -q "^FAIL: ${pack_name}$"; then
         # Extract error lines specific to this pack
-        pack_errors=$(echo "${lint_output}" | grep -A 20 "^FAIL: ${pack_name}$" | grep "ERROR:" | head -10 || true)
+        pack_errors=$(echo "${LINT_OUTPUT}" | grep -A 20 "^FAIL: ${pack_name}$" | grep "ERROR:" | head -10 || true)
         fail "${pack_name}: lint-pack.py failed — ${pack_errors}"
     else
         # lint-pack.py ran but result for this pack is unclear — treat as failure

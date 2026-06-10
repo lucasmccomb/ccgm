@@ -50,6 +50,12 @@ detection: tool
 tool: dep-audit
 ```
 
+**Spine-namespace note:** When dep-audit runs, the spine parser (`parse-dep-audit.py`) emits
+findings with `check_id: deps/vulnerable-dependency` (rubric entry: high severity, high confidence,
+high fix_confidence). The LLM worker triages these spine candidates via `spine_triage`.
+The check-id `dependencies/npm-audit-vulnerability` is the pack's semantic label for this
+audit category. The spine emits `deps/vulnerable-dependency`, not `dependencies/npm-audit-vulnerability`.
+
 #### Severity / Confidence
 
 **Severity rationale:** npm audit findings correspond to published CVEs in dependencies. Even transitive vulnerability paths can be exploited if the vulnerable code path is reachable at runtime. HIGH severity because the vulnerability is externally published and confirmed; severity of a specific finding may be upgraded to CRITICAL if the advisory itself is CRITICAL.
@@ -281,6 +287,12 @@ detection: hybrid
 tool: knip
 fallback: llm
 ```
+
+**Spine-namespace note:** When knip runs, the spine parser (`parse-knip.py`) emits unused
+dependencies in package.json with `check_id: dead-code/unused-dependency` (rubric entry: low
+severity, medium confidence, high fix_confidence). The LLM worker triages these candidates
+via `spine_triage`. The check-id `dependencies/unused-dependency` is the pack's semantic label.
+The spine emits `dead-code/unused-dependency`, not `dependencies/unused-dependency`.
 
 #### Severity / Confidence
 

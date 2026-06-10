@@ -2,8 +2,18 @@
   "id": "ccgm/tos-compliance",
   "name": "Terms of Service & Policy Compliance Audit",
   "version": "1.0.0",
-  "applies_when": ["always"],
-  "tags": ["compliance", "legal", "license", "tos", "privacy", "store-policy", "ai"],
+  "applies_when": [
+    "always"
+  ],
+  "tags": [
+    "compliance",
+    "legal",
+    "license",
+    "tos",
+    "privacy",
+    "store-policy",
+    "ai"
+  ],
   "severity_floor": "medium",
   "tools": [],
   "checks": [
@@ -26,7 +36,7 @@
       "severity": "high",
       "confidence": "medium",
       "detection": "llm",
-      "auto_fixable": false
+      "auto_fixable": true
     },
     {
       "id": "tos-compliance/unlicensed-dependency",
@@ -57,7 +67,21 @@
       "auto_fixable": false
     },
     {
+      "id": "tos-compliance/iap-bypass",
+      "severity": "critical",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
       "id": "tos-compliance/overbroad-extension-permissions",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "tos-compliance/store-policy-violation",
       "severity": "high",
       "confidence": "medium",
       "detection": "llm",
@@ -79,7 +103,7 @@
     },
     {
       "id": "tos-compliance/rate-limit-circumvention",
-      "severity": "medium",
+      "severity": "high",
       "confidence": "medium",
       "detection": "llm",
       "auto_fixable": false
@@ -94,13 +118,6 @@
     {
       "id": "tos-compliance/trademark-misuse",
       "severity": "medium",
-      "confidence": "medium",
-      "detection": "llm",
-      "auto_fixable": false
-    },
-    {
-      "id": "tos-compliance/store-policy-violation",
-      "severity": "high",
       "confidence": "medium",
       "detection": "llm",
       "auto_fixable": false
@@ -128,7 +145,7 @@
     },
     {
       "id": "tos-compliance/ai-data-retention-violation",
-      "severity": "medium",
+      "severity": "high",
       "confidence": "medium",
       "detection": "llm",
       "auto_fixable": false
