@@ -565,23 +565,6 @@ class of bug structurally impossible.
 
 ---
 
-## Migration Mapping
-
-Every bullet from the original Agent 1 Security Audit category prompt is mapped to its owning check-id:
-
-| Original prompt bullet | Check-id |
-|------------------------|----------|
-| Hardcoded secrets, API keys, tokens (NOT auto-fixable - needs env var setup) | `security/hardcoded-secret` |
-| Console.logs with sensitive data (auto-fixable: remove line) | `security/sensitive-console-log` |
-| SQL injection risks (NOT auto-fixable - needs refactor) | `security/sql-injection` |
-| XSS vulnerabilities (NOT auto-fixable - needs sanitization) | `security/xss-vulnerability` |
-| Missing security headers (auto-fixable if config file exists) | `security/missing-security-headers` |
-| Edge function auth bypasses (NOT auto-fixable) | `security/edge-function-auth-bypass` |
-
-All 6 original bullets are covered. No bullet dropped.
-
----
-
 ## Quality Checklist
 
 - [x] Each check-id in this file exactly matches `pack.json`'s `checks[].id`
