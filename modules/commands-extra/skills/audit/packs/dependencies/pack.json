@@ -2,7 +2,7 @@
   "id": "ccgm/dependencies",
   "name": "Dependencies Audit",
   "version": "1.0.0",
-  "applies_when": ["language:js"],
+  "applies_when": ["language:javascript"],
   "tags": ["dependencies", "npm", "vulnerabilities", "supply-chain"],
   "severity_floor": "low",
   "tools": ["dep-audit", "knip"],

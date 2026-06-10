@@ -5,7 +5,7 @@
 This pack audits npm dependency health for JavaScript and TypeScript repositories. It covers known CVE vulnerabilities, outdated packages (both minor and major), unused dependencies, and duplicate packages hoisted into the dependency tree. It relies on npm's built-in audit tooling and the knip unused-export analyser. It does NOT audit license compliance (covered by the tos-compliance pack), Python/Go/Rust dependency trees, or indirect peer-dependency conflicts beyond what npm audit reports.
 
 **Pack ID:** `ccgm/dependencies`
-**Applies when:** `language:js`
+**Applies when:** `language:javascript`
 
 ---
 
@@ -13,7 +13,7 @@ This pack audits npm dependency health for JavaScript and TypeScript repositorie
 
 | Condition | Reason |
 |-----------|--------|
-| `language:js` | All checks target npm's package.json ecosystem; the dep-audit and knip spine tools require a package.json to function. The `language:js` predicate is emitted by the ecosystem detector for any repository containing a package.json, which covers both JavaScript and TypeScript projects. Wave 4.1 will broaden coverage to Python (pip-audit) and Go (govulncheck) under separate packs. |
+| `language:javascript` | The ecosystem detector emits the `javascript` ecosystem for any repository that has a `package.json`; TypeScript repos additionally emit `typescript`. The registry derives condition tokens as `language:javascript` and `language:typescript` respectively. All checks target npm's package.json ecosystem; the dep-audit and knip spine tools require a package.json to function. Using `language:javascript` is the broadest honest gate: it covers both plain-JS and TypeScript projects (TS repos with a `package.json` satisfy both ecosystems). Wave 4.1 will broaden coverage to Python (pip-audit) and Go (govulncheck) under separate packs. |
 
 ---
 
@@ -252,7 +252,7 @@ detection: llm
 **Tool (if detection = tool or hybrid):**
 `knip`
 
-Rule / rule-id: knip `unlisted` and `unresolved` export/dependency reports
+Rule / rule-id: knip `dependencies` issue list (packages listed in package.json that are not imported in source)
 
 Fallback when tool absent: `llm`
 

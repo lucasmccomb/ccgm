@@ -490,19 +490,27 @@ detection: llm
 **True positive** (`src/api-proxy.ts`):
 
 ```typescript
-// FINDS: one server-side OpenAI key served to all users without individual accounts
+// FINDS: personal free-tier OpenAI key hard-wired into commercial multi-tenant SaaS
+// (sk-proj-... key belongs to individual free-tier account, not an org/paid account)
+const openai = new OpenAI({
+  apiKey: "sk-proj-abc123freeTierPersonalKey", // free-tier personal key in commercial app
+});
 const response = await openai.chat.completions.create({
-  apiKey: process.env.OPENAI_API_KEY, // single key for all users
-  messages: userMessages,
+  model: "gpt-4o",
+  messages: userMessages, // serving all paying customers through one personal free-tier key
 });
 ```
 
 **True negative** (should produce NO finding):
 
 ```typescript
-// OK: each user provides their own API key
+// OK: sanctioned pattern — org account platform key on the app backend serving all users
+// OpenAI permits this; "one key per user" is not required for server-side API usage
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY, // org/paid-tier platform key, server-side only
+});
 const response = await openai.chat.completions.create({
-  apiKey: req.user.openaiApiKey, // per-user key
+  model: "gpt-4o",
   messages: userMessages,
 });
 ```
@@ -756,6 +764,93 @@ detection: llm
 }
 ```
 *(Minimal permissions matching stated functionality)*
+
+---
+
+### `tos-compliance/store-policy-violation`
+
+**Severity:** `high`
+**Confidence:** `medium`
+**Detection:** `llm`
+
+#### Detection
+
+**LLM instruction (if detection = llm or hybrid):**
+
+```
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Use the Fix Type Reference table from that file when assigning fix_type and fix_confidence.
+Do not rely on memory — open and apply the file.
+
+Surface (3): APP / EXTENSION STORE & PLATFORM POLICY — store-specific violations
+
+Detect the store/platform context from project indicators:
+  - Info.plist / *.xcodeproj / Podfile / fastlane  → Apple App Store
+  - AndroidManifest.xml / build.gradle             → Google Play
+  - manifest.json with "manifest_version"          → Chrome/Edge Web Store (see also
+    remote-code-extension and overbroad-extension-permissions checks)
+
+NOTE: Apple IAP bypass (digital goods sold through non-Apple payment processor) is covered
+by the separate tos-compliance/iap-bypass check. Hot-code-push is covered by
+tos-compliance/remote-code-extension. This check covers the remaining store policy violations.
+
+For Apple App Store projects, check for:
+- Missing NS*UsageDescription strings in Info.plist for any permission used (camera,
+  microphone, location, contacts, photos, etc.)
+- App Tracking Transparency: collecting device advertising identifiers (IDFA) without
+  ATT consent prompt
+- Production secrets embedded in the shipped binary (API keys, credentials in .plist or
+  compiled strings)
+- Private or undocumented API use (UIKit internals, non-public frameworks)
+
+For Google Play projects, check for:
+- Sensitive permissions (READ_SMS, CALL_LOG, PROCESS_OUTGOING_CALLS, RECORD_AUDIO for
+  unrelated features, QUERY_ALL_PACKAGES, MANAGE_EXTERNAL_STORAGE) without a qualifying use
+  declared in the Play Console
+- Background location access (ACCESS_BACKGROUND_LOCATION) without prominent in-app
+  disclosure to users
+- Advertising ID (GAID) used beyond its permitted scope or collected from users under 13
+- Missing privacy policy URL in the app manifest or Play store listing
+
+For each finding: the platform, the specific policy violation, the policy clause number
+(if known), and remediation. auto_fixable=false.
+```
+
+#### Spine Wiring
+
+```yaml
+check_id: tos-compliance/store-policy-violation
+detection: llm
+```
+
+#### Severity / Confidence
+
+**Severity rationale:** Store policy violations lead to app rejection on submission or removal from the store (for in-review or live apps). Apple IAP bypass is covered separately by tos-compliance/iap-bypass (CRITICAL); the remaining violations in this check are HIGH because they trigger mandatory remediation to maintain store presence.
+
+**Confidence rationale:** Detecting missing NS*UsageDescription strings and sensitive permission declarations is relatively reliable. Determining whether a permission has a qualifying use requires knowing the feature set. Medium confidence overall.
+
+**Rubric entry:** `tos-compliance/store-policy-violation`
+
+#### Fixture
+
+**True positive** (`Info.plist` in an iOS app):
+
+```xml
+<!-- FINDS: camera permission used in code but NSCameraUsageDescription missing -->
+<key>NSMicrophoneUsageDescription</key>
+<string>For audio recording</string>
+<!-- NSCameraUsageDescription absent, but camera API is called in source -->
+```
+
+**True negative** (should produce NO finding):
+
+```xml
+<!-- OK: all used permissions have usage description strings -->
+<key>NSCameraUsageDescription</key>
+<string>To scan QR codes</string>
+<key>NSMicrophoneUsageDescription</key>
+<string>For audio recording</string>
+```
 
 ---
 
@@ -1112,93 +1207,6 @@ detection: llm
 }
 ```
 *(Generic name; "Powered by OpenAI" follows OpenAI's approved attribution language)*
-
----
-
-### `tos-compliance/store-policy-violation`
-
-**Severity:** `high`
-**Confidence:** `medium`
-**Detection:** `llm`
-
-#### Detection
-
-**LLM instruction (if detection = llm or hybrid):**
-
-```
-READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
-Use the Fix Type Reference table from that file when assigning fix_type and fix_confidence.
-Do not rely on memory — open and apply the file.
-
-Surface (3): APP / EXTENSION STORE & PLATFORM POLICY — store-specific violations
-
-Detect the store/platform context from project indicators:
-  - Info.plist / *.xcodeproj / Podfile / fastlane  → Apple App Store
-  - AndroidManifest.xml / build.gradle             → Google Play
-  - manifest.json with "manifest_version"          → Chrome/Edge Web Store (see also
-    remote-code-extension and overbroad-extension-permissions checks)
-
-NOTE: Apple IAP bypass (digital goods sold through non-Apple payment processor) is covered
-by the separate tos-compliance/iap-bypass check. Hot-code-push is covered by
-tos-compliance/remote-code-extension. This check covers the remaining store policy violations.
-
-For Apple App Store projects, check for:
-- Missing NS*UsageDescription strings in Info.plist for any permission used (camera,
-  microphone, location, contacts, photos, etc.)
-- App Tracking Transparency: collecting device advertising identifiers (IDFA) without
-  ATT consent prompt
-- Production secrets embedded in the shipped binary (API keys, credentials in .plist or
-  compiled strings)
-- Private or undocumented API use (UIKit internals, non-public frameworks)
-
-For Google Play projects, check for:
-- Sensitive permissions (READ_SMS, CALL_LOG, PROCESS_OUTGOING_CALLS, RECORD_AUDIO for
-  unrelated features, QUERY_ALL_PACKAGES, MANAGE_EXTERNAL_STORAGE) without a qualifying use
-  declared in the Play Console
-- Background location access (ACCESS_BACKGROUND_LOCATION) without prominent in-app
-  disclosure to users
-- Advertising ID (GAID) used beyond its permitted scope or collected from users under 13
-- Missing privacy policy URL in the app manifest or Play store listing
-
-For each finding: the platform, the specific policy violation, the policy clause number
-(if known), and remediation. auto_fixable=false.
-```
-
-#### Spine Wiring
-
-```yaml
-check_id: tos-compliance/store-policy-violation
-detection: llm
-```
-
-#### Severity / Confidence
-
-**Severity rationale:** Store policy violations lead to app rejection on submission or removal from the store (for in-review or live apps). Apple IAP bypass is covered separately by tos-compliance/iap-bypass (CRITICAL); the remaining violations in this check are HIGH because they trigger mandatory remediation to maintain store presence.
-
-**Confidence rationale:** Detecting IAP bypass (payment SDK in digital goods flow) and missing NS*UsageDescription strings is relatively reliable. Determining whether a permission has a qualifying use requires knowing the feature set. Medium confidence overall.
-
-**Rubric entry:** `tos-compliance/store-policy-violation`
-
-#### Fixture
-
-**True positive** (`Info.plist` in an iOS app):
-
-```xml
-<!-- FINDS: camera permission used in code but NSCameraUsageDescription missing -->
-<key>NSMicrophoneUsageDescription</key>
-<string>For audio recording</string>
-<!-- NSCameraUsageDescription absent, but camera API is called in source -->
-```
-
-**True negative** (should produce NO finding):
-
-```xml
-<!-- OK: all used permissions have usage description strings -->
-<key>NSCameraUsageDescription</key>
-<string>To scan QR codes</string>
-<key>NSMicrophoneUsageDescription</key>
-<string>For audio recording</string>
-```
 
 ---
 
@@ -1711,7 +1719,7 @@ Every bullet and sub-bullet from the original Agent 9 Terms of Service & Policy 
 | MEDIUM: trademark/brand issues | `tos-compliance/trademark-misuse` (medium) |
 | LOW: minor attribution gaps; missing `license` field; demo/sample code | `tos-compliance/missing-attribution` (high for shipped artifact) / `tos-compliance/platform-tos-violation` (medium) |
 
-All sub-bullets from all 5 surfaces are covered, including the Surface 1 procedural sub-bullets (read own license, enumerate dependency licenses). No sub-bullet dropped. The OPTIONAL internet-powered deep checks instructions (WebFetch, WebSearch patterns) are preserved in the relevant LLM instructions, each guarded by the offline-fallback instruction (Never block on the network — fall back to offline pattern + metadata analysis).
+All sub-bullets from all 5 surfaces are covered, including the Surface 1 procedural sub-bullets (read own license, enumerate dependency licenses). No sub-bullet dropped. The OPTIONAL internet-powered deep checks instructions (WebFetch, WebSearch patterns) are preserved in the relevant LLM instructions, each guarded by the offline-fallback instruction (do not block on the network — fall back to offline pattern + metadata analysis).
 
 ---
 

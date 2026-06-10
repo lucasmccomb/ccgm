@@ -87,8 +87,7 @@ skip() { printf "  SKIP: %s\n" "$1"; SKIP=$((SKIP + 1)); }
 # Run lint-pack.py once for the entire packs directory before the per-pack loop
 # ---------------------------------------------------------------------------
 LINT_OUTPUT=""
-LINT_OVERALL_PASS=true
-LINT_OUTPUT=$(python3 "${LINTER}" --packs-dir "${PACKS_DIR}" 2>&1) || LINT_OVERALL_PASS=false
+LINT_OUTPUT=$(python3 "${LINTER}" --packs-dir "${PACKS_DIR}" 2>&1) || true
 
 # ---------------------------------------------------------------------------
 # Check each canonical pack
@@ -139,8 +138,8 @@ for pack_name in "${CANONICAL_PACKS[@]}"; do
     if echo "${LINT_OUTPUT}" | grep -q "^PASS: ${pack_name}$"; then
         pass "${pack_name}: lint-pack.py passed"
     elif echo "${LINT_OUTPUT}" | grep -q "^FAIL: ${pack_name}$"; then
-        # Extract error lines specific to this pack
-        pack_errors=$(echo "${LINT_OUTPUT}" | grep -A 20 "^FAIL: ${pack_name}$" | grep "ERROR:" | head -10 || true)
+        # Extract error lines specific to this pack (stop at the next PASS:/FAIL:/blank boundary)
+        pack_errors=$(echo "${LINT_OUTPUT}" | awk "/^FAIL: ${pack_name}$/{found=1; next} found && /^(PASS:|FAIL:|$)/{exit} found && /ERROR:/{print}" | head -10 || true)
         fail "${pack_name}: lint-pack.py failed — ${pack_errors}"
     else
         # lint-pack.py ran but result for this pack is unclear — treat as failure
