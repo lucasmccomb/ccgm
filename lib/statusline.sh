@@ -5,15 +5,22 @@
 input=$(cat)
 
 # --- Model: render as "{family}-{version}" with a tier that drives color/emoji.
-# Family and version are parsed from display_name generically, so NEW MODEL
-# RELEASES NEED NO EDITS HERE. Examples:
-#   "Opus 4.8 (1M context)" -> 🧠 O-4.8   "Sonnet 4.6" -> 🐢 S-4.6   "Haiku 4.5" -> ⚠️ H-4.5
+# Family and version are parsed from display_name generically, so new VERSIONS
+# of known families need no edits here; a new FAMILY needs one case branch.
+# Examples:
+#   "Fable 5" -> 🧠 F-5   "Opus 4.8 (1M context)" -> 🧠 O-4.8
+#   "Sonnet 4.6" -> 🐢 S-4.6   "Haiku 4.5" -> ⚠️ H-4.5
 model_raw=$(echo "$input" | jq -r '.model.display_name // ""')
 
 # First version token in the name, e.g. "4.8" (empty when the name has none).
 model_ver=$(printf '%s' "$model_raw" | grep -oE '[0-9]+(\.[0-9]+)?' | head -n1)
 
 case "$model_raw" in
+  *Fable*)
+    # Fable is the tier above Opus — always flagship.
+    model_abbr="F${model_ver:+-$model_ver}"
+    model_tier="flagship"
+    ;;
   *Opus*)
     model_abbr="O${model_ver:+-$model_ver}"
     # Opus is flagship (🧠) at 4.6 or newer, plain below. The check is numeric
@@ -21,7 +28,7 @@ case "$model_raw" in
     ver_major=${model_ver%%.*}; ver_minor=${model_ver#*.}
     [ "$ver_minor" = "$model_ver" ] && ver_minor=0
     if [ "${ver_major:-0}" -gt 4 ] || { [ "${ver_major:-0}" -eq 4 ] && [ "${ver_minor:-0}" -ge 6 ]; }; then
-      model_tier="opus-best"
+      model_tier="flagship"
     else
       model_tier="opus-other"
     fi
@@ -145,7 +152,7 @@ if [ -n "$model_abbr" ]; then
     fi
   fi
   case "$model_tier" in
-    opus-best)
+    flagship)
       sections+=("$(printf "${BLUE}🧠 %s${RESET}%s" "$model_abbr" "$effort_suffix")")
       ;;
     sonnet)
