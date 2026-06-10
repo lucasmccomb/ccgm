@@ -118,6 +118,11 @@
       "type": "script",
       "template": false
     },
+    "skills/audit/scripts/baseline.py": {
+      "target": "skills/audit/scripts/baseline.py",
+      "type": "script",
+      "template": false
+    },
     "skills/audit/schemas/severity-rubric.json": {
       "target": "skills/audit/schemas/severity-rubric.json",
       "type": "doc",

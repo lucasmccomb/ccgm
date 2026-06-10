@@ -21,6 +21,8 @@ Run a comprehensive codebase audit across 9 categories. See the full skill for a
 /audit --diff             # Audit only files changed vs the detected base branch
 /audit --diff main        # Audit only files changed vs a specific ref
 /audit --staged           # Audit only files currently staged for commit (always read-only; --fix ignored)
+/audit --baseline <file>            # Classify findings as new/existing vs a previous run's findings.jsonl
+/audit --baseline <file> --new-only # Report only newly introduced findings
 /audit [PATH]             # Audit a specific path instead of the entire repo
 ```
 
