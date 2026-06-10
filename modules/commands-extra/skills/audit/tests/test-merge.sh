@@ -1012,9 +1012,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 8b: invalid finding (string line) -> exit 1 with actionable message
+# Test 8b: invalid finding (string line) -> skipped with WARNING, exit 0
+# (FIX 2: one bad finding must not abort the whole merge run; merge exits 0
+#  and emits a WARNING to stderr so the caller can see what was skipped.)
 # ---------------------------------------------------------------------------
-printf '\nTest 8b: invalid finding (string line) -> exit 1 with actionable message\n'
+printf '\nTest 8b: invalid finding (string line) -> skip+warn, exits 0\n'
 
 T8B_FP="445566778899bbcc:1"
 
@@ -1032,7 +1034,7 @@ with open(out, "w") as fh:
           "detection": "llm",
           "source": "llm",
           "message": "eslint violation",
-          # line is a string instead of int -- malformed input
+          # line is a string instead of int -- malformed but should not abort
           "location": {"path": "src/app.js", "line": "7"},
           "fingerprint": fp
         }
@@ -1049,17 +1051,18 @@ T8B_STDERR="$(python3 "$MERGE_SCRIPT" --spine "$T8_DIR/spine_empty.jsonl" \
 T8B_EXIT=$?
 set -e
 
-if [[ $T8B_EXIT -eq 1 ]]; then
-  pass "t8b: merge exits 1 on string-line finding"
+# Merge must exit 0: one bad finding is skipped, not fatal
+if [[ $T8B_EXIT -eq 0 ]]; then
+  pass "t8b: merge exits 0 (bad finding skipped, not fatal)"
 else
-  fail "t8b: merge exits $T8B_EXIT (expected 1 for malformed input)"
+  fail "t8b: merge exits $T8B_EXIT (expected 0; bad finding should be skipped)"
 fi
 
-# Assert actionable error message (not a bare traceback)
-if echo "$T8B_STDERR" | grep -q "VALIDATION ERROR\|location.line must be"; then
-  pass "t8b: stderr contains actionable error message (not a traceback)"
+# Assert WARNING in stderr mentioning the skipped finding
+if echo "$T8B_STDERR" | grep -q "WARNING.*skipping\|skipping invalid finding"; then
+  pass "t8b: stderr contains skip-warning for the invalid finding"
 else
-  fail "t8b: stderr does not contain actionable error message (got: $T8B_STDERR)"
+  fail "t8b: stderr does not contain skip-warning (got: $T8B_STDERR)"
 fi
 
 # Assert no traceback leaked

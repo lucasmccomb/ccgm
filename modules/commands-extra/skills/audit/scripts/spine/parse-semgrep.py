@@ -98,10 +98,14 @@ def main(argv):
         severity = map_severity(sev_raw)
         confidence = map_confidence(meta)
 
-        # Fingerprint
+        # Fingerprint: use the tool's fingerprint only when it is schema-valid
+        # (fingerprint_from_tool returns None for invalid values such as
+        # semgrep's 'requires login' placeholder emitted without Semgrep Cloud
+        # authentication). Fall back to content-based fingerprint on None.
+        fp = None
         if tool_fp:
             fp = normalize.fingerprint_from_tool(tool_fp)
-        else:
+        if fp is None:
             fp = normalize.make_content_fingerprint(
                 "{0}:{1}:{2}:{3}".format(path, start_line, rule_id, lines_ctx)
             )

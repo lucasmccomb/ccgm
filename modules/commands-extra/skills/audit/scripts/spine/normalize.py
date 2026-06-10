@@ -42,13 +42,35 @@ def compute_fingerprint(file_lines, line_no, gen=1):
     return "{0}:{1}".format(digest[:16], gen)
 
 
+_FINGERPRINT_RE = re.compile(r"^[A-Za-z0-9_.:+/=-]{8,128}$")
+
+
+def validate_tool_fingerprint(tool_fp):
+    """
+    Return the stripped tool-supplied fingerprint if it matches the finding
+    schema fingerprint pattern ^[A-Za-z0-9_.:+/=-]{8,128}$, otherwise None.
+
+    Semgrep emits 'requires login' (contains a space) when not authenticated
+    to Semgrep Cloud; that placeholder fails the schema and must be discarded
+    so callers fall back to compute_fingerprint().
+    """
+    stripped = tool_fp.strip() if tool_fp else ""
+    if stripped and _FINGERPRINT_RE.match(stripped):
+        return stripped
+    return None
+
+
 def fingerprint_from_tool(tool_fp):
     """
-    Use a tool-supplied fingerprint verbatim (stripped).
+    Return a validated tool-supplied fingerprint (stripped), or None if the
+    value fails the fingerprint schema pattern ^[A-Za-z0-9_.:+/=-]{8,128}$.
+
     Per plan ss3.7: where a spine tool emits its own partialFingerprints,
-    use the tool's fingerprint verbatim.
+    use the tool's fingerprint -- but only if it is schema-valid.  Invalid
+    values (e.g. semgrep's 'requires login' placeholder when not logged into
+    Semgrep Cloud) are discarded so callers fall back to compute_fingerprint().
     """
-    return tool_fp.strip()
+    return validate_tool_fingerprint(tool_fp)
 
 
 def make_content_fingerprint(content, gen=1):

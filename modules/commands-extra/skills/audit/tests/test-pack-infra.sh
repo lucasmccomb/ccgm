@@ -196,19 +196,26 @@ else
   pass "wrap-checkov.sh file exists"
 fi
 
-# Build a minimal PATH that excludes checkov
-SYSTEM_BINS=""
-for bin in python3 bash find date mktemp cp rm mv printf head grep; do
-  BINPATH="$(command -v "$bin" 2>/dev/null || true)"
-  if [[ -n "$BINPATH" ]]; then
-    BINDIR="$(dirname "$BINPATH")"
-    case ":$SYSTEM_BINS:" in
-      *":$BINDIR:"*) ;;
-      *) SYSTEM_BINS="${SYSTEM_BINS:+$SYSTEM_BINS:}$BINDIR" ;;
-    esac
-  fi
+# Build a deterministic scratch PATH that excludes checkov.
+# bash and python3 are linked from their currently-active location (may be
+# homebrew on macOS) so bash 4+ and the real python3 are available.
+# All other tools come from /usr/bin and /bin only, excluding homebrew
+# audit tools (checkov, etc.) from leaking in.
+SCRATCH_BINDIR="$TESTRUN_TMPDIR/scratch-bin"
+mkdir -p "$SCRATCH_BINDIR"
+for _bin in bash python3; do
+  _src="$(command -v "$_bin" 2>/dev/null || true)"
+  [[ -n "$_src" ]] && ln -sf "$_src" "$SCRATCH_BINDIR/$_bin" 2>/dev/null || true
 done
-RESTRICTED_PATH="$SYSTEM_BINS:/usr/bin:/bin"
+for _bin in find dirname date mktemp cp rm mv printf head grep cat; do
+  for _dir in /usr/bin /bin; do
+    if [[ -x "$_dir/$_bin" ]]; then
+      ln -sf "$_dir/$_bin" "$SCRATCH_BINDIR/$_bin" 2>/dev/null || true
+      break
+    fi
+  done
+done
+RESTRICTED_PATH="$SCRATCH_BINDIR"
 
 WRAP_OUTPUT="$TESTRUN_TMPDIR/wrap-checkov-absent.jsonl"
 set +e

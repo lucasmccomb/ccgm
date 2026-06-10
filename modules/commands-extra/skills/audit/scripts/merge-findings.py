@@ -392,34 +392,43 @@ def _validate_before_sort(findings: list, emit_mod) -> list:
     """
     Validate findings BEFORE sort and rubric steps (Fix #6).
 
-    Exits 1 with an actionable error message if any finding is malformed
-    (e.g. location.line is a string instead of an int), so the user sees
-    a clear ERROR rather than a bare TypeError traceback from merged.sort().
+    Invalid findings are SKIPPED with a WARNING to stderr so that one bad
+    finding among many (e.g. a tool-supplied fingerprint that fails the schema
+    pattern) does not abort the whole merge run.  Only truly unrecoverable
+    input structure problems (unparseable JSONL, missing CLI args) justify
+    exit 1 -- per-finding validation failures do not.
 
-    Returns validated findings (unchanged list if all pass).
+    Returns the list of valid findings (invalid ones removed).
     """
-    errors = []
+    valid = []
     for idx, f in enumerate(findings):
+        skip_reason = None
+
         loc = f.get("location", {})
         line_val = loc.get("line") if isinstance(loc, dict) else None
         if line_val is not None and not isinstance(line_val, int):
-            errors.append(
-                f"finding[{idx}] ({f.get('check_id','?')}): "
+            skip_reason = (
                 f"location.line must be an integer, got {type(line_val).__name__} "
                 f"value {line_val!r}"
             )
-        # Also run the full validation to catch any other malformed fields early.
-        try:
-            emit_mod.validate_finding(f)
-        except emit_mod.ValidationError as exc:
-            errors.append(f"finding[{idx}] ({f.get('check_id','?')}): {exc}")
 
-    if errors:
-        for err in errors:
-            print(f"merge-findings: VALIDATION ERROR: {err}", file=sys.stderr)
-        sys.exit(1)
+        if skip_reason is None:
+            # Full schema validation
+            try:
+                emit_mod.validate_finding(f)
+            except emit_mod.ValidationError as exc:
+                skip_reason = str(exc)
 
-    return findings
+        if skip_reason is not None:
+            print(
+                f"merge-findings: WARNING: skipping invalid finding[{idx}] "
+                f"({f.get('check_id','?')}): {skip_reason}",
+                file=sys.stderr,
+            )
+        else:
+            valid.append(f)
+
+    return valid
 
 
 # ---------------------------------------------------------------------------
@@ -685,20 +694,21 @@ def main() -> int:
 
     # ------------------------------------------------------------------
     # Final validation pass (post-rubric)
+    # Invalid findings are skipped with a WARNING, not exit 1.  The rubric
+    # step could theoretically produce a bad value; we skip-and-warn so the
+    # rest of the valid output is still emitted.
     # ------------------------------------------------------------------
-    errors = []
     valid_findings = []
     for idx, f in enumerate(merged):
         try:
             emit_mod.validate_finding(f)
             valid_findings.append(f)
         except emit_mod.ValidationError as exc:
-            errors.append(f"finding[{idx}] ({f.get('check_id','?')}): {exc}")
-
-    if errors:
-        for err in errors:
-            print(f"merge-findings: VALIDATION ERROR: {err}", file=sys.stderr)
-        return 1
+            print(
+                f"merge-findings: WARNING: skipping post-rubric invalid finding[{idx}] "
+                f"({f.get('check_id','?')}): {exc}",
+                file=sys.stderr,
+            )
 
     # ------------------------------------------------------------------
     # Step 8: Build output lines
