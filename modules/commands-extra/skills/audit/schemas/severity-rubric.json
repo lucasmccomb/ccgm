@@ -524,6 +524,26 @@
       "severity": "medium",
       "confidence": "medium",
       "fix_confidence": "low"
+    },
+    "api/missing-input-validation": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "api/mass-assignment": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "api/unbounded-list": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "api/missing-versioning": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
     }
   }
 }
