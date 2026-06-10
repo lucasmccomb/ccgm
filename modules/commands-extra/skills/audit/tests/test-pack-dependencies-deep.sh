@@ -590,45 +590,44 @@ version = "0.1.0"
 serde = "1.0"
 CARGO
 
-if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
-  pass "Test 21: spine fixture run skipped -- bash < 4 (spine requires bash 4+; ubuntu CI will run this)"
+# run.sh is bash-3.2-portable; no version guard needed.
+SPINE_OUT="$TESTRUN_TMPDIR/spine-multi-eco.jsonl"
+set +e
+PATH="$RESTRICTED_PATH" bash "${SPINE_DIR}/run.sh" \
+  --repo "$FIXTURE_REPO" \
+  --tools "pip-audit,cargo-audit,bundler-audit" \
+  --output "$SPINE_OUT" \
+  2>/dev/null
+SPINE_EXIT=$?
+set -e
+
+if [[ $SPINE_EXIT -eq 0 ]]; then
+  pass "spine exits 0 for pip-audit,cargo-audit,bundler-audit on fixture repo (tools absent)"
 else
-  SPINE_OUT="$TESTRUN_TMPDIR/spine-multi-eco.jsonl"
-  set +e
-  PATH="$RESTRICTED_PATH" bash "${SPINE_DIR}/run.sh" \
-    --repo "$FIXTURE_REPO" \
-    --tools "pip-audit,cargo-audit,bundler-audit" \
-    --output "$SPINE_OUT" \
-    2>/dev/null
-  SPINE_EXIT=$?
-  set -e
+  fail "spine exits $SPINE_EXIT (expected 0)"
+fi
 
-  if [[ $SPINE_EXIT -eq 0 ]]; then
-    pass "spine exits 0 for pip-audit,cargo-audit,bundler-audit on fixture repo (tools absent)"
-  else
-    fail "spine exits $SPINE_EXIT (expected 0)"
-  fi
+# Use { grep ... || true; } so a zero-match exit-1 doesn't fire the ||, preventing
+# double-output under bash 3.2 when grep exits non-zero (no matches).
+SKIP_OR_GAP="$({ grep -c '"type":"skipped"\|"type":"coverage_gap"' "$SPINE_OUT" || true; } 2>/dev/null)"
+if [[ ${SKIP_OR_GAP:-0} -gt 0 ]]; then
+  pass "spine emits $SKIP_OR_GAP skip/gap note(s) for absent tools on multi-ecosystem fixture"
+else
+  fail "spine emits no skip/gap notes for absent tools on multi-ecosystem fixture"
+fi
 
-  SKIP_OR_GAP="$(grep -c '"type":"skipped"\|"type":"coverage_gap"' "$SPINE_OUT" 2>/dev/null || printf '0')"
-  if [[ "$SKIP_OR_GAP" -gt 0 ]]; then
-    pass "spine emits $SKIP_OR_GAP skip/gap note(s) for absent tools on multi-ecosystem fixture"
-  else
-    fail "spine emits no skip/gap notes for absent tools on multi-ecosystem fixture"
+# All output should be valid JSON
+INVALID_JSON=0
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  if ! python3 -c "import json,sys; json.loads(sys.argv[1])" "$line" 2>/dev/null; then
+    INVALID_JSON=$((INVALID_JSON + 1))
   fi
-
-  # All output should be valid JSON
-  INVALID_JSON=0
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    if ! python3 -c "import json,sys; json.loads(sys.argv[1])" "$line" 2>/dev/null; then
-      INVALID_JSON=$((INVALID_JSON + 1))
-    fi
-  done < "$SPINE_OUT"
-  if [[ $INVALID_JSON -eq 0 ]]; then
-    pass "spine output for multi-ecosystem fixture is valid JSONL"
-  else
-    fail "spine output has $INVALID_JSON invalid JSON lines"
-  fi
+done < "$SPINE_OUT"
+if [[ $INVALID_JSON -eq 0 ]]; then
+  pass "spine output for multi-ecosystem fixture is valid JSONL"
+else
+  fail "spine output has $INVALID_JSON invalid JSON lines"
 fi
 
 # ---------------------------------------------------------------------------

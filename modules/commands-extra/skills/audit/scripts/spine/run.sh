@@ -75,39 +75,52 @@ fi
 # ---------------------------------------------------------------------------
 # Tool registry -- ordered list of (tool_name, wrapper_script) pairs.
 # Paths are absolute, never derived from user input.
+# Bash-3.2-portable: case dispatch instead of associative array
+# (declare -A requires bash 4+).
 # ---------------------------------------------------------------------------
-declare -A TOOL_WRAPPERS
-TOOL_WRAPPERS["gitleaks"]="$SCRIPT_DIR/wrap-gitleaks.sh"
-TOOL_WRAPPERS["semgrep"]="$SCRIPT_DIR/wrap-semgrep.sh"
-TOOL_WRAPPERS["dep-audit"]="$SCRIPT_DIR/wrap-dep-audit.sh"
-TOOL_WRAPPERS["knip"]="$SCRIPT_DIR/wrap-knip.sh"
-TOOL_WRAPPERS["eslint"]="$SCRIPT_DIR/wrap-eslint.sh"
-TOOL_WRAPPERS["govulncheck"]="$SCRIPT_DIR/wrap-govulncheck.sh"
-TOOL_WRAPPERS["bandit"]="$SCRIPT_DIR/wrap-bandit.sh"
-TOOL_WRAPPERS["hadolint"]="$SCRIPT_DIR/wrap-hadolint.sh"
-TOOL_WRAPPERS["actionlint"]="$SCRIPT_DIR/wrap-actionlint.sh"
-TOOL_WRAPPERS["trivy"]="$SCRIPT_DIR/wrap-trivy.sh"
-TOOL_WRAPPERS["zizmor"]="$SCRIPT_DIR/wrap-zizmor.sh"
-TOOL_WRAPPERS["pinact"]="$SCRIPT_DIR/wrap-pinact.sh"
-TOOL_WRAPPERS["squawk"]="$SCRIPT_DIR/wrap-squawk.sh"
-TOOL_WRAPPERS["sqlfluff"]="$SCRIPT_DIR/wrap-sqlfluff.sh"
-TOOL_WRAPPERS["checkov"]="$SCRIPT_DIR/wrap-checkov.sh"
-TOOL_WRAPPERS["pip-audit"]="$SCRIPT_DIR/wrap-pip-audit.sh"
-TOOL_WRAPPERS["cargo-audit"]="$SCRIPT_DIR/wrap-cargo-audit.sh"
-TOOL_WRAPPERS["bundler-audit"]="$SCRIPT_DIR/wrap-bundler-audit.sh"
 
 # Ordered execution list (stable, deterministic)
 TOOL_ORDER=(gitleaks semgrep dep-audit knip eslint govulncheck bandit hadolint actionlint trivy zizmor pinact squawk sqlfluff checkov pip-audit cargo-audit bundler-audit)
 
+# Resolve wrapper path for a given tool name.
+# Sets WRAPPER to the script path, or empty string if unknown.
+_get_wrapper() {
+  local _tool="$1"
+  case "$_tool" in
+    gitleaks)       WRAPPER="$SCRIPT_DIR/wrap-gitleaks.sh" ;;
+    semgrep)        WRAPPER="$SCRIPT_DIR/wrap-semgrep.sh" ;;
+    dep-audit)      WRAPPER="$SCRIPT_DIR/wrap-dep-audit.sh" ;;
+    knip)           WRAPPER="$SCRIPT_DIR/wrap-knip.sh" ;;
+    eslint)         WRAPPER="$SCRIPT_DIR/wrap-eslint.sh" ;;
+    govulncheck)    WRAPPER="$SCRIPT_DIR/wrap-govulncheck.sh" ;;
+    bandit)         WRAPPER="$SCRIPT_DIR/wrap-bandit.sh" ;;
+    hadolint)       WRAPPER="$SCRIPT_DIR/wrap-hadolint.sh" ;;
+    actionlint)     WRAPPER="$SCRIPT_DIR/wrap-actionlint.sh" ;;
+    trivy)          WRAPPER="$SCRIPT_DIR/wrap-trivy.sh" ;;
+    zizmor)         WRAPPER="$SCRIPT_DIR/wrap-zizmor.sh" ;;
+    pinact)         WRAPPER="$SCRIPT_DIR/wrap-pinact.sh" ;;
+    squawk)         WRAPPER="$SCRIPT_DIR/wrap-squawk.sh" ;;
+    sqlfluff)       WRAPPER="$SCRIPT_DIR/wrap-sqlfluff.sh" ;;
+    checkov)        WRAPPER="$SCRIPT_DIR/wrap-checkov.sh" ;;
+    pip-audit)      WRAPPER="$SCRIPT_DIR/wrap-pip-audit.sh" ;;
+    cargo-audit)    WRAPPER="$SCRIPT_DIR/wrap-cargo-audit.sh" ;;
+    bundler-audit)  WRAPPER="$SCRIPT_DIR/wrap-bundler-audit.sh" ;;
+    *)              WRAPPER="" ;;
+  esac
+}
+
 # ---------------------------------------------------------------------------
-# Parse requested tools into a set (using associative array for O(1) lookup)
+# Parse requested tools into a colon-delimited string for membership testing.
+# Bash-3.2-portable: no associative arrays (declare -A requires bash 4+).
+# Membership test pattern: case ":$_REQUESTED_CSV_NORM:" in *":$TOOL:"*) ...
 # ---------------------------------------------------------------------------
-declare -A REQUESTED_SET
+_REQUESTED_CSV_NORM=""
 IFS=',' read -ra _REQ_TOOLS <<< "$REQUESTED_TOOLS"
 for _t in "${_REQ_TOOLS[@]}"; do
   _t="${_t// /}"  # strip spaces
-  REQUESTED_SET["$_t"]=1
+  _REQUESTED_CSV_NORM="${_REQUESTED_CSV_NORM}:${_t}"
 done
+_REQUESTED_CSV_NORM="${_REQUESTED_CSV_NORM}:"  # trailing colon for uniform matching
 
 # ---------------------------------------------------------------------------
 # Aggregation: collect all output to a temp file if --output is set,
@@ -144,11 +157,14 @@ PYEOF
 # ---------------------------------------------------------------------------
 for TOOL in "${TOOL_ORDER[@]}"; do
   # Skip tools not in the requested set
-  if [[ -z "${REQUESTED_SET[$TOOL]:-}" ]]; then
-    continue
-  fi
+  # Bash-3.2-portable membership test via case pattern on colon-delimited string.
+  # _REQUESTED_CSV_NORM has the form ":tool1:tool2:...:toolN:" (leading+trailing colon).
+  case "${_REQUESTED_CSV_NORM}" in
+    *":${TOOL}:"*) ;;  # present -- fall through
+    *) continue ;;     # not requested -- skip
+  esac
 
-  WRAPPER="${TOOL_WRAPPERS[$TOOL]:-}"
+  _get_wrapper "$TOOL"
   if [[ -z "$WRAPPER" || ! -f "$WRAPPER" ]]; then
     printf '{"type":"coverage_gap","tool":"%s","check_id":"spine/missing-wrapper","description":"wrapper script not found: %s"}\n' \
       "$TOOL" "$WRAPPER" >> "$SINK"
