@@ -313,6 +313,41 @@
       "severity": "medium",
       "confidence": "medium",
       "fix_confidence": "low"
+    },
+    "reliability/floating-promise": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "reliability/misused-promise": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "reliability/unhandled-promise": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "reliability/await-in-loop": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "reliability/fetch-without-timeout": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "reliability/retry-without-backoff": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "reliability/promise-all-vs-allsettled": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
     }
   }
 }

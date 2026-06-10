@@ -342,6 +342,16 @@
       "target": "skills/audit/packs/architecture/checks.md",
       "type": "doc",
       "template": false
+    },
+    "skills/audit/packs/reliability/pack.json": {
+      "target": "skills/audit/packs/reliability/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/reliability/checks.md": {
+      "target": "skills/audit/packs/reliability/checks.md",
+      "type": "doc",
+      "template": false
     }
   },
   "tags": [
