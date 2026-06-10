@@ -35,8 +35,12 @@ if [[ ! -d "$WORKFLOWS_DIR" ]]; then
   exit 0
 fi
 
-# Collect workflow files safely
-mapfile -d '' WORKFLOW_FILES < <(
+# Collect workflow files safely using a NUL-delimited read loop.
+# Bash-3.2-portable: mapfile -d '' requires bash 4+; use while-read instead.
+WORKFLOW_FILES=()
+while IFS= read -r -d '' f; do
+  WORKFLOW_FILES+=("$f")
+done < <(
   find "$WORKFLOWS_DIR" \
     -maxdepth 1 \
     -type f \

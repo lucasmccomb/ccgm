@@ -75,8 +75,12 @@ if ! command -v squawk > /dev/null 2>&1; then
   exit 0
 fi
 
-# Collect .sql files from migration directories using find + null-delimited output
-mapfile -d '' SQL_FILES < <(
+# Collect .sql files from migration directories using a NUL-delimited read loop.
+# Bash-3.2-portable: mapfile -d '' requires bash 4+; use while-read instead.
+SQL_FILES=()
+while IFS= read -r -d '' f; do
+  SQL_FILES+=("$f")
+done < <(
   for dir in "${MIGRATION_DIRS[@]}"; do
     find "$dir" \
       -type f \
