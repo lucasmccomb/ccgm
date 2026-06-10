@@ -160,6 +160,26 @@
       "confidence": "low",
       "fix_confidence": "low"
     },
+    "testing/sleep-based-flake": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "testing/only-or-skip-committed": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "testing/mock-not-behavior": {
+      "severity": "medium",
+      "confidence": "low",
+      "fix_confidence": "low"
+    },
+    "testing/test-only-prod-method": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
     "documentation/missing-jsdoc": {
       "severity": "low",
       "confidence": "high",
