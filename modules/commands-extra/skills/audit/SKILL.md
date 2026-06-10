@@ -21,6 +21,10 @@ Comprehensive codebase audit. Produces a findings document and creates GitHub is
 /audit --diff             # Audit only files changed vs the detected base branch (git diff)
 /audit --diff main        # Audit only files changed vs a specific ref
 /audit --staged           # Audit only files currently staged for commit
+
+# Baseline / delta classification (compare to a previous run)
+/audit --baseline <file>            # Classify findings as new/existing vs a baseline run
+/audit --baseline <file> --new-only # Report only newly introduced findings
 ```
 
 > **Note on `--diff` and `--staged`**: These flags scope the audit to changed files only.
@@ -84,6 +88,8 @@ This ensures the user always knows exactly what the audit will do before it star
 - `--manual` -> Coordinator-Only Mode (Phases M1-M4 + output launch commands)
 - `--diff [ref]` -> sets DIFF_MODE=true; changed files computed via `git diff -z <ref>...HEAD` (ref defaults to BASE_BRANCH). Composable with `--single`, `--fix`, and all execution strategies.
 - `--staged` -> sets STAGED_MODE=true; changed files computed via `git diff -z --staged`. Composable with `--single` and all execution strategies. `--fix` is ignored with a printed note when combined with `--staged` — staged-only runs are always read-only.
+- `--baseline <file>` -> sets BASELINE_FILE=<file>. After merge-findings writes findings.jsonl, run `scripts/baseline.py` to classify each finding as new/existing and emit resolved records. Composable with `--single`, `--diff`, and all execution strategies.
+- `--new-only` -> sets NEW_ONLY=true. Only valid with `--baseline`. Filters the report to new findings only (findings not in the baseline). Passed through to `scripts/baseline.py --new-only`.
 - Remaining argument is the target path (default: entire repo)
 
 **If NO flags are passed, prompt the user with `AskUserQuestion` to configure the audit:**
@@ -806,6 +812,45 @@ Tools that were absent, wrappers that were skipped, or checks that could not run
 
 3. **Write** the compiled document to `$AUDIT_DIR/current/audit-report.md`.
 4. **Display** the summary table and critical/high findings to the user.
+
+### Baseline / Delta (optional, after merge step)
+
+When `--baseline <file>` is passed, run the baseline classifier immediately after
+`merge-findings.py` writes `$AUDIT_DIR/current/findings.jsonl`:
+
+```bash
+BASELINE_ARGS=(--current "$AUDIT_DIR/current/findings.jsonl" --baseline "$BASELINE_FILE")
+if [[ "${NEW_ONLY:-false}" == "true" ]]; then
+  BASELINE_ARGS+=(--new-only)
+fi
+python3 "$SKILL_ROOT/scripts/baseline.py" \
+  "${BASELINE_ARGS[@]}" \
+  --output "$AUDIT_DIR/current/findings-delta.jsonl"
+```
+
+The script compares current findings against the baseline using `(rule_id, fingerprint)` as
+the matching key and tags each finding with `properties.baseline_status`:
+- `"new"` — introduced since the baseline.
+- `"existing"` — present in both runs (persisting).
+- Baseline findings absent from current are emitted as `{"type":"resolved", ...}` records.
+
+A `{"type":"baseline_summary", "new": N, "existing": N, "resolved": N}` record is always
+the first line of the delta output.
+
+**Report impact:** when `--baseline` is set, add a **Delta vs Baseline** row to the Summary
+table showing New / Persisting / Fixed counts sourced from the baseline_summary record.
+When `--new-only` is set, limit the Findings sections to new findings only and note this
+in the report header.
+
+**`--single` mode:** the same `--baseline` / `--new-only` flags and this exact step apply
+after Phase 5 (Run Merge Inline) in Single-Session Mode. Run `baseline.py` in place of or
+after `merge-findings.py` in the same inline step; then compile the report (Phase 6) from
+`findings-delta.jsonl` instead of `findings.jsonl`.
+
+**Persisting the baseline:** to save the current run as the next baseline, pass
+`--save-baseline` to `baseline.py`, or manually copy `findings.jsonl` into a history
+directory (e.g., `.audit/history/YYYY-MM-DD.jsonl`). The script never auto-writes a baseline;
+the caller controls when to advance it.
 
 ### Phase M7: Issue Creation
 
