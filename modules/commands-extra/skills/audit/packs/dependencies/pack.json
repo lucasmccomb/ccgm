@@ -1,11 +1,11 @@
 {
   "id": "ccgm/dependencies",
   "name": "Dependencies Audit",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "applies_when": ["language:javascript"],
-  "tags": ["dependencies", "npm", "vulnerabilities", "supply-chain"],
+  "tags": ["dependencies", "npm", "pip", "cargo", "bundler", "vulnerabilities", "supply-chain"],
   "severity_floor": "low",
-  "tools": ["dep-audit", "knip"],
+  "tools": ["dep-audit", "knip", "pip-audit", "cargo-audit", "bundler-audit"],
   "checks": [
     {
       "id": "dependencies/npm-audit-vulnerability",
@@ -43,6 +43,37 @@
       "severity": "medium",
       "confidence": "high",
       "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "dependencies/postinstall-script",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "hybrid",
+      "fallback": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "dependencies/typosquat",
+      "severity": "high",
+      "confidence": "low",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "dependencies/lockfile-integrity",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "hybrid",
+      "fallback": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "dependencies/unpinned-version-range",
+      "severity": "medium",
+      "confidence": "high",
+      "detection": "hybrid",
+      "fallback": "llm",
       "auto_fixable": false
     }
   ]

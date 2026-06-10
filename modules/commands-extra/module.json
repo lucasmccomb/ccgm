@@ -458,6 +458,36 @@
       "target": "skills/audit/packs/data-migrations/checks.md",
       "type": "doc",
       "template": false
+    },
+    "skills/audit/scripts/spine/wrap-pip-audit.sh": {
+      "target": "skills/audit/scripts/spine/wrap-pip-audit.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-pip-audit.py": {
+      "target": "skills/audit/scripts/spine/parse-pip-audit.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-cargo-audit.sh": {
+      "target": "skills/audit/scripts/spine/wrap-cargo-audit.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-cargo-audit.py": {
+      "target": "skills/audit/scripts/spine/parse-cargo-audit.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/wrap-bundler-audit.sh": {
+      "target": "skills/audit/scripts/spine/wrap-bundler-audit.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-bundler-audit.py": {
+      "target": "skills/audit/scripts/spine/parse-bundler-audit.py",
+      "type": "script",
+      "template": false
     }
   },
   "tags": [
