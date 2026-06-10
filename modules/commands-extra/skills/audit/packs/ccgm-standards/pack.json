@@ -1,0 +1,25 @@
+{
+  "id": "ccgm/ccgm-standards",
+  "name": "CCGM Project Standards",
+  "version": "1.0.0",
+  "applies_when": ["always"],
+  "tags": ["standards", "conventions", "mcp", "project-rules"],
+  "severity_floor": "low",
+  "tools": [],
+  "checks": [
+    {
+      "id": "ccgm/project-standards-conformance",
+      "severity": "medium",
+      "confidence": "low",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "ccgm/mcp-tool-annotations",
+      "severity": "low",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}

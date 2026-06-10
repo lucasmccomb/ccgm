@@ -1,509 +1,492 @@
 {
-  "version": "1.0.0",
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "ccgm/audit/severity-rubric.json",
-  "title": "CCGM Audit Severity Rubric",
-  "description": "Rule-level, deterministic severity/confidence table. Agents source severity from here; they do NOT invent it. Keyed by check_id (pattern: <pack>/<check>, matching finding.schema.json). Pack epics add entries under their own namespace; use the [RUBRIC-serial] gate to avoid concurrent edits.",
-  "_format": {
-    "severity": "critical|high|medium|low|info",
-    "confidence": "high|medium|low \u2014 signal precision (how often this check fires correctly)",
-    "fix_confidence": "high|medium|low \u2014 safety confidence for auto-fix when applicable"
-  },
-  "checks": {
-    "secrets/leaked-credential": {
-      "severity": "critical",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "security/hardcoded-secret": {
-      "severity": "critical",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "security/sensitive-console-log": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "high"
-    },
-    "security/sql-injection": {
-      "severity": "critical",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "security/xss-vulnerability": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "security/missing-security-headers": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "medium"
-    },
-    "security/edge-function-auth-bypass": {
-      "severity": "critical",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "dependencies/npm-audit-vulnerability": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "dependencies/outdated-minor": {
-      "severity": "low",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "dependencies/outdated-major": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "dependencies/unused-dependency": {
-      "severity": "low",
-      "confidence": "medium",
-      "fix_confidence": "high"
-    },
-    "dependencies/duplicate-dependency": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "code-quality/eslint-violation": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "code-quality/prettier-violation": {
-      "severity": "low",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "code-quality/unused-import": {
-      "severity": "low",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "code-quality/long-method": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "code-quality/large-file": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "code-quality/empty-catch-block": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "architecture/circular-dependency": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "architecture/god-object": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "architecture/improper-layering": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "architecture/wrong-layer-import": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "medium"
-    },
-    "typescript/excessive-any": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "medium"
-    },
-    "typescript/missing-return-type": {
-      "severity": "low",
-      "confidence": "high",
-      "fix_confidence": "medium"
-    },
-    "typescript/react-hooks-violation": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "typescript/fast-refresh-violation": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "typescript/missing-key-prop": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "testing/missing-test-file": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "testing/no-assertions": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "testing/missing-edge-cases": {
-      "severity": "low",
-      "confidence": "low",
-      "fix_confidence": "low"
-    },
-    "documentation/missing-jsdoc": {
-      "severity": "low",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "documentation/stale-comment": {
-      "severity": "low",
-      "confidence": "low",
-      "fix_confidence": "low"
-    },
-    "documentation/incomplete-readme": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "performance/n-plus-one-query": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "performance/missing-react-memo": {
-      "severity": "low",
-      "confidence": "medium",
-      "fix_confidence": "medium"
-    },
-    "performance/large-bundle-import": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/copyleft-in-proprietary": {
-      "severity": "critical",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/non-commercial-in-commercial": {
-      "severity": "critical",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/missing-attribution": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/unlicensed-dependency": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/scraping-prohibited-site": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/credential-misuse": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/remote-code-extension": {
-      "severity": "critical",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/overbroad-extension-permissions": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/ai-output-training-competitor": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/undisclosed-telemetry": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/rate-limit-circumvention": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/paywall-bypass": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/trademark-misuse": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/store-policy-violation": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/missing-privacy-policy": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/ai-prohibited-use": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/ai-output-misrepresentation": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/ai-data-retention-violation": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/platform-tos-violation": {
-      "severity": "medium",
-      "confidence": "low",
-      "fix_confidence": "low"
-    },
-    "tos-compliance/iap-bypass": {
-      "severity": "critical",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "deps/vulnerable-dependency": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "dead-code/unused-dependency": {
-      "severity": "low",
-      "confidence": "medium",
-      "fix_confidence": "high"
-    },
-    "dead-code/unused-file": {
-      "severity": "low",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "dead-code/unused-export": {
-      "severity": "low",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "dead-code/unlisted-dependency": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "a11y/img-missing-alt": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "a11y/click-without-keyboard": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "a11y/anchor-missing-rel": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "a11y/missing-prefers-reduced-motion": {
-      "severity": "low",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "a11y/tailwind-cursor-pointer": {
-      "severity": "low",
-      "confidence": "medium",
-      "fix_confidence": "high"
-    },
-    "reliability/floating-promise": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "reliability/misused-promise": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "reliability/unhandled-promise": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "reliability/await-in-loop": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "reliability/fetch-without-timeout": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "reliability/retry-without-backoff": {
-      "severity": "low",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "reliability/promise-all-vs-allsettled": {
-      "severity": "low",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "lint/eqeqeq": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "lint/use-isnan": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "lint/valid-typeof": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "lint/no-unreachable": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "lint/no-constant-condition": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "medium"
-    },
-    "lint/no-fallthrough": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "lint/default-case": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "medium"
-    },
-    "correctness/off-by-one": {
-      "severity": "high",
-      "confidence": "low",
-      "fix_confidence": "low"
-    },
-    "correctness/float-equality": {
-      "severity": "medium",
-      "confidence": "low",
-      "fix_confidence": "medium"
-    },
-    "correctness/wrong-branch-logic": {
-      "severity": "high",
-      "confidence": "low",
-      "fix_confidence": "low"
-    },
-    "secrets/tracked-env-file": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "secrets/tracked-key-material": {
-      "severity": "critical",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "secrets/history-only-credential": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "dm/unquoted-reserved-keyword": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "high"
-    },
-    "dm/index-without-concurrently": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "dm/missing-rls": {
-      "severity": "high",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "dm/on-conflict-without-unique": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "dm/security-definer-function": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "dm/squawk-violation": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "dm/sqlfluff-violation": {
-      "severity": "low",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    },
-    "cicd/unpinned-action": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "cicd/dangerous-trigger": {
-      "severity": "critical",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "cicd/excessive-permissions": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "high"
-    },
-    "cicd/script-injection": {
-      "severity": "high",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "cicd/actionlint-error": {
-      "severity": "medium",
-      "confidence": "high",
-      "fix_confidence": "low"
-    },
-    "cicd/workflow-security-issue": {
-      "severity": "medium",
-      "confidence": "medium",
-      "fix_confidence": "low"
-    }
-  }
+    "name": "commands-extra",
+    "version": "1.0.0",
+    "displayName": "Extra Commands",
+    "description": "Additional slash commands: /audit (codebase audit), /pwv (Playwright visual verify), /walkthrough (step-by-step guide), /promote-rule (promote repo rules to global), /freeze + /unfreeze + /guard (safety-hook state management), /checkpoint (save/resume WIP session state).",
+    "category": "commands",
+    "scope": [
+        "global"
+    ],
+    "dependencies": [],
+    "files": {
+        "commands/audit.md": {
+            "target": "commands/audit.md",
+            "type": "command",
+            "template": false
+        },
+        "commands/pwv.md": {
+            "target": "commands/pwv.md",
+            "type": "command",
+            "template": false
+        },
+        "commands/walkthrough.md": {
+            "target": "commands/walkthrough.md",
+            "type": "command",
+            "template": false
+        },
+        "commands/promote-rule.md": {
+            "target": "commands/promote-rule.md",
+            "type": "command",
+            "template": false
+        },
+        "commands/freeze.md": {
+            "target": "commands/freeze.md",
+            "type": "command",
+            "template": false
+        },
+        "commands/unfreeze.md": {
+            "target": "commands/unfreeze.md",
+            "type": "command",
+            "template": false
+        },
+        "commands/guard.md": {
+            "target": "commands/guard.md",
+            "type": "command",
+            "template": false
+        },
+        "commands/checkpoint.md": {
+            "target": "commands/checkpoint.md",
+            "type": "command",
+            "template": false
+        },
+        "skills/audit/SKILL.md": {
+            "target": "skills/audit/SKILL.md",
+            "type": "skill",
+            "template": false
+        },
+        "skills/audit/reference/security-patterns.md": {
+            "target": "skills/audit/reference/security-patterns.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/reference/code-quality.md": {
+            "target": "skills/audit/reference/code-quality.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/reference/architecture.md": {
+            "target": "skills/audit/reference/architecture.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/reference/fix-patterns.md": {
+            "target": "skills/audit/reference/fix-patterns.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/reference/multi-agent-config.md": {
+            "target": "skills/audit/reference/multi-agent-config.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/reference/output-template.md": {
+            "target": "skills/audit/reference/output-template.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/schemas/pack.schema.json": {
+            "target": "skills/audit/schemas/pack.schema.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/schemas/finding.schema.json": {
+            "target": "skills/audit/schemas/finding.schema.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/scripts/registry.py": {
+            "target": "skills/audit/scripts/registry.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/assign-packs.py": {
+            "target": "skills/audit/scripts/assign-packs.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/detect-ecosystems.sh": {
+            "target": "skills/audit/scripts/detect-ecosystems.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/emit-findings.py": {
+            "target": "skills/audit/scripts/emit-findings.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/merge-findings.py": {
+            "target": "skills/audit/scripts/merge-findings.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/baseline.py": {
+            "target": "skills/audit/scripts/baseline.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/suppress.py": {
+            "target": "skills/audit/scripts/suppress.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/schemas/severity-rubric.json": {
+            "target": "skills/audit/schemas/severity-rubric.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/scripts/lint-rubric.py": {
+            "target": "skills/audit/scripts/lint-rubric.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/lint-pack.py": {
+            "target": "skills/audit/scripts/lint-pack.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/provenance.py": {
+            "target": "skills/audit/scripts/provenance.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/packs/_TEMPLATE/checks.md": {
+            "target": "skills/audit/packs/_TEMPLATE/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/security/pack.json": {
+            "target": "skills/audit/packs/security/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/security/checks.md": {
+            "target": "skills/audit/packs/security/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/dependencies/pack.json": {
+            "target": "skills/audit/packs/dependencies/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/dependencies/checks.md": {
+            "target": "skills/audit/packs/dependencies/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/tos-compliance/pack.json": {
+            "target": "skills/audit/packs/tos-compliance/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/tos-compliance/checks.md": {
+            "target": "skills/audit/packs/tos-compliance/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/reference/pack-quality-bar.md": {
+            "target": "skills/audit/reference/pack-quality-bar.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/testing/pack.json": {
+            "target": "skills/audit/packs/testing/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/testing/checks.md": {
+            "target": "skills/audit/packs/testing/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/documentation/pack.json": {
+            "target": "skills/audit/packs/documentation/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/documentation/checks.md": {
+            "target": "skills/audit/packs/documentation/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/performance/pack.json": {
+            "target": "skills/audit/packs/performance/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/performance/checks.md": {
+            "target": "skills/audit/packs/performance/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/scripts/spine/run.sh": {
+            "target": "skills/audit/scripts/spine/run.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/normalize.py": {
+            "target": "skills/audit/scripts/spine/normalize.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-gitleaks.sh": {
+            "target": "skills/audit/scripts/spine/wrap-gitleaks.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-gitleaks.py": {
+            "target": "skills/audit/scripts/spine/parse-gitleaks.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-semgrep.sh": {
+            "target": "skills/audit/scripts/spine/wrap-semgrep.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-semgrep.py": {
+            "target": "skills/audit/scripts/spine/parse-semgrep.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-dep-audit.sh": {
+            "target": "skills/audit/scripts/spine/wrap-dep-audit.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-dep-audit.py": {
+            "target": "skills/audit/scripts/spine/parse-dep-audit.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-knip.sh": {
+            "target": "skills/audit/scripts/spine/wrap-knip.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-knip.py": {
+            "target": "skills/audit/scripts/spine/parse-knip.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-eslint.sh": {
+            "target": "skills/audit/scripts/spine/wrap-eslint.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-eslint.py": {
+            "target": "skills/audit/scripts/spine/parse-eslint.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-govulncheck.sh": {
+            "target": "skills/audit/scripts/spine/wrap-govulncheck.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-govulncheck.py": {
+            "target": "skills/audit/scripts/spine/parse-govulncheck.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-bandit.sh": {
+            "target": "skills/audit/scripts/spine/wrap-bandit.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-bandit.py": {
+            "target": "skills/audit/scripts/spine/parse-bandit.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-hadolint.sh": {
+            "target": "skills/audit/scripts/spine/wrap-hadolint.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-hadolint.py": {
+            "target": "skills/audit/scripts/spine/parse-hadolint.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-actionlint.sh": {
+            "target": "skills/audit/scripts/spine/wrap-actionlint.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-actionlint.py": {
+            "target": "skills/audit/scripts/spine/parse-actionlint.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-trivy.sh": {
+            "target": "skills/audit/scripts/spine/wrap-trivy.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-trivy.py": {
+            "target": "skills/audit/scripts/spine/parse-trivy.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-zizmor.sh": {
+            "target": "skills/audit/scripts/spine/wrap-zizmor.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-zizmor.py": {
+            "target": "skills/audit/scripts/spine/parse-zizmor.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-pinact.sh": {
+            "target": "skills/audit/scripts/spine/wrap-pinact.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-pinact.py": {
+            "target": "skills/audit/scripts/spine/parse-pinact.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/packs/ci-cd/pack.json": {
+            "target": "skills/audit/packs/ci-cd/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/ci-cd/checks.md": {
+            "target": "skills/audit/packs/ci-cd/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/code-quality/pack.json": {
+            "target": "skills/audit/packs/code-quality/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/code-quality/checks.md": {
+            "target": "skills/audit/packs/code-quality/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/typescript-react/pack.json": {
+            "target": "skills/audit/packs/typescript-react/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/typescript-react/checks.md": {
+            "target": "skills/audit/packs/typescript-react/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/architecture/pack.json": {
+            "target": "skills/audit/packs/architecture/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/architecture/checks.md": {
+            "target": "skills/audit/packs/architecture/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/accessibility/pack.json": {
+            "target": "skills/audit/packs/accessibility/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/accessibility/checks.md": {
+            "target": "skills/audit/packs/accessibility/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/reliability/pack.json": {
+            "target": "skills/audit/packs/reliability/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/reliability/checks.md": {
+            "target": "skills/audit/packs/reliability/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/correctness/pack.json": {
+            "target": "skills/audit/packs/correctness/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/correctness/checks.md": {
+            "target": "skills/audit/packs/correctness/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/secrets/pack.json": {
+            "target": "skills/audit/packs/secrets/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/secrets/checks.md": {
+            "target": "skills/audit/packs/secrets/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-squawk.sh": {
+            "target": "skills/audit/scripts/spine/wrap-squawk.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-squawk.py": {
+            "target": "skills/audit/scripts/spine/parse-squawk.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/wrap-sqlfluff.sh": {
+            "target": "skills/audit/scripts/spine/wrap-sqlfluff.sh",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/scripts/spine/parse-sqlfluff.py": {
+            "target": "skills/audit/scripts/spine/parse-sqlfluff.py",
+            "type": "script",
+            "template": false
+        },
+        "skills/audit/packs/data-migrations/pack.json": {
+            "target": "skills/audit/packs/data-migrations/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/data-migrations/checks.md": {
+            "target": "skills/audit/packs/data-migrations/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/ccgm-hygiene/pack.json": {
+            "target": "skills/audit/packs/ccgm-hygiene/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/ccgm-hygiene/checks.md": {
+            "target": "skills/audit/packs/ccgm-hygiene/checks.md",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/ccgm-standards/pack.json": {
+            "target": "skills/audit/packs/ccgm-standards/pack.json",
+            "type": "doc",
+            "template": false
+        },
+        "skills/audit/packs/ccgm-standards/checks.md": {
+            "target": "skills/audit/packs/ccgm-standards/checks.md",
+            "type": "doc",
+            "template": false
+        }
+    },
+    "tags": [
+        "commands",
+        "audit",
+        "verification",
+        "walkthrough",
+        "safety",
+        "checkpoint"
+    ],
+    "configPrompts": []
 }

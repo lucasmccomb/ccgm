@@ -458,6 +458,26 @@
       "target": "skills/audit/packs/data-migrations/checks.md",
       "type": "doc",
       "template": false
+    },
+    "skills/audit/packs/ccgm-hygiene/pack.json": {
+      "target": "skills/audit/packs/ccgm-hygiene/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/ccgm-hygiene/checks.md": {
+      "target": "skills/audit/packs/ccgm-hygiene/checks.md",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/ccgm-standards/pack.json": {
+      "target": "skills/audit/packs/ccgm-standards/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/ccgm-standards/checks.md": {
+      "target": "skills/audit/packs/ccgm-standards/checks.md",
+      "type": "doc",
+      "template": false
     }
   },
   "tags": [
