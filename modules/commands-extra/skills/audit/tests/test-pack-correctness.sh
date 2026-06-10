@@ -238,8 +238,12 @@ else
 fi
 
 # Lint just the correctness pack against the rubric
+# Use set +e so a non-zero exit from lint-pack.py is captured in LINT_EXIT
+# rather than aborting the whole script under set -euo pipefail.
+set +e
 LINT_OUTPUT="$(python3 "${LINTER}" --packs-dir "${AUDIT_DIR}/packs" --rubric "${RUBRIC}" 2>&1)"
 LINT_EXIT=$?
+set -e
 
 if [[ $LINT_EXIT -eq 0 ]]; then
   pass "lint-pack.py passes on all packs (including correctness) with rubric"
