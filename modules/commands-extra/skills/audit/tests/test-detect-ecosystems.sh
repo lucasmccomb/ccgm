@@ -387,6 +387,70 @@ assert_bool         "seed: has_migrations false" "$SEED_JSON" ".project_shape.ha
 assert_contains     "seed: sql ecosystem present" "$SEED_JSON" ".detected_ecosystems" "sql"
 
 # ---------------------------------------------------------------------------
+# Fixture 13: has_iac via Dockerfile
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Fixture: has_iac via Dockerfile ==="
+FIX_IAC_DOCKER=$(make_fixture "iac-docker-repo")
+cat > "$FIX_IAC_DOCKER/Dockerfile" <<'EOF'
+FROM ubuntu:22.04
+RUN apt-get update
+EOF
+
+IAC_DOCKER_JSON=$(run_detector "$FIX_IAC_DOCKER")
+assert_bool "iac-docker: has_iac true"      "$IAC_DOCKER_JSON" ".project_shape.has_iac" "true"
+assert_bool "iac-docker: has_dockerfile true" "$IAC_DOCKER_JSON" ".project_shape.has_dockerfile" "true"
+
+# ---------------------------------------------------------------------------
+# Fixture 14: has_iac via Terraform (.tf file)
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Fixture: has_iac via Terraform (.tf file) ==="
+FIX_IAC_TF=$(make_fixture "iac-tf-repo")
+cat > "$FIX_IAC_TF/main.tf" <<'EOF'
+resource "aws_s3_bucket" "example" {
+  bucket = "my-tf-test-bucket"
+}
+EOF
+
+IAC_TF_JSON=$(run_detector "$FIX_IAC_TF")
+assert_bool         "iac-tf: has_iac true"        "$IAC_TF_JSON" ".project_shape.has_iac" "true"
+assert_bool         "iac-tf: no dockerfile"       "$IAC_TF_JSON" ".project_shape.has_dockerfile" "false"
+assert_contains     "iac-tf: terraform ecosystem" "$IAC_TF_JSON" ".detected_ecosystems" "terraform"
+
+# ---------------------------------------------------------------------------
+# Fixture 15: has_iac false for a plain JS repo (no IaC signals)
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Fixture: has_iac false for plain JS repo ==="
+FIX_IAC_NONE=$(make_fixture "no-iac-repo")
+cat > "$FIX_IAC_NONE/package.json" <<'JSON'
+{"name":"no-iac","version":"1.0.0"}
+JSON
+
+IAC_NONE_JSON=$(run_detector "$FIX_IAC_NONE")
+assert_bool "no-iac: has_iac false" "$IAC_NONE_JSON" ".project_shape.has_iac" "false"
+
+# ---------------------------------------------------------------------------
+# Fixture 16: has_iac via k8s manifest directory
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Fixture: has_iac via k8s manifest directory ==="
+FIX_IAC_K8S=$(make_fixture "iac-k8s-repo")
+mkdir -p "$FIX_IAC_K8S/k8s"
+cat > "$FIX_IAC_K8S/k8s/deployment.yaml" <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 1
+EOF
+
+IAC_K8S_JSON=$(run_detector "$FIX_IAC_K8S")
+assert_bool "iac-k8s: has_iac true" "$IAC_K8S_JSON" ".project_shape.has_iac" "true"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

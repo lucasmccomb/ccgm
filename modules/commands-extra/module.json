@@ -458,6 +458,26 @@
       "target": "skills/audit/packs/data-migrations/checks.md",
       "type": "doc",
       "template": false
+    },
+    "skills/audit/scripts/spine/wrap-checkov.sh": {
+      "target": "skills/audit/scripts/spine/wrap-checkov.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/parse-checkov.py": {
+      "target": "skills/audit/scripts/spine/parse-checkov.py",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/packs/infra-iac/pack.json": {
+      "target": "skills/audit/packs/infra-iac/pack.json",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/packs/infra-iac/checks.md": {
+      "target": "skills/audit/packs/infra-iac/checks.md",
+      "type": "doc",
+      "template": false
     }
   },
   "tags": [

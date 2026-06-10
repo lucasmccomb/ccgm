@@ -39,7 +39,8 @@
               "has_dockerfile",
               "has_workflows",
               "is_extension",
-              "is_mobile"
+              "is_mobile",
+              "has_iac"
             ]
           },
           {

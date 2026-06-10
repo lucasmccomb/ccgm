@@ -442,6 +442,7 @@ if command -v shellcheck > /dev/null 2>&1; then
     "$SPINE_DIR/wrap-pinact.sh"
     "$SPINE_DIR/wrap-squawk.sh"
     "$SPINE_DIR/wrap-sqlfluff.sh"
+    "$SPINE_DIR/wrap-checkov.sh"
   )
 
   for script in "${SHELL_SCRIPTS[@]}"; do

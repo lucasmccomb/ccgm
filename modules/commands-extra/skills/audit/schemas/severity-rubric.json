@@ -504,6 +504,41 @@
       "severity": "medium",
       "confidence": "medium",
       "fix_confidence": "low"
+    },
+    "iac/dockerfile-root-user": {
+      "severity": "high",
+      "confidence": "high",
+      "fix_confidence": "medium"
+    },
+    "iac/dockerfile-latest-tag": {
+      "severity": "medium",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "iac/public-ingress": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "iac/missing-encryption": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "medium"
+    },
+    "iac/hardcoded-secret-in-iac": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "iac/dockerfile-issue": {
+      "severity": "medium",
+      "confidence": "high",
+      "fix_confidence": "medium"
+    },
+    "iac/checkov-violation": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
     }
   }
 }
