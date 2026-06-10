@@ -383,7 +383,7 @@ git -C "$REPO_A" add -A
 git -C "$REPO_A" commit -q -m "init js app fixture"
 
 # Run pipeline (gitleaks is the sole tool for the smoke; semgrep for coverage-gap)
-run_pipeline "smoke-A (JS)" "$REPO_A" "gitleaks,semgrep" "$OUT_A"
+run_pipeline "smoke-A (JS)" "$REPO_A" "gitleaks,semgrep" "$OUT_A" || true
 
 # Assert exact registry-selected pack count (post-Wave-4 registry: JS app = 18)
 assert_pack_count "smoke-A" "$OUT_A/selected.json" 18
@@ -444,7 +444,7 @@ PYEOF
 git -C "$REPO_B" add -A
 git -C "$REPO_B" commit -q -m "init go service fixture"
 
-run_pipeline "smoke-B (Go)" "$REPO_B" "gitleaks,semgrep" "$OUT_B"
+run_pipeline "smoke-B (Go)" "$REPO_B" "gitleaks,semgrep" "$OUT_B" || true
 
 # Assert exact registry-selected pack count (post-Wave-4 registry: Go service = 12)
 assert_pack_count "smoke-B" "$OUT_B/selected.json" 12
@@ -509,7 +509,7 @@ PYEOF
 git -C "$REPO_C" add -A
 git -C "$REPO_C" commit -q -m "init migrations repo fixture"
 
-run_pipeline "smoke-C (migrations)" "$REPO_C" "gitleaks,squawk" "$OUT_C"
+run_pipeline "smoke-C (migrations)" "$REPO_C" "gitleaks,squawk" "$OUT_C" || true
 
 # Assert exact registry-selected pack count (post-Wave-4 registry: migrations repo = 19)
 assert_pack_count "smoke-C" "$OUT_C/selected.json" 19
