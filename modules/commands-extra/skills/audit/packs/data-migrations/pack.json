@@ -10,10 +10,8 @@
     {
       "id": "dm/unquoted-reserved-keyword",
       "severity": "high",
-      "confidence": "high",
-      "detection": "hybrid",
-      "tool": "squawk",
-      "fallback": "llm",
+      "confidence": "medium",
+      "detection": "llm",
       "auto_fixable": true
     },
     {

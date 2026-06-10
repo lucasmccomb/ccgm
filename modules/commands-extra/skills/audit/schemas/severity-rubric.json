@@ -316,7 +316,7 @@
     },
     "dm/unquoted-reserved-keyword": {
       "severity": "high",
-      "confidence": "high",
+      "confidence": "medium",
       "fix_confidence": "high"
     },
     "dm/index-without-concurrently": {
@@ -337,6 +337,16 @@
     "dm/security-definer-function": {
       "severity": "medium",
       "confidence": "high",
+      "fix_confidence": "low"
+    },
+    "dm/squawk-violation": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "dm/sqlfluff-violation": {
+      "severity": "low",
+      "confidence": "medium",
       "fix_confidence": "low"
     }
   }

@@ -30,21 +30,12 @@ definitions, or non-SQL config files.
 ### `dm/unquoted-reserved-keyword`
 
 **Severity:** `high`
-**Confidence:** `high`
-**Detection:** `hybrid`
+**Confidence:** `medium`
+**Detection:** `llm`
 
 #### Detection
 
-**Tool (detection = hybrid):**
-`squawk`
-
-Rule / rule-id: squawk scans for PostgreSQL reserved keyword misuse; the parser maps
-relevant squawk violations to `dm/unquoted-reserved-keyword`. When squawk is absent, the
-fallback grep/llm instruction below applies.
-
-Fallback when tool absent: `llm` (grep pattern documented in LLM instruction)
-
-**LLM instruction (hybrid fallback):**
+**LLM instruction:**
 
 ```
 Scan every SQL file under the project's migration directories
@@ -77,11 +68,14 @@ the surrounding SQL line.
 
 ```yaml
 check_id: dm/unquoted-reserved-keyword
-detection: hybrid
-tool: squawk
-fallback: llm
-# squawk emits this check_id via parse-squawk.py when it detects reserved
-# keyword violations. The spine namespace is dm/* (not squawk/*).
+detection: llm
+# squawk does NOT emit this check_id. squawk has no built-in rule that maps to
+# dm/unquoted-reserved-keyword; parse-squawk.py only maps
+# "require-concurrent-index-creation" -> dm/index-without-concurrently, and
+# everything else falls to the generic dm/squawk-violation catch-all.
+# This check is detected by LLM+grep against the reserved-keyword list above.
+# squawk findings appear under dm/squawk-violation or dm/index-without-concurrently,
+# not under this check_id.
 ```
 
 #### Severity / Confidence
@@ -91,10 +85,12 @@ that prevents the migration from running, directly breaking deployments. This is
 severity blocker with no runtime fallback — if the migration fails, the deployment rolls
 back or stalls.
 
-**Confidence rationale:** The set of PostgreSQL reserved keywords is finite and well-
-documented. A regex match on an unquoted token is precise; double-quoted identifiers are
-unambiguous. Tool-backed detection (squawk) yields HIGH confidence; LLM fallback is also
-HIGH for this pattern because the keyword list is deterministic.
+**Confidence rationale:** The reserved keyword list is finite and deterministic, which
+makes LLM+grep detection reliable for clear cases. However, LLM analysis can produce
+false positives when a keyword appears in context that looks like an identifier but is
+actually valid SQL syntax. MEDIUM confidence reflects this LLM-inherent uncertainty;
+tool-backed detection (which would yield HIGH) is not available for this specific pattern
+since squawk does not have a dedicated reserved-keyword-as-identifier rule.
 
 **Rubric entry:** `dm/unquoted-reserved-keyword`
 
@@ -481,3 +477,15 @@ $$;
 - [x] Severity / confidence rationale is present for every check
 - [x] `applies_when` rationale table is complete
 - [x] `scripts/lint-pack.py` passes on this pack
+
+## Migration Mapping
+
+| check_id | spine namespace | detection | tool (spine) | notes |
+|----------|----------------|-----------|--------------|-------|
+| `dm/unquoted-reserved-keyword` | `dm/` | `llm` | none | squawk has no rule mapping to this id; detected by LLM+grep against the reserved-keyword list. squawk findings appear as `dm/squawk-violation` or `dm/index-without-concurrently`. |
+| `dm/index-without-concurrently` | `dm/` | `hybrid` | squawk (`require-concurrent-index-creation`) | `parse-squawk.py` maps this rule directly to this check_id. |
+| `dm/missing-rls` | `dm/` | `llm` | none | pure LLM cross-file analysis; no spine tool. |
+| `dm/on-conflict-without-unique` | `dm/` | `llm` | none | pure LLM cross-file analysis; no spine tool. |
+| `dm/security-definer-function` | `dm/` | `hybrid` | sqlfluff (description pattern match) | `parse-sqlfluff.py` maps violations matching `/security[\s_-]*definer/i` to this id. All other sqlfluff violations map to `dm/sqlfluff-violation`. |
+| `dm/squawk-violation` (catch-all) | `dm/` | `tool` | squawk (fallback for all unmapped rules) | emitted by `parse-squawk.py` for any squawk rule not explicitly mapped. NOT a declared pack check; surfaces in findings under its rubric entry. |
+| `dm/sqlfluff-violation` (catch-all) | `dm/` | `tool` | sqlfluff (fallback for non-SECURITY-DEFINER violations) | emitted by `parse-sqlfluff.py` for any sqlfluff violation whose description does not match the SECURITY DEFINER pattern. NOT a declared pack check; surfaces in findings under its rubric entry. |
