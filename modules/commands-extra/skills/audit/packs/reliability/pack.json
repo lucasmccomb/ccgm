@@ -1,0 +1,60 @@
+{
+  "id": "ccgm/reliability",
+  "name": "Reliability & Error Handling",
+  "version": "1.0.0",
+  "applies_when": ["language:javascript"],
+  "tags": ["reliability", "promises", "async", "error-handling"],
+  "severity_floor": "low",
+  "tools": [],
+  "checks": [
+    {
+      "id": "reliability/floating-promise",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "reliability/misused-promise",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "reliability/unhandled-promise",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "reliability/await-in-loop",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "reliability/fetch-without-timeout",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "reliability/retry-without-backoff",
+      "severity": "low",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "reliability/promise-all-vs-allsettled",
+      "severity": "low",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}

@@ -5,8 +5,8 @@
   "description": "Rule-level, deterministic severity/confidence table. Agents source severity from here; they do NOT invent it. Keyed by check_id (pattern: <pack>/<check>, matching finding.schema.json). Pack epics add entries under their own namespace; use the [RUBRIC-serial] gate to avoid concurrent edits.",
   "_format": {
     "severity": "critical|high|medium|low|info",
-    "confidence": "high|medium|low — signal precision (how often this check fires correctly)",
-    "fix_confidence": "high|medium|low — safety confidence for auto-fix when applicable"
+    "confidence": "high|medium|low \u2014 signal precision (how often this check fires correctly)",
+    "fix_confidence": "high|medium|low \u2014 safety confidence for auto-fix when applicable"
   },
   "checks": {
     "secrets/leaked-credential": {
@@ -311,6 +311,66 @@
     },
     "dead-code/unlisted-dependency": {
       "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "a11y/img-missing-alt": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "a11y/click-without-keyboard": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "a11y/anchor-missing-rel": {
+      "severity": "medium",
+      "confidence": "high",
+      "fix_confidence": "high"
+    },
+    "a11y/missing-prefers-reduced-motion": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "a11y/tailwind-cursor-pointer": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "high"
+    },
+    "reliability/floating-promise": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "reliability/misused-promise": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "reliability/unhandled-promise": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "reliability/await-in-loop": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "reliability/fetch-without-timeout": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "reliability/retry-without-backoff": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "reliability/promise-all-vs-allsettled": {
+      "severity": "low",
       "confidence": "medium",
       "fix_confidence": "low"
     },
