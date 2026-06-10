@@ -1,0 +1,32 @@
+{
+  "id": "ccgm/correctness",
+  "name": "Correctness / Logic",
+  "version": "1.0.0",
+  "applies_when": ["language:javascript"],
+  "tags": ["correctness", "logic", "eslint"],
+  "severity_floor": "medium",
+  "tools": ["eslint"],
+  "checks": [
+    {
+      "id": "correctness/off-by-one",
+      "severity": "high",
+      "confidence": "low",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "correctness/float-equality",
+      "severity": "medium",
+      "confidence": "low",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "correctness/wrong-branch-logic",
+      "severity": "high",
+      "confidence": "low",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}
