@@ -127,7 +127,7 @@ with open(spine_file, encoding="utf-8") as fin, \
         else:
             skipped += 1
 
-print(f"diff-filter: kept {kept} finding(s), skipped {skipped}", file=__import__('sys').stderr)
+print(f"diff-filter: kept {kept} finding(s), skipped {skipped}", file=sys.stderr)
 PYEOF
 }
 
@@ -173,10 +173,8 @@ git -C "$REPO1" commit -q -m "base"
 
 BASE_SHA=$(git -C "$REPO1" rev-parse HEAD)
 
-# Second commit: doesn't change anything (we need HEAD~1 to be the "base")
-# Actually: make "base" the base ref and modify modified.js AFTER commit
-# so git diff BASE_SHA...HEAD shows nothing (same commit).
-# Better: make a real second commit to HEAD so we can diff HEAD~1...HEAD.
+# Two-commit fixture: HEAD~1 is the base, HEAD introduces the change to modified.js.
+# git diff HEAD~1...HEAD therefore lists only modified.js, leaving clean.js unchanged.
 printf 'const y = 3;  // changed\n' > "$REPO1/modified.js"
 git -C "$REPO1" add modified.js
 git -C "$REPO1" commit -q -m "change modified.js"
@@ -553,8 +551,34 @@ with open(sys.argv[2], 'w', encoding='utf-8') as out:
     for p in paths:
         out.write(p + '\n')
 PYEOF
-# .txt view is known-lossy for newline-embedded names; only .z is canonical.
-pass "newline-named file: .txt view is known-lossy for embedded newlines (documented); .z is canonical"
+# Assert the divergence that motivated using -z: naive line-splitting of changed-files.txt
+# does NOT reproduce the python3 -z parse for a newline-embedded filename.
+# The .z file holds exactly 1 null-delimited path; the .txt file (newline-delimited) splits
+# the embedded newline and produces 2 lines -- proving .z is the correct canonical form.
+DIVERGE_RESULT=$(python3 - "$NEWLINE_Z" "$NEWLINE_TXT" << 'PYEOF'
+import sys
+z_file, txt_file = sys.argv[1], sys.argv[2]
+# z parse: canonical, 1 path
+with open(z_file, "rb") as fh:
+    data = fh.read()
+z_paths = [p.decode("utf-8", errors="surrogateescape")
+           for p in data.rstrip(b"\x00").split(b"\x00") if p]
+# txt parse: naive line-split, lossy for embedded newlines
+with open(txt_file, "r", encoding="utf-8") as fh:
+    txt_lines = [l.rstrip("\n") for l in fh.readlines() if l.rstrip("\n")]
+z_count = len(z_paths)
+txt_count = len(txt_lines)
+if z_count == 1 and txt_count == 2:
+    print("DIVERGE_OK")
+else:
+    print(f"UNEXPECTED: z_count={z_count} txt_count={txt_count}")
+PYEOF
+)
+if [ "$DIVERGE_RESULT" = "DIVERGE_OK" ]; then
+  pass "newline-named file: .txt line-split gives 2 lines vs .z path count 1 (lossy .txt confirmed; .z is canonical)"
+else
+  fail "newline-named file: expected .txt line count 2 vs .z path count 1 (got: $DIVERGE_RESULT)"
+fi
 
 # Apply diff filter: the newline-named file IS in the changed set and must survive.
 NL_SYNTH_SPINE=$(make_tmp)/nl-synth.jsonl
@@ -743,6 +767,37 @@ PYEOF
     pass "spine post-filter: spine found >= 1 finding before filter (both files have secrets)"
   else
     fail "spine post-filter: expected >= 1 finding before filter (gitleaks should detect fake key)"
+  fi
+
+  # Precondition: pre-filter spine MUST contain a finding for unchanged.js.
+  # This makes the exclusion assert below non-vacuous — if the spine never found
+  # unchanged.js, the "excluded" assert would pass trivially even if the filter broke.
+  # Dependency: wrap-gitleaks.sh scans the working tree (--no-git mode); if it ever
+  # switches to history-scan, unchanged.js would not be scanned and this precondition
+  # would fail loudly, surfacing the gap.
+  PRECOND_UNCHANGED=$(python3 - "$SPINE3_OUT" << 'PYEOF'
+import json, sys
+for raw in open(sys.argv[1]):
+    raw = raw.strip()
+    if not raw:
+        continue
+    try:
+        rec = json.loads(raw)
+    except Exception:
+        continue
+    if "type" in rec:
+        continue
+    path = rec.get("location", {}).get("path", "")
+    if "unchanged.js" in path:
+        print("FOUND")
+        import sys; sys.exit(0)
+print("NOT_FOUND")
+PYEOF
+)
+  if [ "$PRECOND_UNCHANGED" = "FOUND" ]; then
+    pass "spine post-filter precondition: pre-filter spine contains finding for 'unchanged.js'"
+  else
+    fail "spine post-filter precondition: pre-filter spine must contain finding for 'unchanged.js' (non-vacuous exclusion check)"
   fi
 
   # Apply diff filter
@@ -1006,6 +1061,45 @@ if [ "${SPINE_SINGLE:-0}" -ge 1 ]; then
   pass "SKILL.md --single Phase 3: spine/run.sh invocation is still present"
 else
   fail "SKILL.md --single Phase 3: spine/run.sh must still be invoked for full-repo mode"
+fi
+
+# 5f. --staged x --fix contract: documented in Error Handling table and mode detection
+set +e
+ERR_SECTION=$(awk '/^## Error Handling/,/^---/' "$SKILL_MD" 2>/dev/null || true)
+STAGED_FIX_ERR=$(echo "$ERR_SECTION" | grep -c "staged.*fix\|--staged.*--fix\|--staged.*read-only" 2>/dev/null || true)
+STAGED_FIX_MD=$(echo "$MD_SECTION" | grep -c "staged.*fix\|--staged.*ignored\|--staged.*read-only" 2>/dev/null || true)
+set -e
+
+if [ "${STAGED_FIX_ERR:-0}" -ge 1 ]; then
+  pass "SKILL.md Error Handling: --staged x --fix contract documented"
+else
+  fail "SKILL.md Error Handling: must document --staged with --fix (read-only; --fix ignored)"
+fi
+
+if [ "${STAGED_FIX_MD:-0}" -ge 1 ]; then
+  pass "SKILL.md Mode Detection: --staged x --fix contract documented"
+else
+  fail "SKILL.md Mode Detection: --staged must note --fix is ignored"
+fi
+
+# 5g. Diff-mode filter-ordering at M4 and Phase 3 execution sites
+set +e
+M4_SECTION_FULL=$(awk '/^### Phase M4/,/^### Phase M5/' "$SKILL_MD" 2>/dev/null || true)
+PHASE3_FULL=$(awk '/^### Phase 3: Run the Spine/,/^### Phase 4/' "$SKILL_MD" 2>/dev/null || true)
+M4_FILTER=$(echo "$M4_SECTION_FULL" | grep -c "Diff mode.*post-filter\|diff-filter.*M4\|post-filter.*before slicing" 2>/dev/null || true)
+P3_FILTER=$(echo "$PHASE3_FULL" | grep -c "Diff mode.*post-filter\|diff-filter.*Phase 3\|post-filter.*before slicing" 2>/dev/null || true)
+set -e
+
+if [ "${M4_FILTER:-0}" -ge 1 ]; then
+  pass "SKILL.md M4: diff-mode post-filter applied before slicing is documented"
+else
+  fail "SKILL.md M4: diff-mode post-filter must be documented at the M4 execution site"
+fi
+
+if [ "${P3_FILTER:-0}" -ge 1 ]; then
+  pass "SKILL.md --single Phase 3: diff-mode post-filter applied before slicing is documented"
+else
+  fail "SKILL.md --single Phase 3: diff-mode post-filter must be documented at Phase 3 execution site"
 fi
 
 # ---------------------------------------------------------------------------
