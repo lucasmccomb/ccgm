@@ -94,12 +94,14 @@ def process_zizmor(data, repo_root):
 
             line_no = max(1, int(region.get("startLine", 1)))
 
-            # Use tool fingerprint if present
+            # Use tool fingerprint when schema-valid;
+            # fingerprint_from_tool returns None for invalid values.
             fps = result.get("partialFingerprints", {})
             tool_fp = fps.get("primaryLocationLineHash", "")
+            fp = None
             if tool_fp:
                 fp = normalize.fingerprint_from_tool(tool_fp)
-            else:
+            if fp is None:
                 fp = normalize.make_content_fingerprint(
                     "{0}:{1}:{2}".format(file_path, line_no, rule_id)
                 )

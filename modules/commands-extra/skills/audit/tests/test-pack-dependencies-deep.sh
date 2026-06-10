@@ -64,19 +64,26 @@ fail() {
 TESTRUN_TMPDIR="$(mktemp -d /tmp/ccgm-test-deps-deep-XXXXXX)"
 trap 'rm -rf "$TESTRUN_TMPDIR"' EXIT
 
-# Build a restricted PATH that excludes pip-audit, cargo-audit, bundle-audit
-SYSTEM_BINS=""
-for bin in python3 bash find mktemp rm printf head grep; do
-  BINPATH="$(command -v "$bin" 2>/dev/null || true)"
-  if [[ -n "$BINPATH" ]]; then
-    BINDIR="$(dirname "$BINPATH")"
-    case ":$SYSTEM_BINS:" in
-      *":$BINDIR:"*) ;;
-      *) SYSTEM_BINS="${SYSTEM_BINS:+$SYSTEM_BINS:}$BINDIR" ;;
-    esac
-  fi
+# Build a deterministic scratch PATH that excludes pip-audit, cargo-audit,
+# and bundle-audit.  bash and python3 are linked from their currently-active
+# location (may be homebrew on macOS) so bash 4+ and the real python3 are
+# available.  All other tools come from /usr/bin and /bin only, excluding
+# homebrew audit tools from leaking in.
+SCRATCH_BINDIR="$TESTRUN_TMPDIR/scratch-bin"
+mkdir -p "$SCRATCH_BINDIR"
+for _bin in bash python3; do
+  _src="$(command -v "$_bin" 2>/dev/null || true)"
+  [[ -n "$_src" ]] && ln -sf "$_src" "$SCRATCH_BINDIR/$_bin" 2>/dev/null || true
 done
-RESTRICTED_PATH="$SYSTEM_BINS:/usr/bin:/bin"
+for _bin in find dirname date mktemp rm cp printf head grep cat; do
+  for _dir in /usr/bin /bin; do
+    if [[ -x "$_dir/$_bin" ]]; then
+      ln -sf "$_dir/$_bin" "$SCRATCH_BINDIR/$_bin" 2>/dev/null || true
+      break
+    fi
+  done
+done
+RESTRICTED_PATH="$SCRATCH_BINDIR"
 
 # ---------------------------------------------------------------------------
 # Test 1: pack.json validates via lint-pack.py (no rubric)
