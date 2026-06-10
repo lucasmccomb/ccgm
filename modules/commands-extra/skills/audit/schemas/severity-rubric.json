@@ -544,6 +544,36 @@
       "severity": "low",
       "confidence": "medium",
       "fix_confidence": "low"
+    },
+    "privacy/pii-without-consent": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "privacy/pii-no-retention": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "privacy/pii-in-url": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "observability/pii-in-logs": {
+      "severity": "high",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "observability/missing-structured-logging": {
+      "severity": "low",
+      "confidence": "medium",
+      "fix_confidence": "low"
+    },
+    "observability/missing-error-reporting": {
+      "severity": "medium",
+      "confidence": "medium",
+      "fix_confidence": "low"
     }
   }
 }

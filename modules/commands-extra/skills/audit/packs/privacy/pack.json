@@ -1,0 +1,32 @@
+{
+  "id": "ccgm/privacy",
+  "name": "Privacy & PII Handling",
+  "version": "1.0.0",
+  "applies_when": ["always"],
+  "tags": ["privacy", "pii", "gdpr", "consent", "data-handling"],
+  "severity_floor": "medium",
+  "tools": [],
+  "checks": [
+    {
+      "id": "privacy/pii-without-consent",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "privacy/pii-no-retention",
+      "severity": "medium",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    },
+    {
+      "id": "privacy/pii-in-url",
+      "severity": "high",
+      "confidence": "medium",
+      "detection": "llm",
+      "auto_fixable": false
+    }
+  ]
+}
