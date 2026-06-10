@@ -837,6 +837,15 @@ the matching key and tags each finding with `properties.baseline_status`:
 A `{"type":"baseline_summary", "new": N, "existing": N, "resolved": N}` record is always
 the first line of the delta output.
 
+**Match key stability:** Tool/spine findings set `rule_id` deterministically, so they
+classify stably across runs.  LLM findings may not: when a worker omits `rule_id`,
+`merge-findings` backfills it from `check_id`.  If a worker's `rule_id` emission is
+inconsistent between runs, the SAME logical finding (same location + fingerprint) can
+carry two different `rule_id` values — producing one phantom **new** and one phantom
+**resolved** for a finding that did not actually change.  To prevent this, ensure LLM
+workers always emit `rule_id` explicitly.  (The key is intentionally composite — dropping
+`rule_id` would silently merge two different rules that share a fingerprint.)
+
 **Report impact:** when `--baseline` is set, add a **Delta vs Baseline** row to the Summary
 table showing New / Persisting / Fixed counts sourced from the baseline_summary record.
 When `--new-only` is set, limit the Findings sections to new findings only and note this

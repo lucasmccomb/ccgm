@@ -567,6 +567,238 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 7: Composite key — same fingerprint, different rule_id
+#   Both (rule-x, FP_SHARED) and (rule-y, FP_SHARED) exist in BOTH baseline
+#   and current.  Both must classify as "existing" independently.
+#   This pins that the key is (rule_id, fingerprint), not fingerprint alone.
+# ---------------------------------------------------------------------------
+printf '\nTest 7: composite key — same fingerprint + different rule_ids → both existing\n'
+
+T7_DIR="$TESTRUN_DIR/t7"
+mkdir -p "$T7_DIR"
+
+FP_SHARED="dddd4444eeee5555:1"
+
+FINDING_X="$(make_finding "rule-x" "$FP_SHARED" "code-quality/test-rule")"
+FINDING_Y="$(make_finding "rule-y" "$FP_SHARED" "code-quality/test-rule")"
+
+# Both in baseline
+write_findings_jsonl "$T7_DIR/baseline.jsonl" "$FINDING_X" "$FINDING_Y"
+# Both in current (unchanged)
+write_findings_jsonl "$T7_DIR/current.jsonl" "$FINDING_X" "$FINDING_Y"
+
+set +e
+T7_OUT="$(python3 "$BASELINE_SCRIPT" \
+  --current "$T7_DIR/current.jsonl" \
+  --baseline "$T7_DIR/baseline.jsonl" 2>/dev/null)"
+T7_EXIT=$?
+set -e
+
+if [[ $T7_EXIT -eq 0 ]]; then
+  pass "t7: same-fp/different-rule_id run exits 0"
+else
+  fail "t7: same-fp/different-rule_id run exits $T7_EXIT (expected 0)"
+fi
+
+# Helper: get baseline_status for a finding identified by rule_id + fingerprint
+get_status_by_rule_fp() {
+  python3 - "$1" "$2" "$3" << 'PYEOF'
+import json, sys
+output, rule_id, fp = sys.argv[1], sys.argv[2], sys.argv[3]
+for l in output.splitlines():
+    if not l.strip():
+        continue
+    try:
+        obj = json.loads(l)
+        if (isinstance(obj, dict) and "type" not in obj
+                and obj.get("rule_id") == rule_id
+                and obj.get("fingerprint") == fp):
+            val = (obj.get("properties") or {}).get("baseline_status")
+            print("" if val is None else str(val))
+            sys.exit(0)
+    except Exception:
+        pass
+print("__not_found__")
+PYEOF
+}
+
+# Helper: check whether a (rule_id, fingerprint) pair exists as a resolved record
+resolved_by_rule_fp() {
+  python3 - "$1" "$2" "$3" << 'PYEOF'
+import json, sys
+output, rule_id, fp = sys.argv[1], sys.argv[2], sys.argv[3]
+for l in output.splitlines():
+    if not l.strip():
+        continue
+    try:
+        obj = json.loads(l)
+        if (isinstance(obj, dict)
+                and obj.get("type") == "resolved"
+                and obj.get("rule_id") == rule_id
+                and obj.get("fingerprint") == fp):
+            print("yes")
+            sys.exit(0)
+    except Exception:
+        pass
+print("no")
+PYEOF
+}
+
+# (rule-x, FP_SHARED) should be "existing"
+T7_X_STATUS="$(get_status_by_rule_fp "$T7_OUT" "rule-x" "$FP_SHARED")"
+if [[ "$T7_X_STATUS" == "existing" ]]; then
+  pass "t7: (rule-x, FP_SHARED) classified as existing"
+else
+  fail "t7: (rule-x, FP_SHARED) baseline_status='$T7_X_STATUS' (expected 'existing')"
+fi
+
+# (rule-y, FP_SHARED) should also be "existing" — independent match, not merged with rule-x
+T7_Y_STATUS="$(get_status_by_rule_fp "$T7_OUT" "rule-y" "$FP_SHARED")"
+if [[ "$T7_Y_STATUS" == "existing" ]]; then
+  pass "t7: (rule-y, FP_SHARED) classified as existing (independent of rule-x)"
+else
+  fail "t7: (rule-y, FP_SHARED) baseline_status='$T7_Y_STATUS' (expected 'existing')"
+fi
+
+# Summary: new=0, existing=2, resolved=0
+T7_SUM_NEW="$(get_summary_field "$T7_OUT" "new")"
+T7_SUM_EXIST="$(get_summary_field "$T7_OUT" "existing")"
+T7_SUM_RESOL="$(get_summary_field "$T7_OUT" "resolved")"
+if [[ "$T7_SUM_NEW" == "0" && "$T7_SUM_EXIST" == "2" && "$T7_SUM_RESOL" == "0" ]]; then
+  pass "t7: summary new=0 existing=2 resolved=0"
+else
+  fail "t7: summary new=$T7_SUM_NEW existing=$T7_SUM_EXIST resolved=$T7_SUM_RESOL (expected 0/2/0)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 8: Composite key — same fingerprint, rule_id changed between runs
+#   Baseline: (rule-x, FP_SHARED).  Current: (rule-y, FP_SHARED).
+#   Expected: baseline finding is "resolved"; current finding is "new".
+#   This proves the key is (rule_id, fingerprint), not fingerprint-only;
+#   a fingerprint-only key would have classified the current finding as "existing".
+# ---------------------------------------------------------------------------
+printf '\nTest 8: composite key — same fingerprint, rule_id changed → resolved + new\n'
+
+T8_DIR="$TESTRUN_DIR/t8"
+mkdir -p "$T8_DIR"
+
+# Baseline has (rule-x, FP_SHARED)
+write_findings_jsonl "$T8_DIR/baseline.jsonl" "$FINDING_X"
+# Current has (rule-y, FP_SHARED) — same fingerprint, different rule_id
+write_findings_jsonl "$T8_DIR/current.jsonl" "$FINDING_Y"
+
+set +e
+T8_OUT="$(python3 "$BASELINE_SCRIPT" \
+  --current "$T8_DIR/current.jsonl" \
+  --baseline "$T8_DIR/baseline.jsonl" 2>/dev/null)"
+T8_EXIT=$?
+set -e
+
+if [[ $T8_EXIT -eq 0 ]]; then
+  pass "t8: rule_id-changed run exits 0"
+else
+  fail "t8: rule_id-changed run exits $T8_EXIT (expected 0)"
+fi
+
+# Current (rule-y, FP_SHARED) must be "new" — composite key, not fingerprint-only
+T8_Y_STATUS="$(get_status_by_rule_fp "$T8_OUT" "rule-y" "$FP_SHARED")"
+if [[ "$T8_Y_STATUS" == "new" ]]; then
+  pass "t8: (rule-y, FP_SHARED) classified as new (proving key is composite)"
+else
+  fail "t8: (rule-y, FP_SHARED) baseline_status='$T8_Y_STATUS' (expected 'new')"
+fi
+
+# Baseline (rule-x, FP_SHARED) must appear as resolved
+T8_X_RESOLVED="$(resolved_by_rule_fp "$T8_OUT" "rule-x" "$FP_SHARED")"
+if [[ "$T8_X_RESOLVED" == "yes" ]]; then
+  pass "t8: (rule-x, FP_SHARED) emitted as resolved"
+else
+  fail "t8: (rule-x, FP_SHARED) not in resolved records (expected type=resolved)"
+fi
+
+# Summary: new=1, existing=0, resolved=1
+T8_SUM_NEW="$(get_summary_field "$T8_OUT" "new")"
+T8_SUM_EXIST="$(get_summary_field "$T8_OUT" "existing")"
+T8_SUM_RESOL="$(get_summary_field "$T8_OUT" "resolved")"
+if [[ "$T8_SUM_NEW" == "1" && "$T8_SUM_EXIST" == "0" && "$T8_SUM_RESOL" == "1" ]]; then
+  pass "t8: summary new=1 existing=0 resolved=1"
+else
+  fail "t8: summary new=$T8_SUM_NEW existing=$T8_SUM_EXIST resolved=$T8_SUM_RESOL (expected 1/0/1)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 9: Current-side dedup — two identical (rule_id, fingerprint) rows in
+#   --current collapse to one in both the count and the output.
+# ---------------------------------------------------------------------------
+printf '\nTest 9: current-side dedup — duplicate current finding counted once\n'
+
+T9_DIR="$TESTRUN_DIR/t9"
+mkdir -p "$T9_DIR"
+
+# Write a current JSONL with FINDING_A duplicated
+python3 - "$T9_DIR/current_duped.jsonl" "$FINDING_A" << 'PYEOF'
+import json, sys
+out_file, finding_json = sys.argv[1], sys.argv[2]
+with open(out_file, "w") as fh:
+    fh.write(json.dumps({
+        "type": "provenance",
+        "tool": "ccgm-merge",
+        "version": "1.0",
+        "timestamp": "2026-01-01T00:00:00Z",
+    }) + "\n")
+    # Same finding twice
+    fh.write(finding_json + "\n")
+    fh.write(finding_json + "\n")
+PYEOF
+
+# Empty baseline so the deduped finding is classified "new"
+write_findings_jsonl "$T9_DIR/baseline.jsonl"
+
+set +e
+T9_OUT="$(python3 "$BASELINE_SCRIPT" \
+  --current "$T9_DIR/current_duped.jsonl" \
+  --baseline "$T9_DIR/baseline.jsonl" 2>/dev/null)"
+T9_EXIT=$?
+set -e
+
+if [[ $T9_EXIT -eq 0 ]]; then
+  pass "t9: current-side dedup run exits 0"
+else
+  fail "t9: current-side dedup run exits $T9_EXIT (expected 0)"
+fi
+
+# Summary new should be 1 (not 2)
+T9_SUM_NEW="$(get_summary_field "$T9_OUT" "new")"
+if [[ "$T9_SUM_NEW" == "1" ]]; then
+  pass "t9: duplicate current finding counted once (new=1)"
+else
+  fail "t9: new count=$T9_SUM_NEW (expected 1 — duplicate should be collapsed)"
+fi
+
+# FP_A should appear exactly once as a finding record in output
+T9_FP_A_COUNT="$(python3 - "$T9_OUT" "$FP_A" << 'PYEOF'
+import json, sys
+output, fp = sys.argv[1], sys.argv[2]
+count = 0
+for l in output.splitlines():
+    if not l.strip():
+        continue
+    try:
+        obj = json.loads(l)
+        if isinstance(obj, dict) and "type" not in obj and obj.get("fingerprint") == fp:
+            count += 1
+    except Exception:
+        pass
+print(count)
+PYEOF
+)"
+if [[ "$T9_FP_A_COUNT" == "1" ]]; then
+  pass "t9: FP_A appears exactly once in output (not duplicated)"
+else
+  fail "t9: FP_A appears $T9_FP_A_COUNT time(s) in output (expected 1)"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 printf '\n-------------------------------------------------\n'

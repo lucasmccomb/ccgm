@@ -45,6 +45,22 @@ Matching key
 ------------
 (rule_id, fingerprint)
 
+The key is composite: rule_id correctly disambiguates two different rules whose findings
+land on the same line (same fingerprint but different rule_id → two distinct findings).
+Do NOT reduce the key to fingerprint alone.
+
+Stability caveat for LLM findings
+----------------------------------
+Tool/spine findings set rule_id deterministically from the check schema, so they classify
+stably across runs.  LLM findings are different: when a worker omits rule_id,
+merge-findings backfills it from check_id.  If rule_id emission is inconsistent across
+runs — the worker emits it in one run but omits it in another, causing merge-findings to
+backfill a different value — the SAME logical finding (identical location + fingerprint)
+can carry two different rule_ids across runs.  The result is one phantom "new" finding
+and one phantom "resolved" finding for a finding that did not actually change.  This is a
+known limitation of LLM-source findings; the fix is to ensure workers consistently emit
+rule_id.
+
 Classification
 --------------
 Each current finding is tagged in properties.baseline_status:
@@ -242,6 +258,11 @@ def main() -> int:
     new_count = 0
     existing_count = 0
     tagged_findings = []
+    # Dedup current-side by (rule_id, fingerprint): mirrors the resolved-side
+    # dedup below.  merge-findings collapses fingerprints on its output, so
+    # duplicates are not expected on the intended path, but the symmetric guard
+    # prevents double-counting if the same key appears more than once.
+    seen_current_keys: set = set()
 
     for idx, f in enumerate(current_findings):
         if not _validate_key(f, "--current", idx):
@@ -250,6 +271,10 @@ def main() -> int:
             continue
 
         key = _match_key(f)
+        if key in seen_current_keys:
+            continue
+        seen_current_keys.add(key)
+
         if key in baseline_keys:
             status = "existing"
             existing_count += 1
