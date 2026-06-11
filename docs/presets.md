@@ -19,13 +19,14 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **Best for**: Most individual developers. The recommended starting point.
 
-**Modules (8)**:
+**Modules (9)**:
 - Everything in **minimal**, plus:
 - `identity` - two foundational context files: soul.md and human-context.md
 - `settings` - base `settings.json` with 800+ pre-configured tool permissions
 - `hooks` - Python hooks for workflow enforcement (branch protection, commit format, auto-approval)
 - `commands-core` - essential slash commands (`/commit`, `/pr`, `/cpm`, `/gs`, `/ghi`)
 - `commands-utility` - utility commands (`/cws-submit`, `/ccgm-sync`, `/user-test`)
+- `output-formatting` - copy-pasteable content goes in fenced code blocks, never blockquotes
 
 **What you get**: Rules, identity context, hooks, commands, and a permissions configuration that lets Claude operate effectively while keeping guardrails on destructive operations.
 
@@ -55,7 +56,7 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **Best for**: Running CCGM on headless cloud VMs that dispatch parallel agents to work on GitHub issues. Includes the agent orchestration modules (`agent-manager`, `cloud-dispatch`) that the standard `full` preset omits.
 
-**Modules (44)**: Curated for headless cloud agents — `full` minus six modules that don't fit the headless use case (`brainstorm`, `skillify`, `deepresearch`, `ccgm-doctor`, `autoheal`, `argus`), plus `agent-manager` (tmux-based agent dashboard) and `cloud-dispatch` (Hetzner Cloud VM provisioning for parallel GitHub-issue work).
+**Modules (45)**: Curated for headless cloud agents — `full` minus six modules that don't fit the headless use case (`brainstorm`, `skillify`, `deepresearch`, `ccgm-doctor`, `autoheal`, `argus`), plus `agent-manager` (tmux-based agent dashboard) and `cloud-dispatch` (Hetzner Cloud VM provisioning for parallel GitHub-issue work).
 
 **What you get**: The cloud-agent preset with cloud-dispatch commands (`/dispatch`, `/dispatch-status`, `/dispatch-stop`, `/vm-manage`) and the `/agents` TUI. Intended for machines that provision cloud VMs and launch autonomous agents, not day-to-day laptop use.
 
