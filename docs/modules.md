@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 67 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 68 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -938,6 +938,18 @@ Eight documented anti-patterns extracted from real mistakes.
 6. **Git multi-clone confusion** - branch from `origin/main`, check sibling clones
 7. **Cloudflare Pages vs Workers** - know which product to use
 8. **CF Pages without Git integration** - must be created with Git integration at inception (cannot be retrofitted)
+
+**Dependencies**: None
+
+---
+
+### output-formatting
+
+Formatting rules for user-facing output, starting with copy-pasteable content.
+
+**Installs**: `rules/copy-paste-output.md`
+
+**What it does**: When output is meant to be copy-pasted somewhere else (emails, texts, social posts, bios, form answers, prompts for other tools, config snippets), Claude delivers it in a fenced code block containing exactly the text that should land at the destination - never a blockquote, which renders as a vertical line in the terminal and copies dirty. Commentary stays outside the block; plain text by default, markdown source only when the destination renders markdown.
 
 **Dependencies**: None
 

@@ -1,0 +1,13 @@
+{
+  "name": "output-formatting",
+  "displayName": "Output Formatting",
+  "description": "Formatting rules for user-facing output: copy-pasteable content (drafts, messages, prompts, config snippets) is delivered in fenced code blocks, never blockquotes, so it pastes clean anywhere.",
+  "category": "patterns",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "rules/copy-paste-output.md": { "target": "rules/copy-paste-output.md", "type": "rule", "template": false }
+  },
+  "tags": ["formatting", "output", "copy-paste", "communication"],
+  "configPrompts": []
+}
