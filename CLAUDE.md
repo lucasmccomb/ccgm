@@ -19,7 +19,7 @@ ccgm/
 │   ├── merge.sh        # settings.json merge via jq
 │   ├── modules.sh      # Module discovery + deps
 │   └── backup.sh       # Backup/restore
-├── modules/            # 66 self-contained modules
+├── modules/            # 68 self-contained modules
 │   └── {name}/
 │       ├── module.json # Manifest
 │       ├── README.md   # Module docs
