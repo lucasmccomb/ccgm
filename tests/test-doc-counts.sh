@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# CCGM Doc-Count + Preset-Coverage Guard
+#
+# Derives the true module count and per-preset membership FROM THE REPO, then
+# fails if:
+#   (a) any committed module-count claim in docs disagrees with reality, or
+#   (b) the `full` preset count claim in docs disagrees with presets/full.json, or
+#   (c) any stable, non-allowlisted module sits in zero presets, or
+#   (d) any preset references a module that does not exist, or
+#   (e) the allowlist contains a stale entry (a module that IS in a preset).
+#
+# Nothing here is hardcoded to a number — truth comes from modules/*/module.json
+# and presets/*.json. Portable: bash 3.2, BSD/GNU grep, no GNU-only flags.
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "FAIL: jq is required for tests/test-doc-counts.sh" >&2
+  exit 1
+fi
+
+FAILURES=0
+fail() {
+  echo "FAIL: $1" >&2
+  FAILURES=$((FAILURES + 1))
+}
+ok() {
+  echo "ok: $1"
+}
+
+# --- Derive truth -----------------------------------------------------------
+
+# Module count = number of modules/*/module.json
+MODULE_COUNT=$(find modules -mindepth 2 -maxdepth 2 -name module.json | wc -l | tr -d ' ')
+echo "Derived module count: $MODULE_COUNT"
+
+# full preset length
+FULL_PRESET_COUNT=$(jq 'length' presets/full.json)
+echo "Derived full-preset count: $FULL_PRESET_COUNT"
+
+# --- (a) module-count claims in docs ---------------------------------------
+# Each entry: "file:regex-with-COUNT-placeholder". The literal token __N__ in
+# the pattern stands for the derived module count. The check greps for the
+# pattern with the real count substituted; absence => drifted or removed claim.
+
+check_count_claim() {
+  local file="$1" template="$2" expected="$3"
+  local needle
+  needle=$(printf '%s' "$template" | sed "s/__N__/$expected/g")
+  if [ ! -f "$file" ]; then
+    fail "expected file $file not found (count claim cannot be verified)"
+    return
+  fi
+  if grep -qF "$needle" "$file"; then
+    ok "$file count claim matches $expected (\"$needle\")"
+  else
+    # Surface what the file currently says for the same phrase prefix.
+    local prefix
+    prefix=$(printf '%s' "$template" | sed 's/__N__.*//')
+    local current
+    current=$(grep -n "$prefix" "$file" | head -3 || true)
+    fail "$file does not contain expected count claim \"$needle\". Current lines matching \"$prefix\":
+$current"
+  fi
+}
+
+check_count_claim "CLAUDE.md"               "It contains __N__ modules"          "$MODULE_COUNT"
+check_count_claim "CLAUDE.md"               "# __N__ self-contained modules"     "$MODULE_COUNT"
+check_count_claim "README.md"               "all __N__ modules"                  "$MODULE_COUNT"
+check_count_claim "docs/modules.md"         "CCGM contains __N__ modules"        "$MODULE_COUNT"
+check_count_claim "docs/getting-started.md" "all __N__ modules"                  "$MODULE_COUNT"
+
+# --- (b) full preset count claim in docs -----------------------------------
+check_count_claim "README.md"               "**full** | __N__ modules"           "$FULL_PRESET_COUNT"
+check_count_claim "docs/getting-started.md" "**full** | __N__ modules"           "$FULL_PRESET_COUNT"
+
+# --- Build the set of modules referenced by any preset ----------------------
+PRESET_MEMBERS=$(cat presets/*.json | jq -r '.[]' | sort -u)
+
+# All real module names
+ALL_MODULES=$(find modules -mindepth 2 -maxdepth 2 -name module.json \
+  | sed 's#^modules/##; s#/module.json$##' | sort)
+
+# --- (d) preset references a non-existent module ----------------------------
+ORPHANS=$(comm -13 <(printf '%s\n' "$ALL_MODULES") <(printf '%s\n' "$PRESET_MEMBERS") || true)
+if [ -n "$ORPHANS" ]; then
+  fail "preset(s) reference modules that do not exist:
+$ORPHANS"
+else
+  ok "every preset member is a real module"
+fi
+
+# --- Load allowlist (bare module names; strip comments/blanks) --------------
+ALLOWLIST_FILE="tests/preset-coverage-allowlist.txt"
+ALLOWLIST=""
+if [ -f "$ALLOWLIST_FILE" ]; then
+  ALLOWLIST=$(grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST_FILE" \
+    | sed 's/[[:space:]]*$//' | sort -u || true)
+fi
+
+# --- (c) stable, non-allowlisted modules in zero presets --------------------
+ZERO_PRESET=$(comm -23 <(printf '%s\n' "$ALL_MODULES") <(printf '%s\n' "$PRESET_MEMBERS") || true)
+
+UNCOVERED=""
+while IFS= read -r mod; do
+  [ -n "$mod" ] || continue
+  # beta modules are auto-excluded
+  status=$(jq -r '.status // "stable"' "modules/$mod/module.json")
+  if [ "$status" = "beta" ]; then
+    ok "$mod in zero presets but status=beta (auto-excluded)"
+    continue
+  fi
+  # allowlisted?
+  if printf '%s\n' "$ALLOWLIST" | grep -qx "$mod"; then
+    ok "$mod in zero presets but allowlisted"
+    continue
+  fi
+  UNCOVERED="$UNCOVERED $mod"
+done <<EOF
+$ZERO_PRESET
+EOF
+
+if [ -n "$(printf '%s' "$UNCOVERED" | tr -d ' ')" ]; then
+  fail "stable module(s) in zero presets and not allowlisted:$UNCOVERED
+  -> add each to a preset in presets/*.json, OR add to $ALLOWLIST_FILE with a reason."
+else
+  ok "every stable module is in a preset or beta/allowlisted"
+fi
+
+# --- (e) stale allowlist entries -------------------------------------------
+# A module that is allowlisted but also appears in a preset, or no longer exists.
+STALE=""
+while IFS= read -r mod; do
+  [ -n "$mod" ] || continue
+  if [ ! -d "modules/$mod" ]; then
+    STALE="$STALE $mod(missing-module)"
+    continue
+  fi
+  if printf '%s\n' "$PRESET_MEMBERS" | grep -qx "$mod"; then
+    STALE="$STALE $mod(now-in-preset)"
+  fi
+done <<EOF
+$ALLOWLIST
+EOF
+
+if [ -n "$(printf '%s' "$STALE" | tr -d ' ')" ]; then
+  fail "stale allowlist entries in $ALLOWLIST_FILE:$STALE
+  -> remove these entries; they are covered or no longer exist."
+else
+  ok "no stale allowlist entries"
+fi
+
+# --- Result -----------------------------------------------------------------
+echo ""
+if [ "$FAILURES" -gt 0 ]; then
+  echo "test-doc-counts.sh: $FAILURES check(s) failed"
+  exit 1
+fi
+echo "test-doc-counts.sh: all checks passed"
