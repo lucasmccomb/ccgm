@@ -231,6 +231,94 @@ else
 fi
 echo ""
 
+# --- Test 7: Backups are scoped to the install target (no cross-scope) ---
+echo "--- Test 7: Backup scope isolation (global vs project) ---"
+
+# Global target lives under $HOME/.claude; project target under a project dir.
+GLOBAL_TARGET="$HOME/.claude"
+PROJECT_DIR="$TMPDIR/project"
+PROJECT_TARGET="$PROJECT_DIR/.claude"
+mkdir -p "$PROJECT_TARGET"
+
+# Distinct content per scope so we can detect cross-scope bleed.
+echo '{"scope": "global"}' > "$GLOBAL_TARGET/settings.json"
+echo '{"scope": "project"}' > "$PROJECT_TARGET/settings.json"
+
+global_backup=$(create_backup "$GLOBAL_TARGET")
+project_backup=$(create_backup "$PROJECT_TARGET")
+
+# Each backup must land under its own scope's backups dir.
+if [[ "$global_backup" == "$GLOBAL_TARGET/backups/"* ]]; then
+  pass "Global backup written under global scope ($GLOBAL_TARGET/backups)"
+else
+  fail "Global backup not scoped to global target: $global_backup"
+fi
+
+if [[ "$project_backup" == "$PROJECT_TARGET/backups/"* ]]; then
+  pass "Project backup written under project scope ($PROJECT_TARGET/backups)"
+else
+  fail "Project backup not scoped to project target: $project_backup"
+fi
+
+# A project backup must NOT appear in the global backups dir.
+if [ -d "$GLOBAL_TARGET/backups" ] && ls -1d "$GLOBAL_TARGET/backups"/ccgm-* >/dev/null 2>&1; then
+  # Global backups exist (expected); ensure none of them carry project content.
+  cross_scope=false
+  for b in "$GLOBAL_TARGET/backups"/ccgm-*; do
+    if [ -f "$b/settings.json" ] && grep -q '"scope": "project"' "$b/settings.json"; then
+      cross_scope=true
+    fi
+  done
+  if [ "$cross_scope" = false ]; then
+    pass "Global backups dir contains no project-scope content"
+  else
+    fail "Project content leaked into global backups dir"
+  fi
+else
+  fail "Expected global backups dir to exist after global backup"
+fi
+
+# Restoring a project backup must reproduce project content, not global.
+PROJECT_RESTORE="$TMPDIR/project-restore"
+mkdir -p "$PROJECT_RESTORE"
+restore_backup "$project_backup" "$PROJECT_RESTORE"
+if [ -f "$PROJECT_RESTORE/settings.json" ] && grep -q '"scope": "project"' "$PROJECT_RESTORE/settings.json"; then
+  pass "Project restore reproduces project-scope content"
+else
+  fail "Project restore did not reproduce project-scope content"
+fi
+
+# get_latest_backup must respect scope: project scope sees only project backups.
+latest_project=$(get_latest_backup "$PROJECT_TARGET" 2>/dev/null || true)
+if [ "$latest_project" = "$project_backup" ]; then
+  pass "get_latest_backup scoped to project target returns project backup"
+else
+  fail "get_latest_backup project scope returned '$latest_project', expected '$project_backup'"
+fi
+echo ""
+
+# --- Test 8: clean_backups respects scope ---
+echo "--- Test 8: clean_backups scoped to install target ---"
+
+SCOPE_BASE="$PROJECT_TARGET/backups"
+# Clear and seed project-scope backups.
+rm -rf "$SCOPE_BASE"/ccgm-*
+for i in 1 2 3 4 5; do
+  bdir="$SCOPE_BASE/ccgm-2026050${i}-120000"
+  mkdir -p "$bdir"
+  echo "scoped backup $i" > "$bdir/settings.json"
+done
+
+clean_backups 2 "$PROJECT_TARGET"
+
+scoped_after=$(ls -1d "$SCOPE_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ')
+if [ "$scoped_after" -eq 2 ]; then
+  pass "clean_backups(2) scoped to project kept exactly 2 backups"
+else
+  fail "clean_backups scoped to project kept $scoped_after, expected 2"
+fi
+echo ""
+
 # --- Summary ---
 echo "==================================="
 echo "  Results: $PASS passed, $FAIL failed"

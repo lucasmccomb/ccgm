@@ -116,6 +116,8 @@ main() {
   backup_path=$(create_backup "$global_dir")
   if [ -n "$backup_path" ]; then
     ui_success "Safety backup created: $backup_path"
+    # Bound backup growth: keep the 5 most recent global-scope backups.
+    clean_backups 5 "$global_dir"
   else
     ui_info "No files to back up"
   fi
@@ -257,7 +259,7 @@ main() {
   fi
 
   local latest_backup
-  latest_backup=$(get_latest_backup 2>/dev/null || true)
+  latest_backup=$(get_latest_backup "$global_dir" 2>/dev/null || true)
   if [ -n "$latest_backup" ] && [ "$latest_backup" != "${backup_path:-}" ]; then
     echo ""
     ui_info "Previous backups available in ~/.claude/backups/"
