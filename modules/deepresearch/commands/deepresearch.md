@@ -40,9 +40,20 @@ Extract from `$ARGUMENTS`:
 - **`--depth <preset>`**: `lite` (3 queries), `standard` (5 queries, default), or `full` (7 queries)
 - **`--output <path>`**: custom output path for `research.md` (must end in `.md`)
 - **`--plan-dir <path>`**: when called from `/xplan`, the plan directory; `research.md` is written there
+- **`--repo <path>`**: (Optional) an existing repo to ground repo-specific facts against. When set, every repo fact MUST be read from a fetched, SHA-pinned source — see "Source Freshness" below. `/xplan` passes its Phase 0.4.0 anchor worktree path here, not a bare clone.
 - **`--extend <path>`**: accepted for compatibility, gracefully ignored
 
 If no topic is provided, use `AskUserQuestion` to ask what to research.
+
+### Source Freshness (only when --repo is set)
+
+A local working tree can lag `origin` by many commits or hold uncommitted WIP, so reading it as-is produces research grounded in stale facts. When `--repo <path>` is given:
+
+1. **Prefer a pre-pinned anchor.** If the caller (e.g. `/xplan`) passed a `Verification anchor: <ref> @ <SHA>` in the prompt, treat that SHA as the source of truth and read repo facts from the path given (an anchor worktree). Do not re-fetch.
+2. **Otherwise, pin it yourself.** Resolve the real default branch (`git -C <repo> rev-parse --abbrev-ref origin/HEAD`; fall back to `origin/main`), run `git -C <repo> fetch origin` once, and pin `ANCHOR=$(git -C <repo> rev-parse <origin-default>)`. Read repo facts via `git -C <repo> show <origin-default>:<path>` (or a temp `git worktree add --detach`), never a bare working-tree Read. If the repo has no remote, note "local-only, working tree used as-is" and proceed.
+3. **Never mutate the user's clone** — no checkout, no HEAD move, no stash. Pin and read only.
+
+This freshness rule is independent: `/deepresearch` enforces it even when invoked directly with `--repo`, not only when delegated from `/xplan`.
 
 ### Determine output path
 
@@ -114,7 +125,23 @@ Aggregate the results in memory across queries.
 
 Cross-reference claims across queries. Note contradictions. Weight by source quality (official docs > peer-reviewed > industry > blogs). Call out high-confidence findings explicitly.
 
-Write the file at the resolved `output_path` using this exact structure:
+Write the file at the resolved `output_path` using this exact structure.
+
+**When `--repo` was set, research.md MUST open (before the title's content) with a verification-anchor line and a Verified Facts Log**, so downstream planning/review can trust every repo claim:
+
+```markdown
+**Verification anchor:** {repo} `{origin-default-ref}` @ `{ANCHOR-SHA}` (the local working tree was {N} commits behind; every repo fact below was read at this anchor, not the working tree).
+
+## 0. Verified Facts Log (every load-bearing repo fact, anchored)
+
+| # | Fact | Truth at anchor | Anchor (`{ref}:<file>:<line>`) |
+|---|------|-----------------|--------------------------------|
+| VF1 | ... | ... | ... |
+```
+
+Every load-bearing repo fact (a file exists, a function is named X, a decision is current/reversed, a dependency is present) gets a row anchored to `<file>:<line>` as read at the anchor — never asserted from memory or a stale Read. This is the pattern that prevents a plan from citing deleted code as present. For greenfield research (no `--repo`), omit the anchor line and Verified Facts Log — there is no repo to anchor against.
+
+Then the standard structure:
 
 ```markdown
 # Research: {topic}
