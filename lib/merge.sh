@@ -49,6 +49,11 @@ merge_settings() {
   # Perform the merge
   local merged
   merged=$(jq -s '
+    # Order-preserving dedup: keep first occurrence, preserve input order.
+    # (jq builtin `unique` sorts, which reshuffles human-curated allow/deny lists.)
+    def dedup_ordered:
+      reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end);
+
     # Custom deep merge function
     def deep_merge(a; b):
       a as $a | b as $b |
@@ -58,8 +63,9 @@ merge_settings() {
           if ($key == "allow" or $key == "deny") and
              (($a[$key] | type) == "array") and
              (($b[$key] | type) == "array") then
-            # Array merge with deduplication for allow/deny
-            { ($key): (($a[$key] + $b[$key]) | unique) }
+            # Array merge with order-preserving deduplication for allow/deny.
+            # Base entries keep their curated order; new unique entries are appended.
+            { ($key): (($a[$key] + $b[$key]) | dedup_ordered) }
           elif ($key == "hooks" or $key == "enabledPlugins") and
                (($a[$key] | type) == "object") and
                (($b[$key] | type) == "object") then
@@ -71,8 +77,9 @@ merge_settings() {
             { ($key): deep_merge($a[$key]; $b[$key]) }
           elif (($a[$key] | type) == "array") and
                (($b[$key] | type) == "array") then
-            # For hook event arrays (PreToolUse, etc.), concatenate and deduplicate
-            { ($key): ([$a[$key] + $b[$key] | .[] | tojson] | unique | [.[] | fromjson]) }
+            # For hook event arrays (PreToolUse, etc.), concatenate and
+            # deduplicate while preserving first-seen order.
+            { ($key): ([$a[$key] + $b[$key] | .[] | tojson] | dedup_ordered | [.[] | fromjson]) }
           elif $b | has($key) then
             { ($key): $b[$key] }
           else

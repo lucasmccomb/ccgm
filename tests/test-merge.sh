@@ -131,6 +131,56 @@ else
 fi
 echo ""
 
+# --- Test 2b: Allow/deny dedup preserves base order (no alphabetic reshuffle) ---
+echo "--- Test 2b: Allow/deny order preservation ---"
+
+# Intentionally non-alphabetical base list to detect any sort-on-merge.
+cat > "$TMPDIR/target2b.json" << 'JSON'
+{
+  "permissions": {
+    "allow": ["Zebra", "Apple", "Bash(git *)", "Read"],
+    "deny": ["Bash(rm -rf *)", "Bash(sudo *)"]
+  }
+}
+JSON
+
+cat > "$TMPDIR/partial2b.json" << 'JSON'
+{
+  "permissions": {
+    "allow": ["Read", "Mango"],
+    "deny": ["Bash(sudo *)", "Alpha"]
+  }
+}
+JSON
+
+merge_settings "$TMPDIR/target2b.json" "$TMPDIR/partial2b.json"
+result2b=$(cat "$TMPDIR/target2b.json")
+
+# Base order must be preserved exactly, with new unique entries appended.
+expected_allow='["Zebra","Apple","Bash(git *)","Read","Mango"]'
+actual_allow=$(echo "$result2b" | jq -c '.permissions.allow')
+if [ "$actual_allow" = "$expected_allow" ]; then
+  pass "Allow list preserves base order and appends new entries"
+else
+  fail "Allow order reshuffled: got $actual_allow, expected $expected_allow"
+fi
+
+expected_deny='["Bash(rm -rf *)","Bash(sudo *)","Alpha"]'
+actual_deny=$(echo "$result2b" | jq -c '.permissions.deny')
+if [ "$actual_deny" = "$expected_deny" ]; then
+  pass "Deny list preserves base order and appends new entries"
+else
+  fail "Deny order reshuffled: got $actual_deny, expected $expected_deny"
+fi
+
+# Guard against regression to a sorted-output implementation.
+if [ "$actual_allow" != "$(echo "$result2b" | jq -c '.permissions.allow | sort')" ]; then
+  pass "Allow output is not alphabetically sorted (curated order intact)"
+else
+  fail "Allow output equals its sorted form (curated order destroyed)"
+fi
+echo ""
+
 # --- Test 3: Hooks arrays are concatenated ---
 echo "--- Test 3: Hooks array concatenation ---"
 
