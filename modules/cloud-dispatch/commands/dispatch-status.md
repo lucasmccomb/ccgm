@@ -12,7 +12,7 @@ Check the status of dispatched agents across all cloud VMs.
 ### Step 1: Check Agent Status
 
 ```bash
-bash modules/cloud-dispatch/lib/agent-status.sh --all
+bash ~/.claude/lib/cloud-dispatch/agent-status.sh --all
 ```
 
 ### Step 2: Collect Results
@@ -20,7 +20,7 @@ bash modules/cloud-dispatch/lib/agent-status.sh --all
 Pull PR URLs and completed work from all VMs:
 
 ```bash
-bash modules/cloud-dispatch/lib/workspace-collect.sh --all
+bash ~/.claude/lib/cloud-dispatch/workspace-collect.sh --all
 ```
 
 ### Step 3: Present Summary

@@ -12,7 +12,7 @@ Stop all running agents and optionally destroy VMs.
 ### Step 1: Stop Agents
 
 ```bash
-bash modules/cloud-dispatch/lib/agent-stop.sh --all
+bash ~/.claude/lib/cloud-dispatch/agent-stop.sh --all
 ```
 
 ### Step 2: Collect Results
@@ -20,7 +20,7 @@ bash modules/cloud-dispatch/lib/agent-stop.sh --all
 Pull any final results, PRs, or uncommitted work before cleanup:
 
 ```bash
-bash modules/cloud-dispatch/lib/workspace-collect.sh --all
+bash ~/.claude/lib/cloud-dispatch/workspace-collect.sh --all
 ```
 
 ### Step 3: Ask About Cleanup
@@ -35,13 +35,13 @@ If the user chooses destroy:
 
 ```bash
 # Revoke session SSH keys and clear secrets from tmpfs
-bash modules/cloud-dispatch/lib/secrets-cleanup.sh
+bash ~/.claude/lib/cloud-dispatch/secrets-cleanup.sh
 
 # Destroy all dispatch VMs
-bash modules/cloud-dispatch/lib/vm-destroy.sh --all --force
+bash ~/.claude/lib/cloud-dispatch/vm-destroy.sh --all --force
 ```
 
 Confirm destruction with a final status:
 ```bash
-bash modules/cloud-dispatch/lib/vm-status.sh
+bash ~/.claude/lib/cloud-dispatch/vm-status.sh
 ```

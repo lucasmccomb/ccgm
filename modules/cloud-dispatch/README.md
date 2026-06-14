@@ -243,9 +243,11 @@ On each VM, iptables rules (set by the golden image security hardening script) c
 
 | VM Type | vCPU | RAM | Price/hr | Recommended agents |
 |---------|------|-----|----------|--------------------|
-| cx22 | 2 | 4 GB | ~$0.005 | 1-2 |
-| cx32 | 4 | 8 GB | ~$0.010 | 4 |
-| ccx63 | 48 | 192 GB | ~$0.80 | 4 (memory-rich) |
+| cx22 | 2 | 4 GB | ~$0.006 | 1-2 |
+| cx32 | 4 | 8 GB | ~$0.011 | 4 |
+| ccx63 | 48 | 192 GB | ~$0.58 | 4 (memory-rich) |
+
+Price/hr figures come from the canonical `HOURLY_RATES` table in `lib/budget-track.sh` (the single source of truth for module pricing).
 
 Default is `ccx63` (set in `lib/common.sh` as `CCGM_SERVER_TYPE`). Override with:
 
@@ -260,8 +262,8 @@ Cost depends on VM type, session length, and whether you're using a Claude API k
 | VM type | VMs | Hours/day | VM cost/month estimate |
 |---------|-----|-----------|------------------------|
 | cx22 | 3 | 8 | ~$4 |
-| cx32 | 3 | 8 | ~$7 |
-| ccx63 | 3 | 8 | ~$580 |
+| cx32 | 3 | 8 | ~$8 |
+| ccx63 | 3 | 8 | ~$418 |
 
 VMs are billed per second on Hetzner. Destroy them when done to stop charges. The auto-shutdown cron job on each VM shuts it down after 15 minutes of inactivity or 8 hours of wall-clock time (whichever comes first).
 

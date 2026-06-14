@@ -17,10 +17,15 @@
 #   /tmp/ccgm-budget.json         Current session data
 #   /tmp/ccgm-budget-monthly.json Monthly session log (append-only array)
 #
-# Hourly rates (USD, approximate EUR->USD at 1.08):
-#   CCX63: $0.58/hr  (48 vCPU, 192 GB)
-#   CCX43: $0.28/hr  (16 vCPU,  64 GB)
-#   CCX33: $0.20/hr  ( 8 vCPU,  32 GB)
+# CANONICAL HOURLY RATES (USD, approximate EUR->USD at 1.08).
+# This HOURLY_RATES table is the single source of truth for VM pricing in
+# cloud-dispatch. README.md and commands/dispatch.md must match these figures.
+#   ccx63: $0.58/hr  (48 vCPU, 192 GB)  dedicated
+#   ccx43: $0.28/hr  (16 vCPU,  64 GB)  dedicated
+#   ccx33: $0.20/hr  ( 8 vCPU,  32 GB)  dedicated
+#   cx42:  $0.022/hr ( 8 vCPU,  16 GB)  shared
+#   cx32:  $0.011/hr ( 4 vCPU,   8 GB)  shared
+#   cx22:  $0.006/hr ( 2 vCPU,   4 GB)  shared
 #
 # Requires: jq, hcloud (for start subcommand)
 
@@ -38,11 +43,14 @@ MONTHLY_FILE="${CCGM_MONTHLY_FILE:-/tmp/ccgm-budget-monthly.json}"
 MONTHLY_BUDGET_USD="${CCGM_MONTHLY_BUDGET:-2000}"
 CLAUDE_MAX_USD="${CCGM_CLAUDE_MAX_USD:-200}"
 
-# Hourly rates by server type (USD)
+# Hourly rates by server type (USD). Canonical source of truth for the module.
 declare -A HOURLY_RATES=(
   [ccx63]="0.58"
   [ccx43]="0.28"
   [ccx33]="0.20"
+  [cx42]="0.022"
+  [cx32]="0.011"
+  [cx22]="0.006"
 )
 DEFAULT_RATE="0.58"
 
@@ -173,7 +181,10 @@ print(json.dumps(result))
     --argjson ccx63 "${HOURLY_RATES[ccx63]:-${DEFAULT_RATE}}" \
     --argjson ccx43 "${HOURLY_RATES[ccx43]:-${DEFAULT_RATE}}" \
     --argjson ccx33 "${HOURLY_RATES[ccx33]:-${DEFAULT_RATE}}" \
-    '{ccx63: $ccx63, ccx43: $ccx43, ccx33: $ccx33}')
+    --argjson cx42 "${HOURLY_RATES[cx42]:-${DEFAULT_RATE}}" \
+    --argjson cx32 "${HOURLY_RATES[cx32]:-${DEFAULT_RATE}}" \
+    --argjson cx22 "${HOURLY_RATES[cx22]:-${DEFAULT_RATE}}" \
+    '{ccx63: $ccx63, ccx43: $ccx43, ccx33: $ccx33, cx42: $cx42, cx32: $cx32, cx22: $cx22}')
 
   local default_rate="${DEFAULT_RATE}"
   local vms_json

@@ -22,22 +22,22 @@ Parse the action from the user's message and run the corresponding script:
 
 ```bash
 # For create:
-bash modules/cloud-dispatch/lib/vm-create.sh $N
+bash ~/.claude/lib/cloud-dispatch/vm-create.sh $N
 
 # For destroy (all):
-bash modules/cloud-dispatch/lib/vm-destroy.sh --all
+bash ~/.claude/lib/cloud-dispatch/vm-destroy.sh --all
 
 # For destroy (specific VM):
-bash modules/cloud-dispatch/lib/vm-destroy.sh $VM_NAME
+bash ~/.claude/lib/cloud-dispatch/vm-destroy.sh $VM_NAME
 
 # For status:
-bash modules/cloud-dispatch/lib/vm-status.sh
+bash ~/.claude/lib/cloud-dispatch/vm-status.sh
 
 # For health:
-bash modules/cloud-dispatch/lib/vm-health.sh --all
+bash ~/.claude/lib/cloud-dispatch/vm-health.sh --all
 
 # For ssh:
-bash modules/cloud-dispatch/lib/vm-ssh.sh $VM_NAME
+bash ~/.claude/lib/cloud-dispatch/vm-ssh.sh $VM_NAME
 ```
 
 After running each command, display the output clearly. For `status`, format it as a table showing VM name, IP, state, and uptime.
