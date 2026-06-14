@@ -414,6 +414,106 @@ else
 fi
 echo ""
 
+# ============================================================
+# Test 6: --add a module with per-module placeholders expands them
+# ============================================================
+echo "--- Test 6: --add expands CCGM_MODULE_* placeholders ---"
+
+TEST6_HOME="$TMPDIR/test6"
+mkdir -p "$TEST6_HOME/.claude"
+export HOME="$TEST6_HOME"
+export CCGM_CODE_DIR="$TEST6_HOME/code"
+
+# Base install so a manifest + .ccgm.env exist.
+set +e
+"$REPO_ROOT/start.sh" --preset minimal --scope global </dev/null >/dev/null 2>&1
+base6_exit=$?
+set -e
+if [ $base6_exit -eq 0 ]; then
+  pass "Base minimal install for placeholder --add test"
+else
+  fail "Base minimal install failed (exit $base6_exit)"
+fi
+
+env6="$TEST6_HOME/.claude/.ccgm.env"
+
+# Seed per-module config the way the interactive installer would have. The key
+# shape is CCGM_MODULE_<module>__<__PLACEHOLDER__> (four underscores).
+{
+  echo "CCGM_MODULE_remote-server____REMOTE_HOST__=10.20.30.40"
+  echo "CCGM_MODULE_remote-server____REMOTE_USER__=ops"
+  echo "CCGM_MODULE_remote-server____REMOTE_ALIAS__=lab-box"
+} >> "$env6"
+
+set +e
+"$REPO_ROOT/start.sh" --add remote-server </dev/null >/dev/null 2>&1
+add6_exit=$?
+set -e
+if [ $add6_exit -eq 0 ]; then
+  pass "--add remote-server (with seeded config) exited successfully"
+else
+  fail "--add remote-server exited with code $add6_exit"
+fi
+
+onremote="$TEST6_HOME/.claude/commands/onremote.md"
+if [ -f "$onremote" ]; then
+  pass "commands/onremote.md installed after --add"
+
+  if grep -qE '__[A-Z_]+__' "$onremote"; then
+    fail "onremote.md still has leftover placeholders: $(grep -oE '__[A-Z_]+__' "$onremote" | sort -u | tr '\n' ' ')"
+  else
+    pass "onremote.md has no leftover __PLACEHOLDER__"
+  fi
+
+  if grep -q "10.20.30.40" "$onremote" && grep -q "ops" "$onremote" && grep -q "lab-box" "$onremote"; then
+    pass "onremote.md contains expanded host/user/alias values"
+  else
+    fail "onremote.md missing expected expanded values"
+  fi
+else
+  fail "commands/onremote.md missing after --add"
+fi
+echo ""
+
+# ============================================================
+# Test 7: --add FAILS when a declared placeholder is unwired
+# ============================================================
+echo "--- Test 7: --add fails on leftover placeholder ---"
+
+TEST7_HOME="$TMPDIR/test7"
+mkdir -p "$TEST7_HOME/.claude"
+export HOME="$TEST7_HOME"
+export CCGM_CODE_DIR="$TEST7_HOME/code"
+
+set +e
+"$REPO_ROOT/start.sh" --preset minimal --scope global </dev/null >/dev/null 2>&1
+base7_exit=$?
+set -e
+if [ $base7_exit -eq 0 ]; then
+  pass "Base minimal install for fail-on-leftover test"
+else
+  fail "Base minimal install failed (exit $base7_exit)"
+fi
+
+# Note: NO CCGM_MODULE_remote-server__* entries seeded, so onremote.md's
+# placeholders cannot be expanded -> install must fail.
+set +e
+add7_out=$("$REPO_ROOT/start.sh" --add remote-server </dev/null 2>&1)
+add7_exit=$?
+set -e
+if [ $add7_exit -ne 0 ]; then
+  pass "--add with unwired placeholders fails with non-zero exit"
+else
+  fail "--add with unwired placeholders unexpectedly succeeded"
+fi
+
+if echo "$add7_out" | grep -qiE "unexpanded placeholder"; then
+  pass "Failure message names the unexpanded placeholder"
+else
+  fail "Failure message did not mention unexpanded placeholder"
+fi
+echo ""
+
 # Restore HOME
 export HOME="$TMPDIR/home"
 

@@ -12,6 +12,10 @@ RESOLVED_MODULES=()
 INSTALLED_FILES=()
 MERGED_FILES=()
 BACKUP_DIRS=()
+# Targets that went through template expansion (template:true). Verification
+# fails hard if any __PLACEHOLDER__ survives in one of these; non-template files
+# (e.g. rule docs that mention __HOME__ in prose) are intentionally excluded.
+EXPANDED_FILES=()
 
 # --- Source libraries ---
 # shellcheck source=lib/ui.sh
@@ -261,6 +265,7 @@ run_add_mode() {
   # INSTALLED_FILES: uninstall un-merges them rather than deleting the file.
   INSTALLED_FILES=()
   MERGED_FILES=()
+  EXPANDED_FILES=()
   local entry action src target template mod_name
   for entry in ${install_plan[@]+"${install_plan[@]}"}; do
     IFS='|' read -r action src target template mod_name <<< "$entry"
@@ -277,6 +282,7 @@ run_add_mode() {
           merged_entry=$(record_merged_partial "$target" "$tmp_merge" "$global_dir")
           merge_settings "$target" "$tmp_merge"
           rm -f "$tmp_merge"
+          EXPANDED_FILES+=("$target")
         else
           merged_entry=$(record_merged_partial "$target" "$src" "$global_dir")
           merge_settings "$target" "$src"
@@ -291,6 +297,7 @@ run_add_mode() {
         if [ "$template" = "true" ]; then
           cp "$src" "$target"
           expand_templates "$target" "$env_file"
+          EXPANDED_FILES+=("$target")
           ui_success "Copied+expanded (template): $target"
         else
           ln -s "$src" "$target"
@@ -301,6 +308,7 @@ run_add_mode() {
         cp "$src" "$target"
         if [ "$template" = "true" ]; then
           expand_templates "$target" "$env_file"
+          EXPANDED_FILES+=("$target")
           ui_success "Copied+expanded: $target"
         else
           ui_success "Copied: $target"
@@ -308,6 +316,17 @@ run_add_mode() {
         ;;
     esac
     INSTALLED_FILES+=("$target")
+  done
+
+  # Fail fast if any declared placeholder survived expansion (broken config).
+  local _add_leftover
+  for f in ${EXPANDED_FILES[@]+"${EXPANDED_FILES[@]}"}; do
+    if [ -f "$f" ] && has_unexpanded_templates "$f"; then
+      _add_leftover=$(list_unexpanded_templates "$f")
+      ui_error "Unexpanded placeholder(s) in $f: $_add_leftover"
+      ui_info "Check the module's configPrompts and re-run with values supplied."
+      exit 1
+    fi
   done
 
   # --- Merge into the manifest (existing entries preserved) ---
@@ -1099,6 +1118,7 @@ main() {
   # uninstall un-merges the CCGM-contributed keys instead of deleting the file.
   INSTALLED_FILES=()
   MERGED_FILES=()
+  EXPANDED_FILES=()
 
   local entry action src target template mod_name
   for entry in ${install_plan[@]+"${install_plan[@]}"}; do
@@ -1121,6 +1141,7 @@ main() {
             merged_entry=$(record_merged_partial "$target" "$tmp_merge" "$global_dir")
             merge_settings "$target" "$tmp_merge"
             rm -f "$tmp_merge"
+            EXPANDED_FILES+=("$target")
           else
             merged_entry=$(record_merged_partial "$target" "$src" "$global_dir")
             merge_settings "$target" "$src"
@@ -1140,6 +1161,7 @@ main() {
           # Templates cannot be symlinked - must copy and expand
           cp "$src" "$target"
           expand_templates "$target" "$env_file"
+          EXPANDED_FILES+=("$target")
           ui_success "Copied+expanded (template): $target"
         else
           ln -s "$src" "$target"
@@ -1150,6 +1172,7 @@ main() {
         cp "$src" "$target"
         if [ "$template" = "true" ]; then
           expand_templates "$target" "$env_file"
+          EXPANDED_FILES+=("$target")
           ui_success "Copied+expanded: $target"
         else
           ui_success "Copied: $target"
@@ -1371,12 +1394,18 @@ TMPL
     fi
   done
 
-  # Check for unexpanded templates
+  # Check for unexpanded templates. A surviving __PLACEHOLDER__ in a file that
+  # was template-expanded means a declared placeholder had no value wired up
+  # (e.g. a module configPrompt that never reached .ccgm.env) - that is a hard
+  # failure, not a warning, because the installed config is broken. Only
+  # template:true targets are checked; rule docs that mention __HOME__ in prose
+  # are not in EXPANDED_FILES and are left alone.
   local remaining
-  for file in ${INSTALLED_FILES[@]+"${INSTALLED_FILES[@]}"}; do
+  for file in ${EXPANDED_FILES[@]+"${EXPANDED_FILES[@]}"}; do
     if [ -f "$file" ] && has_unexpanded_templates "$file"; then
       remaining=$(list_unexpanded_templates "$file")
-      ui_warn "Unexpanded templates in $file: $remaining"
+      ui_error "Unexpanded placeholder(s) in $file: $remaining"
+      verify_errors=$((verify_errors + 1))
     fi
   done
 
