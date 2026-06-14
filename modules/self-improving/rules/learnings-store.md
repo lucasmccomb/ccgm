@@ -103,6 +103,7 @@ Supersede is the right tool when:
 - A pattern evolved (old version still worked, new version is better).
 - A preference changed (user now prefers X over Y).
 - An architecture fact was refined (was "runs at 5s", is now "runs at 2s").
+- A `/consolidate` pass needs to fix a stale `files[]` anchor or duplicate while keeping the chain (same content, corrected metadata — see "Delta-First Consolidation" below).
 
 Use `deprecate` (not supersede) when:
 - The learning is outright wrong and has no replacement.
@@ -123,6 +124,21 @@ if not ok:
     # Flag for human review; do not overwrite the original.
     log_unsafe_rewrite(old_id, dropped)
 ```
+
+---
+
+## Delta-First Consolidation (ACE)
+
+`/consolidate` maintains the store via **incremental delta operations, not whole-entry rewrites.** This follows Agentic Context Engineering (ACE, arXiv:2510.04618): context curated through small, append-only deltas preserves far more detail than periodic monolithic rewrites, which collapse hard-won specifics and cause "context drift." A whole-entry rewrite also discards the entry's `uses`, `contradictions`, and `last_verified` history and severs the supersede audit chain.
+
+When maintaining an entry, pick the **least destructive** operation that resolves the issue, in this strict order:
+
+1. **Counter delta** (`verify` / `contradict`) — mutates only counters; content untouched. Use whenever the question is "is this still right?"
+2. **Supersede** — the default for *any content change* (refined wording, corrected `files` anchors, evolved pattern, changed preference). Atomic, bidirectional, audit-preserving; inherits unspecified fields from the old entry.
+3. **Deprecate** — only when the learning is outright wrong with no replacement, or genuinely obsolete.
+4. **Whole-entry content rewrite** — last resort, only when supersede does not fit, and **only after `compact_preserves_facts` passes**. If the guard rejects, abort and flag for human review.
+
+This is why both primitives above exist: supersede provides the audit-preserving delta, and the compaction guard backstops the rare in-place rewrite. A healthy consolidation pass is supersede- and verify-heavy and deprecate-light; a deprecate-and-re-log-heavy pass is the whole-entry-rewrite anti-pattern in disguise.
 
 ---
 
