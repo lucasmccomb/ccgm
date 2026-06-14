@@ -1,0 +1,19 @@
+{
+  "name": "relevance-injection",
+  "displayName": "Relevance-Scoped Rule Injection",
+  "description": "Opt-in, backward-compatible relevance-scoped rule injection plus a tiered always-on safety core. Off by default: with the flag unset, all rules load exactly as before. When enabled, surfaces a pointer to the task-relevant rule subset while always including the safety core.",
+  "category": "workflow",
+  "scope": ["global"],
+  "status": "beta",
+  "dependencies": ["hooks"],
+  "applicability": { "always": true },
+  "files": {
+    "rules/relevance-injection.md": { "target": "rules/relevance-injection.md", "type": "rule", "template": false },
+    "hooks/relevance-inject.py": { "target": "hooks/relevance-inject.py", "type": "hook", "template": false },
+    "lib/relevance_select.py": { "target": "lib/relevance_select.py", "type": "lib", "template": false },
+    "lib/applicability-schema.json": { "target": "lib/applicability-schema.json", "type": "lib", "template": false },
+    "settings.partial.json": { "target": "settings.json", "type": "settings", "merge": true, "template": false }
+  },
+  "tags": ["rules", "tokens", "context", "safety-core", "opt-in", "session-start"],
+  "configPrompts": []
+}

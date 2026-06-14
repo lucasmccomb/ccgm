@@ -5,6 +5,7 @@
   "category": "tech-specific",
   "scope": ["global", "project"],
   "dependencies": [],
+  "applicability": { "langs": ["typescript", "javascript", "python"], "taskTypes": ["mcp", "backend"] },
   "files": {
     "rules/mcp-development.md": { "target": "rules/mcp-development.md", "type": "rule", "template": false }
   },

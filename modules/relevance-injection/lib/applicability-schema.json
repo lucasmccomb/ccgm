@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ccgm/relevance-injection/applicability-schema.json",
+  "title": "module.json applicability field",
+  "description": "Optional field on a CCGM module.json that scopes when the module's rules are relevant. ABSENT or {\"always\": true} == always applicable (preserves pre-feature behavior where every installed rule loaded unconditionally). This schema documents the field; it is consumed only by the opt-in relevance-injection feature and is ignored by the default install path.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "always": {
+      "type": "boolean",
+      "description": "When true, the module's rules are always surfaced regardless of task profile. Equivalent to omitting the applicability field entirely."
+    },
+    "langs": {
+      "type": "array",
+      "description": "Programming languages / ecosystems this module's rules pertain to. The module is selected when the session's language profile intersects this list. Lowercase, e.g. python, typescript, javascript, ruby, go, rust, css.",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "taskTypes": {
+      "type": "array",
+      "description": "Task categories this module's rules pertain to. The module is selected when the session's task profile intersects this list. Lowercase, e.g. frontend, backend, database, infra, testing, debugging, docs, design.",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    }
+  },
+  "examples": [
+    { "always": true },
+    { "langs": ["python"] },
+    { "taskTypes": ["frontend", "design"] },
+    { "langs": ["typescript", "javascript"], "taskTypes": ["frontend"] }
+  ]
+}
