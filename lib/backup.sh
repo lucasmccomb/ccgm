@@ -16,6 +16,37 @@ backup_base_for() {
   echo "${target_dir%/}/backups"
 }
 
+# --- Ensure a project-scope backups dir is gitignored ---
+# Project-scope backups live inside a project's .claude/backups, which may sit
+# in a git repo. Without this, `git add .` would stage backup snapshots. We drop
+# a self-contained `.gitignore` (containing `*`) inside the backups dir so the
+# whole dir is ignored, scoped exactly to backups and touching nothing else.
+# Global-scope backups (~/.claude/backups) are irrelevant here and skipped.
+# Idempotent: only writes when the marker is absent.
+# Usage: ensure_backups_gitignored "/target/dir"
+ensure_backups_gitignored() {
+  local target_dir="$1"
+
+  # No target means global scope (~/.claude/backups) -> nothing to do.
+  if [ -z "$target_dir" ]; then
+    return 0
+  fi
+
+  local backup_base
+  backup_base=$(backup_base_for "$target_dir")
+
+  # Global scope: backup base equals the home ~/.claude/backups -> skip.
+  if [ "$backup_base" = "${HOME}/.claude/backups" ]; then
+    return 0
+  fi
+
+  local ignore_file="${backup_base}/.gitignore"
+  if [ ! -f "$ignore_file" ]; then
+    mkdir -p "$backup_base"
+    printf '*\n' > "$ignore_file"
+  fi
+}
+
 # --- Create timestamped backup ---
 # Usage: create_backup "/target/dir"
 # Backs up existing config files to <target>/backups/ccgm-YYYYMMDD-HHMMSS/
@@ -58,6 +89,11 @@ create_backup() {
 
   # Create backup directory
   mkdir -p "$backup_dir"
+
+  # For project-scope installs, the backups dir may live inside a git repo.
+  # Drop a .gitignore so snapshots never get accidentally committed (no-op for
+  # global scope). Idempotent across repeated backups.
+  ensure_backups_gitignored "$target_dir"
 
   # Copy existing files
   for p in "${check_paths[@]}"; do
