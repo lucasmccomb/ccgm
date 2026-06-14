@@ -1,0 +1,14 @@
+{
+  "name": "statusline",
+  "displayName": "Statusline",
+  "description": "Compact single-line Claude Code statusline: model + effort, multi-clone identity (.env.clone), dir + git branch, context-used % with a compaction warning, session cost, and 5h/7d rate-limit bars. Installs the script and wires the statusLine setting.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "statusline.sh": { "target": "statusline.sh", "type": "script", "template": false },
+    "settings.partial.json": { "target": "settings.json", "type": "config", "template": false, "merge": true }
+  },
+  "tags": ["statusline", "ui", "context", "cost", "multi-clone"],
+  "configPrompts": []
+}

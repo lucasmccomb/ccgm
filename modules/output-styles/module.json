@@ -1,0 +1,13 @@
+{
+  "name": "output-styles",
+  "displayName": "Output Styles",
+  "description": "Packages the always-on TONE rules (terse communication, autonomous execution, copy-paste formatting) as a Claude Code output style — a system-prompt layer fixed at session start and prompt-cached — instead of always-loaded rules/*.md. Opt-in alternative; does not remove the source rules.",
+  "category": "patterns",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "output-styles/ccgm-terse.md": { "target": "output-styles/ccgm-terse.md", "type": "content", "template": false }
+  },
+  "tags": ["output-style", "tone", "prompt-caching", "tokens"],
+  "configPrompts": []
+}
