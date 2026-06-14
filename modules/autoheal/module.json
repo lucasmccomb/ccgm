@@ -151,6 +151,11 @@
       "type": "lib",
       "template": false
     },
+    "lib/proposal-eval.py": {
+      "target": "lib/proposal-eval.py",
+      "type": "lib",
+      "template": false
+    },
     "lib/analyzer-prompt.md": {
       "target": "lib/analyzer-prompt.md",
       "type": "lib",

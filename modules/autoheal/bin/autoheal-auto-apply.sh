@@ -53,6 +53,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 APPLY_LIB="${MODULE_ROOT}/lib/apply-proposal.py"
+EVAL_LIB="${MODULE_ROOT}/lib/proposal-eval.py"
 
 CONFIG_FILE="${CCGM_AUTOHEAL_CONFIG:-${HOME}/.claude/autoheal/config.json}"
 PROPOSALS_DIR="${CCGM_AUTOHEAL_PROPOSALS_DIR:-${HOME}/.claude/autoheal/proposals}"
@@ -228,6 +229,99 @@ sys.stderr.write(f"evaluated={total} qualified={qualified}\n")
 PY
 }
 
+# ---------------------------------------------------------------------
+# Eval/regression gate (issue #705, epic #659).
+#
+# The structural gate above proves a proposal is the RIGHT SHAPE to
+# auto-apply (high confidence, narrow, settings_allow_add). It does NOT
+# prove the proposal IMPROVES anything. eval_proposal() replays the
+# proposal against a fixed fixture set (tests/fixtures/eval-scenarios.json
+# via lib/proposal-eval.py) and returns 0 only if the proposal resolves
+# >= 1 friction scenario with 0 regressions (no dangerous/guard scenario
+# silently auto-allowed).
+#
+# This is a PRECONDITION layered on top of the structural gate: a proposal
+# must pass BOTH to reach apply-proposal.py. Auto-apply stays off by
+# default (auto_apply_enabled gate, above) — this only narrows what can be
+# promoted once the user has opted in.
+#
+# Deterministic by design (latent-vs-deterministic): the verdict is a
+# pure function of (proposal, fixtures). Same inputs, same answer, every
+# run. If proposal-eval.py is missing we FAIL CLOSED (skip the proposal)
+# rather than promoting un-evaluated changes.
+#
+# Args: $1 = proposal id. Reads the full record from PROPOSALS_FILE.
+# Prints the eval reason on stderr-via-log. Returns:
+#   0  eval passed   -> proposal may proceed to apply
+#   1  eval failed    -> proposal blocked (reason logged)
+#   2  eval error     -> fail closed; proposal blocked (reason logged)
+# ---------------------------------------------------------------------
+
+eval_proposal() {
+    local pid="$1"
+
+    if [ ! -f "${EVAL_LIB}" ]; then
+        log "eval ${pid}: proposal-eval.py missing at ${EVAL_LIB}; failing closed"
+        return 2
+    fi
+
+    # Extract the single proposal record by id, then pipe it to the eval
+    # CLI over stdin. Two python invocations keep the contract clean: the
+    # extractor only knows JSONL, the evaluator only knows one record.
+    local record
+    record="$(python3 - "${PROPOSALS_FILE}" "${pid}" <<'PY'
+import json
+import sys
+
+path, pid = sys.argv[1], sys.argv[2]
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if isinstance(rec, dict) and rec.get("id") == pid:
+                sys.stdout.write(json.dumps(rec))
+                sys.exit(0)
+except OSError:
+    pass
+sys.exit(3)  # not found
+PY
+)"
+    if [ $? -ne 0 ] || [ -z "${record}" ]; then
+        log "eval ${pid}: could not extract proposal record; failing closed"
+        return 2
+    fi
+
+    local eval_out eval_rc reason
+    eval_out="$(printf '%s' "${record}" | python3 "${EVAL_LIB}" - 2>&1)"
+    eval_rc=$?
+
+    # Pull the human-readable reason from the JSON result (best effort).
+    reason="$(printf '%s' "${eval_out}" | python3 -c "
+import json, sys
+try:
+    print(json.loads(sys.stdin.read()).get('reason', ''))
+except Exception:
+    pass
+" 2>/dev/null)"
+
+    if [ "${eval_rc}" -eq 0 ]; then
+        log "eval ${pid}: PASS (${reason:-passed})"
+        return 0
+    elif [ "${eval_rc}" -eq 1 ]; then
+        log "eval ${pid}: BLOCK (${reason:-failed eval})"
+        return 1
+    else
+        log "eval ${pid}: ERROR rc=${eval_rc} (${eval_out}); failing closed"
+        return 2
+    fi
+}
+
 GATE_OUTPUT="$(evaluate_gate 2>&1)"
 # Separate the per-row tab-delimited rows from the trailing stderr counter.
 ROWS="$(printf '%s\n' "${GATE_OUTPUT}" | grep -E '^(QUALIFY|SKIP|BAD_ROW)\t' || true)"
@@ -236,6 +330,7 @@ EVALUATED=0
 QUALIFIED=0
 APPLIED=0
 FAILED=0
+EVAL_BLOCKED=0
 
 while IFS= read -r row; do
     [ -z "${row}" ] && continue
@@ -250,7 +345,20 @@ while IFS= read -r row; do
             ;;
         QUALIFY)
             QUALIFIED=$((QUALIFIED + 1))
-            log "qualify ${pid}: routing to apply-proposal.py"
+
+            # Eval/regression precondition (#705): the structural gate
+            # said the proposal is the right shape; the eval proves it
+            # actually improves the fixture set without regressions.
+            # A proposal must clear BOTH before it reaches apply.
+            eval_proposal "${pid}"
+            eval_rc=$?
+            if [ "${eval_rc}" -ne 0 ]; then
+                EVAL_BLOCKED=$((EVAL_BLOCKED + 1))
+                log "block ${pid}: eval gate rejected (rc=${eval_rc}); not applying"
+                continue
+            fi
+
+            log "qualify ${pid}: eval passed; routing to apply-proposal.py"
 
             # Run apply-proposal.py with source=auto-apply. The library
             # creates branch autoheal/auto/{pid}, applies the diff, runs
@@ -316,7 +424,7 @@ done <<< "${ROWS}"
 # is visible without parsing the per-day file.
 # ---------------------------------------------------------------------
 
-printf 'autoheal-auto-apply: evaluated=%d qualified=%d applied=%d failed=%d (today=%s)\n' \
-    "${EVALUATED}" "${QUALIFIED}" "${APPLIED}" "${FAILED}" "${TODAY}" >&2
+printf 'autoheal-auto-apply: evaluated=%d qualified=%d eval_blocked=%d applied=%d failed=%d (today=%s)\n' \
+    "${EVALUATED}" "${QUALIFIED}" "${EVAL_BLOCKED}" "${APPLIED}" "${FAILED}" "${TODAY}" >&2
 
 exit 0
