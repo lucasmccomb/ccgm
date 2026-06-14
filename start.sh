@@ -7,6 +7,12 @@ set -euo pipefail
 # --- Determine script location ---
 CCGM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# --- Global state (declared up front so write_manifest is safe under set -u) ---
+RESOLVED_MODULES=()
+INSTALLED_FILES=()
+MERGED_FILES=()
+BACKUP_DIRS=()
+
 # --- Source libraries ---
 # shellcheck source=lib/ui.sh
 source "${CCGM_ROOT}/lib/ui.sh"
@@ -30,7 +36,7 @@ write_manifest() {
 
   if command -v jq &>/dev/null; then
     # Build proper JSON with jq
-    local modules_json files_json backups_json
+    local modules_json files_json backups_json merged_json
     modules_json=$(printf '%s\n' "${RESOLVED_MODULES[@]}" | jq -R . | jq -s .)
     if [ ${#INSTALLED_FILES[@]} -gt 0 ]; then
       files_json=$(printf '%s\n' "${INSTALLED_FILES[@]}" | jq -R . | jq -s .)
@@ -42,6 +48,12 @@ write_manifest() {
     else
       backups_json="[]"
     fi
+    # mergedFiles[] entries are already-serialized JSON objects ({target,partial}).
+    if [ ${#MERGED_FILES[@]} -gt 0 ]; then
+      merged_json=$(printf '%s\n' "${MERGED_FILES[@]}" | jq -s 'unique_by(.target + "|" + .partial)')
+    else
+      merged_json="[]"
+    fi
 
     jq -n \
       --arg version "1.0.0" \
@@ -51,6 +63,7 @@ write_manifest() {
       --argjson link "$LINK_MODE" \
       --argjson modules "$modules_json" \
       --argjson files "$files_json" \
+      --argjson merged "$merged_json" \
       --argjson backups "$backups_json" \
       --arg ccgm_root "$CCGM_ROOT" \
       '{
@@ -62,6 +75,7 @@ write_manifest() {
         ccgmRoot: $ccgm_root,
         modules: $modules,
         files: $files,
+        mergedFiles: $merged,
         backups: $backups
       }' > "$manifest_file"
   else
@@ -94,6 +108,7 @@ write_manifest() {
       fi
       echo ""
       echo "  ],"
+      echo "  \"mergedFiles\": [],"
       echo "  \"backups\": ["
       first=true
       local backup
@@ -242,7 +257,10 @@ run_add_mode() {
   done
 
   # --- Execute install plan (mirror of main() Step 11) ---
+  # merge targets (e.g. settings.json) are recorded in MERGED_FILES, NOT
+  # INSTALLED_FILES: uninstall un-merges them rather than deleting the file.
   INSTALLED_FILES=()
+  MERGED_FILES=()
   local entry action src target template mod_name
   for entry in ${install_plan[@]+"${install_plan[@]}"}; do
     IFS='|' read -r action src target template mod_name <<< "$entry"
@@ -250,17 +268,23 @@ run_add_mode() {
     case "$action" in
       merge)
         init_settings "$target"
+        local merged_entry
         if [ "$template" = "true" ]; then
           local tmp_merge
           tmp_merge=$(mktemp)
           cp "$src" "$tmp_merge"
           expand_templates "$tmp_merge" "$env_file"
+          merged_entry=$(record_merged_partial "$target" "$tmp_merge" "$global_dir")
           merge_settings "$target" "$tmp_merge"
           rm -f "$tmp_merge"
         else
+          merged_entry=$(record_merged_partial "$target" "$src" "$global_dir")
           merge_settings "$target" "$src"
         fi
+        [ -n "$merged_entry" ] && MERGED_FILES+=("$merged_entry")
         ui_success "Merged: $target"
+        # Note: NOT added to INSTALLED_FILES (un-merged on uninstall, not deleted).
+        continue
         ;;
       link)
         { [ -e "$target" ] || [ -L "$target" ]; } && rm -f "$target"
@@ -299,8 +323,16 @@ run_add_mode() {
     [ -n "$b" ] && existing_backups+=("$b")
   done < <(jq -r '.backups[]?' "$manifest_file")
 
+  # Preserve any mergedFiles[] already recorded by a prior install/add.
+  local existing_merged=()
+  local mf
+  while IFS= read -r mf; do
+    [ -n "$mf" ] && existing_merged+=("$mf")
+  done < <(jq -c '.mergedFiles[]?' "$manifest_file")
+
   RESOLVED_MODULES=("${existing_modules[@]+"${existing_modules[@]}"}" "${to_install[@]}")
   INSTALLED_FILES=("${existing_files[@]+"${existing_files[@]}"}" "${INSTALLED_FILES[@]+"${INSTALLED_FILES[@]}"}")
+  MERGED_FILES=("${existing_merged[@]+"${existing_merged[@]}"}" "${MERGED_FILES[@]+"${MERGED_FILES[@]}"}")
   BACKUP_DIRS=("${existing_backups[@]+"${existing_backups[@]}"}")
 
   echo ""
@@ -1059,7 +1091,10 @@ main() {
   fi
 
   # Process install plan
+  # merge targets (e.g. settings.json) go into MERGED_FILES, NOT INSTALLED_FILES:
+  # uninstall un-merges the CCGM-contributed keys instead of deleting the file.
   INSTALLED_FILES=()
+  MERGED_FILES=()
 
   local entry action src target template mod_name
   for entry in ${install_plan[@]+"${install_plan[@]}"}; do
@@ -1073,20 +1108,26 @@ main() {
         if [ "$has_jq" = true ]; then
           init_settings "$target"
 
+          local merged_entry
           if [ "$template" = "true" ]; then
             local tmp_merge
             tmp_merge=$(mktemp)
             cp "$src" "$tmp_merge"
             expand_templates "$tmp_merge" "$env_file"
+            merged_entry=$(record_merged_partial "$target" "$tmp_merge" "$global_dir")
             merge_settings "$target" "$tmp_merge"
             rm -f "$tmp_merge"
           else
+            merged_entry=$(record_merged_partial "$target" "$src" "$global_dir")
             merge_settings "$target" "$src"
           fi
+          [ -n "$merged_entry" ] && MERGED_FILES+=("$merged_entry")
           ui_success "Merged: $target"
         else
           ui_warn "Skipped merge (no jq): $target"
         fi
+        # merge targets are never added to INSTALLED_FILES (see note above).
+        continue
         ;;
       link)
         [ -e "$target" ] && rm -f "$target"
