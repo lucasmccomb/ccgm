@@ -1,7 +1,7 @@
 ---
 description: Generate a structured ONBOARDING.md for the current repo from a code inventory. Architecture, dev setup, key commands, test workflow, glossary. Always regenerates from scratch.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep
-argument-hint: [path] [--dry-run]
+argument-hint: "[path] [--dry-run]"
 ---
 
 # /onboarding - Structured ONBOARDING.md Generator

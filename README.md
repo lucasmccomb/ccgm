@@ -23,7 +23,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 64 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 71 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 

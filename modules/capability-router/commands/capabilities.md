@@ -1,7 +1,7 @@
 ---
 description: Print the CCGM capability map - which command/skill to use among overlapping clusters (research, review, planning/execution, debugging, knowledge).
 allowed-tools: Read, Glob, Grep
-argument-hint: [cluster: research | review | plan | debug | knowledge]
+argument-hint: "[cluster: research | review | plan | debug | knowledge]"
 ---
 
 # /capabilities - Which Command Do I Use?

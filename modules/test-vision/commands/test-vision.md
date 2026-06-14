@@ -1,7 +1,7 @@
 ---
 description: Comprehensive e2e test suite generation. Discovers all features, interviews user, generates infrastructure, dispatches parallel /e2e agents.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion
-argument-hint: [--skip-chrome] [--skip-interview]
+argument-hint: "[--skip-chrome] [--skip-interview]"
 ---
 
 # /test-vision - Vision-Driven E2E Test Suite Generation

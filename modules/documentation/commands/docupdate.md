@@ -1,7 +1,7 @@
 ---
 description: Comprehensive documentation audit and update - checks README, docs, TOC, onboarding, packages, and modules against actual codebase state
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, WebSearch, WebFetch, AskUserQuestion
-argument-hint: [--scope readme|docs|toc|onboarding|all] [--dry-run]
+argument-hint: "[--scope readme|docs|toc|onboarding|all] [--dry-run]"
 ---
 
 # /docupdate - Comprehensive Documentation Update
