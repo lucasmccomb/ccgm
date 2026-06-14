@@ -17,8 +17,17 @@ expand_templates() {
   # Load env values
   local home_val="" username_val="" code_dir_val="" log_repo_val="" timezone_val="" default_mode_val=""
 
+  # Per-module placeholders are data-driven: any CCGM_MODULE_* env entry whose
+  # name ends in a __PLACEHOLDER__ token contributes one substitution. The env
+  # name is CCGM_MODULE_<module>__<__PLACEHOLDER__> (see start.sh); the module
+  # segment is irrelevant here, only the trailing __UPPER_SNAKE__ token matters.
+  # Stored as parallel arrays (bash 3.2 has no associative arrays).
+  local module_placeholders=()
+  local module_values=()
+
   if [ -f "$env_file" ]; then
-    # Read all values in a single pass instead of 6 separate grep calls
+    # Read all values in a single pass instead of separate grep calls.
+    local key value placeholder
     while IFS='=' read -r key value; do
       case "$key" in
         CCGM_HOME) home_val="$value" ;;
@@ -27,6 +36,17 @@ expand_templates() {
         CCGM_LOG_REPO) log_repo_val="$value" ;;
         CCGM_TIMEZONE) timezone_val="$value" ;;
         CCGM_DEFAULT_MODE) default_mode_val="$value" ;;
+        CCGM_MODULE_*)
+          # Extract the trailing __UPPER_SNAKE__ token as the placeholder. The
+          # body must start and end with an alphanumeric so the match does not
+          # swallow the __ separator that joins <module> to <__PLACEHOLDER__>
+          # (the key is CCGM_MODULE_<module>____PLACEHOLDER__ - four underscores).
+          placeholder=$(printf '%s' "$key" | grep -oE '__[A-Z0-9]([A-Z0-9_]*[A-Z0-9])?__$' || true)
+          if [ -n "$placeholder" ]; then
+            module_placeholders+=("$placeholder")
+            module_values+=("$value")
+          fi
+          ;;
       esac
     done < "$env_file"
   fi
@@ -47,6 +67,13 @@ expand_templates() {
   log_repo_val="$(_escape_sed_replacement "$log_repo_val")"
   timezone_val="$(_escape_sed_replacement "$timezone_val")"
   default_mode_val="$(_escape_sed_replacement "$default_mode_val")"
+
+  # Escape every per-module value the same way.
+  local _i=0
+  while [ $_i -lt ${#module_values[@]} ]; do
+    module_values[$_i]="$(_escape_sed_replacement "${module_values[$_i]}")"
+    _i=$((_i + 1))
+  done
 
   # Perform replacements using sed
   # Use a different delimiter (|) in case paths contain /
@@ -72,6 +99,16 @@ expand_templates() {
     sed_expr+="s|__TIMEZONE__|${timezone_val}|g;"
   fi
   sed_expr+="s|__DEFAULT_MODE__|${default_mode_val}|g;"
+
+  # Append one substitution per declared per-module placeholder. The placeholder
+  # token is fixed UPPER_SNAKE so it needs no escaping; only the value does
+  # (already escaped above). Empty values are still substituted so the literal
+  # __PLACEHOLDER__ never survives in an installed file.
+  _i=0
+  while [ $_i -lt ${#module_placeholders[@]} ]; do
+    sed_expr+="s|${module_placeholders[$_i]}|${module_values[$_i]}|g;"
+    _i=$((_i + 1))
+  done
 
   # Apply sed in-place
   if [[ "$OSTYPE" == "darwin"* ]]; then

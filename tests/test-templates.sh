@@ -216,6 +216,113 @@ else
 fi
 echo ""
 
+# --- Test 6: Per-module CCGM_MODULE_* placeholder expansion ---
+echo "--- Test 6: Per-module placeholder expansion ---"
+
+# The installer writes per-module config as CCGM_MODULE_<module>__<__PLACEHOLDER__>
+# (note the four underscores joining the module name to the placeholder token).
+# expand_templates must pick these up data-driven and substitute the trailing
+# __PLACEHOLDER__ token.
+cat > "$TMPDIR/module-template.md" << 'TEMPLATE'
+Host: __REMOTE_HOST__
+User: __REMOTE_USER__
+Alias: __REMOTE_ALIAS__
+Home: __HOME__
+TEMPLATE
+
+cat > "$TMPDIR/module.env" << 'ENV'
+CCGM_HOME=/home/testuser
+CCGM_USERNAME=testuser
+CCGM_MODULE_remote-server____REMOTE_HOST__=192.168.1.50
+CCGM_MODULE_remote-server____REMOTE_USER__=deploy
+CCGM_MODULE_remote-server____REMOTE_ALIAS__=home-server
+ENV
+
+expand_templates "$TMPDIR/module-template.md" "$TMPDIR/module.env"
+mod_content=$(cat "$TMPDIR/module-template.md")
+
+if echo "$mod_content" | grep -q "Host: 192.168.1.50"; then
+  pass "__REMOTE_HOST__ replaced from CCGM_MODULE_* entry"
+else
+  fail "__REMOTE_HOST__ not replaced (got: $(echo "$mod_content" | grep Host))"
+fi
+
+if echo "$mod_content" | grep -q "User: deploy"; then
+  pass "__REMOTE_USER__ replaced from CCGM_MODULE_* entry"
+else
+  fail "__REMOTE_USER__ not replaced"
+fi
+
+if echo "$mod_content" | grep -q "Alias: home-server"; then
+  pass "__REMOTE_ALIAS__ replaced from CCGM_MODULE_* entry"
+else
+  fail "__REMOTE_ALIAS__ not replaced"
+fi
+
+# Core placeholders still expand alongside module ones.
+if echo "$mod_content" | grep -q "Home: /home/testuser"; then
+  pass "Core __HOME__ still expands alongside module placeholders"
+else
+  fail "Core __HOME__ not expanded in module template"
+fi
+
+if has_unexpanded_templates "$TMPDIR/module-template.md"; then
+  remaining=$(list_unexpanded_templates "$TMPDIR/module-template.md")
+  fail "Module template has leftover placeholders: $remaining"
+else
+  pass "No leftover __PLACEHOLDER__ after module expansion"
+fi
+echo ""
+
+# --- Test 7: Values with sed-special characters are escaped ---
+echo "--- Test 7: sed-special chars in module values ---"
+
+cat > "$TMPDIR/special-template.md" << 'TEMPLATE'
+Host: __REMOTE_HOST__
+TEMPLATE
+
+# A value containing & (sed match-reference) and | (the sed delimiter).
+cat > "$TMPDIR/special.env" << 'ENV'
+CCGM_MODULE_remote-server____REMOTE_HOST__=a&b|c
+ENV
+
+expand_templates "$TMPDIR/special-template.md" "$TMPDIR/special.env"
+special_content=$(cat "$TMPDIR/special-template.md")
+
+if echo "$special_content" | grep -qF "Host: a&b|c"; then
+  pass "sed-special characters in module value preserved literally"
+else
+  fail "sed-special characters mangled (got: $special_content)"
+fi
+echo ""
+
+# --- Test 8: Unwired placeholder survives (caller can fail on it) ---
+echo "--- Test 8: Unwired module placeholder is detectable ---"
+
+cat > "$TMPDIR/unwired-template.md" << 'TEMPLATE'
+Host: __REMOTE_HOST__
+Token: __SECRET_TOKEN__
+TEMPLATE
+
+# Only one of the two placeholders is wired in the env file.
+cat > "$TMPDIR/unwired.env" << 'ENV'
+CCGM_MODULE_remote-server____REMOTE_HOST__=10.0.0.1
+ENV
+
+expand_templates "$TMPDIR/unwired-template.md" "$TMPDIR/unwired.env"
+
+if has_unexpanded_templates "$TMPDIR/unwired-template.md"; then
+  remaining=$(list_unexpanded_templates "$TMPDIR/unwired-template.md")
+  if [ "$remaining" = "__SECRET_TOKEN__" ]; then
+    pass "Unwired placeholder __SECRET_TOKEN__ correctly survives for detection"
+  else
+    fail "Expected only __SECRET_TOKEN__ leftover, got: $remaining"
+  fi
+else
+  fail "Unwired placeholder was silently consumed (should remain for fail check)"
+fi
+echo ""
+
 # --- Summary ---
 echo "==================================="
 echo "  Results: $PASS passed, $FAIL failed"
