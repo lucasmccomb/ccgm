@@ -61,6 +61,21 @@
       "type": "lib",
       "template": false
     },
+    "lib/hook_dispatcher.py": {
+      "target": "lib/hook_dispatcher.py",
+      "type": "lib",
+      "template": false
+    },
+    "lib/pretooluse_bash_checks.py": {
+      "target": "lib/pretooluse_bash_checks.py",
+      "type": "lib",
+      "template": false
+    },
+    "hooks/pretooluse-bash-dispatch.py": {
+      "target": "hooks/pretooluse-bash-dispatch.py",
+      "type": "hook",
+      "template": false
+    },
     "lib/sched_platform.py": {
       "target": "lib/sched_platform.py",
       "type": "lib",
