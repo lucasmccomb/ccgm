@@ -48,6 +48,14 @@ jobs:
       - name: Audit skill test suite
         run: bash tests/run-audit-suite.sh
 
+      - name: Hooks test suites (dispatcher equivalence + precedence)
+        run: |
+          set -e
+          for t in modules/hooks/tests/*.sh; do
+            echo "=== Running $t ==="
+            bash "$t"
+          done
+
   test-macos:
     runs-on: macos-latest
     steps:
@@ -88,3 +96,11 @@ jobs:
 
       - name: Audit skill test suite
         run: bash tests/run-audit-suite.sh
+
+      - name: Hooks test suites (dispatcher equivalence + precedence)
+        run: |
+          set -e
+          for t in modules/hooks/tests/*.sh; do
+            echo "=== Running $t ==="
+            bash "$t"
+          done
