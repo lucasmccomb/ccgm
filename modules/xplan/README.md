@@ -7,6 +7,7 @@ Interactive deep research + planning + execution framework for new projects. Int
 xplan is a human-in-the-loop planning framework with mandatory confirmation gates throughout:
 
 - **Phase 0** - Parse input, create plan directory
+- **Phase 0.4** - Existing-repo analysis (only with `--repo`): a Source Freshness Guard fetches origin, pins the default-branch anchor SHA, and plans against a temp worktree at that anchor so a stale clone never poisons the plan. Skipped for greenfield.
 - **Phase 0.5** - Discovery interview: confirm core concept, choose research depth
 - **Phase 1** - Deep research via parallel agents (configurable preset: Full / Technical Only / Market & Product / Lite / Custom)
 - **Phase 1.5** - Research review with business viability assessment; confirm to proceed
