@@ -5,6 +5,7 @@
   "category": "tech-specific",
   "scope": ["global", "project"],
   "dependencies": [],
+  "applicability": { "langs": ["sql", "typescript", "javascript"], "taskTypes": ["database", "backend"] },
   "files": {
     "rules/supabase.md": { "target": "rules/supabase.md", "type": "rule", "template": false }
   },

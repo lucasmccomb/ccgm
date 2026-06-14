@@ -5,6 +5,7 @@
   "category": "tech-specific",
   "scope": ["global", "project"],
   "dependencies": [],
+  "applicability": { "langs": ["typescript", "javascript"], "taskTypes": ["frontend", "design"] },
   "files": {
     "rules/shadcn.md": { "target": "rules/shadcn.md", "type": "rule", "template": false }
   },

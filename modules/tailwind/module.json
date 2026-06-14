@@ -5,6 +5,7 @@
   "category": "tech-specific",
   "scope": ["global", "project"],
   "dependencies": [],
+  "applicability": { "langs": ["css", "typescript", "javascript"], "taskTypes": ["frontend", "design"] },
   "files": {
     "rules/tailwind.md": { "target": "rules/tailwind.md", "type": "rule", "template": false },
     "rules/frontend-css.md": { "target": "rules/frontend-css.md", "type": "rule", "template": false }

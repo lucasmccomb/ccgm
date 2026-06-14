@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 69 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 70 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -898,6 +898,23 @@ A compact, dependency-free single-line Claude Code statusline.
 Unlike the statusline script bundled in `commands-utility` (which is never wired to the `statusLine` setting), this module ships the script *and* a settings partial, so `--add statusline` produces a working statusline with no manual `settings.json` editing. It is a superset of that script — it adds clone identity, session cost, and the compaction warning. Depends only on `jq`.
 
 **Dependencies**: None
+
+---
+
+### relevance-injection [BETA]
+
+Opt-in, backward-compatible relevance-scoped rule injection plus a tiered always-on safety core.
+
+**Installs**: `rules/relevance-injection.md`, `hooks/relevance-inject.py`, `lib/relevance_select.py`, `lib/applicability-schema.json`, `settings.partial.json` (SessionStart hook)
+
+**What it does**: Addresses the always-on rule-token load without changing default behavior. Two pieces:
+
+- **Tiered safety core**: an authoritative precedence for the always-on Iron Laws (safety/permissions > confusion protocol > TDD/verification > the rest), so they are tiered rather than nine-way flat. Documentation + metadata only.
+- **Opt-in injection**: when `CCGM_RELEVANCE_INJECTION=true` is set in `~/.claude/.ccgm.env`, a `SessionStart` hook emits an `additionalContext` pointer naming the safety core plus the modules relevant to an optional task profile (`CCGM_RELEVANCE_LANGS`, `CCGM_RELEVANCE_TASKTYPES`). When the flag is unset (the default), the hook no-ops and all rules load exactly as before.
+
+Selection lives in a pure, deterministic, tested library (`relevance_select.py`). Modules may add an optional `applicability` field to their `module.json` (absent or `{"always": true}` == always applicable, preserving pre-feature behavior); otherwise `{"langs": [...]}` / `{"taskTypes": [...]}` scope the module to a profile.
+
+**Dependencies**: hooks
 
 ---
 

@@ -5,6 +5,7 @@
   "category": "tech-specific",
   "scope": ["global", "project"],
   "dependencies": [],
+  "applicability": { "taskTypes": ["infra", "deployment", "backend"] },
   "files": {
     "rules/cloudflare.md": { "target": "rules/cloudflare.md", "type": "rule", "template": false }
   },
