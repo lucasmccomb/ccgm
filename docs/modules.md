@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 67 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 69 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -887,6 +887,20 @@ Visual-ATDD convergence loop: develop UI against a design spec and self-sign-off
 
 ---
 
+### statusline
+
+A compact, dependency-free single-line Claude Code statusline.
+
+**Installs**: `statusline.sh` (script), `settings.partial.json` (wires the `statusLine` setting)
+
+**What it does**: Consumes the statusline JSON Claude Code pipes on stdin and renders, separated by ` | `: model + effort (`🧠 O-4.8 Max`), multi-clone identity (`⛓ agent-2`, read from `.env.clone`), directory + git branch, context-used percentage (`ctx:42%`), a `⚠ COMPACT SOON` warning when ≤15% context remains, session cost (`$1.23`, from `.cost.total_cost_usd`), and 5h/7d rate-limit bars with reset countdowns. Every field is optional — a missing JSON key drops its section, so the bar degrades gracefully on older Claude Code versions.
+
+Unlike the statusline script bundled in `commands-utility` (which is never wired to the `statusLine` setting), this module ships the script *and* a settings partial, so `--add statusline` produces a working statusline with no manual `settings.json` editing. It is a superset of that script — it adds clone identity, session cost, and the compaction warning. Depends only on `jq`.
+
+**Dependencies**: None
+
+---
+
 ## Category: patterns
 
 Reusable development patterns and methodologies.
@@ -1088,6 +1102,20 @@ Discipline for writing skills and slash commands that stay efficient, portable, 
 **Installs**: `rules/skill-authoring.md`
 
 **What it does**: Covers reference-file inclusion (vs. inlining), conditional content extraction, tool selection (when to spawn a subagent vs. handle inline), and writing style for skill markdown. Aimed at avoiding skills that bloat context or hide important behavior in opaque scripts.
+
+**Dependencies**: None
+
+---
+
+### output-styles
+
+Packages CCGM's always-on tone rules as a Claude Code output style instead of always-loaded `rules/*.md`.
+
+**Installs**: `output-styles/ccgm-terse.md` (the `CCGM Terse` output style)
+
+**What it does**: Consolidates three tone-shaping behaviors — terse, action-first communication (`identity`/`soul.md`), autonomous end-to-end execution (`autonomy`), and clean copy-paste output (`output-formatting`) — into a single output style. Claude Code applies output styles as a system-prompt layer **fixed at session start and prompt-cached**, rather than re-sending rule files as conversation context every turn, so stable always-on tone instructions cost fewer tokens there. Select it via `/config`.
+
+The module does **not** delete the source rules; it offers a styled alternative. The tradeoff (cached tokens vs. per-rule granularity and per-repo overrides) is documented in the module README, along with the recommendation to remove the redundant tone rules once the style is selected, to avoid sending the same guidance twice.
 
 **Dependencies**: None
 
