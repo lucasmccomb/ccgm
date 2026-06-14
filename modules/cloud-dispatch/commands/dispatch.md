@@ -44,24 +44,24 @@ gh auth status >/dev/null 2>&1 || { echo "ERROR: gh not authenticated. Run: gh a
 ### Step 3: Check VM Status
 
 ```bash
-source modules/cloud-dispatch/lib/common.sh
-bash modules/cloud-dispatch/lib/vm-status.sh
+source ~/.claude/lib/cloud-dispatch/common.sh
+bash ~/.claude/lib/cloud-dispatch/vm-status.sh
 ```
 
 If no VMs are running, create them:
 ```bash
-bash modules/cloud-dispatch/lib/vm-create.sh $VM_COUNT
+bash ~/.claude/lib/cloud-dispatch/vm-create.sh $VM_COUNT
 ```
 
 If VMs exist, health-check them:
 ```bash
-bash modules/cloud-dispatch/lib/vm-health.sh --all
+bash ~/.claude/lib/cloud-dispatch/vm-health.sh --all
 ```
 
 ### Step 4: Initialize Session Secrets
 
 ```bash
-bash modules/cloud-dispatch/lib/secrets-init.sh
+bash ~/.claude/lib/cloud-dispatch/secrets-init.sh
 ```
 
 Ask the user for their GitHub token if not already configured:
@@ -75,19 +75,19 @@ GITHUB_TOKEN=$(gh auth token)
 
 Then inject secrets to all VMs:
 ```bash
-bash modules/cloud-dispatch/lib/secrets-inject-all.sh --github-token "$GITHUB_TOKEN"
+bash ~/.claude/lib/cloud-dispatch/secrets-inject-all.sh --github-token "$GITHUB_TOKEN"
 ```
 
 ### Step 5: Set Up Workspaces
 
 ```bash
-bash modules/cloud-dispatch/lib/workspace-setup-all.sh "https://github.com/$REPO.git" --issues "$ISSUES"
+bash ~/.claude/lib/cloud-dispatch/workspace-setup-all.sh "https://github.com/$REPO.git" --issues "$ISSUES"
 ```
 
 ### Step 6: Launch Agents
 
 ```bash
-bash modules/cloud-dispatch/lib/agent-launch-all.sh --max-turns $MAX_TURNS --jitter 75
+bash ~/.claude/lib/cloud-dispatch/agent-launch-all.sh --max-turns $MAX_TURNS --jitter 75
 ```
 
 ### Step 7: Report
@@ -97,4 +97,4 @@ Print a summary of what was dispatched:
 - Which issues were assigned to which VM/agent
 - How to check status: "Run /dispatch-status to check progress"
 - How to stop: "Run /dispatch-stop to terminate all agents"
-- Estimated cost: roughly $0.015/hour per cx22 VM (3 VMs = $0.045/hour)
+- Estimated cost: roughly $0.006/hour per cx22 VM (3 VMs = $0.018/hour). For the default ccx63, ~$0.58/hour per VM. See the canonical rate table in `~/.claude/lib/cloud-dispatch/budget-track.sh`.

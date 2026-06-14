@@ -201,6 +201,51 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
 done
 echo ""
 
+# --- Test: Manifest completeness - every shipped lib/command is installed ---
+# Reverse of the check above: ensure no lib/*.sh or commands/*.md sits on disk
+# without a files[] entry, or it silently never installs. Other file types
+# (README.md, terraform/, packer/, tests/) are intentionally not installed.
+echo "--- Checking manifest completeness (lib + commands coverage) ---"
+for mod_dir in "$REPO_ROOT"/modules/*/; do
+  [ ! -d "$mod_dir" ] && continue
+  mod_name=$(basename "$mod_dir")
+  manifest="$mod_dir/module.json"
+  [ ! -f "$manifest" ] && continue
+  jq empty "$manifest" 2>/dev/null || continue
+
+  # Collect declared source paths into a newline-delimited string.
+  declared=$(jq -r '.files | keys[]' "$manifest" 2>/dev/null)
+
+  shipped_count=0
+  missing_count=0
+  for subdir in lib commands; do
+    [ -d "$mod_dir/$subdir" ] || continue
+    # Match shell scripts in lib/, markdown in commands/.
+    if [ "$subdir" = "lib" ]; then
+      pattern="*.sh"
+    else
+      pattern="*.md"
+    fi
+    while IFS= read -r abs_path; do
+      [ -z "$abs_path" ] && continue
+      rel_path="${abs_path#"$mod_dir"}"
+      rel_path="${rel_path#/}"
+      shipped_count=$((shipped_count + 1))
+      if printf '%s\n' "$declared" | grep -qxF "$rel_path"; then
+        :
+      else
+        fail "$mod_name: shipped '$rel_path' is not in module.json files[] (will never install)"
+        missing_count=$((missing_count + 1))
+      fi
+    done < <(find "$mod_dir/$subdir" -maxdepth 1 -type f -name "$pattern" 2>/dev/null)
+  done
+
+  if [ "$shipped_count" -gt 0 ] && [ "$missing_count" -eq 0 ]; then
+    pass "$mod_name: all $shipped_count shipped lib/command file(s) declared in manifest"
+  fi
+done
+echo ""
+
 # --- Test: Dependencies reference real modules ---
 echo "--- Checking dependencies ---"
 for mod_dir in "$REPO_ROOT"/modules/*/; do
