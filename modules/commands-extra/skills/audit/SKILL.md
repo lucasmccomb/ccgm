@@ -103,7 +103,7 @@ Options:
 
 **Question 2** - header: "Execution", question: "How should the audit run?"
 Options:
-1. **Parallel worktrees (Recommended)** - description: "Task agents in isolated git worktrees within this repo. Good balance of depth and speed. Your working directory is never touched."
+1. **Parallel worktrees (Recommended)** - description: "Agents in isolated git worktrees within this repo. Good balance of depth and speed. Your working directory is never touched."
 2. **Single session** - description: "Lightweight read-only subagents in the current session. One subagent per selected pack. Fastest but least thorough."
 3. **Multi-clone** - description: "Agents across sibling clone directories. Deepest analysis with full context per agent. WARNING: Requires all clones to be on clean branches with no active work."
 4. **Manual setup** - description: "Set up worktrees and task files, then output launch commands so you can run each agent yourself in separate terminals."
@@ -681,7 +681,7 @@ PYEOF
 
 ### Phase M5: Launch Audit Workers
 
-**CRITICAL**: Determine which workers have non-empty pack assignments, then launch only those workers — in a SINGLE message with parallel Task tool calls (`subagent_type: "general-purpose"`, `run_in_background: true`).
+**CRITICAL**: Determine which workers have non-empty pack assignments, then launch only those workers — in a SINGLE message with parallel Agent tool calls (`subagent_type: "general-purpose"`, `run_in_background: true`).
 
 ```bash
 # Determine active worker ids
@@ -704,7 +704,7 @@ Display progress summary before launching:
 Running {N} audit workers in parallel...
 ```
 
-**Prompt template for each Task agent (read-only mode):**
+**Prompt template for each agent (read-only mode):**
 
 ```
 You are audit worker {WORKER_ID} performing a READ-ONLY codebase audit using the pack registry.
@@ -1080,7 +1080,7 @@ Notes:
 
 ## Worker Mode: `--worker` (Phases W1-W5)
 
-Run from a worktree (manual mode) or invoked as a Task agent (autonomous mode). Reads its pack-based task file and performs the audit of assigned packs.
+Run from a worktree (manual mode) or invoked as an agent (autonomous mode). Reads its pack-based task file and performs the audit of assigned packs.
 
 ### Phase W1: Self-ID & Task Load
 
@@ -1298,7 +1298,7 @@ wait
 
 ### M5-fix: Worker Prompts Include Fix Instructions
 
-The Task agent prompts are extended with strategy-specific instructions:
+The agent prompts are extended with strategy-specific instructions:
 
 **Worktree strategy** (default `--fix` path):
 ```
@@ -1604,8 +1604,8 @@ Then produce per-pack spine slices using the same slicing logic as Phase M4.
 
 ### Phase 4: Dispatch Read-Only Pack Subagents
 
-Launch **one Task agent per SELECTED pack** (not a fixed 9) in a SINGLE message with parallel
-Task tool calls (`subagent_type: "Explore"`, `run_in_background: true`).
+Launch **one Agent per SELECTED pack** (not a fixed 9) in a SINGLE message with parallel
+Agent tool calls (`subagent_type: "Explore"`, `run_in_background: true`).
 
 For each pack, the subagent receives:
 - The absolute path to the pack's `checks.md` (`$SKILL_ROOT/packs/<pack-dir>/checks.md`)
@@ -1709,8 +1709,8 @@ flag on the specific check. A check is eligible for autonomous fix only when:
 | `.audit/current/` already exists | Coordinator asks: clean start, resume, or cancel. |
 | Worktree already exists | Remove stale worktree first, then create fresh. |
 | Task file missing | Worker errors with message to run `/audit` first. |
-| Task agent times out | Collect proceeds with completed workers, reports incomplete ones. |
-| All Task agents fail | Report failure, suggest `--manual` mode. |
+| Agent times out | Collect proceeds with completed workers, reports incomplete ones. |
+| All agents fail | Report failure, suggest `--manual` mode. |
 | `--single` with `--fix` | Print note: `--single is read-only; --fix ignored`. Proceed read-only. |
 | `--staged` with `--fix` | Print note: `--staged is read-only; --fix ignored`. Proceed read-only. |
 

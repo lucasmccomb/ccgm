@@ -21,7 +21,7 @@ Files installed globally to `~/.claude/`:
 Two consumption patterns:
 
 1. **`/recall` slash command** — fast, deterministic summary / query over the last N days of sessions for the current repo (unified across all clones). Default 7 days. No agent dispatch, no LLM calls.
-2. **`session-historian` agent** — heavier synthesis via Task tool dispatch when you need "what was tried, what failed, what was decided" analysis across platforms (Claude Code + Codex).
+2. **`session-historian` agent** — heavier synthesis via Agent tool dispatch when you need "what was tried, what failed, what was decided" analysis across platforms (Claude Code + Codex).
 
 Use `/recall` for quick lookups. Use the agent when you need the history interpreted, not just listed.
 
@@ -75,7 +75,7 @@ chmod +x ~/.claude/scripts/add-agents-md-symlinks.sh
 
 ### From another skill or command
 
-Dispatch the agent via the Task tool. Pass:
+Dispatch the agent via the Agent tool. Pass:
 
 - A one-paragraph `task_summary` describing the current problem.
 - An optional `time_range` hint (`today`, `this week`, `last month`, ...).

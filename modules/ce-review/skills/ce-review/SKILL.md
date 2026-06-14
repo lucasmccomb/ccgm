@@ -95,7 +95,7 @@ In `autofix`, `report-only`, and `headless` modes, record the scope-drift findin
 
 ## Phase 3: Tiered Reviewer Fan-Out
 
-Dispatch reviewer agents in parallel using the Task tool. Each reviewer returns a JSON array of findings matching `references/finding.schema.yaml`.
+Dispatch reviewer agents in parallel using the Agent tool. Each reviewer returns a JSON array of findings matching `references/finding.schema.yaml`.
 
 ### Always-on reviewers (every run)
 

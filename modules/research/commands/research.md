@@ -17,7 +17,7 @@ For deeper, higher-quality research with a local pipeline, install `/deepresearc
 
 ## Sub-Agent Model Optimization
 
-When spawning research agents (Domain, Technical, Competitive, Adjacent, UX, Data, Monetization, Codebase), set model to **sonnet** in the Agent/Task tool call. Research synthesis and web queries work well on Sonnet. The orchestrator remains on the current model for final synthesis and verification.
+When spawning research agents (Domain, Technical, Competitive, Adjacent, UX, Data, Monetization, Codebase), set model to **sonnet** in the Agent tool call. Research synthesis and web queries work well on Sonnet. The orchestrator remains on the current model for final synthesis and verification.
 
 ---
 
@@ -137,7 +137,7 @@ Pass these targeted sub-questions to each agent instead of (or alongside) the br
 
 ## Phase 2: Spawn Research Agents
 
-Launch the selected research agents in **parallel** using the Task tool. Each agent gets:
+Launch the selected research agents in **parallel** using the Agent tool. Each agent gets:
 1. The topic/concept to research
 2. Its targeted sub-questions from Phase 1.5
 3. The Internet Research Tools reference (below)

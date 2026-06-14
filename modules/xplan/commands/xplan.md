@@ -42,7 +42,7 @@ Specify cheaper models when spawning sub-agents to conserve usage without sacrif
 | Phase 4 | Review agents (security, architecture, business) | sonnet |
 | Phase 7 | Execution agents (epic implementation) | sonnet |
 
-The orchestrator (this session) stays on the current model for all synthesis, architecture, and interactive decisions. Simple background tasks (file checks, directory setup, issue creation) can use haiku if spawned as Task agents.
+The orchestrator (this session) stays on the current model for all synthesis, architecture, and interactive decisions. Simple background tasks (file checks, directory setup, issue creation) can use haiku if spawned as agents.
 
 ---
 
@@ -286,7 +286,7 @@ Wait for explicit selection. Do not auto-select.
 
 ### D.5 Dispatch Targeted Deepening Passes
 
-For each selected candidate, spawn a focused Task agent (model: sonnet) whose entire job is to close that one gap. The agent's brief:
+For each selected candidate, spawn a focused agent (model: sonnet) whose entire job is to close that one gap. The agent's brief:
 
 ```
 You are deepening one section of an existing plan.
@@ -499,9 +499,9 @@ Store the selection for Phase 1.1. Do not re-ask in Phase 1.0.
 
 ### 1.1 Delegate to /deepresearch
 
-Spawn a single Task agent (model: sonnet) that executes the `/deepresearch` skill with the concept, depth selection, plan directory, and repo (if provided).
+Spawn a single agent (model: sonnet) that executes the `/deepresearch` skill with the concept, depth selection, plan directory, and repo (if provided).
 
-The Task agent's prompt should be:
+The agent's prompt should be:
 
 ```
 Read the file ~/.claude/commands/deepresearch.md and follow its instructions exactly.
@@ -523,7 +523,7 @@ SOURCE FRESHNESS — repo facts:
 
 ### 1.2 Verify Research Output
 
-After the Task agent completes:
+After the agent completes:
 
 ```bash
 ls -la ~/code/plans/{concept-name}/research.md
@@ -624,7 +624,7 @@ If yes or "I already have a name":
 
 ### 2.1 Spawn Naming Agent
 
-Launch a Task agent (model: sonnet) that:
+Launch an agent (model: sonnet) that:
 1. Generates 15-25 name candidates based on research and concept
 2. Considers: memorability, brandability, brevity, relevance, uniqueness
 3. Checks for conflicts with existing apps/products (web search)
@@ -999,7 +999,7 @@ options:
 
 ### 4.1 Spawn Review Agents
 
-Launch chosen review agents in parallel using the Task tool (model: sonnet).
+Launch chosen review agents in parallel using the Agent tool (model: sonnet).
 
 1. **Security Review Agent** - Output: `~/code/plans/{concept-name}/reviews/security.md`
 2. **Architecture Review Agent** - Output: `~/code/plans/{concept-name}/reviews/architecture.md`
@@ -1385,7 +1385,7 @@ Read `~/code/plans/{concept-name}/comments.json`. It contains:
 - The "target section" for D.5 is the comment's `section_title` in the comment's `file`.
 - The "gap description" is the comment's `text`.
 - Derive the gap bucket heuristically: ambiguity / pattern / test / tech-assumption based on the comment's wording; default to ambiguity if unclear. This feeds the D.5 agent prompt.
-- Dispatch one Task agent per comment (model: sonnet), in parallel when comments target different sections, serialized when they touch the same section.
+- Dispatch one agent per comment (model: sonnet), in parallel when comments target different sections, serialized when they touch the same section.
 
 After the deepening agents return, integrate their results into plan.md via D.6 **without** re-prompting the user per section (the user already stated their intent in the comment - applying the proposed replacement is the direct implementation of that intent). If a deepening pass produces ambiguous or conflicting output, fall back to D.6's interactive AskUserQuestion for that single comment only.
 
@@ -1601,7 +1601,7 @@ For each wave:
 
 #### 7.3.1 Spawn Agents
 
-Spawn Task agents in parallel (model: sonnet), one per epic, assigned to different clones.
+Spawn agents in parallel (model: sonnet), one per epic, assigned to different clones.
 
 #### 7.3.2 Agent Work Loop
 

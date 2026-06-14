@@ -353,7 +353,7 @@ For repos with >12 feature domains, split into two dispatch waves of 6-8 agents 
 
 ### 4.3 Dispatch Agents
 
-For each feature domain, spawn a Task agent (model: sonnet) with the following prompt:
+For each feature domain, spawn an agent (model: sonnet) with the following prompt:
 
 ```
 Read the file ~/.claude/commands/e2e.md and follow its instructions exactly.

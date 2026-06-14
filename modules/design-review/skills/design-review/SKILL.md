@@ -104,7 +104,7 @@ JSON.stringify(results, null, 2)
 
 ### Step 3: Run Parallel Analysis Passes
 
-Launch **6 Task agents in parallel** (single message, all `subagent_type: "Explore"`, `run_in_background: true`). Each agent receives the CSS source, computed styles JSON, and DOM structure extract. They analyze from one design lens.
+Launch **6 agents in parallel** (single message, all `subagent_type: "Explore"`, `run_in_background: true`). Each agent receives the CSS source, computed styles JSON, and DOM structure extract. They analyze from one design lens.
 
 Include the collected data directly in each agent's prompt (not file paths).
 

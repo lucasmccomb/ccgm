@@ -1,6 +1,6 @@
 # Subagent Patterns
 
-Methodology for decomposing work and delegating to subagents (Task tool) effectively.
+Methodology for decomposing work and delegating to subagents (Agent tool) effectively.
 
 ## When to Use Subagents
 

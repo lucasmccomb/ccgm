@@ -40,7 +40,7 @@ Use TaskList to see active background tasks the agent owns. For each running tas
 - If it's stalled or long-running, report it and ask once: "Background task `<id>` is still running. Wait, kill, or leave it?"
 - If nothing is running, say so in one line and move on.
 
-Sub-agents spawned via the Task tool that have already returned are out of scope — they don't need shutdown. Only `run_in_background` work and persistent background shells matter here.
+Sub-agents spawned via the Agent tool that have already returned are out of scope — they don't need shutdown. Only `run_in_background` work and persistent background shells matter here.
 
 ### Phase 2 — Working tree commit
 
