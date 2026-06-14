@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Unified code-review orchestrator. Composes scope-drift, learnings-researcher, tiered reviewer personas (correctness, testing, maintainability, project-standards + conditional security, performance, reliability, api-contract, data-migrations), and an adversarial/red-team lens that runs AFTER the specialists with access to their findings. Confidence-gated autofix routing with safe_auto / gated_auto / manual / advisory classes. Modes - interactive / autofix / report-only / headless.",
+  "displayName": "CE Review Orchestrator",
+  "keywords": [
+    "adversarial",
+    "autofix",
+    "confidence",
+    "orchestrator",
+    "pr",
+    "red-team",
+    "review",
+    "tiered"
+  ],
+  "license": "MIT",
+  "name": "ce-review"
+}

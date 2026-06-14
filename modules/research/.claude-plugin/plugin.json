@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/research - multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, and Reddit. Zero external dependencies. For deeper research backed by Exa neural search, see the deepresearch module.",
+  "displayName": "Research",
+  "keywords": [
+    "commands",
+    "research",
+    "web-search"
+  ],
+  "license": "MIT",
+  "name": "research"
+}

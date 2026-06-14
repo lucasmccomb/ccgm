@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Packages the always-on TONE rules (terse communication, autonomous execution, copy-paste formatting) as a Claude Code output style — a system-prompt layer fixed at session start and prompt-cached — instead of always-loaded rules/*.md. Opt-in alternative; does not remove the source rules.",
+  "displayName": "Output Styles",
+  "keywords": [
+    "output-style",
+    "prompt-caching",
+    "tokens",
+    "tone"
+  ],
+  "license": "MIT",
+  "name": "output-styles"
+}

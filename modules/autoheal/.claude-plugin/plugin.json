@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Captures permission events, tool failures, and user-correction signals; runs a daily analyzer via direct Anthropic API call; produces a local digest + opt-in Resend email; opt-in real-time security alerts and opt-in confidence-gated auto-apply. Cross-clone-safe via fcntl file locks. Webhook publisher seam is dormant by default.",
+  "displayName": "Autoheal: Self-Healing Observability Loop",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "autoheal",
+    "hooks",
+    "jsonl",
+    "observability",
+    "permissions",
+    "self-healing",
+    "telemetry"
+  ],
+  "license": "MIT",
+  "name": "autoheal"
+}

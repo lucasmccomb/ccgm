@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 70 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 71 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 

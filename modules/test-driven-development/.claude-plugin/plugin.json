@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Strict red-green-refactor TDD discipline. No production code without a failing test first. Enforces test-first methodology for all new features and bug fixes.",
+  "displayName": "Test-Driven Development",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "methodology",
+    "red-green-refactor",
+    "tdd",
+    "testing"
+  ],
+  "license": "MIT",
+  "name": "test-driven-development"
+}

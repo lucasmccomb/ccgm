@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Code standards, testing requirements, error handling patterns, security practices, build verification, and living documents maintenance.",
+  "displayName": "Code Quality Standards",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "code-quality",
+    "security",
+    "standards",
+    "testing"
+  ],
+  "license": "MIT",
+  "name": "code-quality"
+}

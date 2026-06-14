@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Plain-text /startup dashboard for Claude Code sessions. Surfaces git state, live sessions, tracking.csv claims, and recent activity (via session-history /recall). No agent-log writes; session transcripts are captured by Claude Code natively.",
+  "displayName": "Startup Dashboard",
+  "keywords": [
+    "dashboard",
+    "session",
+    "startup"
+  ],
+  "license": "MIT",
+  "name": "startup-dashboard"
+}

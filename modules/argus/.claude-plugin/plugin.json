@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/argus - a closed-loop visual-ATDD harness where the agent develops UI against a per-feature design spec and signs off on its own work (functional AND visual) by grounding every judgment in deterministic gates plus a SEPARATE judge subagent that scores the render against the spec, a reference image, and the design system — never the diff. Loops to two consecutive passes, then commits a snapshot baseline. Platform-agnostic via a pluggable sensor+gates adapter (web built in; iOS/macOS via a project adapter). Ships the loop skill, the argus-judge agent, the spec/verdict/gate/rubric schemas, six dependency-free deterministic gate scripts, and an adapter-authoring contract.",
+  "displayName": "Argus: Visual-ATDD Convergence Loop",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "accessibility",
+    "anti-reward-hacking",
+    "argus",
+    "convergence-loop",
+    "design",
+    "judge",
+    "orchestrator",
+    "snapshot",
+    "visual-atdd",
+    "wcag"
+  ],
+  "license": "MIT",
+  "name": "argus"
+}

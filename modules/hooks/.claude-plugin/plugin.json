@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Python hooks that enforce git workflow rules: issue-first workflow, commit message format, branch protection, and auto-approval for file operations.",
+  "displayName": "Git Workflow Hooks",
+  "keywords": [
+    "auto-approve",
+    "git",
+    "hooks",
+    "workflow"
+  ],
+  "license": "MIT",
+  "name": "hooks"
+}

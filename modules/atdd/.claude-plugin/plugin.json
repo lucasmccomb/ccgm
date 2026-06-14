@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Spec-driven development where E2E vision specs define target behavior. /atdd reads Playwright specs, iteratively builds app code until all tests pass, then ships.",
+  "displayName": "Agentic Test-Driven Development",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "development",
+    "e2e",
+    "playwright",
+    "tdd",
+    "testing"
+  ],
+  "license": "MIT",
+  "name": "atdd"
+}

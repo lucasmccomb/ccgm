@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Structured session shutdown via /sds. Autonomous wrap-up sweep: commit dirty work, update referenced issues, run /reflect, write a handoff, broadcast to sibling clones. Complements /startup at the other end of the session.",
+  "displayName": "Session Lifecycle",
+  "keywords": [
+    "handoff",
+    "session",
+    "shutdown",
+    "workflow"
+  ],
+  "license": "MIT",
+  "name": "session-lifecycle"
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Solo-agent worktree-based isolation for feature work. Lighter alternative to multi-clone setup when only one agent is active.",
+  "displayName": "Git Worktrees",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "git",
+    "isolation",
+    "workflow",
+    "worktree"
+  ],
+  "license": "MIT",
+  "name": "git-worktrees"
+}

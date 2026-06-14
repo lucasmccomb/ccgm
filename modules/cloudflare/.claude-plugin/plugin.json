@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Cloudflare-specific rules: Pages vs Workers selection, deployment methods, Git integration requirements.",
+  "displayName": "Cloudflare Rules",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "cloudflare",
+    "deployment",
+    "pages",
+    "workers"
+  ],
+  "license": "MIT",
+  "name": "cloudflare"
+}

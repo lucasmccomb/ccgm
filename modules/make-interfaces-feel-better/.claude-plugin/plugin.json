@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Design-engineering details that compound into polished interfaces. Model-invoked skill with references on design direction (aesthetic identity, typeface/color/spacing choices, avoiding generic AI aesthetics), typography (text-wrap, tabular nums, font smoothing), surfaces (concentric radii, shadows over borders, optical alignment, image outlines), animations (interruptible transitions, enter/exit, icon micro-interactions), and performance (transition specificity, will-change).",
+  "displayName": "Make Interfaces Feel Better",
+  "keywords": [
+    "aesthetics",
+    "animation",
+    "color",
+    "css",
+    "design",
+    "frontend",
+    "micro-interactions",
+    "typography",
+    "ui"
+  ],
+  "license": "MIT",
+  "name": "make-interfaces-feel-better"
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Evidence-before-claims methodology. Requires fresh execution of verification commands, reading full output, and confirming results before asserting completion.",
+  "displayName": "Verification Before Completion",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "completion",
+    "evidence",
+    "quality",
+    "verification"
+  ],
+  "license": "MIT",
+  "name": "verification"
+}

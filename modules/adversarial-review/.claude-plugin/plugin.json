@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/adrev - adversarial review of a plan or any entity (file, doc, PR, issue, directory, or stated concept). Dispatches a separate adrev-reviewer agent that attacks premises, hunts failure modes, and steelmans the case against. Plan targets get findings incorporated into the plan automatically unless told not to; all other targets get a report.",
+  "displayName": "Adversarial Review",
+  "keywords": [
+    "adversarial",
+    "planning",
+    "quality-gate",
+    "red-team",
+    "review"
+  ],
+  "license": "MIT",
+  "name": "adversarial-review"
+}

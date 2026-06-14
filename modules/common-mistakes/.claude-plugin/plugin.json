@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "8 battle-tested anti-patterns to avoid: shallow directory exploration, dependency blindness, ESLint Fast Refresh, and more.",
+  "displayName": "Common Mistakes",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "anti-patterns",
+    "best-practices",
+    "debugging",
+    "mistakes"
+  ],
+  "license": "MIT",
+  "name": "common-mistakes"
+}

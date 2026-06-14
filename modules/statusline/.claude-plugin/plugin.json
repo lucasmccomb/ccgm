@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Compact single-line Claude Code statusline: model + effort, multi-clone identity (.env.clone), dir + git branch, context-used % with a compaction warning, session cost, and 5h/7d rate-limit bars. Installs the script and wires the statusLine setting.",
+  "displayName": "Statusline",
+  "keywords": [
+    "context",
+    "cost",
+    "multi-clone",
+    "statusline",
+    "ui"
+  ],
+  "license": "MIT",
+  "name": "statusline"
+}

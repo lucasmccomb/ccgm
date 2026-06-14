@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/design-review - visual design review for web pages. Screenshots at 3 viewports, 6 parallel analysis passes: spacing, typography, responsive, visual hierarchy, accessibility, component consistency. Scored report with optional auto-fix.",
+  "displayName": "Design Review",
+  "keywords": [
+    "accessibility",
+    "commands",
+    "css",
+    "design",
+    "frontend",
+    "review"
+  ],
+  "license": "MIT",
+  "name": "design-review"
+}

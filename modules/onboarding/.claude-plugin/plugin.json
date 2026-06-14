@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/onboarding - analyzes a repository and generates a structured ONBOARDING.md (architecture, dev setup, key commands, test workflow, glossary). Runs an inventory script to build a language-aware structural map, reads only the files that map surfaces, and writes prose with strict voice rules so the output reads like a knowledgeable teammate rather than generated documentation.",
+  "displayName": "Onboarding Generator",
+  "keywords": [
+    "command",
+    "documentation",
+    "inventory",
+    "onboarding",
+    "skill"
+  ],
+  "license": "MIT",
+  "name": "onboarding"
+}

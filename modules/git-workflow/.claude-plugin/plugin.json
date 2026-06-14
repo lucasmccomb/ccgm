@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Git workflow rules: sync before history changes, rebase by default, post-merge cleanup, PR template detection, no AI attribution in commits.",
+  "displayName": "Git Workflow",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "branching",
+    "git",
+    "pr",
+    "workflow"
+  ],
+  "license": "MIT",
+  "name": "git-workflow"
+}

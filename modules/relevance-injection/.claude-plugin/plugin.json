@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Opt-in, backward-compatible relevance-scoped rule injection plus a tiered always-on safety core. Off by default: with the flag unset, all rules load exactly as before. When enabled, surfaces a pointer to the task-relevant rule subset while always including the safety core.",
+  "displayName": "Relevance-Scoped Rule Injection",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "context",
+    "opt-in",
+    "rules",
+    "safety-core",
+    "session-start",
+    "tokens"
+  ],
+  "license": "MIT",
+  "name": "relevance-injection"
+}

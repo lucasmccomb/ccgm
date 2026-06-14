@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Slash commands for brand naming research: /brand (full naming pipeline with word exploration, domain/trademark/app store checks) and /brand-check (single-name deep verification). Optionally adds Instant Domain Search MCP server for fast domain availability checks.",
+  "displayName": "Brand Naming Research",
+  "keywords": [
+    "branding",
+    "commands",
+    "domains",
+    "naming",
+    "research"
+  ],
+  "license": "MIT",
+  "name": "brand-naming"
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Two foundational context files that give Claude Code a persistent identity: soul.md (AI personality and philosophy) and human-context.md (who you are, your goals, and how you work).",
+  "displayName": "Identity & Context",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "context",
+    "identity",
+    "personality",
+    "soul"
+  ],
+  "license": "MIT",
+  "name": "identity"
+}

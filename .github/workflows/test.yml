@@ -21,6 +21,12 @@ jobs:
       - name: Check doc counts + preset coverage
         run: bash tests/test-doc-counts.sh
 
+      - name: Plugin marketplace in sync (generator --check)
+        run: python3 modules/plugin-marketplace/lib/gen_marketplace.py --check
+
+      - name: Validate plugin marketplace + manifests
+        run: python3 modules/plugin-marketplace/lib/validate_marketplace.py
+
       - name: Personal-data detector self-test
         run: bash tests/test-no-personal-data.sh --self-test
 
@@ -52,6 +58,12 @@ jobs:
 
       - name: Check doc counts + preset coverage
         run: bash tests/test-doc-counts.sh
+
+      - name: Plugin marketplace in sync (generator --check)
+        run: python3 modules/plugin-marketplace/lib/gen_marketplace.py --check
+
+      - name: Validate plugin marketplace + manifests
+        run: python3 modules/plugin-marketplace/lib/validate_marketplace.py
 
       - name: Personal-data detector self-test
         run: bash tests/test-no-personal-data.sh --self-test

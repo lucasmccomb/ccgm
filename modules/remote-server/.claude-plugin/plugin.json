@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "SSH access to a remote server. Adds /onremote command for health checks and remote command execution. Delegates to Haiku.",
+  "displayName": "Remote Server",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "infrastructure",
+    "remote",
+    "server",
+    "ssh"
+  ],
+  "license": "MIT",
+  "name": "remote-server"
+}

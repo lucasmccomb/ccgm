@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Rule and template for shipping machine-readable docs alongside human docs. Any project an agent will install, build, test, deploy, or debug should have an AGENTS.md with copy-pasteable command blocks — not prose, not dashboard instructions.",
+  "displayName": "Docs for Agents (AGENTS.md)",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "AGENTS.md",
+    "agents",
+    "documentation",
+    "dx",
+    "llms.txt"
+  ],
+  "license": "MIT",
+  "name": "docs-for-agents"
+}

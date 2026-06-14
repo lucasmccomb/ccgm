@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Delegate Claude Code agent work to Hetzner Cloud VMs. Provides golden image pipeline, VM lifecycle management, secret injection, workspace provisioning, and /dispatch command for one-command multi-agent dispatch.",
+  "displayName": "Cloud Dispatch",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "agents",
+    "cloud",
+    "dispatch",
+    "hetzner",
+    "infrastructure",
+    "packer"
+  ],
+  "license": "MIT",
+  "name": "cloud-dispatch"
+}

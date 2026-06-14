@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/editorial-critique - deep editorial review of long-form writing. 8 parallel analysis passes: prose craft, AI-tell detection, argument architecture, conciseness, data verification, structure, impact, grammar. Scored report with optional auto-fix.",
+  "displayName": "Editorial Critique",
+  "keywords": [
+    "commands",
+    "editing",
+    "prose",
+    "review",
+    "writing"
+  ],
+  "license": "MIT",
+  "name": "editorial-critique"
+}

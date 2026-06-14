@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Experimental UserPromptSubmit hook that injects a compact preamble of iron-law principles (Confusion Protocol, Completeness, Evidence Before Claims, Root Cause Before Fix) at the start of slash-command invocations. Opt-in, disabled by default.",
+  "displayName": "Command Preamble Injection (Experimental)",
+  "keywords": [
+    "commands",
+    "experimental",
+    "hooks",
+    "preamble",
+    "principles"
+  ],
+  "license": "MIT",
+  "name": "commands-preamble"
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Team-shared learnings in docs/solutions/. After solving a non-trivial problem, /compound writes a structured markdown doc with YAML frontmatter that later /xplan and /review runs re-inject as grounding. Counterpart to self-improving's personal MEMORY.md.",
+  "displayName": "Compound Knowledge",
+  "keywords": [
+    "compound",
+    "docs-solutions",
+    "knowledge",
+    "learnings",
+    "planning",
+    "review",
+    "team"
+  ],
+  "license": "MIT",
+  "name": "compound-knowledge"
+}
