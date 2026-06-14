@@ -66,7 +66,7 @@ chmod +x ~/.claude/scripts/add-agents-md-symlinks.sh
 /recall                     # Last 7 days, current repo, all clones, summary
 /recall migration           # Last 7 days, filter turns by "migration"
 /recall --days 30 auth      # Custom window + filter
-/recall --repo voxter       # Different repo (canonical name required)
+/recall --repo other-repo   # Different repo (canonical name required)
 /recall --session 65b57a04  # Dump a specific session
 /recall --summary --limit 3 # Top 3 most recent sessions, compact format
 ```
@@ -89,7 +89,7 @@ Ask directly in a session:
 
 ```
 Dispatch the session-historian agent. Find out what I tried when I
-debugged the Vite CSS preflight issue in habitpro-ai this past week.
+debugged the Vite CSS preflight issue in my-app this past week.
 ```
 
 ### Scripts directly
@@ -98,12 +98,12 @@ The discovery and metadata scripts are usable on their own if you want to inspec
 
 ```bash
 # List Claude Code + Codex sessions for this repo from the last 7 days
-bash ~/.claude/scripts/discover-sessions.sh habitpro-ai 7
+bash ~/.claude/scripts/discover-sessions.sh my-app 7
 
 # Get metadata for all of them in one pipeline
-bash ~/.claude/scripts/discover-sessions.sh habitpro-ai 7 \
+bash ~/.claude/scripts/discover-sessions.sh my-app 7 \
   | tr '\n' '\0' \
-  | xargs -0 python3 ~/.claude/scripts/extract-metadata.py --cwd-filter habitpro-ai
+  | xargs -0 python3 ~/.claude/scripts/extract-metadata.py --cwd-filter my-app
 ```
 
 Output is one JSON object per session plus a final `_meta` line with `files_processed` and `parse_errors` counts.
@@ -136,4 +136,4 @@ This module does **not**:
 
 ## Source
 
-Ported from EveryInc/compound-engineering-plugin's `agents/research/session-historian.md` and companion `session-history-scripts/`. The CCGM port drops Cursor (Lucas does not use Cursor), folds skeleton/error extraction back into the agent itself (using native Read + Grep rather than additional Python scripts - keeping the surface minimal), and uses absolute `~/.claude/scripts/` paths matching CCGM's install convention rather than the plugin-relative paths the original assumes.
+Ported from EveryInc/compound-engineering-plugin's `agents/research/session-historian.md` and companion `session-history-scripts/`. The CCGM port drops Cursor (out of scope for the typical CCGM workflow), folds skeleton/error extraction back into the agent itself (using native Read + Grep rather than additional Python scripts - keeping the surface minimal), and uses absolute `~/.claude/scripts/` paths matching CCGM's install convention rather than the plugin-relative paths the original assumes.

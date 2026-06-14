@@ -20,7 +20,7 @@ It does NOT maintain a separate index or database — transcripts are the source
 | `/recall <query>` | Last 7 days, filtered to turns matching `<query>` (case-insensitive regex) |
 | `/recall --days N` | Custom time window |
 | `/recall --days N <query>` | Custom window + query filter |
-| `/recall --repo <name>` | Different repo. Pass the canonical name (e.g. `ccgm`, `habitpro-ai`) as returned by `git remote get-url origin` — substring matching is NOT supported |
+| `/recall --repo <name>` | Different repo. Pass the canonical name (e.g. `ccgm`, `my-multi-word-repo`) as returned by `git remote get-url origin` — substring matching is NOT supported |
 | `/recall --summary` | Force summary mode even when a query is given |
 | `/recall --full <query>` | Do not truncate matched turn content |
 | `/recall --limit N` | Maximum sessions/results to display (default 50) |
@@ -32,7 +32,7 @@ It does NOT maintain a separate index or database — transcripts are the source
 /recall                       # What have I been doing in this repo this week?
 /recall migration             # What did I try with that migration?
 /recall --days 30 auth        # Broader lookback on auth work
-/recall --repo voxter         # Switch to voxter sessions
+/recall --repo other-repo     # Switch to another repo's sessions
 /recall --session 65b57a04    # Read a specific session
 ```
 
