@@ -21,6 +21,9 @@ jobs:
       - name: Check doc counts + preset coverage
         run: bash tests/test-doc-counts.sh
 
+      - name: Validate command/skill/agent frontmatter YAML
+        run: bash tests/test-frontmatter-yaml.sh
+
       - name: Plugin marketplace in sync (generator --check)
         run: python3 modules/plugin-marketplace/lib/gen_marketplace.py --check
 
@@ -58,6 +61,9 @@ jobs:
 
       - name: Check doc counts + preset coverage
         run: bash tests/test-doc-counts.sh
+
+      - name: Validate command/skill/agent frontmatter YAML
+        run: bash tests/test-frontmatter-yaml.sh
 
       - name: Plugin marketplace in sync (generator --check)
         run: python3 modules/plugin-marketplace/lib/gen_marketplace.py --check

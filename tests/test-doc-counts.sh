@@ -70,8 +70,49 @@ $current"
 check_count_claim "CLAUDE.md"               "It contains __N__ modules"          "$MODULE_COUNT"
 check_count_claim "CLAUDE.md"               "# __N__ self-contained modules"     "$MODULE_COUNT"
 check_count_claim "README.md"               "all __N__ modules"                  "$MODULE_COUNT"
+check_count_claim "README.md"               "collection of __N__ configuration modules" "$MODULE_COUNT"
 check_count_claim "docs/modules.md"         "CCGM contains __N__ modules"        "$MODULE_COUNT"
 check_count_claim "docs/getting-started.md" "all __N__ modules"                  "$MODULE_COUNT"
+
+# --- (a2) generic stale-count phrasings anywhere in tracked docs -------------
+# Catch the "N configuration modules" and "collection of N ... modules" classes
+# regardless of which doc they appear in, so a wrong number cannot slip in via a
+# phrasing the explicit list above does not cover. Any match whose number is NOT
+# the derived MODULE_COUNT fails.
+check_no_wrong_count_phrasing() {
+  local label="$1"
+  shift
+  local regex="$1"
+  local found_wrong=0
+  local matches
+  # -R over the docs we ship; -n for line numbers; -E for extended regex.
+  # Limit to Markdown docs at the repo root and under docs/ to avoid scanning
+  # module bodies that legitimately discuss arbitrary counts.
+  matches=$(grep -REn "$regex" README.md CLAUDE.md docs 2>/dev/null || true)
+  if [ -z "$matches" ]; then
+    ok "no '$label' phrasing present (nothing to drift)"
+    return
+  fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    # Extract the first integer that the phrasing wraps.
+    n=$(printf '%s' "$line" | grep -oE "$regex" | grep -oE '[0-9]+' | head -1)
+    if [ -n "$n" ] && [ "$n" != "$MODULE_COUNT" ]; then
+      fail "stale '$label' count ($n, expected $MODULE_COUNT): $line"
+      found_wrong=1
+    fi
+  done <<EOF
+$matches
+EOF
+  if [ "$found_wrong" -eq 0 ]; then
+    ok "all '$label' phrasings use $MODULE_COUNT"
+  fi
+}
+
+check_no_wrong_count_phrasing "N configuration modules" \
+  '[0-9]+ configuration modules'
+check_no_wrong_count_phrasing "collection of N ... modules" \
+  'collection of [0-9]+ [a-zA-Z]+ modules'
 
 # --- (b) full preset count claim in docs -----------------------------------
 check_count_claim "README.md"               "**full** | __N__ modules"           "$FULL_PRESET_COUNT"

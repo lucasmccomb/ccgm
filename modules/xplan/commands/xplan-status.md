@@ -1,7 +1,7 @@
 ---
 description: Check progress on a running or completed xplan
 allowed-tools: Agent
-argument-hint: [plan-name]
+argument-hint: "[plan-name]"
 ---
 
 # xplan-status - Plan Progress Dashboard
