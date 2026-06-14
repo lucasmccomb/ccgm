@@ -4,7 +4,7 @@ Python hooks that enforce git workflow rules: issue-first workflow, commit messa
 
 ## What It Does
 
-This module installs fourteen Python hooks, two Python libraries, and a settings partial:
+This module installs fifteen Python hooks, several Python libraries, and a settings partial:
 
 | Hook | Event | Purpose |
 |------|-------|---------|
@@ -96,6 +96,57 @@ CCGM_RULE_ENFORCEMENT=true
 
 On fresh session start, the hook injects a short reminder that routes tasks through loaded Iron-Law rules (TDD, systematic-debugging, verification, subagent-patterns, confusion-protocol). Remove or set to `false` to disable.
 
+## Hook Composition Dispatcher (opt-in)
+
+A single PreToolUse:Bash event currently fans out into six separate Python
+processes (`enforce-git-workflow` → `auto-approve-bash` → `port-check` →
+`agent-tracking-pre` → `check-migration-timestamps` → `check-careful`), each
+re-importing `hook_utils` and re-parsing stdin. Precedence is an emergent
+property of array order across several modules that do not know about each
+other.
+
+`hooks/pretooluse-bash-dispatch.py` is a **backward-compatible** alternative:
+one in-process dispatcher that runs the same checks via a **declarative
+manifest** (priority + tool-matcher + handler) with an explicit precedence
+contract:
+
+```
+hard_block (exit 2)  >  deny  >  allow  >  ask  >  advisory / pass
+```
+
+- The first `hard_block` wins and is emitted via `hook_utils.hard_block()`
+  (exit 2) — the only signal that survives bypass mode (GitHub #39344).
+- `deny` beats any `allow`; `allow` beats `ask`.
+- The curated destructive set and the git-reset smart-rule are `short_circuit`
+  checks: they emit the instant they fire, so nothing can soften them.
+- Bypass-suppressible checks (pattern matching, the destructive-prompt `ask`,
+  advisory warnings) declare `runs_in_bypass=False` and are skipped in bypass
+  mode — exactly as the standalone hooks exit early when `is_bypass_mode()` is
+  true.
+
+The handlers (`lib/pretooluse_bash_checks.py`) call the **same pure functions**
+the legacy hooks use, so the dispatched path and the legacy path share one
+source of truth. `modules/hooks/tests/test-dispatcher.sh` proves the dispatcher
+produces an identical final decision to the six-process chain across a command
+battery × all four permission modes (`equivalence_harness.py`).
+
+**This is opt-in and additive.** The default `settings.partial.json` keeps the
+legacy per-process chain. To migrate a deployment, replace the six
+PreToolUse:Bash entries in `settings.json` with a single entry:
+
+```json
+{
+  "matcher": "Bash",
+  "hooks": [
+    { "type": "command",
+      "command": "python3 $HOME/.claude/hooks/pretooluse-bash-dispatch.py",
+      "timeout": 5000 }
+  ]
+}
+```
+
+Both mechanisms coexist; nothing forces the migration.
+
 ## Files
 
 | File | Description |
@@ -114,6 +165,9 @@ On fresh session start, the hook injects a short reminder that routes tasks thro
 | `hooks/check-freeze.py` | Scope-lock Edit/Write to `~/.claude/freeze-dir.txt` (freeze safety hook) |
 | `hooks/session-start-enforce.py` | Experimental Iron-Law rule-enforcement meta-instruction at session start (opt in via `CCGM_RULE_ENFORCEMENT=true`) |
 | `hooks/sync-ccgm-canonical.py` | Auto-pull `~/code/ccgm` after CCGM PR merges so symlinked runtime never drifts (override path via `CCGM_CANONICAL_DIR`) |
+| `hooks/pretooluse-bash-dispatch.py` | Opt-in single-process composition dispatcher for the PreToolUse:Bash chain (declarative precedence; backward-compatible with the six-process chain) |
+| `lib/hook_dispatcher.py` | Composition engine: declarative `Manifest`/`Check`/`Result` model + `dispatch()` precedence resolution (hard_block > deny > allow > ask) |
+| `lib/pretooluse_bash_checks.py` | Dispatcher handlers wrapping the legacy PreToolUse:Bash hooks' pure functions into the `Result` contract |
 | `lib/agent_tracking.py` | Python library for tracking CSV operations |
 | `lib/agent_sessions.py` | Python library for live session detection |
 | `settings.partial.json` | Hook wiring configuration to merge into settings.json |
