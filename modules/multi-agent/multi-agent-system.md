@@ -116,7 +116,7 @@ The coordinator agent runs in the workspace directory (e.g., `~/code/myrepo-work
 
 1. Receives a set of issues or a task from the human
 2. Discovers available clones by listing subdirectories
-3. Spawns sub-agents into specific clone directories using the Task tool
+3. Spawns sub-agents into specific clone directories using the Agent tool
 4. Monitors progress and merges PRs
 5. Reports back to the human
 

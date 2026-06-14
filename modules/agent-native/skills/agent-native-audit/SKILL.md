@@ -82,7 +82,7 @@ for design guidance.
 
 ## Phase 1: Parallel Analysis
 
-Dispatch **eight Task agents in parallel** - two per principle. One agent per pair measures (counts, inventory); the other critiques (examples, violations, fixes). Use `subagent_type: "Explore"` and launch all eight in a single message so they run concurrently.
+Dispatch **eight agents in parallel** - two per principle. One agent per pair measures (counts, inventory); the other critiques (examples, violations, fixes). Use `subagent_type: "Explore"` and launch all eight in a single message so they run concurrently.
 
 Pass paths, not file contents (see `modules/subagent-patterns/rules/subagent-patterns.md`). Each agent gets the triage summary, the principle text verbatim from `modules/agent-native/rules/agent-native.md`, and the scoped paths to analyze.
 

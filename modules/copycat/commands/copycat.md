@@ -119,7 +119,7 @@ Build a mental model of:
 
 ## Phase 2: Deep Analysis (Parallel Agents)
 
-Launch analysis agents in parallel using the Task tool. Set model to **sonnet** for all agents.
+Launch analysis agents in parallel using the Agent tool. Set model to **sonnet** for all agents.
 
 Each agent receives:
 1. The target repo path

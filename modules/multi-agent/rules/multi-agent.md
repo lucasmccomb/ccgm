@@ -1,13 +1,13 @@
 # Parallel Work Preference
 
-When a task involves multiple independent issues or work items, prefer spawning parallel agents in separate clones to complete them simultaneously. Use the Task tool to launch agents, each working in its own clone directory.
+When a task involves multiple independent issues or work items, prefer spawning parallel agents in separate clones to complete them simultaneously. Use the Agent tool to launch agents, each working in its own clone directory.
 
 **When to parallelize:**
 - Multiple independent GitHub issues need to be completed
 - A project has issues that do not block each other
 - The repo has a multi-clone setup (workspace model: `~/code/{repo}-workspaces/` or flat model: `~/code/{repo}-repos/`)
 
-**How:** Launch Task agents pointed at different clone directories. Each agent claims its own issue via the tracking CSV (auto-registered by hooks on branch creation) and works independently. See `~/.claude/multi-agent-system.md` for the full coordination guide.
+**How:** Launch agents pointed at different clone directories. Each agent claims its own issue via the tracking CSV (auto-registered by hooks on branch creation) and works independently. See `~/.claude/multi-agent-system.md` for the full coordination guide.
 
 **Issue tracking**: Uses `~/code/{log-repo-name}/{repo}/tracking.csv`. Hooks auto-update tracking on branch creation, commits, PR creation, merge, and issue close. See `~/.claude/multi-agent-system.md` for details.
 

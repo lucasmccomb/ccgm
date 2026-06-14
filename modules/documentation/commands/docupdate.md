@@ -42,7 +42,7 @@ Build a **repo manifest** from the output - a mental model of:
 
 ## Phase 1: Parallel Audit
 
-Launch all applicable audit agents in parallel using the Task tool. Each agent returns a structured list of **gaps** - things that are wrong, missing, or stale.
+Launch all applicable audit agents in parallel using the Agent tool. Each agent returns a structured list of **gaps** - things that are wrong, missing, or stale.
 
 Pass each agent: the repo manifest from Phase 0.
 

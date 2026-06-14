@@ -27,7 +27,7 @@ Read the full file content. Strip frontmatter (everything between the opening an
 
 ### Step 2: Run Parallel Editorial Passes
 
-Launch **8 Task agents in parallel** (single message, all `subagent_type: "Explore"`). Do **NOT** use `run_in_background: true` - the agents must run in the foreground so the system waits for all 8 to complete before returning results. Launching all 8 in a single message ensures they execute concurrently while still blocking until all finish.
+Launch **8 agents in parallel** (single message, all `subagent_type: "Explore"`). Do **NOT** use `run_in_background: true` - the agents must run in the foreground so the system waits for all 8 to complete before returning results. Launching all 8 in a single message ensures they execute concurrently while still blocking until all finish.
 
 Each agent receives the full text and analyzes it from one lens.
 

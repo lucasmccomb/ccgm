@@ -94,7 +94,7 @@ The generated test suite supports building features test-first:
 ## Dependencies
 
 - `browser-automation` - Chrome MCP tool permissions for visual discovery
-- `multi-agent` - Task agent dispatch for parallel spec generation
+- `multi-agent` - agent dispatch for parallel spec generation
 
 ## Manual Installation
 

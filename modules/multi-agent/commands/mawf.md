@@ -9,7 +9,7 @@ Takes unstructured feedback, feature requests, or bug reports, splits them into 
 
 ## Sub-Agent Model Optimization
 
-When spawning execution agents to implement issues in Phase 5, set model to **sonnet** in the Agent/Task tool call. Coding and implementation tasks work well on Sonnet. The orchestrator remains on the current model for issue parsing and agent coordination.
+When spawning execution agents to implement issues in Phase 5, set model to **sonnet** in the Agent tool call. Coding and implementation tasks work well on Sonnet. The orchestrator remains on the current model for issue parsing and agent coordination.
 
 ---
 
@@ -200,7 +200,7 @@ For each wave:
 
 #### 5.1 Spawn Agents
 
-Use the Task tool to launch one agent per assigned issue, each in its own clone directory:
+Use the Agent tool to launch one agent per assigned issue, each in its own clone directory:
 
 Each agent should:
 1. Navigate to its assigned clone directory
