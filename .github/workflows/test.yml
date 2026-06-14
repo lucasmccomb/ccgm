@@ -18,6 +18,9 @@ jobs:
       - name: Validate modules
         run: bash tests/test-modules.sh
 
+      - name: Personal-data detector self-test
+        run: bash tests/test-no-personal-data.sh --self-test
+
       - name: Check personal data
         run: bash tests/test-no-personal-data.sh
 
@@ -43,6 +46,9 @@ jobs:
 
       - name: Validate modules
         run: bash tests/test-modules.sh
+
+      - name: Personal-data detector self-test
+        run: bash tests/test-no-personal-data.sh --self-test
 
       - name: Check personal data
         run: bash tests/test-no-personal-data.sh

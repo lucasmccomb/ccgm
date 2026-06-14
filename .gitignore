@@ -10,3 +10,6 @@ modules/autoheal/config.json
 
 # multi-clone workspaces: per-clone identity + dev-server ports (local-only)
 .env.clone
+
+# local audit artifacts (e.g. /audit output) — must never be published
+docs/audits/
