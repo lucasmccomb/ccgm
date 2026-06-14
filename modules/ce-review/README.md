@@ -34,13 +34,19 @@ The legacy entry points remain installed. Use them when the stakes are low or wh
 
 ## The Pipeline
 
-1. **Phase 0 - Inputs**: collect diff, PR body, commit messages, issue body
+1. **Phase 0 - Inputs**: collect diff, the requirement clauses of the PR/issue (intent only, not the author's rationale), commit subjects, and fresh build/test output
 2. **Phase 1 - Priors**: dispatch `learnings-researcher` (from `compound-knowledge`) with the diff summary; include returned blocks as grounding for every downstream reviewer
 3. **Phase 2 - Scope-drift**: invoke the `scope-drift` skill (from `pr-review-toolkit`); in interactive mode, a HIGH gating "block" stops the pipeline
 4. **Phase 3 - Tiered fan-out**: dispatch always-on reviewers in parallel, plus conditional reviewers selected from the diff content
-5. **Phase 4 - Adversarial**: dispatch `adversarial-reviewer` with every Phase 3 reviewer's output; five lenses (attack happy path, silent failures, trust assumptions, edge cases, integration boundaries)
+5. **Phase 4 - Adversarial**: dispatch `adversarial-reviewer` with the paths to every Phase 3 reviewer's findings artifact; five lenses (attack happy path, silent failures, trust assumptions, edge cases, integration boundaries)
 6. **Phase 5 - Merge / Dedupe / Route**: confidence-gate at 0.50, dedupe on `(file, line ±3, category)`, route by `autofix_class`
 7. **Phase 6 - Output**: Fix-First format (AUTO-FIXED / NEEDS INPUT / RED-TEAM LENS), plus a full JSON envelope at `.context/ce-review/{timestamp}-{base}-{head}.json`
+
+## Fresh-Context Integrity
+
+Reviewer phases run in **fresh context**. A reviewer receives only the spec/intent, the diff (or changed-file paths), and fresh build/test output - never the implementer's conversation, completion report, or "why I did it this way" rationale. A reviewer who reads the author's justification grades the defense of the change instead of the change, which inflates sign-off. This mirrors the Argus integrity principle (the judge never sees the diff-author's reasoning) and heliohq/ship (review runs in a clean session). The one intended cross-phase context flow is Phase 4: the adversarial reviewer reads the other reviewers' findings, which are independent review output, not author rationale.
+
+**Results stay in files, not in the reply.** Each reviewer writes its JSON findings to `.context/ce-review/reviewers/{run_id}/{reviewer-name}.json` and replies with only that path plus `Findings written.`. The orchestrator merges from the artifacts on disk, not from a reviewer's prose summary in the chat - so every sign-off traces back to a re-readable file rather than a narrative.
 
 ## Modes
 

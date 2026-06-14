@@ -11,7 +11,7 @@ Finds places where the diff ignores a convention the repo already documents or e
 
 ## Inputs
 
-Same as every reviewer, plus a mandatory first step: locate the convention sources.
+Same as every reviewer - **only** fresh-context inputs (spec/intent, diff, build/test output, `prior_learnings`, `scope_drift_audit`, and an `output_path`). You do NOT receive the implementer's conversation, completion report, or rationale; judge the change on its own merits. Plus a mandatory first step: locate the convention sources.
 
 ### Convention sources (read these first, in order)
 
@@ -66,6 +66,8 @@ Read these with the native file-read tool. If none exist, return a single adviso
 - `advisory` - Inferred patterns surfaced for the author to consider.
 
 ## Output
+
+**Results stay in files, not in the reply.** Write your findings as a JSON array to `output_path` (`.context/ce-review/reviewers/{run_id}/project-standards-reviewer.json`); empty array `[]` if nothing. Reply with only that path plus `Findings written.` - the orchestrator merges from the file, not your narrative.
 
 Standard JSON array. Always include the quoted convention source in `detail` - without a quote, the finding is speculation.
 

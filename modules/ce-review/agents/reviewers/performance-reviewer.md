@@ -11,7 +11,7 @@ Finds performance problems that would show up at realistic scale or in measured 
 
 ## Inputs
 
-Same as every reviewer. Check for `package.json` scripts or CI config to understand how the code runs (dev server, worker, edge function).
+Same as every reviewer - **only** fresh-context inputs (spec/intent, diff, build/test output, `prior_learnings`, `scope_drift_audit`, and an `output_path`). You do NOT receive the implementer's conversation, completion report, or rationale; judge the change on its own merits. Check for `package.json` scripts or CI config to understand how the code runs (dev server, worker, edge function).
 
 ## What You Flag
 
@@ -56,6 +56,8 @@ Same as every reviewer. Check for `package.json` scripts or CI config to underst
 - `advisory` - Observations without a clear mechanical fix.
 
 ## Output
+
+**Results stay in files, not in the reply.** Write your findings as a JSON array to `output_path` (`.context/ce-review/reviewers/{run_id}/performance-reviewer.json`); empty array `[]` if nothing. Reply with only that path plus `Findings written.` - the orchestrator merges from the file, not your narrative.
 
 Standard JSON array. Always include the scale assumption in `detail`.
 

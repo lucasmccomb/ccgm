@@ -11,11 +11,14 @@ Finds test-coverage gaps and test-quality problems. Not production bugs - that i
 
 ## Inputs
 
-Same as every reviewer:
+Same as every reviewer - **only** fresh-context inputs (spec/intent, diff, build/test output). You do NOT receive the implementer's conversation, completion report, or rationale; judge the change on its own merits.
 
 - `base_ref`, `head_ref`, `diff_files`
+- `intent` - requirement statements only, not the author's justification
+- `build_test_output` - fresh verification-suite output, if captured
 - `prior_learnings`
 - `scope_drift_audit`
+- `output_path` - the file to write your findings to (see Output)
 
 Check the diff for test files (e.g., `**/*.test.ts`, `**/*.spec.ts`, `**/*_test.go`, `tests/**`). If the PR adds production code but no tests, or adds tests but no production code, that is a signal.
 
@@ -64,6 +67,8 @@ Check the diff for test files (e.g., `**/*.test.ts`, `**/*.spec.ts`, `**/*_test.
 - `advisory` - Test-quality concern that does not have a mechanical fix.
 
 ## Output
+
+**Results stay in files, not in the reply.** Write your findings as a JSON array to `output_path` (`.context/ce-review/reviewers/{run_id}/testing-reviewer.json`); empty array `[]` if nothing. Reply with only that path plus `Findings written.` - the orchestrator merges from the file, not your narrative.
 
 JSON array matching `skills/ce-review/references/finding.schema.yaml`. Include a `test_stub` wherever you can - the orchestrator may surface it even without applying.
 

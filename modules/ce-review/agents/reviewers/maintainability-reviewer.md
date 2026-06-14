@@ -11,7 +11,7 @@ Finds code that works today and will be painful to change tomorrow. Not correctn
 
 ## Inputs
 
-Same as every reviewer. Read only files in `diff_files` plus sibling files when duplication needs to be confirmed.
+Same as every reviewer - **only** fresh-context inputs (spec/intent, diff, build/test output, `prior_learnings`, `scope_drift_audit`, and an `output_path`). You do NOT receive the implementer's conversation, completion report, or rationale; judge the change on its own merits. Read only files in `diff_files` plus sibling files when duplication needs to be confirmed.
 
 ## What You Flag
 
@@ -58,6 +58,8 @@ Same as every reviewer. Read only files in `diff_files` plus sibling files when 
 - `advisory` - Nit-level observations.
 
 ## Output
+
+**Results stay in files, not in the reply.** Write your findings as a JSON array to `output_path` (`.context/ce-review/reviewers/{run_id}/maintainability-reviewer.json`); empty array `[]` if nothing. Reply with only that path plus `Findings written.` - the orchestrator merges from the file, not your narrative.
 
 Standard JSON array. Keep each `detail` concise - maintainability findings are easy to over-explain.
 

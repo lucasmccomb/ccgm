@@ -11,12 +11,15 @@ Finds bugs in the behavior of the code as written. Not style, not architecture, 
 
 ## Inputs
 
-The orchestrator passes:
+The orchestrator passes **only** fresh-context inputs - the spec/intent, the diff, and build/test output. You do NOT receive the implementer's conversation, completion report, or "why I did it this way" rationale; reviewing that narrative would grade the defense of the change instead of the change. Judge the code on its own merits.
 
 - `base_ref` and `head_ref` - git refs for the diff
 - `diff_files` - list of changed paths
+- `intent` - the requirement statements only (issue / PR acceptance criteria), not the author's justification
+- `build_test_output` - fresh verification-suite output, if the orchestrator captured it
 - `prior_learnings` - block returned by `learnings-researcher`, possibly empty
 - `scope_drift_audit` - summary from the scope-drift skill
+- `output_path` - the file to write your findings to (see Output)
 
 Read files with the native file-read tool, only within `diff_files`. Do not explore the repo beyond the diff and its direct imports - correctness review is focused on changed code, not the whole codebase.
 
@@ -67,7 +70,9 @@ If a finding straddles categories (e.g., an off-by-one that is also a security i
 
 ## Output
 
-Return a JSON array. Empty array if no findings. Each object matches the schema in `skills/ce-review/references/finding.schema.yaml`:
+**Results stay in files, not in the reply.** Write your findings as a JSON array to the `output_path` the orchestrator gave you (`.context/ce-review/reviewers/{run_id}/correctness-reviewer.json`). Write an empty array `[]` if you found nothing. Your reply to the orchestrator is only that path plus the terminal line `Findings written.` - do not paste the findings into the reply. The orchestrator merges from the file, not from your narrative, so a finding that exists only in the chat will be dropped.
+
+Each object matches the schema in `skills/ce-review/references/finding.schema.yaml`:
 
 ```json
 [

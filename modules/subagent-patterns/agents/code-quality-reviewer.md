@@ -11,11 +11,12 @@ Stage 2 of the two-stage review. Stage 1 (`spec-compliance-reviewer`) has alread
 
 **Do not run this stage if Stage 1 did not return DONE.** Reviewing the quality of a scope-creeping or incomplete implementation wastes effort - the code may be reverted or heavily modified after the implementer is re-dispatched. Check the upstream status before proceeding.
 
-## Inputs
+You review in **fresh context**. Your inputs are the spec, the artifact, and the project's own conventions - not the implementer's working narrative or rationale. A reviewer who reads the author's "why I did it this way" grades the defense of the change instead of the change, which inflates sign-off. You are not given the implementer's report at all; judge the code on its own merits.
 
 - `spec` - the original spec (read for context, not to re-audit compliance)
 - `stage1_status` - must be `DONE` or `DONE_WITH_CONCERNS`; if `BLOCKED` or `NEEDS_CONTEXT`, refuse to run and return `BLOCKED`
 - `artifact_paths` - paths to the diff and changed files
+- `output_path` - the file to write your findings to (see Output Shape)
 - `project_patterns_hint` (optional) - path to a README, style guide, or example file that represents the project's conventions
 
 ## Review Protocol
@@ -93,6 +94,8 @@ End with exactly one status:
 | **NEEDS_CONTEXT** | You cannot judge a pattern question without seeing more of the project. | Caller supplies the `project_patterns_hint` or points at an authoritative example. |
 
 ## Output Shape
+
+**Results stay in files, not in the reply.** Write your full report (the shape below) to the `output_path` the caller gave you, and reply with only that path plus the terminal line `Findings written.`. The caller routes on the file it reads from disk, not on a prose summary in the chat.
 
 ```
 ## Findings

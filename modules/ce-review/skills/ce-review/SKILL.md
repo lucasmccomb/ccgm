@@ -52,17 +52,52 @@ The orchestrator is responsible for:
 
 Each reviewer is a separate agent under `agents/reviewers/`. The orchestrator never inlines reviewer logic - agents own their "what you flag / what you don't flag" boundaries.
 
+## Fresh-Context Integrity (read before dispatching anything)
+
+Every reviewer phase runs in **fresh context**. A reviewer must judge the change on its own merits, not inherit the rationale of whoever produced it. A reviewer who has read the author's "here is why I did it this way" narrative grades the *defense* of the change, not the change. That inflates sign-off - the same failure mode the Argus judge avoids by never seeing the diff-author's reasoning, and that heliohq/ship enforces by running review in a clean session.
+
+Concretely, the orchestrator MUST and MUST NOT pass the following to any reviewer subagent:
+
+**Allowed inputs (the only context a reviewer receives):**
+
+- The **spec / intent**: the issue body, the PR title and body's *requirement* statements, the plan items the PR set out to satisfy. This is the target, not the author's justification.
+- The **diff or changed-file paths**: `diff_files`, `diff_stat`, and the refs needed to read them. Reviewers read the files themselves.
+- **Build / test output**: fresh results of the project's verification suite (lint, type-check, tests, build), captured by the orchestrator.
+- Phase 1 prior-learnings and the Phase 2 scope-drift audit (these are independent grounding, not author rationale).
+
+**Forbidden inputs (never forward to a reviewer):**
+
+- The implementer's conversation, chat transcript, or working notes.
+- The implementer's `DONE` self-report, completion summary, or "what I changed and why" narrative.
+- Commit-message **bodies** that explain the author's reasoning (commit *subjects* are fine as a one-line summary of intent; strip the bodies before forwarding).
+- Any "I chose X over Y because…" justification authored by the implementer.
+
+If the only available description of intent is entangled with the author's rationale (e.g., a PR body that mixes "this must do X" with "I did it this way because…"), extract the requirement clauses and discard the justification before passing it on. When in doubt, pass less: the diff plus the issue's acceptance criteria is always a safe reviewer input.
+
+The single intended exception is Phase 4: the adversarial reviewer reads the *other reviewers'* findings (`prior_findings`). Those are independent review output, not the implementer's rationale - reading them is the point.
+
+## Results Stay in Files, Not in the Reply
+
+Reviewer findings are consumed from a **written artifact**, not trusted from the chat narrative. This mirrors Argus: the orchestrator (the judge's caller) routes on the structured result it reads from disk, not on a reviewer's prose summary in the reply.
+
+- Each reviewer writes its JSON findings array to a file under `.context/ce-review/reviewers/{run_id}/{reviewer-name}.json`, and its reply contains only that path plus the terminal line `Findings written.`
+- The orchestrator reads each reviewer's artifact from disk and merges from the files. It does not parse a findings blob pasted into a reply, and it does not let a reviewer's narrative override what the file says.
+- If a reviewer's artifact is missing or unparseable, treat that reviewer as failed (report it per the Coordination Rules in `subagent-patterns`); do not reconstruct its findings from the chat.
+- The merged envelope (Phase 6) is likewise the source of truth for downstream consumers - the human-facing Summary is rendered *from* the envelope, never the other way around.
+
+This keeps the return path auditable: every finding traces back to a file, and no sign-off rests on a narrative that cannot be re-read.
+
 ## Phase 0: Inputs
 
-Collect the inputs once and pass them by path, not content, to the subagents (see `modules/subagent-patterns/rules/subagent-patterns.md`):
+Collect the inputs once and pass them by path, not content, to the subagents (see `modules/subagent-patterns/rules/subagent-patterns.md`). Everything passed to a reviewer must be an **allowed input** per the Fresh-Context Integrity section above - spec/intent, diff, or build/test output, never the implementer's rationale:
 
 - `base_ref` - usually `origin/main`; override from `$ARGUMENTS` if the user said `base:{ref}`
 - `head_ref` - `HEAD` unless specified
 - `diff_files` - paths returned by `git diff --name-only {base_ref}...{head_ref}`
 - `diff_stat` - output of `git diff --stat {base_ref}...{head_ref}` (short; safe to include inline)
-- `pr_body` - `gh pr view --json body,title` if a PR is open
-- `issue_body` - `gh issue view {num}` for any issue the PR closes
-- `commit_messages` - `git log {base_ref}..{head_ref} --pretty=format:"%s%n%b"`
+- `intent` - the **requirement** statements only: the issue body (`gh issue view {num}` for any issue the PR closes) and the PR title plus any acceptance-criteria clauses from `gh pr view --json body,title`. Strip out the author's justification ("I did it this way because…") before forwarding - that is rationale, not intent.
+- `commit_subjects` - `git log {base_ref}..{head_ref} --pretty=format:"%s"` (subjects only). Do **not** collect commit-message bodies; they routinely carry the author's reasoning, which reviewers must not see.
+- `build_test_output` - fresh output of the project's verification suite (lint, type-check, tests, build), captured by the orchestrator. This is the deterministic evidence reviewers ground on instead of the author's "tests pass" claim.
 
 If no base ref resolves (rare; e.g., detached HEAD with no upstream), state that explicitly and fall back to reviewing the last commit only.
 
@@ -70,7 +105,7 @@ If no base ref resolves (rare; e.g., detached HEAD with no upstream), state that
 
 Dispatch the `learnings-researcher` agent (from `modules/compound-knowledge/agents/learnings-researcher.md`). Pass:
 
-- `task_summary` - one paragraph derived from the PR title, PR body first paragraph, and the diff stat
+- `task_summary` - one paragraph derived from the PR title, the `intent` requirement clauses, and the diff stat (not the author's rationale)
 - `files_hint` - `diff_files`
 - `tags_hint` - tags inferred from touched directories (e.g., `supabase` if `supabase/migrations/` changed; `chrome-extension` if `manifest.json` changed; language tags by file extension)
 - `problem_type_filter` - absent (pull both bugs and knowledge priors)
@@ -122,21 +157,28 @@ If none of the conditions fire, run only the always-on set.
 
 ### Dispatch pattern
 
-Use the parallel-research pattern from `modules/subagent-patterns/rules/subagent-patterns.md`. Pass each reviewer:
+Use the parallel-research pattern from `modules/subagent-patterns/rules/subagent-patterns.md`. Pass each reviewer ONLY the allowed inputs (Fresh-Context Integrity above):
 
-- `base_ref`, `head_ref`, `diff_files`, `diff_stat` (inputs)
+- `base_ref`, `head_ref`, `diff_files`, `diff_stat`
+- `intent` - the requirement clauses (not the author's rationale)
+- `build_test_output` from Phase 0
 - The prior-learnings block from Phase 1
 - The scope-drift audit from Phase 2
 - The reviewer's role name
+- `run_id` and the output path `.context/ce-review/reviewers/{run_id}/{reviewer-name}.json` the reviewer must write to
 
-Reviewers are independent. Do not share their drafts between each other in this phase.
+Do NOT pass the implementer's conversation, completion report, or commit-message bodies to any reviewer. If you find yourself about to paste "the author says…" into a reviewer prompt, stop - that is the rationale leak this phase exists to prevent.
+
+Reviewers are independent. Do not share their drafts between each other in this phase. Each reviewer writes its findings to its artifact path and replies with only that path plus `Findings written.`; the orchestrator reads the files (Results Stay in Files, above), not the replies.
 
 ## Phase 4: Adversarial / Red-Team Lens
 
 After Phase 3 completes, dispatch the `adversarial-reviewer` agent with:
 
-- Everything Phase 3 received
-- All Phase 3 reviewer outputs (this is the key difference - the adversarial reviewer reads their findings)
+- Everything Phase 3 received (the allowed inputs only - same fresh-context rule applies; no implementer rationale)
+- The paths to all Phase 3 reviewer artifacts under `.context/ce-review/reviewers/{run_id}/` (this is the key difference - the adversarial reviewer reads their findings from the files, not from a narrative). Reviewer findings are independent review output, not author rationale, so forwarding them is the one intended cross-phase context flow.
+
+The adversarial reviewer writes its own findings to `.context/ce-review/reviewers/{run_id}/adversarial-reviewer.json` and replies with only that path plus `Findings written.`, same as every other reviewer.
 
 The adversarial reviewer runs five lenses (attack the happy path, find silent failures, exploit trust assumptions, break edge cases, find integration-boundary issues) and is specifically told to find what the specialists MISSED. It does not re-state their findings; it augments.
 
@@ -144,7 +186,7 @@ Gating condition - the adversarial reviewer fires in every mode, but its autofix
 
 ## Phase 5: Merge, Dedupe, Score, Route
 
-Collect every finding from Phases 3 and 4. Each finding is a JSON object shaped like:
+Read every reviewer artifact under `.context/ce-review/reviewers/{run_id}/` (one file per Phase 3 and Phase 4 reviewer) and collect the findings from the files - not from the reviewer replies (Results Stay in Files, above). Each finding is a JSON object shaped like:
 
 ```json
 {
@@ -295,6 +337,8 @@ In `headless` mode, the stdout is limited to the envelope path and the terminal 
 
 - **Running reviewers serially.** They are independent; parallelize. Serial execution wastes agent time and inflates the context window with reviewer boilerplate.
 - **Passing content, not paths.** Reviewers should read only the files they need. The orchestrator must not pre-read and inline diffs into every subagent prompt.
+- **Leaking the implementer's rationale into a reviewer.** Forwarding the author's chat, completion report, or "why I did it this way" commit body inflates sign-off - the reviewer grades the defense, not the change. Pass spec/intent, diff, and build/test output only. (Phase 4's `prior_findings` is the one allowed cross-phase context, and it is review output, not author rationale.)
+- **Trusting the reviewer's reply instead of its artifact.** Findings are merged from the files under `.context/ce-review/reviewers/{run_id}/`. A reviewer's prose summary in the reply is not the source of truth; if the file is missing or unparseable, the reviewer failed - do not reconstruct findings from the chat.
 - **Auto-applying adversarial findings.** The red-team lens is an opinion, not a mechanical fix. Even when the confidence is high, route to `gated_auto` or weaker.
 - **Skipping scope-drift.** An in-scope review of out-of-scope code is wasted effort. Phase 2 runs first for a reason.
 - **Inlining reviewer logic.** Every persona has a `what you flag / what you don't flag` boundary; keeping it in the agent file prevents overlap. Do not absorb reviewer prompts into the orchestrator.

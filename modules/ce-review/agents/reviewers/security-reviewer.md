@@ -11,7 +11,7 @@ Finds security-class problems. The threat model is a motivated attacker who read
 
 ## Inputs
 
-Same as every reviewer. Because security findings often depend on caller context, read the touched file's direct callers and its direct imports. Do not explore further.
+Same as every reviewer - **only** fresh-context inputs (spec/intent, diff, build/test output, `prior_learnings`, `scope_drift_audit`, and an `output_path`). You do NOT receive the implementer's conversation, completion report, or rationale; judge the change on its own merits. Because security findings often depend on caller context, read the touched file's direct callers and its direct imports. Do not explore further.
 
 ## What You Flag
 
@@ -56,6 +56,8 @@ Same as every reviewer. Because security findings often depend on caller context
 - `advisory` - Hardening suggestions.
 
 ## Output
+
+**Results stay in files, not in the reply.** Write your findings as a JSON array to `output_path` (`.context/ce-review/reviewers/{run_id}/security-reviewer.json`); empty array `[]` if nothing. Reply with only that path plus `Findings written.` - the orchestrator merges from the file, not your narrative.
 
 Standard JSON array. `detail` includes the attacker input and the path.
 

@@ -93,6 +93,22 @@ The only exception: inline a small excerpt (10-30 lines) when the subagent needs
 
 After subagent results come back, review in two passes. **Order matters: Stage 1 gates Stage 2.** Running code-quality review on a scope-creeping or deliverable-incomplete implementation wastes effort polishing code that will be reverted or re-dispatched.
 
+### Fresh Context: Reviewers Do Not Inherit the Implementer's Rationale
+
+Both review stages run in **fresh context**. A reviewer judges the change against the spec and the artifact, not against the implementer's explanation of why they did it that way. A reviewer who reads "I chose X over Y because…" grades the *defense* of the change, not the change - and that inflates sign-off. This is the same integrity property Argus enforces by never showing its judge the diff-author's reasoning.
+
+Pass each reviewer ONLY:
+
+- the **spec** (objective, context, constraints, deliverable) - the target
+- the **diff or changed-file paths** - the artifact
+- fresh **build/test output** - the deterministic evidence
+
+Do NOT pass the implementer's conversation, working notes, or chain-of-thought as grounding. The one nuance for Stage 1: the implementer's `DONE` report is an **audit target**, not grounding - the reviewer reads it to check the claims against the diff, never to be persuaded by it. Stage 2 does not need the report at all.
+
+### Results Stay in Files, Not in the Reply
+
+Each reviewer writes its structured findings (the four-state status plus its itemized checks) to a file the caller named, and replies with only that path plus a terminal line. The caller routes on the artifact it reads from disk, not on a prose summary in the chat. This mirrors Argus: the dispatcher trusts the written result, never a narrative that cannot be re-read. If the artifact is missing or unparseable, treat the reviewer as failed - do not reconstruct its verdict from the reply.
+
 ### Stage 1: Spec Compliance
 
 - Did the agent do what was asked?
@@ -131,6 +147,8 @@ Stop and re-sequence if you catch yourself:
 - Starting Stage 2 before Stage 1 has returned DONE
 - Merging a subagent's output without running either stage because "the code looks fine"
 - Accepting the implementer's self-report as evidence of spec compliance
+- Forwarding the implementer's rationale ("why I did it this way") to a reviewer as grounding - it inflates sign-off; pass spec + diff + verification output only
+- Routing on a reviewer's chat summary instead of the findings artifact it wrote to disk
 - Running Stage 1 and Stage 2 in parallel (they are deliberately serial - Stage 1 gates Stage 2)
 
 ## Coordination Rules
