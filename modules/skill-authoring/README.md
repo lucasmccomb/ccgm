@@ -6,6 +6,7 @@ Discipline for writing skills and slash commands that stay efficient, portable, 
 
 Installs a rule file that governs how new skills and commands are authored:
 
+- **RED baseline (watch it fail first)** - before writing a skill, run a no-skill agent on a representative task, capture its failure modes and rationalizations, write the minimal skill targeting them, then re-run with the skill to confirm the behavior changed (GREEN). The baseline failure is a gate, not optional.
 - **Reference-file inclusion** - when to use backtick CWD-relative paths versus `@` inline embeds
 - **Conditional content extraction** - move late-sequence or conditionally-used blocks into `references/` so they do not live in every subsequent message
 - **Tool selection** - prefer native tools (Glob, Grep, Read) over shell equivalents

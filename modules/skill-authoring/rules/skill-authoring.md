@@ -17,6 +17,48 @@ This rule governs authoring of:
 
 It does NOT govern rule files (`rules/*.md`), which are loaded once at session start and follow separate conventions in CONTRIBUTING.md.
 
+## The RED Baseline (Watch It Fail First)
+
+**Iron Law:** NO SKILL WITHOUT A CAPTURED BASELINE FAILURE FIRST.
+
+A skill exists to change an agent's behavior. If the behavior was already correct without the skill, the skill is dead weight that taxes every future invocation. The only proof that a skill is needed is a baseline run where an agent *without* the skill produces the wrong behavior. Watch it fail, capture exactly how it failed, then write the minimal skill that targets those failures - and only those.
+
+This is red-green-refactor applied to skills:
+
+1. **RED** - Run a representative task with an agent that does NOT have the skill. Capture the failure modes and the rationalizations it produces.
+2. **GREEN** - Write the smallest skill that targets the captured failures. Re-run the same task with the skill loaded. Confirm the behavior changed.
+3. **REFACTOR** - Trim the skill to context-efficient form (the rest of this rule) while keeping the GREEN result.
+
+A skill written without watching the baseline fail is a guess about what an agent gets wrong. Guesses produce skills full of advice the agent never needed and missing the corrections it did.
+
+### RED: Capture the Baseline Failure
+
+Before writing any skill content:
+
+1. **Pick a representative task** - a concrete instance of the situation the skill is meant to handle. Not a toy; the real kind of task the trigger will match.
+2. **Run an agent without the skill** - a fresh subagent that does not have the skill loaded. Give it the task and nothing else.
+3. **Record the failure modes** - what specifically did it get wrong? Wrong tool, skipped step, bad default, unsafe action, missing verification?
+4. **Record the rationalizations** - the phrases the agent used to justify the wrong behavior ("this is too small to test," "I'll just chain these commands," "the happy path is enough"). These become the left column of the skill's "Rationalizations" table.
+
+If the baseline agent does the task correctly with no skill, **stop**. There is no skill to write. A skill that does not change behavior is bloat, not discipline.
+
+### GREEN: Write the Minimal Skill, Then Confirm
+
+1. **Target only the captured failures** - each section of the skill should correct a specific failure mode or rationalization observed in RED. Do not add advice for failures the baseline agent never produced.
+2. **Re-run the same representative task** with the skill loaded.
+3. **Confirm the behavior changed** - the failure modes from RED no longer appear. If a failure persists, the skill text did not target it sharply enough; revise and re-run, do not declare done.
+
+GREEN is the gate. A skill is not finishable until a skill-loaded run on the RED task demonstrably differs from the baseline.
+
+### Rationalizations That Mean You Are About to Skip the RED Baseline
+
+| You are about to say... | The reality is... |
+|-------------------------|-------------------|
+| "I already know what the agent gets wrong" | If you knew, the baseline run confirms it in two minutes. If you are wrong, you just avoided shipping a skill that targets the wrong failure. |
+| "Running a baseline is slower than just writing the skill" | Writing a skill the agent did not need is the slow path - it taxes every future invocation forever. |
+| "The skill is obviously needed" | "Obvious" is the word that precedes most unnecessary skills. Watch it fail first. |
+| "I'll verify the skill works after I write it" | Verifying against a skill-loaded run with no recorded baseline proves nothing - you cannot see what changed. |
+
 ## Reference File Inclusion
 
 ### Use Backticks for CWD-Relative Reads
@@ -145,6 +187,9 @@ Skills that describe behavior in the abstract ("handle errors appropriately") ar
 
 Before committing a new skill or command file:
 
+- [ ] A RED baseline was captured: a no-skill agent run on a representative task that demonstrably failed
+- [ ] The skill targets only the failure modes and rationalizations observed in RED
+- [ ] A GREEN run (skill loaded, same task) confirmed the behavior changed
 - [ ] Every reference file lives inside the skill's directory
 - [ ] Backticks are used for on-demand reads; `@` is used only for small structural files
 - [ ] Conditional content (~20%+ of the skill, used by some invocations) is extracted to `references/`
@@ -169,6 +214,8 @@ Before committing a new skill or command file:
 
 Stop and restructure the skill if you catch yourself:
 
+- Writing skill content before running a no-skill baseline that failed
+- Declaring a skill done without a GREEN run that differs from the baseline
 - Embedding a schema or long table inline at the top of the skill body
 - Writing a branched procedure (if X do this, if Y do this, if Z do this) where each branch is more than a paragraph
 - Chaining more than two Bash actions in a single instruction
