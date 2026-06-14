@@ -151,12 +151,79 @@ ls ~/code/plans/_templates/ 2>/dev/null
 
 ### 0.4 Existing Repo Analysis (if --repo provided)
 
-If an existing repo path was given:
+**Skip Phase 0.4 entirely when no `--repo` was given** (greenfield / new project). There is nothing to fetch or verify; proceed straight to Phase 0.5. The Source Freshness Guard below NEVER runs for greenfield plans.
+
+#### 0.4.0 Source Freshness Guard (MANDATORY when --repo is set — runs BEFORE any repo read)
+
+A multi-clone repo often lags `origin` by many commits, and the local working tree may hold uncommitted WIP. Planning against that stale tree builds the plan on facts that no longer hold (deleted code cited as present, reversed decisions cited as current). **Treat a fetched, SHA-pinned origin default branch as the source of truth — never the bare working tree.** This guard runs once, at the very start of Phase 0.4, before reading a single repo file and before the Phase 1.1 deepresearch delegation.
+
+```bash
+REPO="<the --repo path>"
+
+# 1. Resolve the REAL default branch (do not hardcode main).
+if [ -n "$(git -C "$REPO" remote 2>/dev/null)" ]; then
+  HAS_REMOTE=1
+  DEFAULT_REF="$(git -C "$REPO" rev-parse --abbrev-ref origin/HEAD 2>/dev/null)"
+  if [ -z "$DEFAULT_REF" ]; then
+    git -C "$REPO" remote set-head origin -a >/dev/null 2>&1
+    DEFAULT_REF="$(git -C "$REPO" rev-parse --abbrev-ref origin/HEAD 2>/dev/null)"
+  fi
+  DEFAULT_REF="${DEFAULT_REF:-origin/main}"
+else
+  HAS_REMOTE=0
+fi
+
+# 2. Fetch + pin the anchor, record drift, and expose a clean read surface.
+if [ "$HAS_REMOTE" = "1" ]; then
+  git -C "$REPO" fetch origin
+  ANCHOR="$(git -C "$REPO" rev-parse "$DEFAULT_REF")"
+  BEHIND="$(git -C "$REPO" rev-list --count "HEAD..$DEFAULT_REF" 2>/dev/null || echo '?')"
+  [ -n "$(git -C "$REPO" status --porcelain)" ] && DIRTY=yes || DIRTY=no
+  # Temp worktree at the anchor = read CURRENT code with normal Read/Glob/Grep,
+  # without mutating the user's clone (no checkout, no HEAD move, no stash).
+  WORKTREE="$(mktemp -d)/xplan-anchor"
+  git -C "$REPO" worktree add --detach "$WORKTREE" "$ANCHOR" >/dev/null
+  echo "Anchor: $DEFAULT_REF @ $ANCHOR | local HEAD is $BEHIND commits behind | dirty=$DIRTY"
+  echo "VERIFICATION SOURCE (read all repo facts here): $WORKTREE"
+else
+  # Local-only repo: nothing to fetch. Use the working tree, but say so.
+  ANCHOR="local-only (no remote)"
+  WORKTREE="$REPO"
+  echo "No remote on $REPO — local-only. Reading the working tree as-is; this will be noted in research.md."
+fi
+```
+
+Hold `ANCHOR`, `DEFAULT_REF`, and `WORKTREE` for the rest of the run. **`WORKTREE` is the path every downstream reader (Phase 0.4.1 below, the Phase 1.1 deepresearch agent, the Phase 4 review agents) must read from — never the original `--repo` working tree.** Clean up the temp worktree at the end of the run (see Phase 8 teardown).
+
+**Interactive vs autonomous:**
+- **`--autonomous` / `/xplana`**: the guard runs automatically with NO prompt. Default behavior = verify every repo fact against `ANCHOR`. Never fast-forward the user's clone. Record the anchor + drift in `decisions.md`.
+- **Interactive / `--light`**: if `BEHIND` > 0, surface it via AskUserQuestion before continuing:
+  ```
+  question: "Your clone of {repo} is {BEHIND} commits behind {DEFAULT_REF}. I'll plan against {DEFAULT_REF} @ {short-SHA} either way. Also fast-forward your working tree?"
+  options:
+    - "Plan against origin, leave my tree alone (Recommended)"
+    - "Plan against origin AND fast-forward my tree (only if clean)"
+  ```
+  Only fast-forward (`git -C "$REPO" merge --ff-only "$DEFAULT_REF"`) when the user opts in AND `DIRTY=no`. If `DIRTY=yes`, do not offer the fast-forward option — note the WIP and proceed against the anchor.
+
+Record in `decisions.md` immediately:
+```markdown
+## Source Freshness Guard (Phase 0.4.0)
+- Verification anchor: {DEFAULT_REF} @ {ANCHOR}
+- Local clone was {BEHIND} commits behind; dirty={DIRTY}
+- Repo facts verified against: {WORKTREE} (temp worktree at anchor)
+```
+
+#### 0.4.1 Map Current State (read from the anchor worktree)
+
+Reading **from `$WORKTREE` (the anchor), not the original clone**:
 1. Read its CLAUDE.md, README.md, package.json, and key config files
 2. Map its architecture, tech stack, and current state
-3. Check `gh issue list` and `gh pr list` for open work
+3. Check `gh issue list` and `gh pr list` for open work (these query the remote, so they are already current)
 4. Read recent agent logs from the log repo for the project
 5. This context feeds into Phase 1 research and Phase 0.5 interview
+
+Every load-bearing fact pulled from the repo in this phase is anchored to `{file}:{line}` as read at `$WORKTREE`. Do not assert a repo fact from memory or from a stale working-tree Read.
 
 ---
 
@@ -440,9 +507,18 @@ The Task agent's prompt should be:
 Read the file ~/.claude/commands/deepresearch.md and follow its instructions exactly.
 
 Topic: {concept from Phase 0}
-Arguments: --depth {user's selection from 0.5.3 or 1.0} --plan-dir ~/code/plans/{concept-name} {--repo REPO_PATH if provided}
+Arguments: --depth {user's selection from 0.5.3 or 1.0} --plan-dir ~/code/plans/{concept-name} {--repo WORKTREE if --repo was provided — pass the Phase 0.4.0 anchor worktree path, NOT the user's original clone}
 
 Execute the full /deepresearch workflow: parse arguments, run the research pipeline, and write research.md to the plan directory.
+```
+
+**Anchor propagation (only when --repo was given).** Append this hard instruction to the delegation prompt so the research agent cannot read a stale tree:
+
+```
+SOURCE FRESHNESS — repo facts:
+- Verification anchor: {DEFAULT_REF} @ {ANCHOR} (from Phase 0.4.0).
+- The user's original working tree may be STALE (it was {BEHIND} commits behind). Read and verify EVERY repo fact against the anchor: either via the anchor worktree at {WORKTREE} (normal Read/Glob/Grep) or `git -C {REPO} show {DEFAULT_REF}:<path>`. Never a bare Read of the original --repo working tree.
+- research.md MUST open with: `Verification anchor: {DEFAULT_REF} @ {ANCHOR}` and anchor every load-bearing repo fact to `<file>:<line>` as read at that anchor (Verified Facts Log pattern — see deepresearch.md Phase 4).
 ```
 
 ### 1.2 Verify Research Output
@@ -928,6 +1004,15 @@ Launch chosen review agents in parallel using the Task tool (model: sonnet).
 1. **Security Review Agent** - Output: `~/code/plans/{concept-name}/reviews/security.md`
 2. **Architecture Review Agent** - Output: `~/code/plans/{concept-name}/reviews/architecture.md`
 3. **Business Logic Review Agent** - Output: `~/code/plans/{concept-name}/reviews/business-logic.md`
+
+**Anchor propagation (only when --repo was given).** Each review agent verifies plan claims against the actual codebase, so it MUST read the same anchor the planning used — not the stale working tree. Append to every review agent's prompt:
+
+```
+SOURCE FRESHNESS — repo facts:
+- Verification anchor: {DEFAULT_REF} @ {ANCHOR} (from Phase 0.4.0). The user's original working tree may be STALE.
+- When you check a plan claim against the codebase, read/verify it against the anchor: the anchor worktree at {WORKTREE} (normal Read/Glob/Grep) or `git -C {REPO} show {DEFAULT_REF}:<path>`. Never a bare Read of the original --repo working tree.
+- Flag any plan claim that disagrees with the anchor as a finding (e.g., plan cites code that no longer exists on {DEFAULT_REF}).
+```
 
 ### 4.2 Wait for ALL Selected Review Agents to Complete
 
@@ -1700,9 +1785,24 @@ README structure:
 
 Update agent log with full session summary. Mark progress.md as COMPLETE with final statistics and link to retro.md.
 
+### 8.7 Source Freshness Teardown
+
+If Phase 0.4.0 created a temp anchor worktree (`--repo` with a remote), remove it now so it does not linger:
+
+```bash
+git -C "$REPO" worktree remove --force "$WORKTREE" 2>/dev/null
+rmdir "$(dirname "$WORKTREE")" 2>/dev/null
+```
+
+This is safe to run even if planning ended early (e.g., the user stopped at the Phase 6.5 gate) — run the teardown whenever the command exits after a guard ran. Removing the worktree does not touch the user's clone, branches, or working tree.
+
 ---
 
 ## Important Principles
+
+### Source Freshness for Existing Repos
+
+When planning against an existing repo (`--repo`), the source of truth is a fetched, SHA-pinned origin default branch — never the local working tree, which may lag origin by many commits or hold uncommitted WIP. The Phase 0.4.0 guard pins that anchor once and every research/review reader works from it. Greenfield plans (no `--repo`) skip the guard entirely.
 
 ### Human-in-the-Loop First
 

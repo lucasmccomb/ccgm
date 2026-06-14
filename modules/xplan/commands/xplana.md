@@ -41,6 +41,7 @@ Autonomous mode affects these xplan phases:
 
 | Phase | What changes in autonomous mode |
 |-------|--------------------------------|
+| 0.4.0 (Source Freshness Guard) | Runs automatically with NO prompt when `--repo` is set: fetch, pin the origin default-branch anchor, expose a temp anchor worktree, and verify every repo fact against it. Never fast-forwards the user's clone. Skipped entirely for greenfield (no `--repo`). |
 | 0.5 (Discovery Interview) | Skipped. Defaults inferred per Phase 0.5 Inference Rules; recorded in `decisions.md`. |
 | 1.0 (Research Config) | Locked to Full - all 7 research agents fire. |
 | 1.5 (Research Review) | Skipped mid-flow; summary stashed for final walkthrough. |
