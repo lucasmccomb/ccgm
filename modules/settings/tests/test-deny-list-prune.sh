@@ -54,6 +54,17 @@ assert_present() {
     fi
 }
 
+assert_allow_absent() {
+    local pattern="$1"
+    local label="$2"
+    if jq -e ".permissions.allow | any(. == \"${pattern}\")" "${SETTINGS}" > /dev/null; then
+        FAIL=$((FAIL + 1))
+        echo "FAIL: ${label} (dangerous allow entry still present: ${pattern})"
+    else
+        PASS=$((PASS + 1))
+    fi
+}
+
 # 0. JSON validity (cheap precondition; the assertions below rely on jq).
 if ! jq -e . "${SETTINGS}" > /dev/null; then
     echo "FATAL: settings.base.json is not valid JSON"
@@ -99,6 +110,25 @@ else
     FAIL=$((FAIL + 1))
     echo "FAIL: allow list shrank (was ~800, now ${allow_len})"
 fi
+
+# 6. Dangerous broad shell-escape / privilege-escalation prefixes are NOT
+#    auto-allowed (#665). sudo/su/doas escalate privilege; eval/exec smuggle
+#    denied commands past the prefix matcher (e.g. eval "rm -rf /" defeats the
+#    Bash(rm -rf:*) deny). They must fall through to defaultMode (ask).
+assert_allow_absent "Bash(sudo:*)" "no auto-allow: sudo"
+assert_allow_absent "Bash(su:*)"   "no auto-allow: su"
+assert_allow_absent "Bash(doas:*)" "no auto-allow: doas"
+assert_allow_absent "Bash(eval:*)" "no auto-allow: eval"
+assert_allow_absent "Bash(exec:*)" "no auto-allow: exec"
+
+# 7. Deny-beats-allow invariant: no command is simultaneously present in the
+#    deny list and the allow list. Claude Code lets deny win, but an entry in
+#    both is a contradictory signal and a maintenance hazard.
+overlap=$(jq -r '
+    (.permissions.allow) as $a
+    | .permissions.deny | map(select(. as $d | $a | any(. == $d))) | join(", ")
+' "${SETTINGS}")
+assert_eq "${overlap}" "" "deny-beats-allow: no allow/deny overlap"
 
 echo ""
 echo "test-deny-list-prune.sh: ${PASS} passed, ${FAIL} failed"
