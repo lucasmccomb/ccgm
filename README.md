@@ -132,7 +132,7 @@ For a quick install with a preset:
 |--------|---------|----------|
 | **minimal** | global-claude-md, autonomy, git-workflow | Getting started |
 | **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, settings, commands-core, commands-utility, output-formatting | Most users |
-| **full** | 51 modules | Power users |
+| **full** | 50 modules | Power users |
 | **team** | global-claude-md, autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting | Teams |
 
 ### Other install options
@@ -185,7 +185,7 @@ For a quick install with a preset:
 | **test-vision** | workflow | Vision-driven e2e test suite generation. /test-vision for full repo analysis + parallel test suite creation. /e2e for single-feature spec generation | browser-automation, multi-agent |
 | **xplan** | workflow | Interactive planning framework: discovery interview, deep research, tech stack sign-off, peer review, parallel agent execution. Requires [/deepresearch](#companion-module-deepresearch) | multi-agent |
 | **remote-server** | workflow | SSH access to a configured remote server with /onremote command for health checks and remote task execution | - |
-| **agent-manager** | workflow | [BETA] Go-based terminal UI (/agents) for monitoring and controlling Claude Code agent processes across multi-clone repos via tmux | multi-agent |
+| **agent-manager** | workflow | [DEPRECATED] Go-based terminal UI (/agents) for monitoring Claude Code agent processes via tmux. Unmaintained; not offered for new installs, kept in-repo for existing users | multi-agent |
 | **cloud-dispatch** | workflow | Delegate GitHub issues to autonomous Claude Code agents on Hetzner Cloud VMs. Includes /dispatch, /dispatch-status, /dispatch-stop, /vm-manage commands | - |
 | **self-improving** | workflow | Meta-learning system: /reflect and /consolidate commands, PostToolUse hook (PR merge/issue close reminders), PreCompact hook (pre-compaction capture), prescriptive reflection triggers | - |
 | **autoheal** | workflow | Self-healing observability loop: captures permission events, tool failures, and user-correction signals to a local JSONL log; daily analyzer (direct Anthropic API) surfaces a digest of proposed config fixes via `/autoheal-digest` and `/autoheal-apply`. Default-off opt-ins: `realtime_alerts_enabled` (mid-session security alerts), `auto_apply_enabled` (confidence-gated apply), `email_enabled` (Resend digest), `webhook_url` (future dev.lem.work seam). Bring-up: `bash start.sh --add autoheal` then `bash modules/autoheal/bin/autoheal-install.sh` | hooks |
@@ -200,12 +200,11 @@ For a quick install with a preset:
 | **code-quality** | patterns | Code standards, testing requirements, error handling, security, build verification | - |
 | **browser-automation** | patterns | Browser tool selection (Chrome, Playwright, WebMCP), verification priority, UI testing workflow | - |
 | **common-mistakes** | patterns | 8 battle-tested anti-patterns: shallow exploration, dependency blindness, ESLint Fast Refresh, more | - |
-| **frontend-design** | patterns | Distinctive web UI: intentional aesthetics, typography, color systems, spatial composition | - |
 | **systematic-debugging** | patterns | 4-phase root cause investigation: investigate, analyze, test hypotheses, implement fix | - |
 | **test-driven-development** | patterns | Strict red-green-refactor TDD discipline. No production code without a failing test first | - |
 | **verification** | patterns | Evidence-before-claims: fresh execution of verification commands, read full output before asserting done | - |
-| **agent-native** | patterns | Principles and audit skill for building applications where an agent is a first-class client | - |
-| **make-interfaces-feel-better** | patterns | Design-engineering details that compound into polished interfaces. Model-invoked skill covering typography, surfaces, animations, performance | - |
+| **agent-native** | patterns | Principles, audit skill, and a self-eval / red-team rubric for building applications where an agent is a first-class client | - |
+| **make-interfaces-feel-better** | patterns | Design-engineering details that compound into polished interfaces. Model-invoked skill covering design direction, typography, surfaces, animations, performance | - |
 | **rule-authoring** | patterns | Discipline for writing rules that hold up under pressure. Treats rule authoring as a first-class skill with iron-law structure | - |
 | **skill-authoring** | patterns | Discipline for writing skills and slash commands that stay efficient, portable, and structured across models | - |
 | **cloudflare** | tech-specific | Pages vs Workers selection, deployment methods, Git integration requirements | - |
@@ -321,7 +320,7 @@ The `docs/` directory contains comprehensive documentation:
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 69 modules |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 67 modules |
 | [Commands Reference](docs/commands.md) | All 74 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 13 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |

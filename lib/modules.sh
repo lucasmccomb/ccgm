@@ -99,6 +99,14 @@ is_beta() {
   [ "$(module_status "$1")" = "beta" ]
 }
 
+# --- Check if module is deprecated ---
+# Usage: is_deprecated "module-name" && echo "skip"
+# Deprecated modules stay in-repo for existing installs but are no longer
+# offered in the installer's module list or bundled in any preset.
+is_deprecated() {
+  [ "$(module_status "$1")" = "deprecated" ]
+}
+
 # --- Get module info (human-readable) ---
 # Usage: get_module_info "module-name"
 get_module_info() {

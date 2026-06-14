@@ -107,10 +107,10 @@ ZERO_PRESET=$(comm -23 <(printf '%s\n' "$ALL_MODULES") <(printf '%s\n' "$PRESET_
 UNCOVERED=""
 while IFS= read -r mod; do
   [ -n "$mod" ] || continue
-  # beta modules are auto-excluded
+  # beta and deprecated modules are auto-excluded
   status=$(jq -r '.status // "stable"' "modules/$mod/module.json")
-  if [ "$status" = "beta" ]; then
-    ok "$mod in zero presets but status=beta (auto-excluded)"
+  if [ "$status" = "beta" ] || [ "$status" = "deprecated" ]; then
+    ok "$mod in zero presets but status=$status (auto-excluded)"
     continue
   fi
   # allowlisted?

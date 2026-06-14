@@ -1,18 +1,17 @@
-# Agentic Engineering Evaluation Rubric
+# Agent-Native Self-Eval / Red-Team Rubric
 
-Evaluation format for agentic engineering portfolios and interviews. The candidate builds a Twitter-clone-for-agents: a small social-feed system whose tools and surface satisfy the four agent-native principles. Evaluators dispatch N parallel red-team agents against the deployed surface. The candidate passes if no agent breaks the surface within a fixed budget.
+A repeatable rubric for evaluating whether a surface is genuinely agent-native and resilient. Use it to self-audit a system you built, to review one you inherited, or as a consistent scoring standard when assessing agentic engineering work. It operationalizes the four principles in `agent-native.md` (parity, granularity, composability, emergent capability) into a measurable pass/fail procedure backed by parallel red-team probing.
 
-Source: Karpathy, Sequoia interview, April 2026:
-> "Hiring has to look like... write a Twitter clone for agents... make it really good, make it really secure... I'm going to use 10 codecs... to try to break your website. They should not be able to break it."
+The format generalizes the Twitter-clone-for-agents pattern: build (or point at) a small social-feed system whose tools and surface satisfy the four principles, then dispatch N parallel red-team agents against the deployed surface. The system passes if no agent breaks it within a fixed budget and the parity/composability thresholds are met.
 
-Principles referenced: `agent-native` module (`rules/agent-native.md`).
-Red-team dispatch: `subagent-patterns` module (`rules/subagent-patterns.md`).
+Principles referenced: `agent-native.md`.
+Red-team dispatch: `subagent-patterns.md`.
 
 ---
 
-## Part 1: The Reference Build
+## Part 1: The Reference Surface
 
-The candidate builds a small social-feed system. The system is the test case, not the deliverable. Evaluators do not ship it; they probe it.
+A small social-feed system is the canonical test case. It is the test fixture, not a deliverable — you probe it, you do not ship it. The choice is deliberate: a social feed is small enough for 5-10 agents to exhaust in a fixed budget, complex enough to require all four principles, and generic enough that no domain knowledge advantages the builder.
 
 ### Minimum Surface (6 domains, 12 tools)
 
@@ -33,7 +32,7 @@ Every user-visible action must have a callable tool with identical semantics, id
 | Users | `user_get` | Get a user's public profile: username, bio, follower_count, following_count, post_count. |
 | Auth | `session_create` | Create an authenticated session given credentials. Returns a session token for use in subsequent calls. |
 
-The twelve tools above are the minimum. Candidates may add more (granularity: richer primitives enable more emergent behavior). Candidates must not merge any two into a single batched tool (granularity violation).
+The twelve tools above are the minimum. More are allowed (granularity: richer primitives enable more emergent behavior). Two must never be merged into a single batched tool (granularity violation).
 
 ### Surface Requirements
 
@@ -41,10 +40,10 @@ Beyond the tool list, the surface must satisfy:
 
 1. **Parity**: Every action a user can take in any UI (if one exists) is covered by a tool.
 2. **Granularity**: No tool does two things. No tool encodes a workflow. `post_create_and_follow_author` is a violation.
-3. **Composability**: There must be at least three documented example prompts that compose existing tools to produce a behavior the surface did not explicitly design for. Example: "Summarize the top-5 most-liked posts from the last 24 hours and reply to each with a one-sentence takeaway." The agent must complete this prompt using only the twelve tools above, no new code.
+3. **Composability**: At least three documented example prompts that compose existing tools to produce a behavior the surface did not explicitly design for. Example: "Summarize the top-5 most-liked posts from the last 24 hours and reply to each with a one-sentence takeaway." The agent must complete this using only the twelve tools, no new code.
 4. **Error messages are instructions**: Every tool failure must name the reason and suggest the next action. `{ error: "not_found", message: "post id 'p999' does not exist; use feed_public to find valid ids" }` is acceptable. `{ error: "500" }` is not.
 5. **Idempotency**: `like_toggle` and `follow_toggle` must be safe to call twice in a row. `post_create` must not be idempotent (calling it twice creates two posts).
-6. **No UI-only flows**: If the candidate builds a UI, every action in the UI must be reachable by a tool. Modal confirmations for destructive actions must be satisfiable programmatically (e.g., a `confirm: true` parameter on `post_delete`).
+6. **No UI-only flows**: If a UI exists, every action in it must be reachable by a tool. Modal confirmations for destructive actions must be satisfiable programmatically (e.g., a `confirm: true` parameter on `post_delete`).
 
 ---
 
@@ -93,7 +92,7 @@ For 5 agents at 200 calls each, total budget is 1,000 tool calls. Adjust proport
 | 8 | 150 | 1,200 |
 | 10 | 100 | 1,000 |
 
-Fewer calls per agent with more agents favors breadth. More calls per agent with fewer agents favors depth. For interview use, 5 agents at 200 calls is the default.
+Fewer calls per agent with more agents favors breadth. More calls per agent with fewer agents favors depth. The default is 5 agents at 200 calls.
 
 ---
 
@@ -122,7 +121,7 @@ Fewer calls per agent with more agents favors breadth. More calls per agent with
 
 Parity score is a count, not an opinion. The evaluator must:
 
-1. Enumerate every user-visible action (button, form submission, gesture with programmatic effect) in the candidate's surface. If there is no UI, the tool schema is the surface and parity is 100% by definition (but then the six-domain minimum still applies).
+1. Enumerate every user-visible action (button, form submission, gesture with programmatic effect) in the surface. If there is no UI, the tool schema is the surface and parity is 100% by definition (but the six-domain minimum still applies).
 2. Map each action to a tool. An action is covered if there is a tool with the same semantics.
 3. Report `covered / total` as the parity score.
 
@@ -130,7 +129,7 @@ A parity score below 85% is a failing criterion. The gap list is the specific fi
 
 ### Scoring Emergent Capability
 
-Agent 5 attempts 5 novel prompts. The evaluator selects prompts that:
+Agent 5 attempts 5 novel prompts. Select prompts that:
 - Require at least 3 tool calls in sequence
 - Produce an outcome the surface did not explicitly design (no single tool does the full job)
 - Are useful to a real user (not contrived)
@@ -177,8 +176,4 @@ When red-team agents are not available (no budget, solo evaluation), use this ab
 
 ## Notes on Scope
 
-This rubric describes the evaluation format. It does not describe the implementation of the Twitter-clone-for-agents surface. Candidates implement the surface themselves; the rubric tells them what it must satisfy and how it will be probed.
-
-A `/agentic-eval` skill that runs the red-team dispatch automatically is a planned follow-up to this module. The rubric is complete and useful as a self-eval standard without the skill.
-
-The choice of a social-feed system as the test case is deliberate: it is small enough for 5-10 agents to exhaust in a fixed budget, complex enough to require all four principles, and generic enough that candidates are not advantaged by domain knowledge.
+This rubric describes the evaluation format. It does not describe the implementation of the test surface. The builder implements the surface; the rubric tells them what it must satisfy and how it will be probed. The rubric is complete and useful as a self-eval standard even without automated red-team dispatch.

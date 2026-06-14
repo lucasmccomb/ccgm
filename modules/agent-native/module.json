@@ -1,13 +1,18 @@
 {
   "name": "agent-native",
   "displayName": "Agent-Native Architecture",
-  "description": "Principles and audit skill for building applications where an agent is a first-class user. Four principles (parity, granularity, composability, emergent capability) as a rule file, plus /agent-native-audit that scores a codebase with specific counts and a reviewer persona for the unified review orchestrator.",
+  "description": "Principles and audit skill for building applications where an agent is a first-class user. Four principles (parity, granularity, composability, emergent capability) as a rule file, a self-eval / red-team rubric that scores a surface against those principles, plus /agent-native-audit that scores a codebase with specific counts and a reviewer persona for the unified review orchestrator.",
   "category": "patterns",
   "scope": ["global", "project"],
   "dependencies": ["subagent-patterns"],
   "files": {
     "rules/agent-native.md": {
       "target": "rules/agent-native.md",
+      "type": "rule",
+      "template": false
+    },
+    "rules/agent-native-self-eval.md": {
+      "target": "rules/agent-native-self-eval.md",
       "type": "rule",
       "template": false
     },
@@ -22,6 +27,6 @@
       "template": false
     }
   },
-  "tags": ["agent-native", "architecture", "tools", "audit", "review", "ai-first"],
+  "tags": ["agent-native", "architecture", "tools", "audit", "review", "ai-first", "evaluation", "red-team", "rubric"],
   "configPrompts": []
 }

@@ -2,7 +2,7 @@
 
 Principles and tooling for designing applications where an LLM agent is a first-class user. Ship it when you are building or auditing a product that an agent will drive on behalf of a human.
 
-The module installs three things: a rule file with the four principles, a `/agent-native-audit` skill that scores a codebase against them, and a reviewer persona for the unified review orchestrator (CCGM #277).
+The module installs four things: a rule file with the four principles, a self-eval / red-team rubric that scores a surface against those principles, a `/agent-native-audit` skill that scores a codebase against them, and a reviewer persona for the unified review orchestrator (CCGM #277).
 
 ## The Four Principles
 
@@ -20,6 +20,7 @@ Files installed globally to `~/.claude/`:
 | Source | Target | Purpose |
 |--------|--------|---------|
 | `rules/agent-native.md` | `rules/agent-native.md` | Four principles with one section each plus design, runtime, and audit guidance |
+| `rules/agent-native-self-eval.md` | `rules/agent-native-self-eval.md` | Self-eval / red-team rubric: reference surface spec, parallel red-team procedure, pass criteria, and scoring |
 | `skills/agent-native-audit/SKILL.md` | `skills/agent-native-audit/SKILL.md` | `/agent-native-audit` - score a codebase with specific counts and concrete fixes |
 | `agents/reviewers/agent-native-reviewer.md` | `agents/reviewers/agent-native-reviewer.md` | Reviewer persona for `/ce-review` and standalone diff review |
 
@@ -34,6 +35,9 @@ mkdir -p ~/.claude/agents/reviewers
 
 cp modules/agent-native/rules/agent-native.md \
    ~/.claude/rules/agent-native.md
+
+cp modules/agent-native/rules/agent-native-self-eval.md \
+   ~/.claude/rules/agent-native-self-eval.md
 
 cp modules/agent-native/skills/agent-native-audit/SKILL.md \
    ~/.claude/skills/agent-native-audit/SKILL.md
@@ -70,6 +74,10 @@ Dispatch agent-native-reviewer with:
 ```
 
 The reviewer returns a structured critique with a verdict (approve / approve-with-concerns / request-changes), principle-level deltas versus a prior audit if provided, and a Findings list with file:line evidence and suggested changes.
+
+### Self-eval / red-team a surface
+
+Use `rules/agent-native-self-eval.md` to score whether a surface is genuinely agent-native and resilient. It defines a reference test surface (a small social-feed system with 12 minimum tools), a parallel red-team procedure that dispatches N agents against the deployed surface per the `subagent-patterns` dispatch model, and a pass/fail scorecard (zero exploits, >= 85% parity, >= 3/5 emergent prompts, zero granularity violations, error-quality spot-check). A red-team-free manual checklist is included for solo evaluation. The rubric doubles as a consistent standard for assessing agentic engineering work.
 
 ### Use the rule as design guidance
 
