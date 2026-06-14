@@ -1222,6 +1222,30 @@ One-screen dashboard summarizing whether the current branch is ready to merge. S
 
 ---
 
+## Navigation commands
+
+Installed by the **capability-router** module.
+
+---
+
+### /capabilities
+
+**Which command/skill do I use?**
+
+Prints a decision map for CCGM's overlapping clusters - research, review, planning/execution, debugging, and knowledge/memory - with a terse "use X when..., use Y when..." line per cluster. The full map lives in this on-demand command; a tight always-on rule carries only the most-confused one-liners so the catalog costs no idle tokens. Pass a cluster name to print just that section.
+
+**Usage**:
+```
+/capabilities             # Print the whole map
+/capabilities research    # /research vs /deepresearch
+/capabilities review      # ce-review, document-review, editorial-critique, design-review, adrev...
+/capabilities plan        # /xplan, /xplana, /etp, /mawf
+/capabilities debug       # /debug vs the systematic-debugging methodology
+/capabilities knowledge   # /reflect vs /compound vs session-history
+```
+
+---
+
 ## Onboarding commands
 
 Installed by the **onboarding** module.
