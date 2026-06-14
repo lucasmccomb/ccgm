@@ -1,0 +1,50 @@
+# Preset Coverage Allowlist
+#
+# Modules listed here are intentionally NOT a member of any preset
+# (presets/*.json) and are therefore exempt from the zero-preset CI check
+# in tests/test-doc-counts.sh.
+#
+# A module belongs here only if it is a stable module that is deliberately
+# left out of every curated preset (installable via `start.sh --add <name>`
+# but not bundled). Modules with "status": "beta" in their module.json are
+# auto-excluded and do NOT need to be listed here.
+#
+# Format: one bare module name per line (no inline comments). Blank lines and
+# lines starting with # are ignored.
+#
+# When a module here is later added to a preset, remove it from this list —
+# the CI guard flags stale allowlist entries (a module that is allowlisted AND
+# already in a preset).
+
+# capability-router target (Wave 2); not yet preset-assigned
+agent-native
+# slated to merge into agent-native (Wave 2)
+agentic-eval
+# specialized review skill; opt-in via --add
+ce-review
+# internal command-preamble partial; not a user-facing preset member
+commands-preamble
+# team-shared knowledge store; opt-in via --add
+compound-knowledge
+# niche doc-generation skill; opt-in via --add
+docs-for-agents
+# specialized review skill; opt-in via --add
+document-review
+# advanced git workflow; opt-in via --add
+git-worktrees
+# launch-readiness skill; opt-in via --add
+launch
+# onboarding skill; opt-in via --add
+onboarding
+# specialized PR skill; opt-in via --add
+pr-feedback
+# specialized PR skill; opt-in via --add
+pr-review-toolkit
+# meta/authoring skill; opt-in via --add
+rule-authoring
+# ship-readiness skill; opt-in via --add
+ship-readiness
+# meta/authoring skill; opt-in via --add
+skill-authoring
+# lightweight todos skill; opt-in via --add
+todos

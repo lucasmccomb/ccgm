@@ -18,6 +18,9 @@ jobs:
       - name: Validate modules
         run: bash tests/test-modules.sh
 
+      - name: Check doc counts + preset coverage
+        run: bash tests/test-doc-counts.sh
+
       - name: Personal-data detector self-test
         run: bash tests/test-no-personal-data.sh --self-test
 
@@ -46,6 +49,9 @@ jobs:
 
       - name: Validate modules
         run: bash tests/test-modules.sh
+
+      - name: Check doc counts + preset coverage
+        run: bash tests/test-doc-counts.sh
 
       - name: Personal-data detector self-test
         run: bash tests/test-no-personal-data.sh --self-test
