@@ -1,13 +1,29 @@
 #!/usr/bin/env bash
 # CCGM - Backup and restore
 
+# --- Resolve the backup base for a given install target ---
+# Backups are scoped to the install target so a project-scope (.claude/) install
+# never writes to or restores from the global ~/.claude/backups (and vice-versa).
+# The backups dir sits alongside the target (<target>/backups), so a project
+# target's backups live under that project's .claude/backups.
+# Usage: backup_base_for "/target/dir"
+backup_base_for() {
+  local target_dir="$1"
+  if [ -z "$target_dir" ]; then
+    echo "${HOME}/.claude/backups"
+    return 0
+  fi
+  echo "${target_dir%/}/backups"
+}
+
 # --- Create timestamped backup ---
 # Usage: create_backup "/target/dir"
-# Backs up existing config files to ~/.claude/backups/ccgm-YYYYMMDD-HHMMSS/
+# Backs up existing config files to <target>/backups/ccgm-YYYYMMDD-HHMMSS/
 # Returns the backup directory path on stdout
 create_backup() {
   local target_dir="$1"
-  local backup_base="${HOME}/.claude/backups"
+  local backup_base
+  backup_base=$(backup_base_for "$target_dir")
   local timestamp
   timestamp=$(date '+%Y%m%d-%H%M%S')
   local backup_dir="${backup_base}/ccgm-${timestamp}"
@@ -84,18 +100,21 @@ restore_backup() {
     mkdir -p "$target_dir"
   fi
 
-  # Copy everything from backup to target
-  cp -r "${backup_dir}/"* "$target_dir/" 2>/dev/null
+  # Copy everything from backup to target. The globs may not match (empty
+  # backup, or no hidden files); tolerate that without aborting under `set -e`.
+  cp -r "${backup_dir}/"* "$target_dir/" 2>/dev/null || true
   # Also restore hidden files
-  cp -r "${backup_dir}/".[!.]* "$target_dir/" 2>/dev/null
+  cp -r "${backup_dir}/".[!.]* "$target_dir/" 2>/dev/null || true
 
   return 0
 }
 
 # --- List available backups ---
-# Prints each backup dir, newest first
+# Usage: list_backups ["/target/dir"]
+# Prints each backup dir for the target's scope, newest first.
 list_backups() {
-  local backup_base="${HOME}/.claude/backups"
+  local backup_base
+  backup_base=$(backup_base_for "${1:-}")
   if [ ! -d "$backup_base" ]; then
     return 0
   fi
@@ -113,8 +132,10 @@ list_backups() {
 }
 
 # --- Get most recent backup ---
+# Usage: get_latest_backup ["/target/dir"]
 get_latest_backup() {
-  local backup_base="${HOME}/.claude/backups"
+  local backup_base
+  backup_base=$(backup_base_for "${1:-}")
   if [ ! -d "$backup_base" ]; then
     return 1
   fi
@@ -123,9 +144,11 @@ get_latest_backup() {
 }
 
 # --- Clean old backups (keep N most recent) ---
+# Usage: clean_backups [keep] ["/target/dir"]
 clean_backups() {
   local keep="${1:-5}"
-  local backup_base="${HOME}/.claude/backups"
+  local backup_base
+  backup_base=$(backup_base_for "${2:-}")
 
   if [ ! -d "$backup_base" ]; then
     return 0

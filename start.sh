@@ -1025,6 +1025,8 @@ main() {
     if [ -n "$backup_path" ]; then
       BACKUP_DIRS+=("$backup_path")
       ui_success "Global config backed up to: $backup_path"
+      # Bound backup growth: keep the 5 most recent global-scope backups.
+      clean_backups 5 "$global_dir"
     else
       ui_info "No existing global config to back up"
     fi
@@ -1035,6 +1037,8 @@ main() {
     if [ -n "$backup_path" ]; then
       BACKUP_DIRS+=("$backup_path")
       ui_success "Project config backed up to: $backup_path"
+      # Bound backup growth: keep the 5 most recent project-scope backups.
+      clean_backups 5 "$project_dir"
     else
       ui_info "No existing project config to back up"
     fi
