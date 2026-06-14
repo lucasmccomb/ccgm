@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# postInstall.sh - Download and install the ccgm-agents binary after module install.
+# postInstall.sh - Download and install the ccgm-agents binary.
+#
+# NOTE: The CCGM installer has no post-install hook mechanism; the `postInstall`
+# key in module.json is advisory metadata and is NOT executed automatically.
+# Run this script manually to install the binary.
 #
 # Downloads the correct platform binary from GitHub Releases, verifies the
 # SHA-256 checksum, and installs it to ~/.ccgm/bin/ccgm-agents.

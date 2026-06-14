@@ -159,14 +159,26 @@ The runner discovers these automatically, so no registration is needed.
 
 Each entry in the `files` object maps a source path (relative to the module directory) to a descriptor:
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `target` | string | yes | Destination path relative to the install root (`~/.claude/` or `.claude/`). |
-| `type` | string | yes | File type: `rule`, `command`, `agent`, `skill`, `skill-reference`, `hook`, `lib`, `script`, `config`, `doc`, or `content`. |
-| `template` | boolean | yes | Whether the file contains `__PLACEHOLDER__` template variables to expand. |
-| `merge` | boolean | no | For `config` type only. If `true`, the file is merged into the target rather than replacing it. Used for settings partials. |
+| Field | Type | Required | Behavior-bearing | Description |
+|-------|------|----------|:----------------:|-------------|
+| `target` | string | yes | yes | Destination path relative to the install root (`~/.claude/` or `.claude/`). This alone determines where the file lands. |
+| `template` | boolean | yes | yes | Whether the file contains `__PLACEHOLDER__` template variables to expand at install time. |
+| `merge` | boolean | no | yes | If `true`, the file is merged into the target rather than replacing it (used for settings partials). The installer derives copy/link/merge from this flag plus `--link` mode — **not** from `type`. |
+| `type` | string | yes | no (advisory) | A label describing the kind of file (`rule`, `command`, `agent`, `skill`, `skill-reference`, `hook`, `lib`, `script`, `config`, `doc`, or `content`). Documentation only — see "Functional vs advisory fields" below. |
+
+### Functional vs advisory fields
+
+Not every manifest field changes what the installer does. Knowing which is which prevents you from assuming behavior that does not exist:
+
+- **Behavior-bearing fields** drive installation: `name`, `scope`, `dependencies`, `configPrompts`, and each file's `target`, `template`, and `merge`. `status` gates whether a module is offered (`deprecated` and `beta` are recognized). `displayName` and `description` are shown to the user.
+- **Advisory fields** are catalog/documentation metadata only and do **not** change install behavior:
+  - **`category`** — used for grouping in the human-readable module listing. It is required and validated against the enum below, but the installer never branches on it.
+  - **`files[].type`** — a descriptive label for the kind of file. The install location is set by `target` and copy/link/merge is set by `merge` plus link mode; `type` is not consumed by the installer and is not validated against an enum. Set it accurately for readers, but do not expect it to control where or how a file installs.
+  - **`postInstall`** — present in one legacy (deprecated) manifest but **not executed by the installer**. There is no post-install hook mechanism in `start.sh` or `lib/`. Do not add `postInstall` to a manifest expecting it to run; if a module needs a binary fetched or a build step, document a manual step in its README instead.
 
 ### File Types
+
+The `type` values below are descriptive labels (advisory — see above). The "installed to" notes describe the **convention** authors follow via each file's `target`; `type` itself does not set the destination.
 
 | Type | Extension | Description |
 |------|-----------|-------------|

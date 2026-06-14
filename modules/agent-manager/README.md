@@ -26,13 +26,15 @@ The agent manager gives you a live view of all running Claude Code agents: their
 
 ## Installation
 
-### Via CCGM Installer (Recommended)
+> This module is deprecated and is not offered in the installer's module list, so there is no installer-driven setup path. The CCGM installer also has **no post-install hook mechanism** — the `postInstall.sh` script in this directory is never run automatically. Install the binary manually using either the script or the steps below.
+
+### Binary install via script
+
+Run the bundled script directly. It downloads the correct platform binary, verifies its checksum, and installs it to `~/.ccgm/bin/`:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/lucasmccomb/ccgm/main/start.sh)
+bash modules/agent-manager/postInstall.sh
 ```
-
-Select "Agent Manager TUI" from the module list. The installer runs `postInstall.sh` automatically, which downloads the correct binary for your platform.
 
 ### Manual Installation
 
