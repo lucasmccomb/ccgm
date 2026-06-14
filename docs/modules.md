@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 68 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 69 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -406,6 +406,18 @@ At-a-glance dashboard of what gates a merge on the current branch.
 **Installs**: `commands/ship-ready.md`
 
 **What it does**: `/ship-ready` surfaces failing tests, open PR count, stale branches, outdated deps, merge velocity, review freshness, and unresolved risks from `docs/solutions/`. Reads ce-review envelopes for commit-hash staleness detection so a finding from N commits ago is flagged as potentially stale.
+
+**Dependencies**: None
+
+---
+
+### capability-router
+
+A decision map for CCGM's overlapping command/skill clusters - answers "which one do I use?"
+
+**Installs**: `commands/capabilities.md`, `rules/capability-map.md`
+
+**What it does**: `/capabilities [cluster]` prints a decision map for the clusters that overlap most - research (`/research` vs `/deepresearch`), review (`scope-drift`, `/ce-review`, `document-review`, `editorial-critique`, `design-review`, `adrev`, `/resolve-pr-feedback`), planning/execution (`/xplan`, `/xplana`, `/etp`, `/mawf`), debugging (`/debug`), and knowledge (`/reflect` vs `/compound` vs `session-history`). A tight always-on rule carries the most-confused one-liners and points at the command, so the full map costs no idle tokens.
 
 **Dependencies**: None
 
