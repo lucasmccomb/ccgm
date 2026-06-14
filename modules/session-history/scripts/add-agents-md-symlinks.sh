@@ -8,8 +8,10 @@
 # duplicating content.
 #
 # Behavior:
-# - Accepts a list of repo paths as arguments. If none provided, scans
-#   sensible defaults under $CODE_DIR (default $HOME/code).
+# - Accepts a list of repo paths as arguments. If none provided, auto-discovers
+#   candidate repos under $CODE_DIR (default $HOME/code): any immediate
+#   subdirectory containing a CLAUDE.md, plus the first clone of common
+#   multi-clone layouts (-repos/-N and -workspaces/-wX/-wX-cY).
 # - Skips any path that is not a directory containing CLAUDE.md.
 # - Skips any path where AGENTS.md already exists as a non-symlink (warns).
 # - If AGENTS.md is already a symlink, leaves it alone.
@@ -19,22 +21,31 @@ set -u
 
 CODE_DIR="${CODE_DIR:-$HOME/code}"
 
-DEFAULT_TARGETS=(
-  "$CODE_DIR/ccgm"
-  "$CODE_DIR/voxstr-repos/voxstr-0"
-  "$CODE_DIR/voxstr-site-repos/voxstr-site-0"
-  "$CODE_DIR/habitpro-ai-workspaces/habitpro-ai-w0/habitpro-ai-w0-c0"
-  "$CODE_DIR/openslide-ai-repos/openslide-ai-0"
-  "$CODE_DIR/lem-photo-repos/lem-photo-0"
-  "$CODE_DIR/darkly-suite-repos/darkly-suite-0"
-  "$CODE_DIR/lem-work-repos/lem-work-0"
-  "$CODE_DIR/nadaproof"
-)
+# Discover repos under $CODE_DIR that have a CLAUDE.md. Pass explicit paths as
+# arguments to override discovery. No personal repo names are hardcoded here.
+discover_targets() {
+  [ -d "$CODE_DIR" ] || return 0
+  # Single-clone repos: $CODE_DIR/<repo>/CLAUDE.md
+  for d in "$CODE_DIR"/*/; do
+    [ -f "${d}CLAUDE.md" ] && printf '%s\n' "${d%/}"
+  done
+  # Flat-clone repos: $CODE_DIR/<repo>-repos/<repo>-0/CLAUDE.md
+  for d in "$CODE_DIR"/*-repos/*-0/; do
+    [ -f "${d}CLAUDE.md" ] && printf '%s\n' "${d%/}"
+  done
+  # Workspace repos: $CODE_DIR/<repo>-workspaces/<repo>-w0/<repo>-w0-c0/CLAUDE.md
+  for d in "$CODE_DIR"/*-workspaces/*-w0/*-w0-c0/; do
+    [ -f "${d}CLAUDE.md" ] && printf '%s\n' "${d%/}"
+  done
+}
 
 if [ "$#" -gt 0 ]; then
   TARGETS=("$@")
 else
-  TARGETS=("${DEFAULT_TARGETS[@]}")
+  TARGETS=()
+  while IFS= read -r line; do
+    [ -n "$line" ] && TARGETS+=("$line")
+  done < <(discover_targets)
 fi
 
 CREATED=0

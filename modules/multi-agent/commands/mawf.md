@@ -149,10 +149,10 @@ Compare the output CWDs against the clone directories. Any clone directory that 
 In the execution plan presentation, mark occupied clones clearly:
 ```
 Wave 1 (parallel):
-  agent-w0-c0 (habitpro-ai-w0-c0): #42 - Add dark mode toggle
-  agent-w0-c1 (habitpro-ai-w0-c1): #43 - Fix login redirect
-  agent-w0-c2 (habitpro-ai-w0-c2): [OCCUPIED - PID 78859, up 2h, branch: 166-api-native] - SKIPPED
-  agent-w0-c3 (habitpro-ai-w0-c3): #44 - Update onboarding flow
+  agent-w0-c0 (myrepo-w0-c0): #42 - Add dark mode toggle
+  agent-w0-c1 (myrepo-w0-c1): #43 - Fix login redirect
+  agent-w0-c2 (myrepo-w0-c2): [OCCUPIED - PID 78859, up 2h, branch: 166-api-native] - SKIPPED
+  agent-w0-c3 (myrepo-w0-c3): #44 - Update onboarding flow
 ```
 
 If all available clones are occupied, report this and ask the user:

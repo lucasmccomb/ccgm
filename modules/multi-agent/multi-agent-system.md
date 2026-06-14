@@ -62,15 +62,15 @@ Derived from the directory name pattern `{repo}-w{X}-c{Y}`:
 
 ```bash
 AGENT_ID=$(basename "$PWD" | grep -oP 'w\d+-c\d+$' | sed 's/^/agent-/')
-# habitpro-ai-w1-c2 -> agent-w1-c2
+# myrepo-w1-c2 -> agent-w1-c2
 ```
 
 | Directory | Agent ID |
 |-----------|----------|
-| `habitpro-ai-w0-c0` | agent-w0-c0 |
-| `habitpro-ai-w0-c3` | agent-w0-c3 |
-| `habitpro-ai-w1-c0` | agent-w1-c0 |
-| `habitpro-ai-w2-c3` | agent-w2-c3 |
+| `myrepo-w0-c0` | agent-w0-c0 |
+| `myrepo-w0-c3` | agent-w0-c3 |
+| `myrepo-w1-c0` | agent-w1-c0 |
+| `myrepo-w2-c3` | agent-w2-c3 |
 
 ### .env.clone File (Workspaces)
 
@@ -112,7 +112,7 @@ PORT_OFFSET=6
 
 ### Coordinator Role
 
-The coordinator agent runs in the workspace directory (e.g., `~/code/habitpro-ai-workspaces/habitpro-ai-w0/`). It:
+The coordinator agent runs in the workspace directory (e.g., `~/code/myrepo-workspaces/myrepo-w0/`). It:
 
 1. Receives a set of issues or a task from the human
 2. Discovers available clones by listing subdirectories
@@ -366,14 +366,11 @@ Each clone gets isolated ports to prevent collisions. Ports are assigned per-rep
 
 | Repo | Frontend Base | Backend Base |
 |------|--------------|-------------|
-| habitpro-ai | 5173 | 8787 |
-| openslide-ai | 5189 | 8803 |
-| lem-photo | 5205 | 8819 |
-| lem-work | 5221 | 8835 |
-| techenable | 5237 | 8851 |
-| lem-fyi | 5253 | 8867 |
-| nadaproof | 5269 | 8883 |
-| darkly-suite | 5285 | 8899 |
+| example-app | 5173 | 8787 |
+| example-monorepo | 5189 | 8803 |
+| ccgm | 5301 | 8915 |
+
+The entries shipped in `port-registry.json` are examples — add a row per repo you run, keeping each repo's base ports at least 16 apart so blocks do not overlap.
 
 Within each block, offset = `(workspace * clones_per_workspace) + clone` (workspace model) or `clone_number` (flat model).
 

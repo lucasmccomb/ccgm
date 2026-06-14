@@ -33,7 +33,7 @@ Run a health check and present a brief status report:
 ```bash
 ssh __REMOTE_USER__@__REMOTE_HOST__ "uptime"
 ssh __REMOTE_USER__@__REMOTE_HOST__ "df -h /"
-ssh __REMOTE_USER__@__REMOTE_HOST__ "ps -u openclaw -o pid,command | grep -Ev '/System/|/usr/lib|/usr/sbin|Contents/MacOS|\.framework' | grep -v PID"
+ssh __REMOTE_USER__@__REMOTE_HOST__ "ps -u __REMOTE_USER__ -o pid,command | grep -Ev '/System/|/usr/lib|/usr/sbin|Contents/MacOS|\.framework' | grep -v PID"
 ```
 
 Present as:
@@ -57,10 +57,10 @@ The arguments are a natural language description of what to do on the remote ser
 4. Report back in plain language - what you did and what the result was
 
 Examples of how to interpret input:
-- "check if openclaw is running" → `ps aux | grep openclaw-gateway`
+- "check if myservice is running" → `ps aux | grep myservice`
 - "how much disk space is left" → `df -h /`
 - "restart ollama" → `brew services restart ollama` (or find the right command)
-- "show the last 50 lines of the openclaw log" → find the log file and tail it
+- "show the last 50 lines of the myservice log" → find the log file and tail it
 - "what processes are using the most CPU" → `ps aux | sort -rk3 | head -10`
 
 Use multiple SSH calls if needed. Interpret the task fully - do not ask clarifying questions unless the intent is genuinely ambiguous.

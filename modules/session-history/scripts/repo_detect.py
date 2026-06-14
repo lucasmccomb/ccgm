@@ -12,9 +12,9 @@ from pathlib import Path
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
 
 # Regex matches a clone suffix on a path basename:
-#   flat clone:     "ccgm-0", "ccgm-1", "habitpro-ai-0"
-#   workspace:      "ccgm-w0", "habitpro-ai-w1"
-#   workspace+clone: "ccgm-w0-c2", "habitpro-ai-w1-c3"
+#   flat clone:     "myrepo-0", "myrepo-1", "my-multi-word-repo-0"
+#   workspace:      "myrepo-w0", "my-multi-word-repo-w1"
+#   workspace+clone: "myrepo-w0-c2", "my-multi-word-repo-w1-c3"
 CLONE_SUFFIX = re.compile(r"-(?:w\d+(?:-c\d+)?|\d+)$")
 
 
@@ -41,7 +41,7 @@ def detect_repo(cwd: str | None = None) -> str | None:
         if out.returncode == 0:
             url = out.stdout.strip()
             # Handle git@github.com:user/repo.git and https://github.com/user/repo.git
-            name = url.rstrip("/").rsplit("/", 1)[-1].rstrip(".git")
+            name = url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
             if name:
                 return name
     except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -93,9 +93,9 @@ def clone_label(project_dir: Path, repo: str) -> str:
     """Short label identifying which clone this project dir represents.
 
     Example mappings (based on trailing encoded-path segment):
-      repo='ccgm', project_dir=-Users-lem-code-ccgm-repos-ccgm-1   → 'ccgm-1'
-      repo='ccgm', -Users-lem-code-ccgm-workspaces-ccgm-w0-c2      → 'ccgm-w0-c2'
-      repo='ccgm', -Users-lem-code-ccgm                            → 'ccgm'
+      repo='ccgm', project_dir=-home-alice-code-ccgm-repos-ccgm-1   → 'ccgm-1'
+      repo='ccgm', -home-alice-code-ccgm-workspaces-ccgm-w0-c2      → 'ccgm-w0-c2'
+      repo='ccgm', -home-alice-code-ccgm                            → 'ccgm'
 
     Requires the canonical repo name to disambiguate (since encoded path names
     cannot be uniquely reversed when repo names contain hyphens).

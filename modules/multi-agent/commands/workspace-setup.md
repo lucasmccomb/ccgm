@@ -29,13 +29,13 @@ $ARGUMENTS
 ### Phase 1: Parse Arguments
 
 Extract from `$ARGUMENTS`:
-- **repo-name** (required): The GitHub repo name (e.g., `habitpro-ai`)
+- **repo-name** (required): The GitHub repo name (e.g., `my-multi-word-repo`)
 - **workspace-count** (optional, default: 3): Number of workspaces (w0 through wN-1)
 - **clone-count** (optional, default: 4): Number of clones per workspace (c0 through cN-1)
 
 If repo-name is missing, ask:
 
-> "What GitHub repo should I set up workspaces for? (e.g., `habitpro-ai`)"
+> "What GitHub repo should I set up workspaces for? (e.g., `my-multi-word-repo`)"
 
 ### Phase 2: Detect GitHub Info
 
