@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Base settings.json with comprehensive tool permissions (800+ allow entries), deny list for dangerous operations, and plugin configuration. Defaults to 'ask' mode for safety.",
+  "displayName": "Settings & Permissions",
+  "keywords": [
+    "permissions",
+    "security",
+    "settings"
+  ],
+  "license": "MIT",
+  "name": "settings"
+}

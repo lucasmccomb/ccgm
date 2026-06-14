@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "4-phase root cause investigation methodology: investigate, analyze patterns, test hypotheses, implement fix. Prevents random fix attempts.",
+  "displayName": "Systematic Debugging",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "debugging",
+    "methodology",
+    "root-cause",
+    "troubleshooting"
+  ],
+  "license": "MIT",
+  "name": "systematic-debugging"
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Augments the external pr-review-toolkit plugin with scope-drift detection (compare stated intent to actual diff) and a Fix-First output format (AUTO-FIXED vs NEEDS INPUT). Ported from garrytan/gstack review skill.",
+  "displayName": "PR Review Toolkit",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "commands",
+    "fix-first",
+    "pr",
+    "review",
+    "scope-drift"
+  ],
+  "license": "MIT",
+  "name": "pr-review-toolkit"
+}

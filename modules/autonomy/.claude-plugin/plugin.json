@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Configure Claude as a fully autonomous Staff-level engineer who executes tasks end-to-end without asking unnecessary questions.",
+  "displayName": "Full Autonomy",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "autonomy",
+    "productivity",
+    "workflow"
+  ],
+  "license": "MIT",
+  "name": "autonomy"
+}

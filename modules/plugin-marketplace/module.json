@@ -1,0 +1,17 @@
+{
+  "name": "plugin-marketplace",
+  "displayName": "Plugin Marketplace (generator)",
+  "description": "Maintainer tooling that projects CCGM's modules into a native Claude Code plugin marketplace (.claude-plugin/marketplace.json + per-module plugin.json), additively. The bash installer stays the canonical full-fidelity path. Ships the generator, a JSON-schema validator, and the SessionStart rule-injection hook that bridges the plugin-CLAUDE.md-not-loaded gap.",
+  "category": "core",
+  "scope": ["global"],
+  "status": "beta",
+  "dependencies": [],
+  "files": {
+    "rules/plugin-marketplace.md": { "target": "rules/plugin-marketplace.md", "type": "rule", "template": false },
+    "lib/gen_marketplace.py": { "target": "lib/gen_marketplace.py", "type": "lib", "template": false },
+    "lib/validate_marketplace.py": { "target": "lib/validate_marketplace.py", "type": "lib", "template": false },
+    "hooks/plugin-rule-inject.py": { "target": "hooks/plugin-rule-inject.py", "type": "hook", "template": false }
+  },
+  "tags": ["plugin", "marketplace", "generator", "distribution", "session-start", "opt-in"],
+  "configPrompts": []
+}

@@ -150,6 +150,25 @@ For a quick install with a preset:
 ./uninstall.sh   # Remove only CCGM-installed files
 ```
 
+### Install as a native plugin marketplace
+
+CCGM is also published as a [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugin-marketplaces). This is an **additive** path — the bash installer above remains canonical.
+
+```bash
+claude plugin marketplace add lucasmccomb/ccgm
+claude plugin install code-quality@ccgm     # install any module as a plugin
+```
+
+**The bash installer is canonical; the marketplace is a projection.** A plugin's `CLAUDE.md` is not auto-loaded and a plugin can only contribute the `agent`/`subagentStatusLine` settings keys, so the marketplace path does **not** perform CCGM's deep `settings.json` merge or write the always-on global `CLAUDE.md` context. Use the bash installer when those matter.
+
+| Component | Bash installer | Marketplace |
+|-----------|----------------|-------------|
+| Commands / agents / skills / output styles | `~/.claude/` | Native plugin components |
+| Rules (`rules/*.md`) | Auto-loaded | Injected by a SessionStart hook, opt-in via `CCGM_PLUGIN_RULE_INJECTION=true` |
+| Deep `settings.json` merge + global `CLAUDE.md` | Yes | No |
+
+The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plugin.json` files are **generated** from `modules/*/module.json` by `modules/plugin-marketplace/lib/gen_marketplace.py` — never hand-edited. See the [plugin-marketplace module](modules/plugin-marketplace/README.md).
+
 ## Module Catalog
 
 | Module | Category | Description | Dependencies |
@@ -320,7 +339,7 @@ The `docs/` directory contains comprehensive documentation:
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 70 modules |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 71 modules |
 | [Commands Reference](docs/commands.md) | All 74 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 13 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |

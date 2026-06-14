@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/deepresearch - Multi-query semantic research using the Exa MCP server. Claude generates diverse queries from your topic, fans them out via parallel Exa MCP tool calls, and synthesizes a structured research.md from full page contents. Requires the Exa MCP server registered via `claude mcp add` and an Exa API key.",
+  "displayName": "Deep Research (Exa MCP)",
+  "keywords": [
+    "commands",
+    "exa",
+    "external-api",
+    "mcp",
+    "research",
+    "web-search"
+  ],
+  "license": "MIT",
+  "name": "deepresearch"
+}

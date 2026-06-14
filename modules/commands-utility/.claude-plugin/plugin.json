@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Utility commands and scripts: /cws-submit, /ccgm-sync (reverse-sync local config to CCGM + lem-deepresearch), /user-test, statusline, agent-team launcher.",
+  "displayName": "Utility Commands",
+  "keywords": [
+    "browser",
+    "commands",
+    "git",
+    "statusline",
+    "testing",
+    "tmux",
+    "utility"
+  ],
+  "license": "MIT",
+  "name": "commands-utility"
+}

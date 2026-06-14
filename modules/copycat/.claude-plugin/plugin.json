@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/copycat - analyze external Claude Code config repos to find useful patterns, rules, and techniques worth adopting into CCGM",
+  "displayName": "Copycat",
+  "keywords": [
+    "ccgm",
+    "commands",
+    "config-analysis",
+    "research"
+  ],
+  "license": "MIT",
+  "name": "copycat"
+}

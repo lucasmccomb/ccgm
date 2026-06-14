@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/transcript <url> grabs a YouTube transcript via yt-dlp AND dispatches a subagent to produce an opinionated implications doc against your project memory. Saves both files with matching slug+date so the pair correlates by name. --no-analysis flag for extraction only.",
+  "displayName": "YouTube Transcripts",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "analysis",
+    "commands",
+    "subagent",
+    "transcripts",
+    "youtube"
+  ],
+  "license": "MIT",
+  "name": "youtube-transcripts"
+}

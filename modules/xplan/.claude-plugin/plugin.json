@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Deep research + planning + execution framework. Spawns parallel research/review agents, creates comprehensive plans, and executes via parallel agent waves.",
+  "displayName": "xplan Planning System",
+  "keywords": [
+    "execution",
+    "parallel",
+    "planning",
+    "research"
+  ],
+  "license": "MIT",
+  "name": "xplan"
+}

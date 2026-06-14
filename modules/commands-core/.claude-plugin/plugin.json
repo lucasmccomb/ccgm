@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Essential slash commands: /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue).",
+  "displayName": "Core Commands",
+  "keywords": [
+    "commands",
+    "git",
+    "github",
+    "workflow"
+  ],
+  "license": "MIT",
+  "name": "commands-core"
+}

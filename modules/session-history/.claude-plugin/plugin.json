@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Cross-platform session historian agent. Searches prior Claude Code and Codex session transcripts for what was tried, what failed, and what was decided in earlier sessions on the same repo. Invoked by other skills (/compound, /xplan, /debug) to surface institutional knowledge a fresh session cannot see.",
+  "displayName": "Session History",
+  "keywords": [
+    "agent",
+    "claude-code",
+    "codex",
+    "cross-platform",
+    "history",
+    "recall",
+    "retrieval",
+    "session"
+  ],
+  "license": "MIT",
+  "name": "session-history"
+}

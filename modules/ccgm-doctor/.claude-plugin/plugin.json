@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Audit tool for Claude Code installs. Three subcommands: check-resolvable (hook refs, command descriptions, script refs), dry (lexical overlap between command descriptions), and resolver-eval (runs a routing suite of {intent, expected} assertions against keyword-overlap scoring). Ships a default routing suite covering common slash commands.",
+  "displayName": "CCGM Doctor",
+  "keywords": [
+    "audit",
+    "evals",
+    "health-check",
+    "reachability",
+    "resolver"
+  ],
+  "license": "MIT",
+  "name": "ccgm-doctor"
+}

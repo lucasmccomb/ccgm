@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/docupdate - comprehensive documentation audit and update. Checks README, TOC, onboarding flows, package lists, and module coverage against actual codebase state.",
+  "displayName": "Documentation Update",
+  "keywords": [
+    "commands",
+    "documentation",
+    "maintenance"
+  ],
+  "license": "MIT",
+  "name": "documentation"
+}

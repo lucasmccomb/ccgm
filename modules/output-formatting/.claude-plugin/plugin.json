@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Formatting rules for user-facing output: copy-pasteable content (drafts, messages, prompts, config snippets) is delivered in fenced code blocks, never blockquotes, so it pastes clean anywhere.",
+  "displayName": "Output Formatting",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "communication",
+    "copy-paste",
+    "formatting",
+    "output"
+  ],
+  "license": "MIT",
+  "name": "output-formatting"
+}

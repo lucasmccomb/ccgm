@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/ideate - structured ideation framework. Interviews you to refine a loose idea into a concrete concept using Socratic questioning, confidence tracking, and progressive refinement. Delegates to /deepresearch for validation and /xplan for planning.",
+  "displayName": "Ideation",
+  "keywords": [
+    "brainstorming",
+    "commands",
+    "ideation",
+    "interview",
+    "planning"
+  ],
+  "license": "MIT",
+  "name": "ideate"
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Meta-learning system with a structured JSONL learnings store (confidence decay, staleness, prompt-injection-filtered), automated reflection triggers, and hooks that fire at key moments (PR merge, context compaction, debugging failures). Replaces narrative MEMORY.md with a queryable, token-budgeted store while keeping MEMORY.md as a rendered index.",
+  "displayName": "Self-Improving Agent",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "confidence-decay",
+    "hooks",
+    "improvement",
+    "jsonl",
+    "learnings",
+    "memory",
+    "meta-learning",
+    "reflection"
+  ],
+  "license": "MIT",
+  "name": "self-improving"
+}

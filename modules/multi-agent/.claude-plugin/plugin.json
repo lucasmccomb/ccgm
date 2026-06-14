@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Multi-clone architecture for parallel agent work with issue claiming, port allocation, and the /mawf workflow command.",
+  "displayName": "Multi-Agent Coordination",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "coordination",
+    "multi-agent",
+    "parallel",
+    "workflow"
+  ],
+  "license": "MIT",
+  "name": "multi-agent"
+}

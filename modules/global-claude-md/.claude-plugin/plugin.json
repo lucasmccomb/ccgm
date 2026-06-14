@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Slim global CLAUDE.md that serves as the root configuration reference. Points to rules, commands, hooks, and settings without duplicating their content.",
+  "displayName": "Global CLAUDE.md",
+  "keywords": [
+    "claude-md",
+    "config",
+    "core"
+  ],
+  "license": "MIT",
+  "name": "global-claude-md"
+}

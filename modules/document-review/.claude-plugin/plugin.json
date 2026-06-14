@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Seven-lens plan-quality gate. Before a plan, spec, or requirements doc ships to execution, /document-review fans out to 7 role-specific reviewer agents (coherence, feasibility, product-lens, scope-guardian, design-lens, security-lens, adversarial) and merges structured JSON findings with severity and confidence. Each lens has tight what-you-flag boundaries so they do not overlap.",
+  "displayName": "Document Review",
+  "keywords": [
+    "adversarial",
+    "document-review",
+    "plan-review",
+    "planning",
+    "quality-gate",
+    "review",
+    "scope",
+    "yagni"
+  ],
+  "license": "MIT",
+  "name": "document-review"
+}

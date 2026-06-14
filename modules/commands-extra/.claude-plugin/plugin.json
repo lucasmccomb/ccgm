@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Additional slash commands: /audit (codebase audit), /pwv (Playwright visual verify), /walkthrough (step-by-step guide), /promote-rule (promote repo rules to global), /freeze + /unfreeze + /guard (safety-hook state management), /checkpoint (save/resume WIP session state).",
+  "displayName": "Extra Commands",
+  "keywords": [
+    "audit",
+    "checkpoint",
+    "commands",
+    "safety",
+    "verification",
+    "walkthrough"
+  ],
+  "license": "MIT",
+  "name": "commands-extra"
+}

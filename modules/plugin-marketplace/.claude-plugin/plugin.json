@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Maintainer tooling that projects CCGM's modules into a native Claude Code plugin marketplace (.claude-plugin/marketplace.json + per-module plugin.json), additively. The bash installer stays the canonical full-fidelity path. Ships the generator, a JSON-schema validator, and the SessionStart rule-injection hook that bridges the plugin-CLAUDE.md-not-loaded gap.",
+  "displayName": "Plugin Marketplace (generator)",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "distribution",
+    "generator",
+    "marketplace",
+    "opt-in",
+    "plugin",
+    "session-start"
+  ],
+  "license": "MIT",
+  "name": "plugin-marketplace"
+}

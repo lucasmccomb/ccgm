@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Structured resolver for PR review comments. /resolve-pr-feedback fetches unresolved review threads via GraphQL, triages new vs already-handled, and if 3+ new items arrive (or a cross-invocation signal fires) runs cluster analysis - categorizes each into 11 fixed concern categories and groups by category + spatial proximity. Clusters surface systemic issues instead of dispatching 10 one-off fixes. Parallel pr-comment-resolver subagents apply unambiguous fixes, post inline replies via gh api, and resolve threads; taste questions are batched for human decision.",
+  "displayName": "PR Feedback Resolver",
+  "keywords": [
+    "cluster",
+    "comments",
+    "feedback",
+    "github",
+    "graphql",
+    "pr",
+    "resolver",
+    "review"
+  ],
+  "license": "MIT",
+  "name": "pr-feedback"
+}

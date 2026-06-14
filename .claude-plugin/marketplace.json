@@ -1,0 +1,954 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "description": "Claude Code God Mode - modular rules, commands, agents, and skills. The bash installer (start.sh) remains the canonical full-fidelity path; this marketplace is an additive native-plugin projection of the same modules.",
+  "metadata": {
+    "pluginRoot": "./modules"
+  },
+  "name": "ccgm",
+  "owner": {
+    "name": "CCGM"
+  },
+  "plugins": [
+    {
+      "category": "workflow",
+      "description": "/adrev - adversarial review of a plan or any entity (file, doc, PR, issue, directory, or stated concept). Dispatches a separate adrev-reviewer agent that attacks premises, hunts failure modes, and steelmans the case against. Plan targets get findings incorporated into the plan automatically unless told not to; all other targets get a report.",
+      "name": "adversarial-review",
+      "source": "./adversarial-review",
+      "tags": [
+        "adversarial",
+        "planning",
+        "quality-gate",
+        "red-team",
+        "review"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "[DEPRECATED] Go-based terminal UI for managing Claude Code agent processes via tmux panes. Unmaintained and no longer offered for new installs; a GUI-based replacement is being pursued instead. Kept in-repo for existing users.",
+      "keywords": [
+        "status:deprecated"
+      ],
+      "name": "agent-manager",
+      "source": "./agent-manager",
+      "tags": [
+        "agents",
+        "monitoring",
+        "multi-agent",
+        "process-management",
+        "tui"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "Principles and audit skill for building applications where an agent is a first-class user. Four principles (parity, granularity, composability, emergent capability) as a rule file, a self-eval / red-team rubric that scores a surface against those principles, plus /agent-native-audit that scores a codebase with specific counts and a reviewer persona for the unified review orchestrator.",
+      "name": "agent-native",
+      "source": "./agent-native",
+      "tags": [
+        "agent-native",
+        "ai-first",
+        "architecture",
+        "audit",
+        "evaluation",
+        "red-team",
+        "review",
+        "rubric",
+        "tools"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "/argus - a closed-loop visual-ATDD harness where the agent develops UI against a per-feature design spec and signs off on its own work (functional AND visual) by grounding every judgment in deterministic gates plus a SEPARATE judge subagent that scores the render against the spec, a reference image, and the design system — never the diff. Loops to two consecutive passes, then commits a snapshot baseline. Platform-agnostic via a pluggable sensor+gates adapter (web built in; iOS/macOS via a project adapter). Ships the loop skill, the argus-judge agent, the spec/verdict/gate/rubric schemas, six dependency-free deterministic gate scripts, and an adapter-authoring contract.",
+      "name": "argus",
+      "source": "./argus",
+      "tags": [
+        "accessibility",
+        "anti-reward-hacking",
+        "argus",
+        "convergence-loop",
+        "design",
+        "judge",
+        "orchestrator",
+        "snapshot",
+        "visual-atdd",
+        "wcag"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Spec-driven development where E2E vision specs define target behavior. /atdd reads Playwright specs, iteratively builds app code until all tests pass, then ships.",
+      "name": "atdd",
+      "source": "./atdd",
+      "tags": [
+        "development",
+        "e2e",
+        "playwright",
+        "tdd",
+        "testing"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Captures permission events, tool failures, and user-correction signals; runs a daily analyzer via direct Anthropic API call; produces a local digest + opt-in Resend email; opt-in real-time security alerts and opt-in confidence-gated auto-apply. Cross-clone-safe via fcntl file locks. Webhook publisher seam is dormant by default.",
+      "name": "autoheal",
+      "source": "./autoheal",
+      "tags": [
+        "autoheal",
+        "hooks",
+        "jsonl",
+        "observability",
+        "permissions",
+        "self-healing",
+        "telemetry"
+      ]
+    },
+    {
+      "category": "core",
+      "description": "Configure Claude as a fully autonomous Staff-level engineer who executes tasks end-to-end without asking unnecessary questions.",
+      "name": "autonomy",
+      "source": "./autonomy",
+      "tags": [
+        "autonomy",
+        "productivity",
+        "workflow"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/brainstorm - hard gate that forbids code, scaffolding, or implementation until a design spec is written and user-approved. Proposes 2-3 approaches with tradeoffs, writes a design doc, self-reviews for TBDs and contradictions, then hands off to /xplan. Pairs with /ideate (which refines the concept) to enforce spec-before-plan-before-code.",
+      "name": "brainstorm",
+      "source": "./brainstorm",
+      "tags": [
+        "brainstorming",
+        "commands",
+        "design",
+        "gate",
+        "planning",
+        "spec"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "Slash commands for brand naming research: /brand (full naming pipeline with word exploration, domain/trademark/app store checks) and /brand-check (single-name deep verification). Optionally adds Instant Domain Search MCP server for fast domain availability checks.",
+      "name": "brand-naming",
+      "source": "./brand-naming",
+      "tags": [
+        "branding",
+        "commands",
+        "domains",
+        "naming",
+        "research"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "Rules for browser automation tool selection: Chrome extension, Playwright, and WebMCP. Includes verification priority order and UI verification workflow.",
+      "name": "browser-automation",
+      "source": "./browser-automation",
+      "tags": [
+        "automation",
+        "browser",
+        "chrome",
+        "playwright",
+        "webmcp"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/capabilities - a decision map for CCGM's overlapping command/skill clusters. Answers \"which one do I use?\" for research, review, planning/execution, debugging, and knowledge/memory. A tight always-on rule points at the on-demand command so the full map costs zero idle tokens.",
+      "name": "capability-router",
+      "source": "./capability-router",
+      "tags": [
+        "commands",
+        "decision-map",
+        "discoverability",
+        "navigation",
+        "router"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Audit tool for Claude Code installs. Three subcommands: check-resolvable (hook refs, command descriptions, script refs), dry (lexical overlap between command descriptions), and resolver-eval (runs a routing suite of {intent, expected} assertions against keyword-overlap scoring). Ships a default routing suite covering common slash commands.",
+      "name": "ccgm-doctor",
+      "source": "./ccgm-doctor",
+      "tags": [
+        "audit",
+        "evals",
+        "health-check",
+        "reachability",
+        "resolver"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "Unified code-review orchestrator. Composes scope-drift, learnings-researcher, tiered reviewer personas (correctness, testing, maintainability, project-standards + conditional security, performance, reliability, api-contract, data-migrations), and an adversarial/red-team lens that runs AFTER the specialists with access to their findings. Confidence-gated autofix routing with safe_auto / gated_auto / manual / advisory classes. Modes - interactive / autofix / report-only / headless.",
+      "name": "ce-review",
+      "source": "./ce-review",
+      "tags": [
+        "adversarial",
+        "autofix",
+        "confidence",
+        "orchestrator",
+        "pr",
+        "red-team",
+        "review",
+        "tiered"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Delegate Claude Code agent work to Hetzner Cloud VMs. Provides golden image pipeline, VM lifecycle management, secret injection, workspace provisioning, and /dispatch command for one-command multi-agent dispatch.",
+      "name": "cloud-dispatch",
+      "source": "./cloud-dispatch",
+      "tags": [
+        "agents",
+        "cloud",
+        "dispatch",
+        "hetzner",
+        "infrastructure",
+        "packer"
+      ]
+    },
+    {
+      "category": "tech-specific",
+      "description": "Cloudflare-specific rules: Pages vs Workers selection, deployment methods, Git integration requirements.",
+      "name": "cloudflare",
+      "source": "./cloudflare",
+      "tags": [
+        "cloudflare",
+        "deployment",
+        "pages",
+        "workers"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "Code standards, testing requirements, error handling patterns, security practices, build verification, and living documents maintenance.",
+      "name": "code-quality",
+      "source": "./code-quality",
+      "tags": [
+        "code-quality",
+        "security",
+        "standards",
+        "testing"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "Essential slash commands: /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue).",
+      "name": "commands-core",
+      "source": "./commands-core",
+      "tags": [
+        "commands",
+        "git",
+        "github",
+        "workflow"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "Additional slash commands: /audit (codebase audit), /pwv (Playwright visual verify), /walkthrough (step-by-step guide), /promote-rule (promote repo rules to global), /freeze + /unfreeze + /guard (safety-hook state management), /checkpoint (save/resume WIP session state).",
+      "name": "commands-extra",
+      "source": "./commands-extra",
+      "tags": [
+        "audit",
+        "checkpoint",
+        "commands",
+        "safety",
+        "verification",
+        "walkthrough"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Experimental UserPromptSubmit hook that injects a compact preamble of iron-law principles (Confusion Protocol, Completeness, Evidence Before Claims, Root Cause Before Fix) at the start of slash-command invocations. Opt-in, disabled by default.",
+      "name": "commands-preamble",
+      "source": "./commands-preamble",
+      "tags": [
+        "commands",
+        "experimental",
+        "hooks",
+        "preamble",
+        "principles"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "Utility commands and scripts: /cws-submit, /ccgm-sync (reverse-sync local config to CCGM + lem-deepresearch), /user-test, statusline, agent-team launcher.",
+      "name": "commands-utility",
+      "source": "./commands-utility",
+      "tags": [
+        "browser",
+        "commands",
+        "git",
+        "statusline",
+        "testing",
+        "tmux",
+        "utility"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "8 battle-tested anti-patterns to avoid: shallow directory exploration, dependency blindness, ESLint Fast Refresh, and more.",
+      "name": "common-mistakes",
+      "source": "./common-mistakes",
+      "tags": [
+        "anti-patterns",
+        "best-practices",
+        "debugging",
+        "mistakes"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Team-shared learnings in docs/solutions/. After solving a non-trivial problem, /compound writes a structured markdown doc with YAML frontmatter that later /xplan and /review runs re-inject as grounding. Counterpart to self-improving's personal MEMORY.md.",
+      "name": "compound-knowledge",
+      "source": "./compound-knowledge",
+      "tags": [
+        "compound",
+        "docs-solutions",
+        "knowledge",
+        "learnings",
+        "planning",
+        "review",
+        "team"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/copycat - analyze external Claude Code config repos to find useful patterns, rules, and techniques worth adopting into CCGM",
+      "name": "copycat",
+      "source": "./copycat",
+      "tags": [
+        "ccgm",
+        "commands",
+        "config-analysis",
+        "research"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/debug - structured root-cause debugging with Opus delegation. 7-phase workflow: gather context, reproduce, hypothesize, instrument, diagnose, fix, verify.",
+      "name": "debugging",
+      "source": "./debugging",
+      "tags": [
+        "commands",
+        "debugging"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/deepresearch - Multi-query semantic research using the Exa MCP server. Claude generates diverse queries from your topic, fans them out via parallel Exa MCP tool calls, and synthesizes a structured research.md from full page contents. Requires the Exa MCP server registered via `claude mcp add` and an Exa API key.",
+      "name": "deepresearch",
+      "source": "./deepresearch",
+      "tags": [
+        "commands",
+        "exa",
+        "external-api",
+        "mcp",
+        "research",
+        "web-search"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/design-review - visual design review for web pages. Screenshots at 3 viewports, 6 parallel analysis passes: spacing, typography, responsive, visual hierarchy, accessibility, component consistency. Scored report with optional auto-fix.",
+      "name": "design-review",
+      "source": "./design-review",
+      "tags": [
+        "accessibility",
+        "commands",
+        "css",
+        "design",
+        "frontend",
+        "review"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "Rule and template for shipping machine-readable docs alongside human docs. Any project an agent will install, build, test, deploy, or debug should have an AGENTS.md with copy-pasteable command blocks — not prose, not dashboard instructions.",
+      "name": "docs-for-agents",
+      "source": "./docs-for-agents",
+      "tags": [
+        "AGENTS.md",
+        "agents",
+        "documentation",
+        "dx",
+        "llms.txt"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Seven-lens plan-quality gate. Before a plan, spec, or requirements doc ships to execution, /document-review fans out to 7 role-specific reviewer agents (coherence, feasibility, product-lens, scope-guardian, design-lens, security-lens, adversarial) and merges structured JSON findings with severity and confidence. Each lens has tight what-you-flag boundaries so they do not overlap.",
+      "name": "document-review",
+      "source": "./document-review",
+      "tags": [
+        "adversarial",
+        "document-review",
+        "plan-review",
+        "planning",
+        "quality-gate",
+        "review",
+        "scope",
+        "yagni"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/docupdate - comprehensive documentation audit and update. Checks README, TOC, onboarding flows, package lists, and module coverage against actual codebase state.",
+      "name": "documentation",
+      "source": "./documentation",
+      "tags": [
+        "commands",
+        "documentation",
+        "maintenance"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/editorial-critique - deep editorial review of long-form writing. 8 parallel analysis passes: prose craft, AI-tell detection, argument architecture, conciseness, data verification, structure, impact, grammar. Scored report with optional auto-fix.",
+      "name": "editorial-critique",
+      "source": "./editorial-critique",
+      "tags": [
+        "commands",
+        "editing",
+        "prose",
+        "review",
+        "writing"
+      ]
+    },
+    {
+      "category": "core",
+      "description": "Git workflow rules: sync before history changes, rebase by default, post-merge cleanup, PR template detection, no AI attribution in commits.",
+      "name": "git-workflow",
+      "source": "./git-workflow",
+      "tags": [
+        "branching",
+        "git",
+        "pr",
+        "workflow"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Solo-agent worktree-based isolation for feature work. Lighter alternative to multi-clone setup when only one agent is active.",
+      "name": "git-worktrees",
+      "source": "./git-worktrees",
+      "tags": [
+        "git",
+        "isolation",
+        "workflow",
+        "worktree"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "GitHub repository management protocols: issue-first workflow, PR conventions, label taxonomy, code review standards.",
+      "name": "github-protocols",
+      "source": "./github-protocols",
+      "tags": [
+        "code-review",
+        "github",
+        "issues",
+        "pr",
+        "protocols"
+      ]
+    },
+    {
+      "category": "core",
+      "description": "Slim global CLAUDE.md that serves as the root configuration reference. Points to rules, commands, hooks, and settings without duplicating their content.",
+      "name": "global-claude-md",
+      "source": "./global-claude-md",
+      "tags": [
+        "claude-md",
+        "config",
+        "core"
+      ]
+    },
+    {
+      "category": "core",
+      "description": "Python hooks that enforce git workflow rules: issue-first workflow, commit message format, branch protection, and auto-approval for file operations.",
+      "name": "hooks",
+      "source": "./hooks",
+      "tags": [
+        "auto-approve",
+        "git",
+        "hooks",
+        "workflow"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/ideate - structured ideation framework. Interviews you to refine a loose idea into a concrete concept using Socratic questioning, confidence tracking, and progressive refinement. Delegates to /deepresearch for validation and /xplan for planning.",
+      "name": "ideate",
+      "source": "./ideate",
+      "tags": [
+        "brainstorming",
+        "commands",
+        "ideation",
+        "interview",
+        "planning"
+      ]
+    },
+    {
+      "category": "core",
+      "description": "Two foundational context files that give Claude Code a persistent identity: soul.md (AI personality and philosophy) and human-context.md (who you are, your goals, and how you work).",
+      "name": "identity",
+      "source": "./identity",
+      "tags": [
+        "context",
+        "identity",
+        "personality",
+        "soul"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "A /launch skill that takes a one-page spec and reaches a deployed Cloudflare Pages site without further human input — except for the unavoidable Connect-to-Git dashboard step, which the skill stops to ask for. Inspired by Karpathy's Sequoia talk: 'I would hope that I could give a prompt to an LLM, build menu gen, and then I didn't have to touch anything and it's deployed in that same way on the internet.' The skill is the forcing function that surfaces every place CCGM/CF infra is still human-shaped.",
+      "name": "launch",
+      "source": "./launch",
+      "tags": [
+        "agent-native",
+        "cloudflare-pages",
+        "deployment",
+        "one-prompt",
+        "skills",
+        "spec-driven"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "Design-engineering details that compound into polished interfaces. Model-invoked skill with references on design direction (aesthetic identity, typeface/color/spacing choices, avoiding generic AI aesthetics), typography (text-wrap, tabular nums, font smoothing), surfaces (concentric radii, shadows over borders, optical alignment, image outlines), animations (interruptible transitions, enter/exit, icon micro-interactions), and performance (transition specificity, will-change).",
+      "name": "make-interfaces-feel-better",
+      "source": "./make-interfaces-feel-better",
+      "tags": [
+        "aesthetics",
+        "animation",
+        "color",
+        "css",
+        "design",
+        "frontend",
+        "micro-interactions",
+        "typography",
+        "ui"
+      ]
+    },
+    {
+      "category": "tech-specific",
+      "description": "Guide for building Model Context Protocol servers: project structure, tool design, error handling, testing with MCP Inspector, and evaluation patterns.",
+      "name": "mcp-development",
+      "source": "./mcp-development",
+      "tags": [
+        "mcp",
+        "model-context-protocol",
+        "servers",
+        "tools"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Multi-clone architecture for parallel agent work with issue claiming, port allocation, and the /mawf workflow command.",
+      "name": "multi-agent",
+      "source": "./multi-agent",
+      "tags": [
+        "coordination",
+        "multi-agent",
+        "parallel",
+        "workflow"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/onboarding - analyzes a repository and generates a structured ONBOARDING.md (architecture, dev setup, key commands, test workflow, glossary). Runs an inventory script to build a language-aware structural map, reads only the files that map surfaces, and writes prose with strict voice rules so the output reads like a knowledgeable teammate rather than generated documentation.",
+      "name": "onboarding",
+      "source": "./onboarding",
+      "tags": [
+        "command",
+        "documentation",
+        "inventory",
+        "onboarding",
+        "skill"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "Formatting rules for user-facing output: copy-pasteable content (drafts, messages, prompts, config snippets) is delivered in fenced code blocks, never blockquotes, so it pastes clean anywhere.",
+      "name": "output-formatting",
+      "source": "./output-formatting",
+      "tags": [
+        "communication",
+        "copy-paste",
+        "formatting",
+        "output"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "Packages the always-on TONE rules (terse communication, autonomous execution, copy-paste formatting) as a Claude Code output style — a system-prompt layer fixed at session start and prompt-cached — instead of always-loaded rules/*.md. Opt-in alternative; does not remove the source rules.",
+      "name": "output-styles",
+      "source": "./output-styles",
+      "tags": [
+        "output-style",
+        "prompt-caching",
+        "tokens",
+        "tone"
+      ]
+    },
+    {
+      "category": "core",
+      "description": "Maintainer tooling that projects CCGM's modules into a native Claude Code plugin marketplace (.claude-plugin/marketplace.json + per-module plugin.json), additively. The bash installer stays the canonical full-fidelity path. Ships the generator, a JSON-schema validator, and the SessionStart rule-injection hook that bridges the plugin-CLAUDE.md-not-loaded gap.",
+      "keywords": [
+        "status:beta"
+      ],
+      "name": "plugin-marketplace",
+      "source": "./plugin-marketplace",
+      "tags": [
+        "distribution",
+        "generator",
+        "marketplace",
+        "opt-in",
+        "plugin",
+        "session-start"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Structured resolver for PR review comments. /resolve-pr-feedback fetches unresolved review threads via GraphQL, triages new vs already-handled, and if 3+ new items arrive (or a cross-invocation signal fires) runs cluster analysis - categorizes each into 11 fixed concern categories and groups by category + spatial proximity. Clusters surface systemic issues instead of dispatching 10 one-off fixes. Parallel pr-comment-resolver subagents apply unambiguous fixes, post inline replies via gh api, and resolve threads; taste questions are batched for human decision.",
+      "name": "pr-feedback",
+      "source": "./pr-feedback",
+      "tags": [
+        "cluster",
+        "comments",
+        "feedback",
+        "github",
+        "graphql",
+        "pr",
+        "resolver",
+        "review"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "Augments the external pr-review-toolkit plugin with scope-drift detection (compare stated intent to actual diff) and a Fix-First output format (AUTO-FIXED vs NEEDS INPUT). Ported from garrytan/gstack review skill.",
+      "name": "pr-review-toolkit",
+      "source": "./pr-review-toolkit",
+      "tags": [
+        "commands",
+        "fix-first",
+        "pr",
+        "review",
+        "scope-drift"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Opt-in, backward-compatible relevance-scoped rule injection plus a tiered always-on safety core. Off by default: with the flag unset, all rules load exactly as before. When enabled, surfaces a pointer to the task-relevant rule subset while always including the safety core.",
+      "keywords": [
+        "status:beta"
+      ],
+      "name": "relevance-injection",
+      "source": "./relevance-injection",
+      "tags": [
+        "context",
+        "opt-in",
+        "rules",
+        "safety-core",
+        "session-start",
+        "tokens"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "SSH access to a remote server. Adds /onremote command for health checks and remote command execution. Delegates to Haiku.",
+      "name": "remote-server",
+      "source": "./remote-server",
+      "tags": [
+        "infrastructure",
+        "remote",
+        "server",
+        "ssh"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/research - multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, and Reddit. Zero external dependencies. For deeper research backed by Exa neural search, see the deepresearch module.",
+      "name": "research",
+      "source": "./research",
+      "tags": [
+        "commands",
+        "research",
+        "web-search"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "Discipline for writing rules that hold up under pressure. Treats rule authoring as TDD: pressure-test a candidate rule with adversarial scenarios, capture the rationalizations agents use to bypass it, and rewrite until the rule closes those loopholes.",
+      "name": "rule-authoring",
+      "source": "./rule-authoring",
+      "tags": [
+        "authoring",
+        "discipline",
+        "pressure-testing",
+        "rules",
+        "tdd-for-rules"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Meta-learning system with a structured JSONL learnings store (confidence decay, staleness, prompt-injection-filtered), automated reflection triggers, and hooks that fire at key moments (PR merge, context compaction, debugging failures). Replaces narrative MEMORY.md with a queryable, token-budgeted store while keeping MEMORY.md as a rendered index.",
+      "name": "self-improving",
+      "source": "./self-improving",
+      "tags": [
+        "confidence-decay",
+        "hooks",
+        "improvement",
+        "jsonl",
+        "learnings",
+        "memory",
+        "meta-learning",
+        "reflection"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Cross-platform session historian agent. Searches prior Claude Code and Codex session transcripts for what was tried, what failed, and what was decided in earlier sessions on the same repo. Invoked by other skills (/compound, /xplan, /debug) to surface institutional knowledge a fresh session cannot see.",
+      "name": "session-history",
+      "source": "./session-history",
+      "tags": [
+        "agent",
+        "claude-code",
+        "codex",
+        "cross-platform",
+        "history",
+        "recall",
+        "retrieval",
+        "session"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Structured session shutdown via /sds. Autonomous wrap-up sweep: commit dirty work, update referenced issues, run /reflect, write a handoff, broadcast to sibling clones. Complements /startup at the other end of the session.",
+      "name": "session-lifecycle",
+      "source": "./session-lifecycle",
+      "tags": [
+        "handoff",
+        "session",
+        "shutdown",
+        "workflow"
+      ]
+    },
+    {
+      "category": "core",
+      "description": "Base settings.json with comprehensive tool permissions (800+ allow entries), deny list for dangerous operations, and plugin configuration. Defaults to 'ask' mode for safety.",
+      "name": "settings",
+      "source": "./settings",
+      "tags": [
+        "permissions",
+        "security",
+        "settings"
+      ]
+    },
+    {
+      "category": "tech-specific",
+      "description": "shadcn/ui component patterns: composition over custom builds, semantic theming tokens, proper form architecture, accessibility, and CLI workflow.",
+      "name": "shadcn",
+      "source": "./shadcn",
+      "tags": [
+        "components",
+        "radix",
+        "react",
+        "shadcn",
+        "ui"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/ship-ready command: at-a-glance dashboard of what gates a merge on the current branch (failing tests, open PR count, stale branches, outdated deps, merge velocity, review freshness, unresolved risks from docs/solutions/). Reads ce-review envelopes for commit-hash staleness detection.",
+      "name": "ship-readiness",
+      "source": "./ship-readiness",
+      "tags": [
+        "dashboard",
+        "gating",
+        "pre-merge",
+        "review",
+        "ship",
+        "staleness"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "Discipline for writing skills and slash commands that stay efficient, portable, and context-safe. Covers reference-file inclusion, conditional content extraction, tool selection, and writing style.",
+      "name": "skill-authoring",
+      "source": "./skill-authoring",
+      "tags": [
+        "authoring",
+        "commands",
+        "context-window",
+        "discipline",
+        "skills"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Slash command that promotes an ad-hoc session capability into a durable skill: a command file with triggers and rules, optional deterministic helper script, a pinning test, and a learnings-store entry pointing at the new skill. Inspired by the 'skillify' pattern where every repeated failure becomes structurally unreachable by being turned into a tested skill.",
+      "name": "skillify",
+      "source": "./skillify",
+      "tags": [
+        "authoring",
+        "durability",
+        "meta-learning",
+        "skills"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Plain-text /startup dashboard for Claude Code sessions. Surfaces git state, live sessions, tracking.csv claims, and recent activity (via session-history /recall). No agent-log writes; session transcripts are captured by Claude Code natively.",
+      "name": "startup-dashboard",
+      "source": "./startup-dashboard",
+      "tags": [
+        "dashboard",
+        "session",
+        "startup"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Compact single-line Claude Code statusline: model + effort, multi-clone identity (.env.clone), dir + git branch, context-used % with a compaction warning, session cost, and 5h/7d rate-limit bars. Installs the script and wires the statusLine setting.",
+      "name": "statusline",
+      "source": "./statusline",
+      "tags": [
+        "context",
+        "cost",
+        "multi-clone",
+        "statusline",
+        "ui"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Subagent dispatch methodology: task decomposition, spec-driven delegation, pass-paths-not-contents, two-stage review (spec compliance then code quality), parallel coordination, and skill invocation modes.",
+      "name": "subagent-patterns",
+      "source": "./subagent-patterns",
+      "tags": [
+        "agents",
+        "coordination",
+        "delegation",
+        "parallel",
+        "review",
+        "subagents"
+      ]
+    },
+    {
+      "category": "tech-specific",
+      "description": "Supabase-specific rules: API key terminology (publishable/secret), environment variable naming, migration validation, and database change workflow.",
+      "name": "supabase",
+      "source": "./supabase",
+      "tags": [
+        "auth",
+        "database",
+        "migrations",
+        "supabase"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "4-phase root cause investigation methodology: investigate, analyze patterns, test hypotheses, implement fix. Prevents random fix attempts.",
+      "name": "systematic-debugging",
+      "source": "./systematic-debugging",
+      "tags": [
+        "debugging",
+        "methodology",
+        "root-cause",
+        "troubleshooting"
+      ]
+    },
+    {
+      "category": "tech-specific",
+      "description": "Tailwind CSS v4 design system patterns: CSS-first configuration, design token hierarchy, CVA component variants, dark mode, and responsive grid systems.",
+      "name": "tailwind",
+      "source": "./tailwind",
+      "tags": [
+        "css",
+        "design-system",
+        "tailwind",
+        "theming",
+        "tokens"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "Strict red-green-refactor TDD discipline. No production code without a failing test first. Enforces test-first methodology for all new features and bug fixes.",
+      "name": "test-driven-development",
+      "source": "./test-driven-development",
+      "tags": [
+        "methodology",
+        "red-green-refactor",
+        "tdd",
+        "testing"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Vision-driven e2e test suite generation. /test-vision for full repo analysis + parallel test suite creation. /e2e for single-feature spec generation. Composes /e2e as the atomic unit within /test-vision orchestration.",
+      "name": "test-vision",
+      "source": "./test-vision",
+      "tags": [
+        "browser-automation",
+        "e2e",
+        "parallel",
+        "playwright",
+        "testing"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "File-based review-finding tracker. Review findings, PR nitpicks, and tech debt that does not merit a full GitHub issue go to .claude/todos/NNN-{status}-{priority}-{description}.md with YAML frontmatter. Three skills compose - /todo-create (canonical writer), /todo-triage (interactive pending->ready), /todo-resolve (batch-resolve ready todos via parallel subagents). Fills the gap between review-found-it and cut-an-issue with a lightweight, in-repo third option.",
+      "name": "todos",
+      "source": "./todos",
+      "tags": [
+        "pr-feedback",
+        "review",
+        "tech-debt",
+        "todos",
+        "tracker",
+        "triage"
+      ]
+    },
+    {
+      "category": "patterns",
+      "description": "Evidence-before-claims methodology. Requires fresh execution of verification commands, reading full output, and confirming results before asserting completion.",
+      "name": "verification",
+      "source": "./verification",
+      "tags": [
+        "completion",
+        "evidence",
+        "quality",
+        "verification"
+      ]
+    },
+    {
+      "category": "workflow",
+      "description": "Deep research + planning + execution framework. Spawns parallel research/review agents, creates comprehensive plans, and executes via parallel agent waves.",
+      "name": "xplan",
+      "source": "./xplan",
+      "tags": [
+        "execution",
+        "parallel",
+        "planning",
+        "research"
+      ]
+    },
+    {
+      "category": "commands",
+      "description": "/transcript <url> grabs a YouTube transcript via yt-dlp AND dispatches a subagent to produce an opinionated implications doc against your project memory. Saves both files with matching slug+date so the pair correlates by name. --no-analysis flag for extraction only.",
+      "name": "youtube-transcripts",
+      "source": "./youtube-transcripts",
+      "tags": [
+        "analysis",
+        "commands",
+        "subagent",
+        "transcripts",
+        "youtube"
+      ]
+    }
+  ]
+}

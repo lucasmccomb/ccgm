@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/capabilities - a decision map for CCGM's overlapping command/skill clusters. Answers \"which one do I use?\" for research, review, planning/execution, debugging, and knowledge/memory. A tight always-on rule points at the on-demand command so the full map costs zero idle tokens.",
+  "displayName": "Capability Router",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "commands",
+    "decision-map",
+    "discoverability",
+    "navigation",
+    "router"
+  ],
+  "license": "MIT",
+  "name": "capability-router"
+}
