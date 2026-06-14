@@ -11,10 +11,19 @@ PASS=0
 FAIL=0
 ERRORS=()
 
+# Per-assertion PASS lines run into the thousands and, under heavy stdout on
+# the macOS CI runner, a signal can interrupt a write mid-flush and surface as
+# "echo: write error: Interrupted system call" (EINTR), failing the run
+# spuriously. By default we stay quiet on success and only print failures plus
+# the final summary, which keeps total writes small. Set VERBOSE=1 for the old
+# per-assertion PASS output (used for local debugging).
+VERBOSE="${VERBOSE:-0}"
+
 # --- Helpers ---
 pass() {
   PASS=$((PASS + 1))
-  echo "  PASS: $1"
+  [ "$VERBOSE" = "1" ] && echo "  PASS: $1"
+  return 0
 }
 
 fail() {
