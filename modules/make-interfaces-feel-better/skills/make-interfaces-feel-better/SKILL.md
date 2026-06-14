@@ -11,6 +11,7 @@ Great interfaces rarely come from a single thing. It's usually a collection of s
 
 | Category | When to Use |
 | --- | --- |
+| [Design Direction](design-direction.md) | Aesthetic identity, typeface/color/spacing choices, avoiding generic AI aesthetics (CCGM addition) |
 | [Typography](typography.md) | Text wrapping, font smoothing, tabular numbers |
 | [Surfaces](surfaces.md) | Border radius, optical alignment, shadows, image outlines, hit areas |
 | [Animations](animations.md) | Interruptible animations, enter/exit transitions, icon animations, scale on press |
@@ -142,6 +143,7 @@ Rows should cite the specific file and the specific property that changed when i
 
 ## Reference Files
 
+- [design-direction.md](design-direction.md) — Aesthetic identity, typeface/color/spacing choices, motion philosophy, avoiding generic AI aesthetics (CCGM addition, not upstream)
 - [typography.md](typography.md) — Text wrapping, font smoothing, tabular numbers
 - [surfaces.md](surfaces.md) — Border radius, optical alignment, shadows, image outlines
 - [animations.md](animations.md) — Interruptible animations, enter/exit transitions, icon animations, scale on press

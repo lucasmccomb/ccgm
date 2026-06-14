@@ -95,13 +95,13 @@ The skill takes a spec. It does not generate a spec. If the spec is missing deta
 - **Multiple framework templates beyond default + override.** Vite + React TS is the default. The spec can override (e.g., `framework: next`, `framework: astro`, `framework: static`), but the skill does not ship pre-built scaffolds for every option in v1 — it shells out to the framework's own scaffolder (`npm create vite@latest`, `npx create-next-app@latest`, etc.).
 - **Ongoing site updates.** The skill is for *initial launch*. Subsequent changes use `/cpm` for the commit/PR/merge cycle. Pages auto-deploys from the connected branch.
 - **Domain registration.** The skill expects the user to already own the domain. It can attach an owned domain to the Pages project; it does not buy domains.
-- **Building a full agent-native surface for the deployed project.** The deployed app is whatever the spec asks for. Producing a 12-tool agent-native surface as in `/agentic-eval` is a separate exercise.
+- **Building a full agent-native surface for the deployed project.** The deployed app is whatever the spec asks for. Producing a 12-tool agent-native surface as in the agent-native self-eval rubric is a separate exercise.
 - **Real end-to-end test against a fresh deployment.** Burning a real CF Pages project and a real GitHub repo for testing is out of scope for the PR that ships the skill. Real-world use will surface refinements and those are expected follow-ups.
 
 ## What `/launch` Is Not
 
 - **Not a replacement for `/cpm`.** `/launch` is for the initial creation of a project. Once the project exists and Pages is auto-deploying, ongoing changes go through `/cpm` (commit, PR, merge).
-- **Not a replacement for `/agentic-eval`.** `/launch` produces a deployed site. `/agentic-eval` evaluates whether that site (or any other system) satisfies the four agent-native principles. If you want a launched site that also passes agentic-eval, run both: `/launch` first, `/agentic-eval` against the result.
+- **Not a replacement for the agent-native self-eval rubric.** `/launch` produces a deployed site. The agent-native self-eval / red-team rubric (`rules/agent-native-self-eval.md`, from the `agent-native` module) evaluates whether that site (or any other system) satisfies the four agent-native principles. If you want a launched site that also passes that evaluation, run `/launch` first, then apply the rubric against the result.
 - **Not a planning tool.** If the spec needs to be designed first, use `/brainstorm` and `/xplan` to produce the spec, then feed it to `/launch`.
 
 ## Design Decisions

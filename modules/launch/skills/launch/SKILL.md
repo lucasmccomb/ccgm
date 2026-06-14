@@ -544,7 +544,7 @@ Deferred suggestions (NOT implemented; spec did not ask for these):
 
 Next steps:
 - For ongoing changes: use /cpm to commit/PR/merge. Pages auto-deploys on push to main.
-- To audit agent-native readiness: run /agentic-eval against the deployed surface.
+- To audit agent-native readiness: apply the agent-native self-eval / red-team rubric (`rules/agent-native-self-eval.md`) against the deployed surface.
 - If the custom domain is still pending DNS, attach via the dashboard once DNS resolves.
 ```
 
@@ -631,7 +631,7 @@ If you find yourself reaching for `wrangler pages deploy <new-name>`, STOP. Read
 ## Composition with Other CCGM Skills
 
 - **`/cpm`** — for ongoing changes after the project is launched. `/launch` is initial-creation only.
-- **`/agentic-eval`** — to evaluate whether the launched site satisfies the four agent-native principles. Run after `/launch` if the spec implies an agent-native surface.
+- **agent-native self-eval rubric** (`rules/agent-native-self-eval.md`, from the `agent-native` module) — to evaluate whether the launched site satisfies the four agent-native principles. Apply after `/launch` if the spec implies an agent-native surface.
 - **`/brainstorm` and `/xplan`** — to produce the spec that `/launch` consumes. If the user has only a fuzzy idea, run those first.
 - **`/research`** — for technical context the spec author might need before writing the spec.
 
@@ -641,7 +641,7 @@ If you find yourself reaching for `wrangler pages deploy <new-name>`, STOP. Read
 fuzzy idea -> /ideate -> /brainstorm -> /xplan -> spec.md -> /launch -> deployed site
                                                                    |
                                                                    +-> /cpm for ongoing changes
-                                                                   +-> /agentic-eval for surface audit
+                                                                   +-> agent-native self-eval rubric for surface audit
 ```
 
 ---

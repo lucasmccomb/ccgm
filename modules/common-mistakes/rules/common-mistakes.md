@@ -163,36 +163,19 @@ Key reminders:
 
 **Problem**: Creating a Cloudflare Workers project instead of a Pages project for a static site, leading to multiple failed deploy attempts with confusing errors.
 
-**Rule**: Cloudflare Pages and Workers are **different products** for different use cases:
+**Rule**: Cloudflare Pages and Workers are **different products** — Pages for static sites/SPAs (Git-integration auto-deploy, blank deploy-command field), Workers for serverless functions/APIs (`wrangler deploy`, `wrangler.toml`). If you reach for `wrangler deploy` or hit "Must specify a project name" on a static site, you created a Workers project by mistake.
 
-| | Cloudflare Pages | Cloudflare Workers |
-|---|---|---|
-| **Use case** | Static sites, SPAs, JAMstack | Serverless functions, APIs |
-| **Deploy method** | Git integration (auto-builds on push) | `npx wrangler deploy` |
-| **Config** | Build command + output directory in dashboard | `wrangler.toml` |
-| **Deploy command field** | Leave blank (Pages handles it) | Required |
-
-**How to tell you're on the wrong product**:
-- Need `wrangler deploy` or a deploy command -> You created a **Workers** project
-- Errors like "Must specify a project name" or "Project not found" with wrangler -> **Workers**, not Pages
-- For static sites, the deploy command field should be **empty** - Pages builds and deploys automatically
-
-**Before setting up Cloudflare hosting**, determine:
-1. Is this a static site / SPA? -> Use **Pages**
-2. Does it need server-side logic at the edge? -> Use **Workers**
-3. If unsure, check the Cloudflare docs first - don't guess
+The **cloudflare** module is the canonical source for this — see `modules/cloudflare/rules/cloudflare.md` > "Pages vs Workers: Choose the Right Product" for the full comparison table, the decision checklist, and the wrong-product symptoms. (Installed standalone, that rule lives at `~/.claude/rules/cloudflare.md`.)
 
 ---
 
 ## 8. Cloudflare Pages Created Without Git Integration
 
-**Problem**: An agent runs `wrangler pages deploy <new-project-name>` to "get something live", which creates a direct-upload Pages project. The project never auto-deploys from GitHub — pushes to main are silently ignored, and the production site goes stale after every merge. **Cloudflare does not support retrofitting Git integration onto an existing direct-upload project.** The only fix is to delete the project and recreate it with Git integration, which means migrating custom domains, env vars, and bindings — multi-session production work. This mistake recurs across projects and burns hours every time it happens.
+**Problem**: An agent runs `wrangler pages deploy <new-project-name>` to "get something live", which creates a direct-upload Pages project. The project never auto-deploys from GitHub — pushes to main are silently ignored, and the production site goes stale after every merge. **Cloudflare does not support retrofitting Git integration onto an existing direct-upload project.** The only fix is to delete the project and recreate it with Git integration (migrating custom domains, env vars, and bindings) — multi-session production work. This mistake recurs across projects and burns hours every time it happens.
 
-**Rule**: **Cloudflare Pages projects MUST be created via the Connect-to-Git flow at inception.** Workers & Pages > Create > Pages > Connect to Git, in the Cloudflare dashboard. Never via `wrangler pages deploy <new-name>` for a project that should auto-deploy from a repo (which is ~99% of cases).
+**Rule**: **Cloudflare Pages projects MUST be created via the Connect-to-Git flow at inception** (Workers & Pages > Create > Pages > Connect to Git). Never via `wrangler pages deploy <new-name>` for a project that should auto-deploy (~99% of cases); if you are an agent and the dashboard step needs the user's browser session, stop and ask the user rather than falling back to direct-upload.
 
-If the dashboard step requires the user's browser session and you are an agent, **stop and ask the user** to create the project. Do NOT fall back to direct-upload "to make progress" — you are creating a project the user will have to throw away later.
-
-See `modules/cloudflare/rules/cloudflare.md` for the full creation procedure, red flags, and the destructive remediation steps if you inherit a broken project.
+The **cloudflare** module is the canonical source — see `modules/cloudflare/rules/cloudflare.md` > "Pages: MUST Be Created With Git Integration At Inception" for the full creation procedure, acceptable exceptions, the "created wrong" symptoms, and the destructive remediation steps if you inherit a broken project.
 
 ---
 

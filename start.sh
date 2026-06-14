@@ -767,6 +767,11 @@ main() {
       local beta_labels=()
       local desc
       while IFS= read -r mod; do
+        # Deprecated modules stay in-repo for existing installs but are no
+        # longer offered for new installs.
+        if is_deprecated "$mod"; then
+          continue
+        fi
         all_modules+=("$mod")
         desc=""
         if [ "$has_jq" = true ]; then

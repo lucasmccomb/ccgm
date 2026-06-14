@@ -6,8 +6,8 @@
 #
 # A module belongs here only if it is a stable module that is deliberately
 # left out of every curated preset (installable via `start.sh --add <name>`
-# but not bundled). Modules with "status": "beta" in their module.json are
-# auto-excluded and do NOT need to be listed here.
+# but not bundled). Modules with "status": "beta" or "status": "deprecated"
+# in their module.json are auto-excluded and do NOT need to be listed here.
 #
 # Format: one bare module name per line (no inline comments). Blank lines and
 # lines starting with # are ignored.
@@ -18,8 +18,6 @@
 
 # capability-router target (Wave 2); not yet preset-assigned
 agent-native
-# slated to merge into agent-native (Wave 2)
-agentic-eval
 # specialized review skill; opt-in via --add
 ce-review
 # internal command-preamble partial; not a user-facing preset member

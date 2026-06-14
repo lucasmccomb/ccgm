@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 69 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 67 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -667,7 +667,7 @@ Methodology for decomposing tasks and delegating to subagents.
 
 ### agent-manager
 
-[BETA] Go-based terminal UI for managing Claude Code agent processes.
+[DEPRECATED] Go-based terminal UI for managing Claude Code agent processes. Unmaintained; no longer offered for new installs (not shown in the installer list, not in any preset), kept in-repo for existing users.
 
 **Installs**: `commands/agents.md`, Go binary (`~/.ccgm/bin/ccgm-agents`) via postInstall.sh
 
@@ -684,7 +684,7 @@ The `/agents` command launches the TUI. The binary is built and installed by the
 |---------|-------------|
 | `/agents` | Launch the Agent Manager TUI |
 
-**Status**: Beta - experimental, not recommended for daily use. A GUI-based replacement is being considered.
+**Status**: Deprecated - unmaintained and not offered for new installs. Development is paused in favor of a GUI-based replacement.
 
 **Dependencies**: multi-agent
 
@@ -967,39 +967,21 @@ Formatting rules for user-facing output, starting with copy-pasteable content.
 
 ---
 
-### frontend-design
-
-Principles for building distinctive, production-grade web interfaces.
-
-**Installs**: `rules/frontend-design.md`
-
-**What it does**: Guides Claude away from generic AI-generated aesthetics toward intentional design:
-
-- **Typography**: Establish clear hierarchy, use 2-3 font sizes max per component
-- **Color systems**: WCAG AA compliance, semantic color tokens, purposeful contrast
-- **Spatial composition**: Consistent spacing scale, intentional whitespace
-- **Motion**: Purposeful animations (feedback, orientation, delight), not decoration
-- **What to avoid**: Default framework styles, generic card grids, excessive gradients
-- **Implementation checklist**: Questions to ask before writing UI code
-
-**Dependencies**: None
-
----
-
 ### make-interfaces-feel-better
 
-Design-engineering details that compound into polished interfaces. Vendored from [jakubkrehel/make-interfaces-feel-better](https://github.com/jakubkrehel/make-interfaces-feel-better) (MIT).
+Design-engineering details that compound into polished interfaces. Implementation-level reference files are vendored from [jakubkrehel/make-interfaces-feel-better](https://github.com/jakubkrehel/make-interfaces-feel-better) (MIT); the design-direction reference is a CCGM addition (folded in from the former `frontend-design` module).
 
-**Installs**: `skills/make-interfaces-feel-better/` (SKILL.md + typography.md, surfaces.md, animations.md, performance.md)
+**Installs**: `skills/make-interfaces-feel-better/` (SKILL.md + design-direction.md, typography.md, surfaces.md, animations.md, performance.md)
 
-**What it does**: A model-invoked skill. Claude loads it automatically when the conversation is about UI polish, animations, shadows, borders, typography, micro-interactions, or any visual-detail work. Covers:
+**What it does**: A model-invoked skill. Claude loads it automatically when the conversation is about UI polish, animations, shadows, borders, typography, micro-interactions, aesthetic direction, or any visual-detail work. Covers:
 
+- **Design direction** (CCGM addition): Aesthetic identity (minimal/brutalist/editorial/…), typeface and color-palette selection, spacing scale, motion philosophy, avoiding generic AI-generated aesthetics
 - **Typography**: `text-wrap: balance` / `pretty`, font smoothing on macOS, tabular numbers for dynamic values
 - **Surfaces**: Concentric border radius, optical vs geometric alignment, shadows instead of borders, image outlines, hit areas
 - **Animations**: Interruptible animations (transitions vs keyframes), enter/exit transitions, icon micro-interactions, scale on press
 - **Performance**: Transition specificity, `will-change` usage
 
-Complements `frontend-design` (aesthetic direction) and `design-review` (automated review) with implementation-level details.
+Complements `design-review` (automated review) with both aesthetic direction and implementation-level detail.
 
 **Dependencies**: None
 
@@ -1067,23 +1049,11 @@ Evidence-before-claims methodology for confirming work is done.
 
 Principles for designing applications where an agent is a first-class user — alongside humans.
 
-**Installs**: `rules/agent-native.md`, `skills/agent-native-audit/`, `agents/reviewers/agent-native-reviewer.md`
+**Installs**: `rules/agent-native.md`, `rules/agent-native-self-eval.md`, `skills/agent-native-audit/`, `agents/reviewers/agent-native-reviewer.md`
 
-**What it does**: Defines four principles — parity (every UI action has a programmable equivalent), granularity (composable primitives), composability (operations chain into workflows), and emergent capability (combinations exceed the sum). Ships `/agent-native-audit` which scores a codebase against the principles with concrete counts, and a reviewer persona that plugs into the unified review orchestrator.
+**What it does**: Defines four principles — parity (every UI action has a programmable equivalent), granularity (composable primitives), composability (operations chain into workflows), and emergent capability (combinations exceed the sum). Ships `/agent-native-audit` which scores a codebase against the principles with concrete counts, and a reviewer persona that plugs into the unified review orchestrator. Also includes a self-eval / red-team rubric (`agent-native-self-eval.md`) that scores a surface against the four principles using a reference test surface and parallel red-team probing — a repeatable standard for self-auditing a system or assessing agentic engineering work.
 
 **Dependencies**: subagent-patterns
-
----
-
-### agentic-eval
-
-Hiring-format rubric for evaluating agentic engineering portfolios.
-
-**Installs**: `rules/agentic-eval-rubric.md`
-
-**What it does**: Describes the Twitter-clone-for-agents evaluation format from the Karpathy/Sequoia interview (2026-04-29): the candidate builds a small social-feed system whose surface satisfies the four agent-native principles, then N parallel red-team agents try to break it. The rubric is the scoring framework.
-
-**Dependencies**: agent-native, subagent-patterns
 
 ---
 

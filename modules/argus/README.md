@@ -126,8 +126,9 @@ Argus composes the existing review/loop primitives rather than duplicating them:
   sensor reuses that philosophy. Argus adds the convergence loop, the separated judge, and the gate floor.
 - **`atdd` / `test-vision`** — same "spec is the immutable target" stance, but Argus's oracle is a
   rubric judge + visual gates, not only pass/fail E2E tests.
-- **`ce-review` / `agentic-eval`** — same adversarial-separate-evaluator and threshold/budget discipline,
-  applied to an iterative *build* loop instead of a single review pass.
+- **`ce-review` / agent-native self-eval rubric** — same adversarial-separate-evaluator and threshold/budget
+  discipline (the latter via `agent-native`'s `rules/agent-native-self-eval.md`), applied to an iterative
+  *build* loop instead of a single review pass.
 
 ## Testing
 

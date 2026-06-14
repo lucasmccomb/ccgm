@@ -1,9 +1,9 @@
 {
   "name": "agent-manager",
   "displayName": "Agent Manager TUI",
-  "description": "[BETA - experimental] Go-based terminal UI for managing Claude Code agent processes via tmux panes. Experimental and not recommended for daily use; a GUI-based replacement is being considered.",
+  "description": "[DEPRECATED] Go-based terminal UI for managing Claude Code agent processes via tmux panes. Unmaintained and no longer offered for new installs; a GUI-based replacement is being pursued instead. Kept in-repo for existing users.",
   "category": "workflow",
-  "status": "beta",
+  "status": "deprecated",
   "scope": ["global"],
   "dependencies": ["multi-agent"],
   "files": {
