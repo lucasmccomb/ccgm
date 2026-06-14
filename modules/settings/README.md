@@ -6,7 +6,7 @@ Base settings.json with comprehensive tool permissions (800+ allow entries), den
 
 This module provides a `settings.base.json` that gets merged into `~/.claude/settings.json`. It includes:
 
-- **Allow list**: ~800 Bash command prefixes covering git, package managers, build tools, languages, editors, system utilities, cloud CLIs, databases, and more
+- **Allow list**: ~800 Bash command prefixes covering git, package managers, build tools, languages, editors, system utilities, cloud CLIs, databases, and more. Privilege-escalation and arbitrary-execution prefixes (`sudo`, `su`, `doas`, `eval`, `exec`) are deliberately **excluded** — see "Excluded from the allow list" below.
 - **File operation permissions**: Read/Edit/Write permissions for your code directory, Claude config, and temp files
 - **Deny list**: 13 entries for dangerous operations (rm -rf, force push to main, docker rm, DROP/TRUNCATE/DELETE SQL). Several legacy entries were pruned in #474 once the `hooks` module gained bypass-proof `hard_block()` enforcement — see "Deny list rationale" below.
 - **Tool permissions**: WebFetch, WebSearch, Skill, Glob, Grep, and Supabase MCP tools pre-approved
@@ -26,6 +26,17 @@ Each entry survives a specific test: would removing it create a real new risk af
 
 Removed in #474 (now redundant with hook hard-blocks):
 - `Bash(git push --force main:*)`, `Bash(git push -f main:*)`, `Bash(git push --force-with-lease origin main:*)`, `Bash(git push -f origin main:*)` — all subsumed by `check-careful.py:_is_force_push_to_main()`.
+
+### Excluded from the allow list (#665)
+
+The allow list intentionally does **not** grant these prefixes:
+
+| Excluded prefix | Why it is dangerous to auto-allow |
+|-----------------|-----------------------------------|
+| `Bash(sudo:*)`, `Bash(su:*)`, `Bash(doas:*)` | Privilege escalation. An auto-approved `sudo` runs *anything* as root, sidestepping every per-command guard. |
+| `Bash(eval:*)`, `Bash(exec:*)` | Arbitrary execution. The permission matcher only sees the literal prefix (`eval`, `exec`), so `eval "rm -rf /"` would be auto-approved even though `Bash(rm -rf:*)` is on the deny list. These prefixes defeat both the deny list and every argument-pattern allow rule. |
+
+These were removed in #665. The deny list takes precedence over the allow list in Claude Code's permission model, but it can only override commands it actually names — `eval`/`exec` let a caller smuggle a denied command past the matcher entirely, so the only safe fix is to keep them off the allow list. With these prefixes excluded, such commands fall through to `defaultMode` (`ask`) and prompt for approval.
 
 ## Template Variables
 
