@@ -51,6 +51,11 @@ jobs:
       - name: Hooks test suites (dispatcher equivalence + precedence)
         run: |
           set -e
+          # enforce-git-workflow.py imports hook_utils from ~/.claude/lib, so the
+          # suites need the hooks lib on that path (an installed-environment
+          # assumption). Stage it before running.
+          mkdir -p "$HOME/.claude/lib"
+          cp modules/hooks/lib/*.py "$HOME/.claude/lib/"
           for t in modules/hooks/tests/*.sh; do
             echo "=== Running $t ==="
             bash "$t"
@@ -100,6 +105,11 @@ jobs:
       - name: Hooks test suites (dispatcher equivalence + precedence)
         run: |
           set -e
+          # enforce-git-workflow.py imports hook_utils from ~/.claude/lib, so the
+          # suites need the hooks lib on that path (an installed-environment
+          # assumption). Stage it before running.
+          mkdir -p "$HOME/.claude/lib"
+          cp modules/hooks/lib/*.py "$HOME/.claude/lib/"
           for t in modules/hooks/tests/*.sh; do
             echo "=== Running $t ==="
             bash "$t"
