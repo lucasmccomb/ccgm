@@ -232,9 +232,40 @@ Triage the findings yourself (orchestrator judgment - latent work, not delegable
 
 Loop review → fix → re-review until the PR passes. Bound it: after **3 fix rounds** on the same PR without convergence, freeze that PR, record the unresolved findings as a blocker, and move on - one stuck PR does not halt the wave.
 
+### 4.35 Drive the PR to CI-green (bounded post-PR loop)
+
+The finish line is not "PR opened" - it is "CI green and mergeable." Adversarial review (4.2-4.3) judges the diff; this step makes the *pipeline* agree. Run it for every PR after it passes adversarial review and before it can merge (4.4). It applies to inherited in-flight PRs too.
+
+**Read CI fresh, never assume.** Poll the actual checks - do not infer state from "the implementer said tests passed":
+
+```bash
+gh pr checks <PR> --watch    # block until checks finish (or poll without --watch and re-read)
+gh pr view <PR> --json mergeable,mergeStateStatus,statusCheckRollup
+```
+
+Classify the result:
+- **Green and mergeable** → done with this step; proceed to 4.4.
+- **Red checks** → a real failure to diagnose and fix (below).
+- **Conflicting / behind base** (`mergeable: CONFLICTING`, or a `mergeStateStatus` indicating the branch is behind) → rebase the branch on the latest `origin/main` and resolve conflicts before re-checking.
+- **Pending/queued** → keep waiting; do not act on an unfinished run.
+
+**The bounded fix loop.** Each round, in order:
+
+1. **Read the failure, fully.** Pull the failing job's logs - `gh run view <run-id> --log-failed` (find the run via `gh pr checks` or `gh run list --branch <branch>`). Read the actual error, the failing job, and the step. Do not guess from the check name.
+2. **Find the root cause, then fix at the source.** This is systematic-debugging, not symptom-patching: one hypothesis, the minimal change. For a code/test failure, dispatch a targeted `implementer` (model sonnet) against the PR branch scoped to *exactly* that failure - never a broad rewrite. For a merge conflict / behind-base, rebase on `origin/main` and resolve. For a suspected flaky check, re-run it once (`gh run rerun <run-id> --failed`) before treating it as real - a check that fails twice is a real bug, not flake.
+3. **Push and re-check.** Push the fix, then re-read CI fresh (back to the top of this step). A fix that introduces a new failure counts as the same loop continuing, not a fresh start.
+
+**The bound (explicit, no infinite loop).** Allow **at most 3 CI-fix rounds** on the same PR. This mirrors the three-strike rule (Phase 6) and the 4.3 review bound. After 3 rounds without reaching green:
+- **Freeze** the PR (do not merge it).
+- **Record** the unresolved CI failure as a blocker on the run record (issue/batch: a one-line note + the failing-job link; plan: the progress file's blocker list).
+- **Escalate to the user** with a clear, specific summary: which PR, which check failed, the root-cause read so far, the fixes already attempted, and the exact failing-log link. This is the directive's "absolute blocker → notify me" path for CI.
+- **Continue all other PRs and waves.** One CI-stuck PR is set aside, never a halt for the run.
+
+A PR that cannot be driven green within the bound is treated exactly like a PR frozen at 4.3: blocked, recorded, escalated, and stepped around - not merged, not abandoned silently.
+
 ### 4.4 Merge
 
-Merge a PR only when: it passed review (both stages, or Stage 1 under `--light-review`), CI is green, and it does not conflict. Merge in dependency order within the wave. Squash merge (the repo default). Never merge a PR that failed adversarial review to "keep moving" - that defeats the entire loop.
+Merge a PR only when: it passed review (both stages, or Stage 1 under `--light-review`), CI is **green and mergeable** (verified fresh via 4.35, not assumed), and it does not conflict. Merge in dependency order within the wave. Squash merge (the repo default). Never merge a PR that failed adversarial review or has red/unresolved CI to "keep moving" - that defeats the entire loop.
 
 ### 4.5 Bring-up & integration verification (when applicable)
 
@@ -280,6 +311,7 @@ Loop Phases 4-6 until every condition holds:
 - All units DONE or explicitly escalated as blocked.
 - All in-scope follow-ups DONE.
 - All PRs merged (or frozen-and-recorded as blocked); all target issues closed by their merged PRs.
+- Every merged PR reached CI-green via the bounded loop (4.35); any PR that could not be driven green within the bound is among the frozen-and-recorded blockers, not silently merged.
 - CI green, no uncommitted changes in any clone, no unexpected open PRs.
 - All layers confirmed live (where the work has runtime impact); smoke test passes.
 
