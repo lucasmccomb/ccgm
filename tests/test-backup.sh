@@ -319,6 +319,65 @@ else
 fi
 echo ""
 
+# --- Test 9: project-scope backups dir is gitignored ---
+echo "--- Test 9: project-scope backups gitignored ---"
+
+GI_PROJECT="$TMPDIR/gi-project"
+GI_TARGET="$GI_PROJECT/.claude"
+mkdir -p "$GI_TARGET"
+echo '{"scope": "gi-project"}' > "$GI_TARGET/settings.json"
+
+gi_backup=$(create_backup "$GI_TARGET")
+GI_BASE="$GI_TARGET/backups"
+
+# A .gitignore must exist inside the backups dir and ignore everything.
+if [ -f "$GI_BASE/.gitignore" ]; then
+  pass "Project-scope backups dir has a .gitignore"
+else
+  fail "Project-scope backups dir is missing a .gitignore"
+fi
+
+if [ -f "$GI_BASE/.gitignore" ] && [ "$(cat "$GI_BASE/.gitignore")" = '*' ]; then
+  pass "backups/.gitignore contains '*' (ignores all backup content)"
+else
+  fail "backups/.gitignore does not contain the expected '*' entry"
+fi
+
+# Idempotent: a second backup must not duplicate or alter the entry.
+gi_lines_before=$(wc -l < "$GI_BASE/.gitignore" | tr -d ' ')
+sleep 1  # ensure a distinct ccgm-YYYYMMDD-HHMMSS timestamp for the 2nd backup
+gi_backup2=$(create_backup "$GI_TARGET")
+gi_lines_after=$(wc -l < "$GI_BASE/.gitignore" | tr -d ' ')
+
+if [ "$gi_lines_before" = "$gi_lines_after" ] && [ "$(cat "$GI_BASE/.gitignore")" = '*' ]; then
+  pass "Repeated backup does not duplicate the .gitignore entry"
+else
+  fail "Repeated backup changed .gitignore (before=$gi_lines_before after=$gi_lines_after)"
+fi
+
+# Two distinct backups should have been created (sanity that we exercised it twice).
+if [ -n "$gi_backup" ] && [ -n "$gi_backup2" ] && [ "$gi_backup" != "$gi_backup2" ]; then
+  pass "Two distinct project-scope backups created"
+else
+  fail "Expected two distinct project-scope backups (got '$gi_backup' and '$gi_backup2')"
+fi
+echo ""
+
+# --- Test 10: global-scope backups are NOT gitignored ---
+echo "--- Test 10: global-scope backups unaffected ---"
+
+# Clean any prior global backups, then create a fresh global-scope backup.
+rm -rf "$HOME/.claude/backups"/ccgm-*
+echo '{"scope": "global-gi"}' > "$HOME/.claude/settings.json"
+global_gi_backup=$(create_backup "$HOME/.claude")
+
+if [ ! -f "$HOME/.claude/backups/.gitignore" ]; then
+  pass "Global-scope backups dir has no .gitignore (irrelevant for ~/.claude)"
+else
+  fail "Global-scope backups dir unexpectedly got a .gitignore"
+fi
+echo ""
+
 # --- Summary ---
 echo "==================================="
 echo "  Results: $PASS passed, $FAIL failed"
