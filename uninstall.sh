@@ -10,6 +10,7 @@ CCGM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # --- Source libraries ---
 source "${CCGM_ROOT}/lib/ui.sh"
 source "${CCGM_ROOT}/lib/backup.sh"
+source "${CCGM_ROOT}/lib/merge.sh"
 
 # ============================================================
 # Main
@@ -72,6 +73,21 @@ main() {
         echo "  - $file (already missing)"
       fi
     done < <(jq -r '.files[]?' "$manifest" 2>/dev/null)
+
+    # Merge targets (e.g. settings.json) are NOT deleted - only CCGM-contributed
+    # keys are un-merged out, preserving the user's own settings.
+    if jq -e '.mergedFiles | length > 0' "$manifest" >/dev/null 2>&1; then
+      echo ""
+      ui_info "Settings to un-merge (file preserved, only CCGM keys removed):"
+      while IFS= read -r mtarget; do
+        [ -z "$mtarget" ] && continue
+        if [ -e "$mtarget" ]; then
+          echo "  - $mtarget"
+        else
+          echo "  - $mtarget (already missing)"
+        fi
+      done < <(jq -r '.mergedFiles[]?.target' "$manifest" 2>/dev/null | sort -u)
+    fi
   else
     ui_info "Found manifest at: $manifest"
     ui_warn "jq not available - will remove known CCGM paths"
@@ -83,7 +99,12 @@ main() {
   ui_info "Your backups (if any) will NOT be removed."
   echo ""
 
-  if ! ui_confirm "Proceed with uninstall?" "no"; then
+  # Interactive default is "no" for safety. An explicit non-interactive run
+  # (CCGM_NON_INTERACTIVE=1) opts in to proceeding, matching the installer's
+  # non-interactive contract.
+  local proceed_default="no"
+  [ "${CCGM_NON_INTERACTIVE:-}" = "1" ] && proceed_default="yes"
+  if ! ui_confirm "Proceed with uninstall?" "$proceed_default"; then
     ui_info "Uninstall cancelled."
     exit 0
   fi
@@ -104,10 +125,47 @@ main() {
 
   local removed_count=0
   local skipped_count=0
+  local unmerged_count=0
 
   if [ "$has_jq" = true ]; then
+    # Collect merge-target paths so we never rm -f a file that is a merge target.
+    # This also protects legacy manifests where a merge target (settings.json)
+    # was incorrectly recorded in files[] - those entries are skipped here and
+    # handled by the un-merge pass below instead of being deleted wholesale.
+    local merge_targets=()
+    local mt
+    while IFS= read -r mt; do
+      [ -n "$mt" ] && merge_targets+=("$mt")
+    done < <(jq -r '.mergedFiles[]?.target' "$manifest" 2>/dev/null | sort -u)
+
+    _is_merge_target() {
+      local candidate="$1" t
+      for t in ${merge_targets[@]+"${merge_targets[@]}"}; do
+        [ "$t" = "$candidate" ] && return 0
+      done
+      return 1
+    }
+
     while IFS= read -r file; do
       [ -z "$file" ] && continue
+
+      # Never delete a merge target - it holds the user's own settings too.
+      if _is_merge_target "$file"; then
+        ui_info "Preserving merge target (will un-merge): $file"
+        skipped_count=$((skipped_count + 1))
+        continue
+      fi
+
+      # Defense-in-depth for legacy manifests written before mergedFiles[]
+      # existed: settings.json is ALWAYS a merge target. If it leaked into
+      # files[] with no recorded partial, we cannot un-merge precisely, so we
+      # refuse to delete it - skipping preserves the user's data over a clean
+      # uninstall. The empty-dir cleanup below will still tidy CCGM-only dirs.
+      if [ "$(basename "$file")" = "settings.json" ]; then
+        ui_warn "Preserving settings.json (no merge record; refusing to delete): $file"
+        skipped_count=$((skipped_count + 1))
+        continue
+      fi
 
       if [ -L "$file" ]; then
         rm -f "$file"
@@ -121,6 +179,30 @@ main() {
         skipped_count=$((skipped_count + 1))
       fi
     done < <(jq -r '.files[]?' "$manifest" 2>/dev/null)
+
+    # Un-merge CCGM-contributed keys from each merge target. The file is left in
+    # place with the user's keys intact; it is removed only if nothing remains.
+    while IFS=$'\t' read -r mtarget mpartial; do
+      [ -z "$mtarget" ] && continue
+      if unmerge_settings "$mtarget" "$mpartial"; then
+        if [ -f "$mtarget" ]; then
+          ui_success "Un-merged CCGM keys from: $mtarget (user settings preserved)"
+        else
+          ui_success "Removed (empty after un-merge): $mtarget"
+        fi
+        unmerged_count=$((unmerged_count + 1))
+      else
+        ui_warn "Could not un-merge $mtarget - left untouched"
+      fi
+      # Clean up the recorded sidecar partial.
+      [ -f "$mpartial" ] && rm -f "$mpartial"
+    done < <(jq -r '.mergedFiles[]? | [.target, .partial] | @tsv' "$manifest" 2>/dev/null)
+
+    # Remove the now-empty sidecar store if nothing else lives there.
+    local merged_dir="${global_dir}/.ccgm-merged"
+    if [ -d "$merged_dir" ] && [ -z "$(ls -A "$merged_dir" 2>/dev/null)" ]; then
+      rmdir "$merged_dir" 2>/dev/null && ui_info "Removed empty dir: $merged_dir"
+    fi
   else
     ui_warn "Cannot parse manifest without jq."
     ui_info "Install jq for precise file removal, or manually remove ~/.claude/ contents."
@@ -164,7 +246,7 @@ main() {
 
   # Step 7: Summary and offer restore
   echo ""
-  ui_info "Removed $removed_count file(s), skipped $skipped_count"
+  ui_info "Removed $removed_count file(s), un-merged $unmerged_count settings file(s), skipped $skipped_count"
   echo ""
 
   if [ -n "$backup_path" ]; then
