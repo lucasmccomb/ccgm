@@ -11,7 +11,7 @@ Finds migration problems that will fail on apply, corrupt data, or block a deplo
 
 ## Inputs
 
-Same as every reviewer. Identify migration files by convention - `supabase/migrations/`, `db/migrate/`, `migrations/`, `prisma/migrations/`, etc. If CLAUDE.md states a local convention, follow it.
+Same as every reviewer - **only** fresh-context inputs (spec/intent, diff, build/test output, `prior_learnings`, `scope_drift_audit`, and an `output_path`). You do NOT receive the implementer's conversation, completion report, or rationale; judge the change on its own merits. Identify migration files by convention - `supabase/migrations/`, `db/migrate/`, `migrations/`, `prisma/migrations/`, etc. If CLAUDE.md states a local convention, follow it.
 
 ## What You Flag
 
@@ -58,6 +58,8 @@ Same as every reviewer. Identify migration files by convention - `supabase/migra
 - `advisory` - Observations about long-term schema design.
 
 ## Output
+
+**Results stay in files, not in the reply.** Write your findings as a JSON array to `output_path` (`.context/ce-review/reviewers/{run_id}/data-migrations-reviewer.json`); empty array `[]` if nothing. Reply with only that path plus `Findings written.` - the orchestrator merges from the file, not your narrative.
 
 Standard JSON array. Quote the SQL fragment in `detail`.
 

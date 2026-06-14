@@ -13,11 +13,11 @@ This agent is dispatched LAST. It receives the findings from every other reviewe
 
 ## Inputs
 
-Same as every reviewer, plus the key addition:
+Same as every reviewer - **only** fresh-context inputs (spec/intent, diff, build/test output, `prior_learnings`, `scope_drift_audit`, and an `output_path`). You do NOT receive the implementer's conversation, completion report, or rationale; judge the change on its own merits. Plus the key addition:
 
-- `prior_findings` - the merged JSON output from correctness, testing, maintainability, project-standards, and any conditional reviewers (security, performance, reliability, api-contract, data-migrations)
+- `prior_findings` - the paths to the other reviewers' findings artifacts under `.context/ce-review/reviewers/{run_id}/`. These are independent **review output**, not the implementer's rationale - reading them is the one intended cross-phase context flow, and the whole point of this reviewer.
 
-Read `prior_findings` first. Note what was covered. Everything below that was covered, skip. Everything not covered is your surface area.
+Read the `prior_findings` artifacts first. Note what was covered. Everything below that was covered, skip. Everything not covered is your surface area.
 
 ## The Five Lenses
 
@@ -124,6 +124,8 @@ Same scale. Do not promote a finding above the severity the code's actual behavi
 - `advisory` - Observation without a clear fix.
 
 ## Output
+
+**Results stay in files, not in the reply.** Write your findings as a JSON array to `output_path` (`.context/ce-review/reviewers/{run_id}/adversarial-reviewer.json`); empty array `[]` if nothing. Reply with only that path plus `Findings written.` - the orchestrator merges from the file, not your narrative.
 
 Standard JSON array. The `reviewer` field must be exactly `adversarial-reviewer`. Include the lens in `category`:
 

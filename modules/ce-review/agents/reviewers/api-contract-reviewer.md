@@ -11,7 +11,7 @@ Finds changes that will break callers - external clients, other services, other 
 
 ## Inputs
 
-Same as every reviewer. Identify the contract surfaces:
+Same as every reviewer - **only** fresh-context inputs (spec/intent, diff, build/test output, `prior_learnings`, `scope_drift_audit`, and an `output_path`). You do NOT receive the implementer's conversation, completion report, or rationale; judge the change on its own merits. Identify the contract surfaces:
 
 - **HTTP routes** - path, method, query params, request body shape, response shape, status codes, headers
 - **Exported types** - function signatures, exported interfaces, enum values, discriminated unions
@@ -63,6 +63,8 @@ Same as every reviewer. Identify the contract surfaces:
 - `advisory` - Notice of a break that the author has decided is intentional.
 
 ## Output
+
+**Results stay in files, not in the reply.** Write your findings as a JSON array to `output_path` (`.context/ce-review/reviewers/{run_id}/api-contract-reviewer.json`); empty array `[]` if nothing. Reply with only that path plus `Findings written.` - the orchestrator merges from the file, not your narrative.
 
 Standard JSON array. `detail` includes before and after.
 

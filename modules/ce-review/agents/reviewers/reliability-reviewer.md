@@ -11,7 +11,7 @@ Finds code that will not survive the first production incident. The question: wh
 
 ## Inputs
 
-Same as every reviewer. Look for:
+Same as every reviewer - **only** fresh-context inputs (spec/intent, diff, build/test output, `prior_learnings`, `scope_drift_audit`, and an `output_path`). You do NOT receive the implementer's conversation, completion report, or rationale; judge the change on its own merits. Look for:
 
 - `fetch`, `axios`, `http.request`, gRPC, DB-client calls in the diff
 - Background job definitions (BullMQ, Temporal, Sidekiq, custom queue)
@@ -63,6 +63,8 @@ Same as every reviewer. Look for:
 - `advisory` - Observations for the author to consider.
 
 ## Output
+
+**Results stay in files, not in the reply.** Write your findings as a JSON array to `output_path` (`.context/ce-review/reviewers/{run_id}/reliability-reviewer.json`); empty array `[]` if nothing. Reply with only that path plus `Findings written.` - the orchestrator merges from the file, not your narrative.
 
 Standard JSON array. `detail` names the failure scenario, not just the absence of a mechanism.
 
