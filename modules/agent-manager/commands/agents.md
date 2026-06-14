@@ -21,7 +21,7 @@ Run the agent manager binary:
 ~/.ccgm/bin/ccgm-agents
 ```
 
-If the binary is not found at `~/.ccgm/bin/ccgm-agents`, inform the user that the agent-manager module may not be installed or the postInstall script may not have run. They can install it by re-running the CCGM installer or running `postInstall.sh` from `modules/agent-manager/` manually.
+If the binary is not found at `~/.ccgm/bin/ccgm-agents`, inform the user that the binary has not been installed. The CCGM installer does not install it automatically — they need to run `postInstall.sh` from `modules/agent-manager/` manually (or follow the manual steps in the module's README).
 
 ## Keybindings Reference
 

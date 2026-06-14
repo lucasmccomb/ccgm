@@ -669,7 +669,7 @@ Methodology for decomposing tasks and delegating to subagents.
 
 [DEPRECATED] Go-based terminal UI for managing Claude Code agent processes. Unmaintained; no longer offered for new installs (not shown in the installer list, not in any preset), kept in-repo for existing users.
 
-**Installs**: `commands/agents.md`, Go binary (`~/.ccgm/bin/ccgm-agents`) via postInstall.sh
+**Installs**: `commands/agents.md`. The Go binary (`~/.ccgm/bin/ccgm-agents`) is **not** installed by CCGM — run `modules/agent-manager/postInstall.sh` manually to fetch it.
 
 **What it does**: Provides a terminal dashboard for monitoring and controlling Claude Code agents across multi-clone repos:
 
@@ -678,7 +678,7 @@ Methodology for decomposing tasks and delegating to subagents.
 - **Controls**: Launch, stop, restart, and force-kill agents from the TUI
 - **Filtering**: Filter agent list by name, status, or repo
 
-The `/agents` command launches the TUI. The binary is built and installed by the `postInstall.sh` script during CCGM installation.
+The `/agents` command launches the TUI. The CCGM installer has no post-install hook, so the binary is not installed automatically — fetch it by running `modules/agent-manager/postInstall.sh` manually (it downloads and checksum-verifies the release binary into `~/.ccgm/bin/`).
 
 | Command | Description |
 |---------|-------------|

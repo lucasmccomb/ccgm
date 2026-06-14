@@ -186,6 +186,8 @@ get_module_scope() {
 # --- Get module files ---
 # Returns JSON object of files (requires jq)
 # Each line: source_path|target|type|template|merge
+# NOTE: `type` is advisory metadata only — callers discard it. Install location
+# is driven by `target`, and copy/link/merge by `template`/`merge` + link mode.
 get_module_files() {
   local name="$1"
   local manifest="${CCGM_ROOT}/modules/${name}/module.json"
