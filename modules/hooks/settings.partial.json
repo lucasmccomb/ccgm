@@ -51,32 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.claude/hooks/enforce-git-workflow.py",
-            "timeout": 5000
-          },
-          {
-            "type": "command",
-            "command": "$HOME/.claude/hooks/auto-approve-bash.py",
-            "timeout": 5000
-          },
-          {
-            "type": "command",
-            "command": "python3 $HOME/.claude/hooks/port-check.py",
-            "timeout": 5000
-          },
-          {
-            "type": "command",
-            "command": "python3 $HOME/.claude/hooks/agent-tracking-pre.py",
-            "timeout": 5000
-          },
-          {
-            "type": "command",
-            "command": "python3 $HOME/.claude/hooks/check-migration-timestamps.py",
-            "timeout": 5000
-          },
-          {
-            "type": "command",
-            "command": "python3 $HOME/.claude/hooks/check-careful.py",
+            "command": "python3 $HOME/.claude/hooks/pretooluse-bash-dispatch.py",
             "timeout": 5000
           }
         ]
