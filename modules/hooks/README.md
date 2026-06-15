@@ -25,6 +25,15 @@ This module installs fifteen Python hooks, several Python libraries, and a setti
 
 The `settings.partial.json` wires these hooks into your `~/.claude/settings.json`.
 
+> **PreToolUse:Bash is composed.** The six PreToolUse(Bash) checks above
+> (`enforce-git-workflow`, `auto-approve-bash`, `port-check`,
+> `agent-tracking-pre`, `check-migration-timestamps`, `check-careful`) run
+> through a single in-process dispatcher
+> (`hooks/pretooluse-bash-dispatch.py`) rather than six separate processes.
+> Their behavior is unchanged — the dispatcher calls the same pure functions
+> and the decision is equivalence-proven against the legacy chain. See
+> [Hook Composition Dispatcher](#hook-composition-dispatcher-default) below.
+
 **Libraries**: `lib/agent_tracking.py` (tracking CSV operations), `lib/agent_sessions.py` (live session detection)
 
 ## Dependencies
@@ -96,19 +105,18 @@ CCGM_RULE_ENFORCEMENT=true
 
 On fresh session start, the hook injects a short reminder that routes tasks through loaded Iron-Law rules (TDD, systematic-debugging, verification, subagent-patterns, confusion-protocol). Remove or set to `false` to disable.
 
-## Hook Composition Dispatcher (opt-in)
+## Hook Composition Dispatcher (default)
 
-A single PreToolUse:Bash event currently fans out into six separate Python
-processes (`enforce-git-workflow` → `auto-approve-bash` → `port-check` →
-`agent-tracking-pre` → `check-migration-timestamps` → `check-careful`), each
-re-importing `hook_utils` and re-parsing stdin. Precedence is an emergent
-property of array order across several modules that do not know about each
-other.
+The PreToolUse:Bash event is handled by a **single-process composition
+dispatcher** (`hooks/pretooluse-bash-dispatch.py`). It replaces what used to be
+six separate Python processes (`enforce-git-workflow` → `auto-approve-bash` →
+`port-check` → `agent-tracking-pre` → `check-migration-timestamps` →
+`check-careful`), each re-importing `hook_utils` and re-parsing stdin, where
+precedence was an emergent property of array order across several modules that
+did not know about each other.
 
-`hooks/pretooluse-bash-dispatch.py` is a **backward-compatible** alternative:
-one in-process dispatcher that runs the same checks via a **declarative
-manifest** (priority + tool-matcher + handler) with an explicit precedence
-contract:
+The dispatcher runs the same checks via a **declarative manifest** (priority +
+tool-matcher + handler) with an explicit precedence contract:
 
 ```
 hard_block (exit 2)  >  deny  >  allow  >  ask  >  advisory / pass
@@ -126,13 +134,16 @@ hard_block (exit 2)  >  deny  >  allow  >  ask  >  advisory / pass
 
 The handlers (`lib/pretooluse_bash_checks.py`) call the **same pure functions**
 the legacy hooks use, so the dispatched path and the legacy path share one
-source of truth. `modules/hooks/tests/test-dispatcher.sh` proves the dispatcher
-produces an identical final decision to the six-process chain across a command
-battery × all four permission modes (`equivalence_harness.py`).
+source of truth — the six standalone hook scripts are still installed and
+remain individually runnable. `modules/hooks/tests/test-dispatcher.sh` proves
+the dispatcher produces an identical final decision to the six-process chain
+across an adversarial command battery × all four permission modes
+(`equivalence_harness.py`): 224/224 (command × mode) pairs match, with a
+non-trivial outcome distribution spanning `hard_block`, `deny`, `allow`, `ask`,
+and pass.
 
-**This is opt-in and additive.** The default `settings.partial.json` keeps the
-legacy per-process chain. To migrate a deployment, replace the six
-PreToolUse:Bash entries in `settings.json` with a single entry:
+**This is the default.** `settings.partial.json` wires the single dispatcher
+entry for PreToolUse:Bash:
 
 ```json
 {
@@ -145,7 +156,10 @@ PreToolUse:Bash entries in `settings.json` with a single entry:
 }
 ```
 
-Both mechanisms coexist; nothing forces the migration.
+To revert to the legacy per-process chain, replace that single entry with the
+six standalone hook entries (`enforce-git-workflow`, `auto-approve-bash`,
+`port-check`, `agent-tracking-pre`, `check-migration-timestamps`,
+`check-careful`) in `settings.json`. Both mechanisms remain supported.
 
 ## Files
 
@@ -165,7 +179,7 @@ Both mechanisms coexist; nothing forces the migration.
 | `hooks/check-freeze.py` | Scope-lock Edit/Write to `~/.claude/freeze-dir.txt` (freeze safety hook) |
 | `hooks/session-start-enforce.py` | Experimental Iron-Law rule-enforcement meta-instruction at session start (opt in via `CCGM_RULE_ENFORCEMENT=true`) |
 | `hooks/sync-ccgm-canonical.py` | Auto-pull `~/code/ccgm` after CCGM PR merges so symlinked runtime never drifts (override path via `CCGM_CANONICAL_DIR`) |
-| `hooks/pretooluse-bash-dispatch.py` | Opt-in single-process composition dispatcher for the PreToolUse:Bash chain (declarative precedence; backward-compatible with the six-process chain) |
+| `hooks/pretooluse-bash-dispatch.py` | Default single-process composition dispatcher for the PreToolUse:Bash chain (declarative precedence; equivalence-proven against the six-process chain) |
 | `lib/hook_dispatcher.py` | Composition engine: declarative `Manifest`/`Check`/`Result` model + `dispatch()` precedence resolution (hard_block > deny > allow > ask) |
 | `lib/pretooluse_bash_checks.py` | Dispatcher handlers wrapping the legacy PreToolUse:Bash hooks' pure functions into the `Result` contract |
 | `lib/agent_tracking.py` | Python library for tracking CSV operations |

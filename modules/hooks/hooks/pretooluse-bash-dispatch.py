@@ -7,11 +7,12 @@ event. It replaces the six-process legacy chain
 → check-migration-timestamps → check-careful) with ONE process that runs the
 same checks in-process, by priority, through hook_dispatcher.
 
-It is OPT-IN. The default install keeps the legacy per-process chain registered
-in settings.partial.json. Migrating a deployment means replacing those six
-PreToolUse:Bash entries with this single entry — the decisions are identical
-because the handlers (lib/pretooluse_bash_checks.py) call the legacy hooks'
-own pure functions; the dispatcher only resolves precedence.
+It is the DEFAULT PreToolUse:Bash handler: settings.partial.json wires this
+single entry in place of the six legacy per-process entries. The decisions are
+identical because the handlers (lib/pretooluse_bash_checks.py) call the legacy
+hooks' own pure functions; the dispatcher only resolves precedence. The six
+standalone hook scripts remain installed and individually runnable, so a
+deployment can revert by restoring the six PreToolUse:Bash entries.
 
 DECLARATIVE MANIFEST (priority order mirrors the legacy registration order).
 Precedence among the decisions they return is governed by hook_dispatcher's

@@ -182,7 +182,10 @@ assert_eq "${fp_escape%%|*}" "0" \
 echo "--- 4. backward-compat equivalence (dispatcher == legacy chain) ---"
 equiv=$(HOME="${FAKE_HOME}" python3 "${SCRIPT_DIR}/equivalence_harness.py" 2>&1)
 equiv_rc=$?
-echo "${equiv}" | tail -1
+# Surface both the equivalence count and the outcome distribution (last 2
+# lines) so CI logs show the total N/N and that outcomes are not trivially
+# all-'none'.
+echo "${equiv}" | tail -2
 assert_eq "${equiv_rc}" "0" "dispatcher matches legacy chain across battery×modes"
 # Surface any specific mismatch lines for debugging.
 if [ "${equiv_rc}" -ne 0 ]; then
