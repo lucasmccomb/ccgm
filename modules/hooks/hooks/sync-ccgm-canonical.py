@@ -7,7 +7,8 @@ in workspace clones, that canonical checkout drifts unless something pulls it.
 This hook removes the manual sync step.
 
 Triggers when:
-- The Bash command was `gh pr merge ...`
+- The Bash command invokes `gh pr merge ...` in any segment (it is usually
+  `cd <repo>` first, or chained with && / piped to tail -- not the first token)
 - The cwd's git remote points at a repo named "ccgm" (any owner)
 - The canonical clone exists at $CCGM_CANONICAL_DIR (default ~/code/ccgm)
 
@@ -43,6 +44,22 @@ def get_origin_url(cwd: str) -> str | None:
     except (subprocess.SubprocessError, OSError):
         pass
     return None
+
+
+def command_triggers_merge(command: str) -> bool:
+    """True if any segment of `command` invokes `gh pr merge`.
+
+    `gh pr merge` is almost never the first token of the command string -- it is
+    typically `cd <repo>` first (often on its own line) or chained with && / piped
+    to tail. A start-anchored match therefore misses real merges and leaves the
+    canonical clone stale (#728). Split on shell separators (newline ; | &) and
+    check each segment. A false positive only costs one harmless, idempotent
+    ff-only pull, so erring toward matching is safe.
+    """
+    for segment in re.split(r"[\n;|&]+", command):
+        if re.match(r"\s*gh\s+pr\s+merge(\s|$)", segment):
+            return True
+    return False
 
 
 def is_ccgm_repo(cwd: str) -> bool:
@@ -91,7 +108,7 @@ def main() -> None:
         sys.exit(0)
 
     command = (payload.get("tool_input") or {}).get("command", "")
-    if not re.match(r"\s*gh\s+pr\s+merge(\s|$)", command):
+    if not command_triggers_merge(command):
         sys.exit(0)
 
     cwd = payload.get("cwd") or os.getcwd()
