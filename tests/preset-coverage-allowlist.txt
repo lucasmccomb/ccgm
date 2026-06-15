@@ -15,34 +15,6 @@
 # When a module here is later added to a preset, remove it from this list —
 # the CI guard flags stale allowlist entries (a module that is allowlisted AND
 # already in a preset).
-
-# capability-router target (Wave 2); not yet preset-assigned
-agent-native
-# specialized review skill; opt-in via --add
-ce-review
-# internal command-preamble partial; not a user-facing preset member
-commands-preamble
-# team-shared knowledge store; opt-in via --add
-compound-knowledge
-# niche doc-generation skill; opt-in via --add
-docs-for-agents
-# specialized review skill; opt-in via --add
-document-review
-# advanced git workflow; opt-in via --add
-git-worktrees
-# launch-readiness skill; opt-in via --add
-launch
-# onboarding skill; opt-in via --add
-onboarding
-# specialized PR skill; opt-in via --add
-pr-feedback
-# specialized PR skill; opt-in via --add
-pr-review-toolkit
-# meta/authoring skill; opt-in via --add
-rule-authoring
-# ship-readiness skill; opt-in via --add
-ship-readiness
-# meta/authoring skill; opt-in via --add
-skill-authoring
-# lightweight todos skill; opt-in via --add
-todos
+#
+# Currently empty: every stable module is a member of the `full` preset
+# (full = all stable modules), so no stable module sits in zero presets.

@@ -34,31 +34,32 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **Best for**: Teams with shared repositories who want consistent practices across contributors.
 
-**Modules**:
+**Modules (19)**:
 - Everything in **standard** (minus `identity` and `commands-utility`), plus:
 - `github-protocols` - issue-first workflow, PR conventions, label taxonomy, code review standards
 - `code-quality` - code standards, testing requirements, error handling, security, build verification
 - `systematic-debugging` - structured 4-phase debugging methodology
 - `verification` - evidence-before-claims, fresh execution requirement
 - `autoheal` - continuous self-improvement loop with multi-recipient digest support
+- `ce-review`, `pr-feedback`, `document-review`, `compound-knowledge` - shared review skills and a team knowledge store (with their dependencies `pr-review-toolkit`, `skill-authoring`, `subagent-patterns`)
 
-**What you get**: Everything in standard (with a team-focused selection), plus rules that enforce consistent development practices across a team. The autoheal module's multi-recipient digest (`digest_email: ["a@b", "c@d"]`) is particularly useful for sharing weekly insights with teammates.
+**What you get**: Everything in standard (with a team-focused selection), plus rules and review skills that enforce consistent development practices across a team. The autoheal module's multi-recipient digest (`digest_email: ["a@b", "c@d"]`) is particularly useful for sharing weekly insights with teammates.
 
 ### full
 
 **Best for**: Power users who want the complete CCGM experience, including multi-agent coordination, brand research, and tech-specific guides.
 
-**Modules**: All stable modules including **autoheal** (continuous self-improvement; opt-in real-time alerts and auto-apply). The `agent-manager` (beta) and `cloud-dispatch` modules are not included by default; install them individually via the module selector (or use the `cloud-agent` preset).
+**Modules (68)**: Every stable module — `full` is defined as the set of all modules whose `module.json` status is not `beta` or `deprecated`. This includes **autoheal** (continuous self-improvement; opt-in real-time alerts and auto-apply) and `cloud-dispatch`. The only modules omitted are the beta ones (`plugin-marketplace`, `relevance-injection`) and the deprecated `agent-manager`; install those individually via the module selector if you need them.
 
 **What you get**: The full suite. Includes multi-agent workflows, planning frameworks, tech-specific patterns (Cloudflare, Supabase, Tailwind, shadcn, MCP development), specialized commands, and the autoheal observability loop with three opt-in toggles (`/autoheal-toggle realtime|autoapply|webhook`).
 
 ### cloud-agent
 
-**Best for**: Running CCGM on headless cloud VMs that dispatch parallel agents to work on GitHub issues. Includes the agent orchestration modules (`agent-manager`, `cloud-dispatch`) that the standard `full` preset omits.
+**Best for**: Running CCGM on headless cloud VMs that dispatch parallel agents to work on GitHub issues. Includes the `cloud-dispatch` orchestration module plus the review and authoring skills agents lean on most.
 
-**Modules (45)**: Curated for headless cloud agents — `full` minus six modules that don't fit the headless use case (`brainstorm`, `skillify`, `deepresearch`, `ccgm-doctor`, `autoheal`, `argus`), plus `agent-manager` (tmux-based agent dashboard) and `cloud-dispatch` (Hetzner Cloud VM provisioning for parallel GitHub-issue work).
+**Modules (53)**: Curated for headless cloud agents — a headless-oriented selection drawn from the stable module set, including `cloud-dispatch` (Hetzner Cloud VM provisioning for parallel GitHub-issue work) and persona-relevant skills (`ce-review`, `pr-feedback`, `document-review`, `skill-authoring`, `rule-authoring`, `agent-native`, `git-worktrees`, `ship-readiness`, with their dependencies). The deprecated `agent-manager` (tmux-based dashboard) is not included; install it individually if you still need it.
 
-**What you get**: The cloud-agent preset with cloud-dispatch commands (`/dispatch`, `/dispatch-status`, `/dispatch-stop`, `/vm-manage`) and the `/agents` TUI. Intended for machines that provision cloud VMs and launch autonomous agents, not day-to-day laptop use.
+**What you get**: The cloud-agent preset with cloud-dispatch commands (`/dispatch`, `/dispatch-status`, `/dispatch-stop`, `/vm-manage`). Intended for machines that provision cloud VMs and launch autonomous agents, not day-to-day laptop use.
 
 ## Dependency resolution
 
