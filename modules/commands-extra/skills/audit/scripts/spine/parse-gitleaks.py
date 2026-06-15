@@ -127,6 +127,9 @@ def main(argv):
             fingerprint=fp,
             end_line=end,
             properties=props,
+            # Heuristic secret match -- FP-prone on test fixtures and fabricated
+            # keys, so worker triage must be able to dismiss it (#4).
+            detection="hybrid",
         )
         normalize.emit_finding(finding)
 

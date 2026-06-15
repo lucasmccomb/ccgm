@@ -127,6 +127,9 @@ def main(argv):
             fingerprint=fp,
             end_line=end_line,
             properties={"tool": "semgrep"},
+            # Heuristic SAST -- FP-prone (e.g. unsafe-formatstring on console
+            # template literals), so worker triage must be able to dismiss (#4).
+            detection="hybrid",
         )
         normalize.emit_finding(finding)
 

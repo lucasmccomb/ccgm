@@ -152,11 +152,21 @@ def make_finding(
     end_line=None,
     fix_confidence=None,
     properties=None,
+    detection="tool",
 ):
     """
     Build a finding dict conforming to finding.schema.json.
     Automatically redacts the message field.
+
+    detection: "tool" (default) for deterministic, lockfile/manifest-grade
+    findings that must NOT be dismissible (dep-audit, govulncheck, ...).
+    Heuristic, FP-prone scanners (gitleaks, semgrep, bandit) pass "hybrid" so
+    worker triage can dismiss false positives on test fixtures and the like
+    (field report #4); a hybrid finding is dropped only if EVERY worker that
+    named it voted "dismissed".  source stays "tool" -- the spine produced it.
     """
+    if detection not in ("tool", "hybrid"):
+        detection = "tool"
     finding = {
         "check_id": check_id,
         "rule_id": rule_id,
@@ -168,7 +178,7 @@ def make_finding(
         },
         "message": redact_message(message),
         "fingerprint": fingerprint,
-        "detection": "tool",
+        "detection": detection,
         "source": "tool",
     }
     if end_line is not None and end_line >= line:

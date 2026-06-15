@@ -24,6 +24,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NORMALIZE_PY="$SCRIPT_DIR/normalize.py"
 PARSE_PY="$SCRIPT_DIR/parse-eslint.py"
 
+# shellcheck source=exclude.sh
+. "$SCRIPT_DIR/exclude.sh"
+
 if [[ -z "$REPO_ROOT" ]]; then
   python3 "$NORMALIZE_PY" --emit-skip eslint \
     "lint/eslint-error:no repo_root argument supplied"
@@ -45,11 +48,19 @@ trap 'rm -f "$TMPFILE"' EXIT
 # core ESLint rules that run correctly with only --no-config-lookup and no
 # type information.  The repo's own lint config is never loaded.
 # repo_root is passed via cd in subshell, glob is a static pattern.
+#
+# Path exclusion: --no-config-lookup ALSO discards .eslintignore / flat-config
+# `ignores`, so without this eslint lints node_modules/, dist/, and every
+# stale .claude/worktrees/* copy (28k+ findings, 40+ min in the field report).
+# --ignore-pattern works with --no-config-lookup; CCGM_FLAGS is built from the
+# canonical exclude list.
+ccgm_eslint_ignore_args
 set +e
 (
   cd "$REPO_ROOT"
   eslint \
     --no-config-lookup \
+    "${CCGM_FLAGS[@]}" \
     --rule '{"no-eval":["error"],"no-implied-eval":["error"],"no-new-func":["error"],"eqeqeq":["error","always"],"use-isnan":["error"],"valid-typeof":["error"],"no-unreachable":["error"],"no-constant-condition":["error"],"no-fallthrough":["error"],"default-case":["error"]}' \
     --format json \
     --output-file "$TMPFILE" \

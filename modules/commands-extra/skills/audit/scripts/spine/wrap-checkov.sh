@@ -15,6 +15,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NORMALIZE_PY="$SCRIPT_DIR/normalize.py"
 PARSE_PY="$SCRIPT_DIR/parse-checkov.py"
 
+# shellcheck source=exclude.sh
+. "$SCRIPT_DIR/exclude.sh"
+
 if [[ -z "$REPO_ROOT" ]]; then
   python3 "$NORMALIZE_PY" --emit-skip checkov \
     "iac/public-ingress:no repo_root argument supplied" \
@@ -49,6 +52,9 @@ trap 'rm -f "$TMPFILE"' EXIT
 # alter checks.  Accepted limitation: the pack rubric and normalizer
 # (parse-checkov.py) own severity/confidence regardless of what the repo
 # config does to the check list.
+# --skip-path: regex of vendored/generated dirs and stale worktrees so checkov
+#   does not walk node_modules or duplicate worktree trees (field report #1).
+ccgm_checkov_skip_args
 set +e
 checkov \
   --directory "$REPO_ROOT" \
@@ -56,6 +62,7 @@ checkov \
   --quiet \
   --compact \
   --soft-fail \
+  "${CCGM_FLAGS[@]}" \
   > "$TMPFILE" 2>/dev/null
 CHECKOV_EXIT=$?
 set -e

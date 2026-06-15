@@ -5,7 +5,9 @@ CCGM /audit provenance.py (Epic 3.4) — STDLIB ONLY.
 Three capabilities in one script:
 
 1. HEADER  — emit an audit_provenance record (type: "audit_provenance") with:
-     commit           git SHA of the audited repo (git -C <repo> rev-parse HEAD)
+     commit           base SHA the audit ran against. Prefer --commit (pinned by
+                      the coordinator at spine time); falls back to live
+                      git -C <repo> rev-parse HEAD only when --commit is absent.
      rubric_version   version field from severity-rubric.json
      skill_version    version from the audit module.json (or DEFAULT_SKILL_VERSION)
      tool_versions    map of installed spine tools -> version string (absent tools omitted)
@@ -32,6 +34,7 @@ CLI:
                 [--rubric <path>]          default: ../schemas/severity-rubric.json relative to script
                 [--output <file>]          default: stdout
                 [--model <str>]            model identifier; also read from AUDIT_MODEL env var
+                [--commit <sha>]           base SHA pinned by the coordinator (preferred over live HEAD)
                 [--optional-check <id>]   may be repeated
                 [--packages <dir> ...]    explicit package roots (repo-relative); may be repeated
                 [--skip-tool-versions]    omit tool_versions from header (speeds up tests)
@@ -581,6 +584,19 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--commit",
+        default=None,
+        metavar="SHA",
+        help=(
+            "Base commit SHA the audit actually ran against. The coordinator "
+            "captures this ONCE at spine time (before any worktree/worker work) "
+            "and passes it here. Without it, the header records the repo's LIVE "
+            "HEAD, which a fix-mode worker that polluted the main checkout may "
+            "have moved -- recording the wrong 'audited at' commit (field "
+            "report #5). Falls back to `git -C <repo> rev-parse HEAD` if absent."
+        ),
+    )
+    parser.add_argument(
         "--optional-check",
         action="append",
         default=[],
@@ -628,7 +644,10 @@ def main() -> int:
     model = args.model or os.environ.get("AUDIT_MODEL", "unknown")
     rubric_version = _load_rubric_version(rubric_path)
     skill_version = _load_skill_version()
-    commit = _get_commit(repo_root)
+    # Prefer the coordinator-pinned base SHA over live HEAD (#5): a polluting
+    # fix-mode worker can move the main checkout's HEAD, so reading it here
+    # would record the wrong commit.
+    commit = args.commit or _get_commit(repo_root)
     tool_versions = _collect_tool_versions(skip=args.skip_tool_versions)
 
     header: dict = {

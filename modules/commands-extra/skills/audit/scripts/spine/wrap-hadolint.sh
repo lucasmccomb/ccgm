@@ -14,6 +14,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NORMALIZE_PY="$SCRIPT_DIR/normalize.py"
 PARSE_PY="$SCRIPT_DIR/parse-hadolint.py"
 
+# shellcheck source=exclude.sh
+. "$SCRIPT_DIR/exclude.sh"
+
 if [[ -z "$REPO_ROOT" ]]; then
   python3 "$NORMALIZE_PY" --emit-skip hadolint \
     "iac/dockerfile-issue:no repo_root argument supplied"
@@ -33,14 +36,17 @@ trap 'rm -f "$TMPFILES_LIST" "$TMPFILE"' EXIT
 
 # Collect Dockerfiles via find -- NUL-delimited read loop.
 # Bash-3.2-portable: mapfile -d '' requires bash 4+; use while-read instead.
+# Prune vendored/generated dirs and stale worktrees so a Dockerfile inside
+# node_modules or a duplicate worktree copy is not linted (field report #1).
+ccgm_find_prune_args
 DOCKERFILES=()
 while IFS= read -r -d '' f; do
   DOCKERFILES+=("$f")
 done < <(
   find "$REPO_ROOT" \
+    \( "${CCGM_FIND_PRUNE[@]}" \) -prune -o \
     -type f \
     \( -name "Dockerfile" -o -name "Dockerfile.*" \) \
-    -not -path "*/.git/*" \
     -print0
 )
 

@@ -224,6 +224,21 @@
       "type": "script",
       "template": false
     },
+    "skills/audit/scripts/spine/exclude-dirs.txt": {
+      "target": "skills/audit/scripts/spine/exclude-dirs.txt",
+      "type": "doc",
+      "template": false
+    },
+    "skills/audit/scripts/spine/exclude.sh": {
+      "target": "skills/audit/scripts/spine/exclude.sh",
+      "type": "script",
+      "template": false
+    },
+    "skills/audit/scripts/spine/exclude.py": {
+      "target": "skills/audit/scripts/spine/exclude.py",
+      "type": "script",
+      "template": false
+    },
     "skills/audit/scripts/spine/normalize.py": {
       "target": "skills/audit/scripts/spine/normalize.py",
       "type": "script",

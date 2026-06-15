@@ -20,6 +20,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NORMALIZE_PY="$SCRIPT_DIR/normalize.py"
 PARSE_PY="$SCRIPT_DIR/parse-semgrep.py"
 
+# shellcheck source=exclude.sh
+. "$SCRIPT_DIR/exclude.sh"
+
 if [[ -z "$REPO_ROOT" ]]; then
   python3 "$NORMALIZE_PY" --emit-skip semgrep \
     "sast/code-injection:no repo_root argument supplied"
@@ -41,7 +44,11 @@ trap 'rm -f "$TMPFILE"' EXIT
 # --no-autofix: read-only scan
 # --metrics off: no telemetry
 # --quiet: suppress progress output
+# --exclude: vendored/generated dirs and stale worktrees (#1).  semgrep already
+#   honors .gitignore + a default .semgrepignore, but an un-gitignored stale
+#   .claude/worktrees tree would still be scanned; this makes exclusion explicit.
 # repo_root passed as positional arg
+ccgm_semgrep_exclude_args
 set +e
 semgrep scan \
   --config "$SEMGREP_CONFIG" \
@@ -50,6 +57,7 @@ semgrep scan \
   --no-autofix \
   --metrics off \
   --quiet \
+  "${CCGM_FLAGS[@]}" \
   "$REPO_ROOT" \
   > /dev/null 2>&1
 SEMGREP_EXIT=$?

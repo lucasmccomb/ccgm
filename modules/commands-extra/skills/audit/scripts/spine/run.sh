@@ -123,16 +123,16 @@ done
 _REQUESTED_CSV_NORM="${_REQUESTED_CSV_NORM}:"  # trailing colon for uniform matching
 
 # ---------------------------------------------------------------------------
-# Aggregation: collect all output to a temp file if --output is set,
-# otherwise stream directly to stdout.
+# Aggregation: always collect to a temp file so the coordinator-side
+# junk-path post-filter (exclude.py --filter) can run before output, then
+# emit to --output or stdout.  Buffering the stdout path is functionally
+# identical for callers that capture the output.
 # ---------------------------------------------------------------------------
-if [[ -n "$OUTPUT_FILE" ]]; then
-  AGTMPFILE="$(mktemp /tmp/ccgm-spine-agg-XXXXXX.jsonl)"
-  trap 'rm -f "$AGTMPFILE"' EXIT
-  SINK="$AGTMPFILE"
-else
-  SINK="/dev/stdout"
-fi
+AGTMPFILE="$(mktemp /tmp/ccgm-spine-agg-XXXXXX.jsonl)"
+FILTEREDFILE="$(mktemp /tmp/ccgm-spine-filtered-XXXXXX.jsonl)"
+TOOLTMPFILE="$(mktemp /tmp/ccgm-spine-tool-XXXXXX.jsonl)"
+trap 'rm -f "$AGTMPFILE" "$FILTEREDFILE" "$TOOLTMPFILE"' EXIT
+SINK="$AGTMPFILE"
 
 # ---------------------------------------------------------------------------
 # Emit a provenance header record
@@ -172,11 +172,27 @@ for TOOL in "${TOOL_ORDER[@]}"; do
   fi
 
   # Run wrapper -- REPO_ROOT is passed as a positional argv element,
-  # never interpolated into a shell string.
+  # never interpolated into a shell string.  Capture to a per-tool temp so we
+  # can report per-tool timing + finding count to stderr (#6: a 22-min stall
+  # is now visible immediately instead of looking hung), then append to SINK.
+  : > "$TOOLTMPFILE"
+  SECONDS=0
   set +e
-  bash "$WRAPPER" "$REPO_ROOT" >> "$SINK" 2>/dev/null
+  bash "$WRAPPER" "$REPO_ROOT" > "$TOOLTMPFILE" 2>/dev/null
   WRAPPER_EXIT=$?
   set -e
+  TOOL_ELAPSED=$SECONDS
+
+  # Findings have no "type" field; notes (skipped/coverage_gap) do.
+  TOOL_TOTAL=$(grep -cv '^[[:space:]]*$' "$TOOLTMPFILE" 2>/dev/null || true)
+  TOOL_NOTES=$(grep -c '"type":' "$TOOLTMPFILE" 2>/dev/null || true)
+  [[ -z "$TOOL_TOTAL" ]] && TOOL_TOTAL=0
+  [[ -z "$TOOL_NOTES" ]] && TOOL_NOTES=0
+  TOOL_FINDINGS=$((TOOL_TOTAL - TOOL_NOTES))
+  [[ $TOOL_FINDINGS -lt 0 ]] && TOOL_FINDINGS=0
+
+  cat "$TOOLTMPFILE" >> "$SINK"
+  printf 'spine: %-13s %5d finding(s) in %3ds\n' "$TOOL" "$TOOL_FINDINGS" "$TOOL_ELAPSED" >&2
 
   if [[ $WRAPPER_EXIT -ne 0 ]]; then
     printf '{"type":"coverage_gap","tool":"%s","check_id":"spine/wrapper-error","description":"wrapper exited with code %d"}\n' \
@@ -185,9 +201,27 @@ for TOOL in "${TOOL_ORDER[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
-# If --output was specified, move temp file to destination
+# Coordinator-side junk-path post-filter (#1, defense-in-depth).
+# Drops any FINDING whose location.path contains an excluded segment
+# (node_modules, stale .claude/worktrees, .audit, dist, ...).  Provenance and
+# coverage_gap notes pass through untouched.  This is the correctness backstop
+# for anything a tool's own ignore logic missed; the per-wrapper exclusion
+# flags are the performance half (the tools never scan those paths).
+# ---------------------------------------------------------------------------
+# The filter prints its drop/keep summary to stderr (observability, #6).
+if python3 "$SCRIPT_DIR/exclude.py" --filter "$AGTMPFILE" "$FILTEREDFILE"; then
+  EMIT_FILE="$FILTEREDFILE"
+else
+  # Filter unavailable -- emit unfiltered rather than lose data.
+  EMIT_FILE="$AGTMPFILE"
+fi
+
+# ---------------------------------------------------------------------------
+# Emit: --output destination, or stdout.
 # ---------------------------------------------------------------------------
 if [[ -n "$OUTPUT_FILE" ]]; then
-  cp "$AGTMPFILE" "$OUTPUT_FILE"
+  cp "$EMIT_FILE" "$OUTPUT_FILE"
   printf 'Spine complete. Findings written to: %s\n' "$OUTPUT_FILE" >&2
+else
+  cat "$EMIT_FILE"
 fi
