@@ -203,13 +203,15 @@ done
 # ---------------------------------------------------------------------------
 # Coordinator-side junk-path post-filter (#1, defense-in-depth).
 # Drops any FINDING whose location.path contains an excluded segment
-# (node_modules, stale .claude/worktrees, .audit, dist, ...).  Provenance and
-# coverage_gap notes pass through untouched.  This is the correctness backstop
-# for anything a tool's own ignore logic missed; the per-wrapper exclusion
-# flags are the performance half (the tools never scan those paths).
+# (node_modules, stale .claude/worktrees, .audit, dist, ...), matches an
+# excluded file glob (*.min.js), or -- via REPO_ROOT -- is gitignored.
+# Provenance and coverage_gap notes pass through untouched.  This is the
+# correctness backstop for anything a tool's own ignore logic missed; the
+# per-wrapper exclusion flags are the performance half (the tools never scan
+# those paths).
 # ---------------------------------------------------------------------------
 # The filter prints its drop/keep summary to stderr (observability, #6).
-if python3 "$SCRIPT_DIR/exclude.py" --filter "$AGTMPFILE" "$FILTEREDFILE"; then
+if python3 "$SCRIPT_DIR/exclude.py" --filter "$AGTMPFILE" "$FILTEREDFILE" "$REPO_ROOT"; then
   EMIT_FILE="$FILTEREDFILE"
 else
   # Filter unavailable -- emit unfiltered rather than lose data.

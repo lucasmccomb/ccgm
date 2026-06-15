@@ -229,6 +229,11 @@
       "type": "doc",
       "template": false
     },
+    "skills/audit/scripts/spine/exclude-file-globs.txt": {
+      "target": "skills/audit/scripts/spine/exclude-file-globs.txt",
+      "type": "doc",
+      "template": false
+    },
     "skills/audit/scripts/spine/exclude.sh": {
       "target": "skills/audit/scripts/spine/exclude.sh",
       "type": "script",

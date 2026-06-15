@@ -57,7 +57,12 @@ trap 'rm -f "$TMPFILE" "$CONFIGFILE"' EXIT
 # without a config.  We generate a config that keeps the default ruleset
 # ([extend] useDefault = true) and allowlists every canonical excluded dir;
 # this dropped gitleaks from 22 min -> 34 s.
-python3 "$SCRIPT_DIR/exclude.py" --gitleaks-config "$CONFIGFILE" 2>/dev/null || true
+#
+# Passing REPO_ROOT also allowlists GITIGNORED paths: a working-tree scan would
+# otherwise report a gitignored, never-committed .env.local as a CRITICAL
+# leaked-credential. A leaked credential describes committed/tracked content,
+# so gitignored local files must not be flagged (field report #726).
+python3 "$SCRIPT_DIR/exclude.py" --gitleaks-config "$CONFIGFILE" "$REPO_ROOT" 2>/dev/null || true
 
 # Determine scan mode: history or working-tree
 HISTORY_MODE="${CCGM_GITLEAKS_HISTORY:-0}"
