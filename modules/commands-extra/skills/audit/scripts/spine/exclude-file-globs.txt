@@ -1,0 +1,21 @@
+# CCGM audit spine -- canonical excluded FILE-GLOB list (single source of truth).
+#
+# Companion to exclude-dirs.txt. These globs match vendored or generated files
+# by NAME, regardless of which directory they live in -- the directory denylist
+# cannot catch a committed `client/public/js-dos/foo.min.js` because none of its
+# path segments is an excluded dir name. Minified / bundled assets are machine-
+# generated; linting them produces thousands of junk findings (the lem-work run
+# reported 4,828 eqeqeq from minified vendor JS).
+#
+# Consumed by:
+#   - exclude.sh   (sourced by the bash wrappers; builds per-tool exclude flags)
+#   - exclude.py   (path_is_excluded basename match + the run.sh post-filter)
+#
+# Format: one glob per line, matched against the file BASENAME (fnmatch). Blank
+# lines and #-comment lines are ignored.
+*.min.js
+*.min.css
+*.min.mjs
+*.bundle.js
+*.bundle.css
+*.map

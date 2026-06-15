@@ -126,7 +126,8 @@ cp commands/checkpoint.md .claude/commands/checkpoint.md
 | `skills/audit/scripts/spine/run.sh` | Deterministic tool spine: runs 18 wrapped tools, reports per-tool progress to stderr, applies the junk-path post-filter, emits finding JSONL |
 | `skills/audit/scripts/spine/wrap-*.sh` | Per-tool wrappers (gitleaks, semgrep, knip, eslint, trivy, …) |
 | `skills/audit/scripts/spine/exclude-dirs.txt` | Canonical excluded-dir list (node_modules, worktrees, build output) — single source of truth |
-| `skills/audit/scripts/spine/exclude.sh` / `exclude.py` | Build per-tool exclusion flags (sh) and the gitleaks config + always-on junk-path post-filter (py) from `exclude-dirs.txt` |
+| `skills/audit/scripts/spine/exclude-file-globs.txt` | Canonical excluded file-glob list (`*.min.js`, `*.bundle.js`, `*.map`) — catches vendored/minified files by name regardless of directory |
+| `skills/audit/scripts/spine/exclude.sh` / `exclude.py` | Build per-tool exclusion flags (sh) and the gitleaks config + always-on post-filter (py) from the dir + file-glob lists. The post-filter also drops findings on `.gitignore`d paths and a looks-minified backstop drops lint/SAST findings on minified vendored files (e.g. `js-dos.js`); the gitleaks config allowlists gitignored files so a never-committed `.env.local` is not reported as a leaked credential |
 | `skills/audit/schemas/finding.schema.json` | JSON schema for normalized finding records |
 | `skills/audit/schemas/severity-rubric.json` | Per-check severity + confidence overrides |
 | `skills/audit/reference/*.md` | Runtime reference docs: security patterns, fix-patterns, architecture guides, output templates |

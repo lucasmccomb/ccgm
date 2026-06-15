@@ -454,9 +454,14 @@ python3 -c "import json,sys;p=sys.argv[1];d=json.load(open(p));d['base_sha']=sys
 
 **Step 2 — Run the deterministic spine** (coordinator responsibility, once per audit run).
 Runs against the **clean main checkout** — no audit worktrees exist yet (see M3 step 5).
-The spine excludes vendored/generated dirs and stale worktrees per-tool AND applies a
-junk-path post-filter (`scripts/spine/exclude.py`); it also reports per-tool timing +
-finding counts to stderr so a slow tool is visible immediately, not mistaken for a hang:
+The spine excludes vendored/generated dirs (`exclude-dirs.txt`) and vendored/minified
+files by name (`exclude-file-globs.txt`: `*.min.js`, `*.bundle.js`, `*.map`) per-tool, AND
+applies a post-filter (`scripts/spine/exclude.py`) that additionally drops findings on
+`.gitignore`d paths and a looks-minified backstop that drops lint/SAST findings on minified
+vendored files not caught by name (e.g. `js-dos.js`). gitleaks runs with a generated config
+that allowlists gitignored files, so a never-committed `.env.local` is never reported as a
+leaked credential. The spine also reports per-tool timing + finding counts to stderr so a
+slow tool is visible immediately, not mistaken for a hang:
 ```bash
 # Compute union of tools[] across all selected packs
 SPINE_TOOLS=$(python3 - "$AUDIT_DIR/current/selected-packs.json" << 'PYEOF'
