@@ -123,8 +123,10 @@ cp commands/checkpoint.md .claude/commands/checkpoint.md
 | `skills/audit/scripts/assign-packs.py` | Distributes selected packs across parallel worker agents |
 | `skills/audit/scripts/lint-pack.py` | Validates pack.json + checks.md against schemas and rubric |
 | `skills/audit/scripts/merge-findings.py` | Merges spine JSONL + LLM findings, applies rubric severity |
-| `skills/audit/scripts/spine/run.sh` | Deterministic tool spine: runs 18 wrapped tools, emits finding JSONL |
+| `skills/audit/scripts/spine/run.sh` | Deterministic tool spine: runs 18 wrapped tools, reports per-tool progress to stderr, applies the junk-path post-filter, emits finding JSONL |
 | `skills/audit/scripts/spine/wrap-*.sh` | Per-tool wrappers (gitleaks, semgrep, knip, eslint, trivy, …) |
+| `skills/audit/scripts/spine/exclude-dirs.txt` | Canonical excluded-dir list (node_modules, worktrees, build output) — single source of truth |
+| `skills/audit/scripts/spine/exclude.sh` / `exclude.py` | Build per-tool exclusion flags (sh) and the gitleaks config + always-on junk-path post-filter (py) from `exclude-dirs.txt` |
 | `skills/audit/schemas/finding.schema.json` | JSON schema for normalized finding records |
 | `skills/audit/schemas/severity-rubric.json` | Per-check severity + confidence overrides |
 | `skills/audit/reference/*.md` | Runtime reference docs: security patterns, fix-patterns, architecture guides, output templates |
