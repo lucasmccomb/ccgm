@@ -48,7 +48,16 @@ if ! command -v gitleaks > /dev/null 2>&1; then
 fi
 
 TMPFILE="$(mktemp /tmp/ccgm-gitleaks-XXXXXX.json)"
-trap 'rm -f "$TMPFILE"' EXIT
+CONFIGFILE="$(mktemp /tmp/ccgm-gitleaks-cfg-XXXXXX.toml)"
+trap 'rm -f "$TMPFILE" "$CONFIGFILE"' EXIT
+
+# Path exclusion (field report #1): `--no-git` walks the whole filesystem with
+# NO path exclusions, so it scans a 566 MB node_modules and every stale
+# worktree copy -- 22+ minutes on this tool alone.  gitleaks excludes nothing
+# without a config.  We generate a config that keeps the default ruleset
+# ([extend] useDefault = true) and allowlists every canonical excluded dir;
+# this dropped gitleaks from 22 min -> 34 s.
+python3 "$SCRIPT_DIR/exclude.py" --gitleaks-config "$CONFIGFILE" 2>/dev/null || true
 
 # Determine scan mode: history or working-tree
 HISTORY_MODE="${CCGM_GITLEAKS_HISTORY:-0}"
@@ -59,6 +68,7 @@ if [[ "$HISTORY_MODE" == "1" ]]; then
   # Uses `gitleaks git` which requires a real git repo.
   # --no-banner: suppress the gitleaks ASCII banner (keeps output clean)
   gitleaks git \
+    --config "$CONFIGFILE" \
     --report-format json \
     --report-path "$TMPFILE" \
     --exit-code 0 \
@@ -69,6 +79,7 @@ else
   # Working-tree scan (default): scans files present in the working directory.
   # --no-git: works in worktrees / detached heads
   gitleaks detect \
+    --config "$CONFIGFILE" \
     --source "$REPO_ROOT" \
     --report-format json \
     --report-path "$TMPFILE" \

@@ -14,6 +14,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NORMALIZE_PY="$SCRIPT_DIR/normalize.py"
 PARSE_PY="$SCRIPT_DIR/parse-trivy.py"
 
+# shellcheck source=exclude.sh
+. "$SCRIPT_DIR/exclude.sh"
+
 if [[ -z "$REPO_ROOT" ]]; then
   python3 "$NORMALIZE_PY" --emit-skip trivy \
     "deps/container-vulnerability:no repo_root argument supplied"
@@ -34,7 +37,10 @@ trap 'rm -f "$TMPFILE"' EXIT
 # --format json: machine-readable output
 # --exit-code 0: always exit 0 (we handle findings ourselves)
 # --quiet: suppress progress bars
+# --skip-dirs: exclude vendored/generated dirs and stale worktrees so trivy
+#   does not scan a 566 MB node_modules or duplicate worktree trees (#1).
 # repo_root passed as positional arg (never interpolated into string)
+ccgm_trivy_skip_args
 set +e
 trivy fs \
   --format json \
@@ -42,6 +48,7 @@ trivy fs \
   --exit-code 0 \
   --quiet \
   --scanners vuln,misconfig,secret \
+  "${CCGM_FLAGS[@]}" \
   "$REPO_ROOT" \
   > /dev/null 2>&1
 TRIVY_EXIT=$?

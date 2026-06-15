@@ -1,0 +1,37 @@
+# CCGM audit spine -- canonical path-exclusion list (single source of truth).
+#
+# These directory NAMES are excluded from every file-walking spine tool and
+# from the coordinator-side junk-path post-filter (filter-excluded.py).  They
+# are vendored, generated, or coordination directories that never contain
+# source the audit should report on.  A populated node_modules or a tree of
+# stale agent worktrees would otherwise explode the spine to tens of thousands
+# of findings and 40+ minute runs (see audit-skill-feedback-2026-06-14 #1).
+#
+# Consumed by:
+#   - exclude.sh           (sourced by the bash wrappers; builds per-tool flags)
+#   - filter-excluded.py   (the always-on coordinator post-filter in run.sh)
+#
+# Format: one directory name per line.  Blank lines and #-comment lines ignored.
+# Names are matched as path SEGMENTS, not substrings (e.g. "build" matches
+# "build/" or "x/build/y" but never "rebuild/").
+node_modules
+.git
+.claude
+.audit
+dist
+build
+.next
+out
+coverage
+.turbo
+vendor
+DerivedData
+.build
+target
+.venv
+venv
+__pycache__
+.mypy_cache
+.pytest_cache
+.gradle
+.idea

@@ -123,6 +123,7 @@ Merge semantics (in order)
 import argparse
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -237,12 +238,103 @@ def _parse_spine(spine_path: str):
 
 _KNOWN_VERDICTS = frozenset({"confirmed", "dismissed"})
 
+# Matches an absolute worktree prefix so worker findings that report a path
+# into their own worktree (.../.audit/worktrees/agent-N/<rel>) are rewritten to
+# the repo-relative <rel>.  Field report #3: worker 1 emitted absolute paths.
+_WORKTREE_PREFIX_RE = re.compile(r"^.*/\.audit/worktrees/[^/]+/")
 
-def _parse_llm_file(llm_path: str):
+
+def _coerce_line(val) -> int:
+    """
+    Coerce a worker-supplied line value to a positive integer.
+    Accepts an int, a numeric string, or a comma list like "60,70,84" (first
+    integer wins).  Anything unparseable defaults to 1.
+    """
+    if isinstance(val, bool):
+        return 1
+    if isinstance(val, int):
+        return val if val >= 1 else 1
+    if isinstance(val, str):
+        m = re.search(r"\d+", val)
+        if m:
+            n = int(m.group(0))
+            return n if n >= 1 else 1
+    return 1
+
+
+def _normalize_path(path: str, repo_root: Path) -> str:
+    """Rewrite an absolute worktree/repo path to a repo-relative path."""
+    if not path:
+        return path
+    p = str(path).replace("\\", "/")
+    m = _WORKTREE_PREFIX_RE.match(p)
+    if m:
+        return p[m.end():]
+    rr = str(repo_root).replace("\\", "/").rstrip("/")
+    if rr and p.startswith(rr + "/"):
+        return p[len(rr) + 1:]
+    return p
+
+
+def _normalize_llm_finding(f: dict, repo_root: Path) -> dict:
+    """
+    Coerce a worker finding's common VARIANT shape into the canonical schema
+    shape BEFORE validation (field report #3).  Two of four LLM workers emitted
+    ``{title, description, path, line, source}`` with no ``detection``, no
+    ``location``, and no ``message``; merge-findings used to silently drop
+    them.  This recovers them:
+
+      - ``title`` (+``description``) -> ``message`` when ``message`` absent
+      - flat ``path`` + ``line``     -> ``location: {path, line}``
+      - ``line`` coerced to first integer (handles "60,70,84")
+      - absolute worktree/repo path  -> repo-relative
+      - missing ``detection``/``source`` default to "llm"
+
+    Redundant flat keys (title/description/path/line) are stripped so the
+    output stays schema-clean (finding.schema.json additionalProperties:false).
+    """
+    f = dict(f)
+
+    if not f.get("message"):
+        title = f.get("title")
+        desc = f.get("description")
+        if title and desc:
+            f["message"] = "{0}: {1}".format(title, desc)
+        elif title:
+            f["message"] = title
+        elif desc:
+            f["message"] = desc
+
+    loc = f.get("location")
+    if not isinstance(loc, dict):
+        loc = {}
+    else:
+        loc = dict(loc)
+    if "path" not in loc and f.get("path"):
+        loc["path"] = f.get("path")
+    raw_line = loc.get("line", f.get("line"))
+    loc["line"] = _coerce_line(raw_line)
+    if loc.get("path"):
+        loc["path"] = _normalize_path(str(loc["path"]), repo_root)
+    f["location"] = loc
+
+    if not f.get("detection"):
+        f["detection"] = "llm"
+    if not f.get("source"):
+        f["source"] = "llm"
+
+    for k in ("title", "description", "path", "line"):
+        f.pop(k, None)
+    return f
+
+
+def _parse_llm_file(llm_path: str, repo_root: Path):
     """
     Parse a single LLM results file.
 
-    Enforces worker trust-boundary invariants at intake:
+    Normalizes the common worker VARIANT shape at intake (#3) via
+    _normalize_llm_finding before any validation, then enforces trust-boundary
+    invariants:
       - Missing both "findings" and "spine_triage" keys: stderr warning naming the file.
       - source="tool" on a worker finding: coerced to "llm" with a warning.
       - detection="tool" on a worker finding: coerced to "llm" with a warning.
@@ -302,11 +394,14 @@ def _parse_llm_file(llm_path: str):
         )
         sys.exit(1)
 
-    # Fix #5: enforce worker trust-boundary coercions on findings.
+    # Normalize the common variant shape (#3) FIRST so downstream trust-boundary
+    # coercion and validation see canonical fields, then enforce trust-boundary
+    # coercions on the result.
     llm_findings = []
     for f in llm_findings_raw:
         if not isinstance(f, dict):
             continue
+        f = _normalize_llm_finding(f, repo_root)
         claimed_source = f.get("source", "")
         if claimed_source == "tool":
             print(
@@ -385,50 +480,27 @@ def _ensure_fingerprint(finding: dict, emit_mod, repo_root: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Pre-sort validation helper
+# Sortability guard
 # ---------------------------------------------------------------------------
 
-def _validate_before_sort(findings: list, emit_mod) -> list:
+def _ensure_sortable(findings: list) -> list:
     """
-    Validate findings BEFORE sort and rubric steps (Fix #6).
+    Ensure every finding has an integer location.line so the deterministic
+    sort key cannot raise a TypeError.
 
-    Invalid findings are SKIPPED with a WARNING to stderr so that one bad
-    finding among many (e.g. a tool-supplied fingerprint that fails the schema
-    pattern) does not abort the whole merge run.  Only truly unrecoverable
-    input structure problems (unparseable JSONL, missing CLI args) justify
-    exit 1 -- per-finding validation failures do not.
-
-    Returns the list of valid findings (invalid ones removed).
+    This does NOT drop findings.  Full schema validation runs ONCE, AFTER
+    rubric enforcement (#3) so that a rubriced check_id whose worker omitted
+    severity/confidence can have them supplied by the rubric before the
+    finding is judged valid -- otherwise a recoverable variant-shape finding
+    would be dropped for missing fields the rubric was going to fill.
     """
-    valid = []
-    for idx, f in enumerate(findings):
-        skip_reason = None
-
-        loc = f.get("location", {})
-        line_val = loc.get("line") if isinstance(loc, dict) else None
-        if line_val is not None and not isinstance(line_val, int):
-            skip_reason = (
-                f"location.line must be an integer, got {type(line_val).__name__} "
-                f"value {line_val!r}"
-            )
-
-        if skip_reason is None:
-            # Full schema validation
-            try:
-                emit_mod.validate_finding(f)
-            except emit_mod.ValidationError as exc:
-                skip_reason = str(exc)
-
-        if skip_reason is not None:
-            print(
-                f"merge-findings: WARNING: skipping invalid finding[{idx}] "
-                f"({f.get('check_id','?')}): {skip_reason}",
-                file=sys.stderr,
-            )
+    for f in findings:
+        loc = f.get("location")
+        if isinstance(loc, dict):
+            loc["line"] = _coerce_line(loc.get("line"))
         else:
-            valid.append(f)
-
-    return valid
+            f["location"] = {"path": "", "line": 1}
+    return findings
 
 
 # ---------------------------------------------------------------------------
@@ -441,8 +513,10 @@ def _apply_rubric(finding: dict, rubric: dict) -> dict:
 
     check_id IN rubric:
       - Overwrite severity, confidence, fix_confidence with rubric values.
-      - If overwritten severity differs from reported: preserve original in
-        properties.agentReportedSeverity.
+      - If overwritten severity differs from a severity the worker ACTUALLY
+        reported: preserve original in properties.agentReportedSeverity.  A
+        worker that omitted severity entirely (variant shape, #3) records no
+        disagreement -- the rubric is simply the source of truth.
 
     check_id NOT IN rubric:
       - Keep reported severity.
@@ -455,7 +529,7 @@ def _apply_rubric(finding: dict, rubric: dict) -> dict:
         reported_severity = finding.get("severity")
         rubric_severity = entry.get("severity", reported_severity)
 
-        if rubric_severity != reported_severity:
+        if reported_severity is not None and rubric_severity != reported_severity:
             props = finding.get("properties") or {}
             props["agentReportedSeverity"] = reported_severity
             finding["properties"] = props
@@ -557,7 +631,7 @@ def main() -> int:
     per_file_triage: list = []
 
     for llm_path in args.llm:
-        llm_findings, triage_map = _parse_llm_file(llm_path)
+        llm_findings, triage_map = _parse_llm_file(llm_path, repo_root)
         all_llm_findings.extend(llm_findings)
         per_file_triage.append((llm_path, triage_map))
 
@@ -667,11 +741,11 @@ def main() -> int:
             f["rule_id"] = f.get("check_id", "unknown")
 
     # ------------------------------------------------------------------
-    # Step 6: Validate findings BEFORE sort and rubric (Fix #6).
-    # Exits 1 with an actionable message on malformed input (e.g. string line)
-    # instead of a bare TypeError traceback from merged.sort().
+    # Step 6: Guarantee a sortable location.line (no dropping here).  Full
+    # schema validation is deferred to the post-rubric pass so the rubric can
+    # supply severity/confidence a worker omitted before the finding is judged.
     # ------------------------------------------------------------------
-    merged = _validate_before_sort(merged, emit_mod)
+    merged = _ensure_sortable(merged)
 
     # ------------------------------------------------------------------
     # Deterministic sort: path, line, check_id
@@ -709,6 +783,22 @@ def main() -> int:
                 f"({f.get('check_id','?')}): {exc}",
                 file=sys.stderr,
             )
+    dropped_postrubric = len(merged) - len(valid_findings)
+
+    # ------------------------------------------------------------------
+    # Loud drop summary (#3): always print the total dropped count and the
+    # number of LLM result files, so a non-interactive run cannot silently
+    # ship a report missing half its findings.  The per-finding WARNING lines
+    # above give the detail; this line gives the headline.
+    # ------------------------------------------------------------------
+    total_dropped = dropped_postrubric
+    if total_dropped > 0:
+        print(
+            f"merge-findings: WARNING: dropped {total_dropped} invalid finding(s) "
+            f"from {len(args.llm)} LLM result file(s) -- see the 'skipping invalid "
+            "finding' WARNING line(s) above for each",
+            file=sys.stderr,
+        )
 
     # ------------------------------------------------------------------
     # Step 8: Build output lines
@@ -749,7 +839,8 @@ def main() -> int:
             return 1
         print(
             f"merge-findings: wrote {len(valid_findings)} finding(s) + "
-            f"{len(seen_gaps)} coverage-gap(s) to {args.output}",
+            f"{len(seen_gaps)} coverage-gap(s) to {args.output} "
+            f"(dropped {total_dropped} invalid finding(s))",
             file=sys.stderr,
         )
     else:

@@ -104,6 +104,9 @@ def main(argv):
             fingerprint=fp,
             end_line=end_line,
             properties={"tool": "bandit"},
+            # Heuristic SAST -- FP-prone on test fixtures, so worker triage must
+            # be able to dismiss it (#4).
+            detection="hybrid",
         )
         normalize.emit_finding(finding)
 

@@ -182,13 +182,32 @@ run_scenario_a() {
     fail "scenario-a: expected type=audit_provenance, got '$record_type'"
   fi
 
-  # commit matches real SHA
+  # commit matches real SHA (no --commit: falls back to live HEAD)
   local got_commit
   got_commit="$(jsonl_header_field "$out_file" commit)"
   if [[ "$got_commit" == "$expected_sha" ]]; then
     pass "scenario-a: commit matches git HEAD SHA"
   else
     fail "scenario-a: expected commit='$expected_sha', got '$got_commit'"
+  fi
+
+  # --commit override (#5): a coordinator-pinned base SHA wins over live HEAD,
+  # so a worker that moved the main checkout's HEAD cannot corrupt the record.
+  local pinned_sha="1234567890abcdef1234567890abcdef12345678"
+  local out_pinned="$tmpdir/out-pinned.jsonl"
+  python3 "$PROV_SCRIPT" \
+    --findings "$findings_file" \
+    --repo "$tmpdir" \
+    --rubric "$RUBRIC_FILE" \
+    --commit "$pinned_sha" \
+    --skip-tool-versions \
+    --output "$out_pinned"
+  local got_pinned
+  got_pinned="$(jsonl_header_field "$out_pinned" commit)"
+  if [[ "$got_pinned" == "$pinned_sha" ]]; then
+    pass "scenario-a: --commit overrides live HEAD (#5)"
+  else
+    fail "scenario-a: --commit ignored -- expected '$pinned_sha', got '$got_pinned'"
   fi
 
   # rubric_version comes from rubric file

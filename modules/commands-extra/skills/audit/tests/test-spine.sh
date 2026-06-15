@@ -420,6 +420,27 @@ except Exception:
   else
     pass "all gitleaks findings conform to finding.schema.json"
   fi
+
+  # Field report #4: gitleaks is heuristic/FP-prone, so its findings must be
+  # detection="hybrid" (dismissible by worker triage), not "tool".
+  GL_DET="$(python3 - "$GL_OUTPUT" << 'PYEOF'
+import json, sys
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line:
+        continue
+    obj = json.loads(line)
+    if isinstance(obj, dict) and "type" not in obj:
+        print(obj.get("detection", "?"))
+        sys.exit(0)
+print("none")
+PYEOF
+)"
+  if [[ "$GL_DET" == "hybrid" ]]; then
+    pass "gitleaks findings are detection=hybrid (dismissible by triage, #4)"
+  else
+    fail "gitleaks finding detection='$GL_DET' (expected 'hybrid' per #4)"
+  fi
 else
   pass "gitleaks not installed -- live-tool test skipped"
 fi
@@ -432,6 +453,7 @@ printf '\nTest 5: shellcheck on all shell wrappers\n'
 if command -v shellcheck > /dev/null 2>&1; then
   SHELL_SCRIPTS=(
     "$SPINE_DIR/run.sh"
+    "$SPINE_DIR/exclude.sh"
     "$SPINE_DIR/wrap-gitleaks.sh"
     "$SPINE_DIR/wrap-semgrep.sh"
     "$SPINE_DIR/wrap-dep-audit.sh"

@@ -1012,11 +1012,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 8b: invalid finding (string line) -> skipped with WARNING, exit 0
-# (FIX 2: one bad finding must not abort the whole merge run; merge exits 0
-#  and emits a WARNING to stderr so the caller can see what was skipped.)
+# Test 8b: string line is COERCED (recovered), not dropped (field report #3)
+# A worker emitting "line": "7" is a recoverable variant, not a fatal error:
+# merge coerces it to the integer 7, keeps the finding, exits 0, no traceback.
 # ---------------------------------------------------------------------------
-printf '\nTest 8b: invalid finding (string line) -> skip+warn, exits 0\n'
+printf '\nTest 8b: string line coerced+recovered, exits 0\n'
 
 T8B_FP="445566778899bbcc:1"
 
@@ -1048,24 +1048,27 @@ write_spine "$T8_DIR/spine_empty.jsonl"
 set +e
 T8B_STDERR="$(python3 "$MERGE_SCRIPT" --spine "$T8_DIR/spine_empty.jsonl" \
   --llm "$T8_DIR/llm_badline.json" --rubric "$RUBRIC_FILE" 2>&1 >/dev/null)"
+T8B_OUT="$(python3 "$MERGE_SCRIPT" --spine "$T8_DIR/spine_empty.jsonl" \
+  --llm "$T8_DIR/llm_badline.json" --rubric "$RUBRIC_FILE" 2>/dev/null)"
 T8B_EXIT=$?
 set -e
 
-# Merge must exit 0: one bad finding is skipped, not fatal
+# Merge must exit 0: a string line is coerced, not fatal.
 if [[ $T8B_EXIT -eq 0 ]]; then
-  pass "t8b: merge exits 0 (bad finding skipped, not fatal)"
+  pass "t8b: merge exits 0 (string line coerced, not fatal)"
 else
-  fail "t8b: merge exits $T8B_EXIT (expected 0; bad finding should be skipped)"
+  fail "t8b: merge exits $T8B_EXIT (expected 0)"
 fi
 
-# Assert WARNING in stderr mentioning the skipped finding
-if echo "$T8B_STDERR" | grep -q "WARNING.*skipping\|skipping invalid finding"; then
-  pass "t8b: stderr contains skip-warning for the invalid finding"
+# The finding must SURVIVE with its line coerced to the integer 7.
+T8B_LINE="$(get_finding_nested_field "$T8B_OUT" "$T8B_FP" "location" "line")"
+if [[ "$T8B_LINE" == "7" ]]; then
+  pass "t8b: string line \"7\" coerced to integer 7 and finding recovered"
 else
-  fail "t8b: stderr does not contain skip-warning (got: $T8B_STDERR)"
+  fail "t8b: line='$T8B_LINE' (expected 7; finding should have been recovered)"
 fi
 
-# Assert no traceback leaked
+# No bare traceback should ever leak.
 if echo "$T8B_STDERR" | grep -q "Traceback\|TypeError"; then
   fail "t8b: bare Python traceback leaked to stderr (got: $T8B_STDERR)"
 else
@@ -1241,6 +1244,166 @@ if echo "$T8D_STDERR_BA" | grep -q "WARNING.*conflict\|WARNING.*unanimity\|WARNI
   pass "t8d: warning emitted for conflicting verdicts (B+A order)"
 else
   fail "t8d: no conflict warning in B+A order (stderr: $T8D_STDERR_BA)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 9: worker VARIANT shape is recovered (field report #3)
+#   A worker emits {title, description, path (absolute worktree), line:"60,70",
+#   source} with NO detection, NO location, NO message.  merge-findings must
+#   normalize it into a valid finding (not silently drop it) and report
+#   "dropped 0".
+# ---------------------------------------------------------------------------
+printf '\nTest 9: worker variant shape recovered, dropped 0\n'
+
+T9_DIR="$TESTRUN_DIR/t9"
+mkdir -p "$T9_DIR"
+
+write_spine "$T9_DIR/spine.jsonl"
+
+# Variant-shape finding: no detection/location/message; absolute worktree path;
+# comma-list line. check_id is rubriced (code-quality/eslint-violation).
+python3 - "$T9_DIR/llm.json" << 'PYEOF'
+import json, sys
+with open(sys.argv[1], "w") as fh:
+    json.dump({
+      "findings": [
+        {
+          "check_id": "code-quality/eslint-violation",
+          "rule_id": "no-unused-vars",
+          "title": "Unused import",
+          "description": "lodash imported but never used",
+          "path": "/tmp/whatever/.audit/worktrees/agent-1/src/util.js",
+          "line": "60,70,84",
+          "source": "llm"
+        }
+      ],
+      "spine_triage": []
+    }, fh)
+PYEOF
+
+set +e
+T9_STDERR="$(python3 "$MERGE_SCRIPT" --spine "$T9_DIR/spine.jsonl" \
+  --llm "$T9_DIR/llm.json" --rubric "$RUBRIC_FILE" --repo "/tmp/whatever" 2>&1 >/dev/null)"
+T9_OUT="$(python3 "$MERGE_SCRIPT" --spine "$T9_DIR/spine.jsonl" \
+  --llm "$T9_DIR/llm.json" --rubric "$RUBRIC_FILE" --repo "/tmp/whatever" 2>/dev/null)"
+T9_EXIT=$?
+set -e
+
+if [[ $T9_EXIT -eq 0 ]]; then
+  pass "t9: merge exits 0"
+else
+  fail "t9: merge exits $T9_EXIT (expected 0)"
+fi
+
+T9_COUNT="$(count_findings "$T9_OUT")"
+if [[ "$T9_COUNT" -eq 1 ]]; then
+  pass "t9: variant finding recovered (1 finding survives)"
+else
+  fail "t9: expected 1 recovered finding, got $T9_COUNT"
+fi
+
+# Inspect the recovered finding's normalized fields.
+T9_FIELDS="$(python3 - "$T9_OUT" << 'PYEOF'
+import json, sys
+for l in sys.argv[1].splitlines():
+    if not l.strip():
+        continue
+    o = json.loads(l)
+    if isinstance(o, dict) and "type" not in o:
+        loc = o.get("location", {})
+        print("path=%s line=%s det=%s msg=%s extra=%s" % (
+            loc.get("path"), loc.get("line"), o.get("detection"),
+            "yes" if o.get("message") else "no",
+            ",".join(k for k in ("title", "description", "path", "line") if k in o) or "none",
+        ))
+        sys.exit(0)
+print("none")
+PYEOF
+)"
+
+if echo "$T9_FIELDS" | grep -q "path=src/util.js"; then
+  pass "t9: absolute worktree path normalized to repo-relative (src/util.js)"
+else
+  fail "t9: path not normalized ($T9_FIELDS)"
+fi
+if echo "$T9_FIELDS" | grep -q "line=60"; then
+  pass "t9: comma-list line coerced to first integer (60)"
+else
+  fail "t9: line not coerced ($T9_FIELDS)"
+fi
+if echo "$T9_FIELDS" | grep -q "det=llm"; then
+  pass "t9: missing detection defaulted to llm"
+else
+  fail "t9: detection not defaulted ($T9_FIELDS)"
+fi
+if echo "$T9_FIELDS" | grep -q "msg=yes"; then
+  pass "t9: message synthesized from title/description"
+else
+  fail "t9: message not synthesized ($T9_FIELDS)"
+fi
+if echo "$T9_FIELDS" | grep -q "extra=none"; then
+  pass "t9: redundant flat keys stripped (schema-clean output)"
+else
+  fail "t9: flat keys leaked into output ($T9_FIELDS)"
+fi
+if echo "$T9_STDERR" | grep -q "dropped 0 invalid"; then
+  pass "t9: summary reports 'dropped 0' (no silent loss)"
+else
+  # 'dropped 0' only prints in the write summary; without --output the loud
+  # line is suppressed when total_dropped==0. Accept either: no drop warning.
+  if echo "$T9_STDERR" | grep -q "dropped [1-9]"; then
+    fail "t9: merge reported a nonzero drop for a recoverable finding ($T9_STDERR)"
+  else
+    pass "t9: no nonzero-drop warning emitted (variant fully recovered)"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Test 10: loud drop count -- an UNrecoverable finding is reported, not silent
+# ---------------------------------------------------------------------------
+printf '\nTest 10: unrecoverable finding -> loud dropped count\n'
+
+T10_DIR="$TESTRUN_DIR/t10"
+mkdir -p "$T10_DIR"
+write_spine "$T10_DIR/spine.jsonl"
+
+# check_id violates the schema pattern (uppercase) -> cannot be coerced; dropped.
+python3 - "$T10_DIR/llm.json" << 'PYEOF'
+import json, sys
+with open(sys.argv[1], "w") as fh:
+    json.dump({
+      "findings": [
+        {
+          "check_id": "BadNamespace/Bad",
+          "rule_id": "r",
+          "severity": "high",
+          "confidence": "high",
+          "detection": "llm",
+          "source": "llm",
+          "message": "bad check_id",
+          "location": {"path": "src/x.js", "line": 1},
+          "fingerprint": "aabbccdd00112233:1"
+        }
+      ],
+      "spine_triage": []
+    }, fh)
+PYEOF
+
+set +e
+T10_STDERR="$(python3 "$MERGE_SCRIPT" --spine "$T10_DIR/spine.jsonl" \
+  --llm "$T10_DIR/llm.json" --rubric "$RUBRIC_FILE" --output "$T10_DIR/out.jsonl" 2>&1)"
+T10_EXIT=$?
+set -e
+
+if [[ $T10_EXIT -eq 0 ]]; then
+  pass "t10: merge exits 0 (bad finding dropped, not fatal)"
+else
+  fail "t10: merge exits $T10_EXIT (expected 0)"
+fi
+if echo "$T10_STDERR" | grep -q "dropped 1 invalid finding"; then
+  pass "t10: loud 'dropped 1 invalid finding(s)' headline emitted"
+else
+  fail "t10: no loud dropped-count headline (got: $T10_STDERR)"
 fi
 
 # ---------------------------------------------------------------------------
