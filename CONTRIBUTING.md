@@ -100,9 +100,9 @@ If your module is broadly useful, add its name to the appropriate preset arrays 
 
 - `minimal.json` - Only essential modules
 - `standard.json` - Modules most users will want
-- `full.json` - All modules (your module should always be here)
+- `full.json` - All stable modules (your module belongs here unless its `module.json` status is `beta` or `deprecated`)
 - `team.json` - Modules useful for team workflows
-- `cloud-agent.json` - Modules needed for remote/cloud agent VMs (includes `agent-manager` and `cloud-dispatch`)
+- `cloud-agent.json` - Modules needed for remote/cloud agent VMs (includes `cloud-dispatch`; the deprecated `agent-manager` is not bundled)
 
 ### 6. Run tests
 

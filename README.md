@@ -132,8 +132,8 @@ For a quick install with a preset:
 |--------|---------|----------|
 | **minimal** | global-claude-md, autonomy, git-workflow | Getting started |
 | **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, settings, commands-core, commands-utility, output-formatting, statusline | Most users |
-| **full** | 52 modules | Power users |
-| **team** | global-claude-md, autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting | Teams |
+| **full** | 68 modules | Power users |
+| **team** | global-claude-md, autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, ce-review, pr-feedback, document-review, compound-knowledge (+ deps) | Teams |
 
 ### Other install options
 
