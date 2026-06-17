@@ -202,7 +202,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **multi-agent** | workflow | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | startup-dashboard |
 | **atdd** | workflow | Agentic Test-Driven Development. /atdd reads Playwright vision specs, iteratively builds app code until all tests pass, then ships | - |
 | **test-vision** | workflow | Vision-driven e2e test suite generation. /test-vision for full repo analysis + parallel test suite creation. /e2e for single-feature spec generation | browser-automation, multi-agent |
-| **xplan** | workflow | Interactive planning framework: discovery interview, deep research, tech stack sign-off, peer review, parallel agent execution. Requires [/deepresearch](#companion-module-deepresearch) | multi-agent |
+| **xplan** | workflow | Interactive planning framework: discovery interview, deep research, tech stack sign-off, constructive peer review + a 3-pass sequential adversarial review, parallel agent execution. Requires [/deepresearch](#companion-module-deepresearch) | multi-agent, adversarial-review |
 | **remote-server** | workflow | SSH access to a configured remote server with /onremote command for health checks and remote task execution | - |
 | **agent-manager** | workflow | [DEPRECATED] Go-based terminal UI (/agents) for monitoring Claude Code agent processes via tmux. Unmaintained; not offered for new installs, kept in-repo for existing users | multi-agent |
 | **cloud-dispatch** | workflow | Delegate GitHub issues to autonomous Claude Code agents on Hetzner Cloud VMs. Includes /dispatch, /dispatch-status, /dispatch-stop, /vm-manage commands | - |

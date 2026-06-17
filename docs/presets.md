@@ -65,7 +65,7 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 When you select a module that depends on other modules, the installer automatically includes the dependencies. For example:
 
-- Selecting `xplan` automatically adds `multi-agent` and `startup-dashboard`
+- Selecting `xplan` automatically adds `multi-agent` and `adversarial-review`, plus their dependencies `startup-dashboard` and `subagent-patterns`
 - Selecting `hooks` automatically adds `settings`
 
 You don't need to manually track dependencies. The installer resolves them using topological sorting and reports any additions.
