@@ -499,7 +499,7 @@ Commands installed:
 
 Deep research, planning, and execution framework for complex projects.
 
-**Installs**: 3 command files
+**Installs**: 5 command files + 2 lib files
 
 **What it does**: An interactive, human-in-the-loop planning framework:
 
@@ -510,8 +510,10 @@ Deep research, planning, and execution framework for complex projects.
 - **Phase 2** - Naming ideation (optional)
 - **Phase 2.5/2.6/2.7** - Tech stack sign-off, scope sign-off, multi-agent setup review
 - **Phase 3** - Plan creation with parallelized epics and dependency waves
-- **Phase 4** - Peer review by security, architecture, and business logic agents
-- **Phase 5-6** - Write plan.md, final confirmation gate
+- **Phase 4** - Constructive peer review by security, architecture, and business logic agents (review stage 1 of 2)
+- **Phase 5 (+5.6)** - Write plan.md, then a self-review loop for placeholders and identifier drift
+- **Phase 5.7** - Adversarial review sequence (stage 2 of 2): 3 sequential `adrev-reviewer` passes on Opus 4.8 (max effort), each attacking the plan after the prior pass's fixes are incorporated
+- **Phase 6** - Web review + final confirmation gate
 - **Phase 7** - Execute via parallel agents in separate clones
 - **Phase 8** - Verification, audit, and retrospective
 
@@ -522,10 +524,12 @@ Commands installed:
 | Command | Description |
 |---------|-------------|
 | `/xplan` | Launch the full planning and execution pipeline |
+| `/xplana` | Autonomous alias - `/xplan --autonomous` (full-depth, zero mid-flow prompts) |
 | `/xplan-status` | Check progress on a running or completed plan |
 | `/xplan-resume` | Resume an interrupted plan execution |
+| `/etp` | Execute a ready plan or GitHub issue(s) end-to-end with adversarial PR review |
 
-**Dependencies**: multi-agent (which depends on startup-dashboard)
+**Dependencies**: multi-agent (which depends on startup-dashboard), adversarial-review (which depends on subagent-patterns; provides the `adrev-reviewer` agent for Phase 5.7)
 
 ---
 
