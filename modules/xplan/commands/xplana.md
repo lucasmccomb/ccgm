@@ -6,7 +6,7 @@ argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--deepen
 
 # xplana - Autonomous xplan
 
-Thin alias for `/xplan --autonomous`. Runs the full xplan pipeline (research + naming + tech stack + scope + multi-agent setup + full plan + full review + self-review) end-to-end without any mid-flow prompts, then presents the completed plan as a structured artifact for review at a single final gate.
+Thin alias for `/xplan --autonomous`. Runs the full xplan pipeline (research + naming + tech stack + scope + multi-agent setup + full plan + full standard review + self-review + **3 sequential adversarial reviews**) end-to-end without any mid-flow prompts, then presents the completed plan as a structured artifact for review at a single final gate.
 
 Pick `/xplana` when:
 - You know exactly what you want to plan and don't want the 7-question discovery interview
@@ -51,12 +51,13 @@ Autonomous mode affects these xplan phases:
 | 2.7 (Multi-Agent Setup) | Inferred from scope (9+ epics = workspace, 4-8 = flat, 1-3 = single). |
 | 4.0 (Review Configuration) | Locked to Full - security + architecture + business logic. |
 | 5.6 (Plan Quality Self-Review) | Unchanged - still loops until clean. |
+| 5.7 (Adversarial Review Sequence) | **Locked ON.** Runs 3 sequential `adrev-reviewer` passes (Opus 4.8, max effort) against the finished plan — each pass attacks after the previous pass's fixes are incorporated; the third is the final review. No mid-flow prompt - any P0/P1 the final pass leaves unresolved are recorded and surfaced at the 6.A walkthrough + 6.5 gate instead of asking. |
 | 6 (Walkthrough) | Runs the new **Phase 6.A Autonomous Plan Walkthrough** - structured plan-as-artifact presentation with explicit assumption callouts. |
 | 6.5 (Final Execution Gate) | **Always fires**, same as any xplan run. Autonomous mode does NOT bypass this gate. |
 
 ## What This Command Does NOT Do
 
-- It does NOT skip research, naming, reviews, or the self-review loop. Autonomous is the *deep* mode, not the fast one.
+- It does NOT skip research, naming, the standard reviews, the self-review loop, or the Phase 5.7 adversarial review sequence. Autonomous is the *deep* mode, not the fast one — the finished plan has survived 6 reviews (3 standard + 3 sequential adversarial) before you see it.
 - It does NOT skip the final execution gate. 6.5 is non-bypassable.
 - It does NOT automatically proceed to execution. The default recommendation at 6.5 in autonomous mode leans toward "save plan, don't execute yet" so the user can review before committing to multi-agent work.
 
