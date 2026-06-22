@@ -60,6 +60,8 @@ Agent 3: "Write shared validation helpers in src/utils/validate.ts"
 
 Note: If agents share dependencies (Agent 3's output is needed by 1 and 2), run the dependency first, then the dependents in parallel.
 
+**Throttle heavy fan-outs.** Launching too many heavy agents at once (whether via the Workflow tool's `parallel()`/`pipeline()` or multiple Agent calls in one message) trips a server-side 429 throttle that fails the entire burst. Cap simultaneous heavy agents to 4 (never exceed 5), launch in waves, and default fan-out agents to cheaper models / lower effort unless thoroughness is explicitly requested. See `concurrency-and-rate-limits.md` for the defaults, the exact error, and the throttled-mid-run recovery procedure.
+
 ## Pass Paths, Not Contents
 
 When a subagent needs access to reference material, pass **file paths**, not file contents. The orchestrator should not pre-read files and splice their text into the prompt. It should tell the subagent where the files are and let the subagent read what it actually needs.

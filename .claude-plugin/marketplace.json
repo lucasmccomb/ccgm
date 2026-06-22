@@ -825,14 +825,16 @@
     },
     {
       "category": "workflow",
-      "description": "Subagent dispatch methodology: task decomposition, spec-driven delegation, pass-paths-not-contents, two-stage review (spec compliance then code quality), parallel coordination, and skill invocation modes.",
+      "description": "Subagent dispatch methodology: task decomposition, spec-driven delegation, pass-paths-not-contents, two-stage review (spec compliance then code quality), parallel coordination, concurrency/rate-limit throttling for fan-outs, and skill invocation modes.",
       "name": "subagent-patterns",
       "source": "./subagent-patterns",
       "tags": [
         "agents",
+        "concurrency",
         "coordination",
         "delegation",
         "parallel",
+        "rate-limits",
         "review",
         "subagents"
       ]
