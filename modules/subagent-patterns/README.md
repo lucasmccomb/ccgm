@@ -4,7 +4,7 @@ Subagent dispatch methodology for effective task delegation.
 
 ## What It Does
 
-Installs a rules file covering subagent coordination:
+Installs rules covering subagent coordination:
 
 - **When to use subagents** - 3+ independent tasks, parallel research, context protection
 - **Task decomposition** - Write specs with objective, context, constraints, deliverable
@@ -16,12 +16,14 @@ Installs a rules file covering subagent coordination:
 - **Completion status protocol** - DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT
 - **Skill invocation modes** - interactive / autofix / report-only / headless for composable skill calls
 - **Reusable agent prompt templates** - `implementer`, `spec-compliance-reviewer`, `code-quality-reviewer` for consistent dispatch and review
+- **Concurrency and rate limits** - Cap simultaneous heavy agents (4, never >5), launch fan-outs in waves, default to cheaper models / lower effort, and recover from server-side 429 throttles - covers both the Workflow tool and direct parallel Agent dispatch
 
 ## Manual Installation
 
 ```bash
 # Global (all projects)
 cp rules/subagent-patterns.md ~/.claude/rules/subagent-patterns.md
+cp rules/concurrency-and-rate-limits.md ~/.claude/rules/concurrency-and-rate-limits.md
 mkdir -p ~/.claude/agents
 cp agents/implementer.md ~/.claude/agents/implementer.md
 cp agents/spec-compliance-reviewer.md ~/.claude/agents/spec-compliance-reviewer.md
@@ -43,6 +45,7 @@ chmod +x ~/.claude/hooks/task-completed-check.py
 | File | Description |
 |------|-------------|
 | `rules/subagent-patterns.md` | Subagent decomposition, dispatch patterns, and review methodology |
+| `rules/concurrency-and-rate-limits.md` | Caps heavy-agent fan-out concurrency, wave sizing, and 429-throttle recovery for the Workflow tool and direct parallel Agent dispatch |
 | `agents/implementer.md` | Reusable prompt template for implementer subagents - enforces scope discipline and four-state status |
 | `agents/spec-compliance-reviewer.md` | Stage 1 reviewer - adversarial stance, verifies deliverables and constraints independently of the implementer's self-report |
 | `agents/code-quality-reviewer.md` | Stage 2 reviewer - refuses to run unless Stage 1 returned DONE; checks project patterns, edge cases, simplicity |

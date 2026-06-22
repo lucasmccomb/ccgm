@@ -655,7 +655,7 @@ Meta-learning system with automated reflection triggers, commands, and hooks.
 
 Methodology for decomposing tasks and delegating to subagents.
 
-**Installs**: `rules/subagent-patterns.md`
+**Installs**: `rules/subagent-patterns.md`, `rules/concurrency-and-rate-limits.md`
 
 **What it does**: Provides a structured approach to using Claude Code's Agent tool:
 
@@ -664,6 +664,7 @@ Methodology for decomposing tasks and delegating to subagents.
 - **Dispatch patterns**: Parallel research with aggregation, parallel implementation with separate clones
 - **Two-stage review**: First check spec compliance, then check code quality
 - **Coordination rules**: No shared mutable state, aggregate results in the parent, report failures immediately
+- **Concurrency and rate limits**: Cap simultaneous heavy agents (4, never >5), launch fan-outs in waves, default to cheaper models / lower effort, and recover from server-side 429 throttles — applies to both the Workflow tool and direct parallel Agent dispatch
 
 **Dependencies**: None
 
