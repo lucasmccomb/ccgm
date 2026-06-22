@@ -59,7 +59,9 @@ Interpret HTTP codes from SOCIAL section:
 
 ## Phase 2: Web Search Checks (parallel tool calls)
 
-Run ALL of the following WebSearch/WebFetch calls **in parallel tool calls** (batch them into a single response, do not run sequentially):
+Run the following WebSearch/WebFetch calls **in parallel tool calls** (batch them into a single response, do not run sequentially):
+
+> **Concurrency — avoid the 429 throttle.** Batch at most ~4 parallel WebSearch/WebFetch calls per message; if a call returns HTTP 429, wait ~30s and re-issue only the failed queries. (These are tool calls, not agents, but the same burst discipline applies.) See `~/.claude/rules/concurrency-and-rate-limits.md`.
 
 1. **USPTO trademark**: `WebSearch: "{name}" trademark USPTO`
 2. **WIPO trademark**: `WebSearch: "{name}" site:branddb.wipo.int OR "{name}" WIPO trademark`

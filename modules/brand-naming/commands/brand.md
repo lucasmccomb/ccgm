@@ -70,6 +70,8 @@ mkdir -p "$WORK_DIR"
 
 Launch 4 parallel agents to explore the word space. Each agent writes results to `$WORK_DIR/`.
 
+> **Concurrency:** four `haiku` agents in one wave is well within the safe band — keep the model light and the count at 4. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 ### Agent 1: Datamuse Semantic Explorer
 
 Query the Datamuse API for each key concept word in the user's description. Use these endpoints (no auth needed):

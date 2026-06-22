@@ -733,6 +733,8 @@ PYEOF
 
 **CRITICAL**: Determine which workers have non-empty pack assignments, then launch only those workers — in a SINGLE message with parallel Agent tool calls (`subagent_type: "general-purpose"`, `run_in_background: true`).
 
+> **Concurrency — avoid the 429 throttle.** `general-purpose` workers each load a pack's checks plus a spine slice (large context) and, under `FIX_MODE=true`, also commit and push — these are heavy agents. Launch **at most 4 workers at once**. If more than 4 have non-empty assignments, launch the first 4 in this message, wait for them to return (`run_in_background` plus the M6 collect step gives you the join point), then launch the next wave of 4. Bursting more than ~5 heavy workers together trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole batch; if you see it mid-run, stop, wait 30–60s, and re-dispatch only the failed workers in waves of ≤4. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 ```bash
 # Determine active worker ids
 ACTIVE_WORKERS=$(python3 -c "
@@ -1821,6 +1823,8 @@ Then produce per-pack spine slices using the same slicing logic as Phase M4.
 
 Launch **one Agent per SELECTED pack** (not a fixed 9) in a SINGLE message with parallel
 Agent tool calls (`subagent_type: "Explore"`, `run_in_background: true`).
+
+> **Concurrency — avoid the 429 throttle.** These are light `Explore` agents, but a full audit can select well over 8 packs — and launching 15–20+ at once trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole batch. Launch in **waves of ≤8** (`run_in_background` lets a wave drain while you start the next): dispatch the first 8 packs, then the rest. If you see the throttle mid-run, wait 30–60s and re-dispatch only the failed packs. See `~/.claude/rules/concurrency-and-rate-limits.md`.
 
 For each pack, the subagent receives:
 - The absolute path to the pack's `checks.md` (`$SKILL_ROOT/packs/<pack-dir>/checks.md`)

@@ -154,6 +154,8 @@ In `mode:headless`: proceed with `safe_auto` only. Return `manual`, `gated_auto`
 
 Dispatch one `pr-comment-resolver` per cluster (or per thread, when clustering was skipped), in parallel. Pass paths, not contents - see `modules/subagent-patterns/rules/subagent-patterns.md`.
 
+> **Concurrency — avoid the 429 throttle.** Dispatch resolvers at `model: "sonnet"` with medium reasoning effort. Clustering already keeps the count low, but a busy PR can yield more clusters than is safe to burst — launch **at most 4 at once**, and if there are more, run them in sequential waves of 4 rather than one message. Bursting too many heavy agents trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole batch; if you hit it, wait 30–60s and re-dispatch only the unfinished clusters in waves of ≤4. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 Per-subagent spec:
 
 **Objective** - Implement the `fix_hypothesis` for this cluster; post an inline reply on each covered thread; resolve each thread if the reply is a fix (not an acknowledgment).

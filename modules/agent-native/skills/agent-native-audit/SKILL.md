@@ -84,6 +84,8 @@ for design guidance.
 
 Dispatch **eight agents in parallel** - two per principle. One agent per pair measures (counts, inventory); the other critiques (examples, violations, fixes). Use `subagent_type: "Explore"` and launch all eight in a single message so they run concurrently.
 
+> **Concurrency — avoid the 429 throttle.** Eight light `Explore` agents is at the safe ceiling for a single parallel wave — acceptable because they are cheap and scoped. Do NOT raise the count, and if you ever switch them to a heavier model / higher reasoning effort, split into two sequential waves of 4 (measure pass, then critique pass). Bursting more than ~5 heavy agents — or many more light ones — trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole dispatch; if you hit it, launch as 4+4. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 Pass paths, not file contents (see `modules/subagent-patterns/rules/subagent-patterns.md`). Each agent gets the triage summary, the principle text verbatim from `modules/agent-native/rules/agent-native.md`, and the scoped paths to analyze.
 
 Every agent prompt must end with:

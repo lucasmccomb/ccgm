@@ -68,6 +68,8 @@ Parse `$ARGUMENTS` for optional filters (compose with the mode token):
 
 Dispatch one subagent per non-blocked todo, in parallel. Each subagent spec:
 
+> **Concurrency — avoid the 429 throttle.** Dispatch resolver subagents at `model: "sonnet"` with medium reasoning effort, and **launch at most 4 at once**. If more than 4 todos are ready, run them in sequential waves of 4 (dispatch 4, wait for them to return, dispatch the next 4) rather than one burst — a batch of 10 ready todos must NOT become 10 simultaneous agents. Bursting too many heavy agents trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole batch; if you hit it, wait 30–60s and re-dispatch only the unfinished todos in waves of ≤4. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 **Objective** - Implement the Proposed Change section of the todo file.
 
 **Context** (pass paths, not contents - see `modules/subagent-patterns/rules/subagent-patterns.md`):

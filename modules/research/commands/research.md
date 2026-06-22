@@ -138,6 +138,8 @@ Pass these targeted sub-questions to each agent instead of (or alongside) the br
 ## Phase 2: Spawn Research Agents
 
 Launch the selected research agents in **parallel** using the Agent tool. Each agent gets:
+
+> **Concurrency — avoid the 429 throttle.** These agents already run on `model: sonnet` (see the Sub-Agent Model Optimization section), so launching all 7 in one parallel wave is within the safe band. If you ever raise the count past ~8 or escalate the agents to a heavier model, cap simultaneous heavy agents at 4 and run the rest in a second wave. See `~/.claude/rules/concurrency-and-rate-limits.md`.
 1. The topic/concept to research
 2. Its targeted sub-questions from Phase 1.5
 3. The Internet Research Tools reference (below)

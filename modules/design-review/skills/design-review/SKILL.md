@@ -106,6 +106,8 @@ JSON.stringify(results, null, 2)
 
 Launch **6 agents in parallel** (single message, all `subagent_type: "Explore"`, `run_in_background: true`). Each agent receives the CSS source, computed styles JSON, and DOM structure extract. They analyze from one design lens.
 
+> **Concurrency:** six light `Explore` agents with `run_in_background: true` is within the safe band — keep it that way. If you ever widen the lens set past ~8 or switch these to a heavier model / higher effort, cap simultaneous heavy agents at 4 and run the rest in a second wave. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 Include the collected data directly in each agent's prompt (not file paths).
 
 Every agent prompt must end with:

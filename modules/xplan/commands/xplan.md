@@ -1338,6 +1338,8 @@ This phase scopes to the **main planning flow (Phases 5 → 6)**. Deepen Mode re
 
 Compute the date once for the run: `date +%F`. Then run **exactly three `adrev-reviewer` passes, one at a time** (installed at `~/.claude/agents/adrev-reviewer.md`). Do NOT launch them together — pass `k` does not start until pass `k-1` has returned, its changes are incorporated, and the self-review (5.7.3) is clean:
 
+> **Concurrency — avoid the 429 throttle.** Running these one at a time is also what keeps them under the rate limit: each pass is an Opus-4.8, max-effort agent — the heaviest dispatch in CCGM — and three of them firing together would almost certainly trip the server-side throttle (`Server is temporarily limiting requests · Rate limited`). Do not parallelize the passes to "save time." If a single pass returns the throttle, wait 30–60s and retry that one pass. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 ```
 Pass 1  →  incorporate  →  5.6 self-review clean
    ↓

@@ -204,6 +204,8 @@ For each wave, in order (a single issue is a wave of one). This is the core loop
 ### 4.1 Implement (parallel within a wave)
 
 Spawn one `implementer` agent per unit (model sonnet), each in its own clone or worktree. Each agent:
+
+> **Concurrency — avoid the 429 throttle.** `implementer` agents run on `sonnet` (light), so a wave of up to ~8 is safe. But the default `--max-agents` (widest wave, clamped to isolation slots) can exceed that in a workspace with many clones — **cap the live wave at 8 light agents, or 4 if you raise `implementer` to a heavier model / higher effort**. If a wave has more units than the cap, split it into sub-waves. Bursting too many heavy agents trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole wave; if you hit it, wait 30–60s and re-spawn only the unfinished units in smaller sub-waves. See `~/.claude/rules/concurrency-and-rate-limits.md`.
 - Branches from `origin/main` (`git checkout -b {issue#}-{desc} origin/main` for an issue unit, `{slug}-{desc}` for a plan unit).
 - Implements the unit with tests, following the existing project patterns.
 - **Verifies the work actually functions** - unit tests passing is the floor, not the finish line. Run the real path where feasible.
