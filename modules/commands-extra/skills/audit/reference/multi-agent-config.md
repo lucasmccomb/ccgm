@@ -24,6 +24,8 @@ Architecture, Performance, Testing, Documentation.
 
 **Agent identity**: Derived from worktree directory name suffix. `agent-0` -> agent 0, `agent-3` -> agent 3.
 
+**Concurrency cap — avoid the 429 throttle.** The 4-agent default is deliberately at the safe ceiling for *heavy* workers: each `general-purpose` worker loads its pack's checks plus a spine slice (large context) and, under `FIX_MODE=true`, also commits and pushes. **Never launch more than 4 of these at once.** If you raise the worker count (more non-empty assignments, or a custom split), launch them in sequential waves of ≤4 rather than one burst; if a launch reports `Server is temporarily limiting requests · Rate limited`, that is the server throttle, not a usage cap — wait 30–60s and re-dispatch only the unfinished workers. This matches the M5 launch step in `SKILL.md`. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 ---
 
 ## CRITICAL: Worktree Isolation
