@@ -73,6 +73,8 @@ Options: "proceed", "edit N", "regenerate".
 
 For each approved scenario, dispatch a subagent using the Agent tool. Model: **sonnet**. Dispatch in parallel where possible.
 
+> **Concurrency — avoid the 429 throttle.** "In parallel where possible" means **at most 4 at once**. With 5–7 scenarios, dispatch a wave of 4, read their results, then dispatch the rest — do not launch all 7 in one message. The GREEN and hardening phases are already throttled by the blocking read between phases. Bursting too many agents trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole batch. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 The subagent prompt should:
 
 1. Present the scenario setup, pressures, and request

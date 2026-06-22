@@ -171,6 +171,8 @@ Do NOT pass the implementer's conversation, completion report, or commit-message
 
 Reviewers are independent. Do not share their drafts between each other in this phase. Each reviewer writes its findings to its artifact path and replies with only that path plus `Findings written.`; the orchestrator reads the files (Results Stay in Files, above), not the replies.
 
+> **Concurrency — avoid the 429 throttle.** Dispatch reviewers at `model: "sonnet"` with medium reasoning effort (they read a bounded diff, not the whole repo). With all five conditional reviewers firing this fan-out reaches 9 agents — past the safe burst. Launch the 4 always-on reviewers in the first wave, wait for them to return, then launch the conditional subset in a second wave; never more than ~5 at once. Bursting too many heavy agents trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole dispatch. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 ## Phase 4: Adversarial / Red-Team Lens
 
 After Phase 3 completes, dispatch the `adversarial-reviewer` agent with:

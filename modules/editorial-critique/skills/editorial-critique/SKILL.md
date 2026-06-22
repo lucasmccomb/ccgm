@@ -29,6 +29,8 @@ Read the full file content. Strip frontmatter (everything between the opening an
 
 Launch **8 agents in parallel** (single message, all `subagent_type: "Explore"`). Do **NOT** use `run_in_background: true` - the agents must run in the foreground so the system waits for all 8 to complete before returning results. Launching all 8 in a single message ensures they execute concurrently while still blocking until all finish.
 
+> **Concurrency — avoid the 429 throttle.** Eight light `Explore` agents is at the safe ceiling for one parallel wave — acceptable here because they are cheap and each reads only the source text. Do NOT add lenses beyond 8 in a single burst, and never escalate these to a heavier model / higher reasoning effort while keeping all 8 in one message — if you need heavier passes, split into two waves of 4. Bursting too many heavy agents trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole dispatch; if you hit it, run the 8 as 4+4. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 Each agent receives the full text and analyzes it from one lens.
 
 Include the full text in each agent's prompt (not a file path - the agent needs to analyze text, not explore code).

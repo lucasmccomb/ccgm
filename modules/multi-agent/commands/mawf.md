@@ -202,6 +202,8 @@ For each wave:
 
 Use the Agent tool to launch one agent per assigned issue, each in its own clone directory:
 
+> **Concurrency — avoid the 429 throttle.** Wave size is naturally bounded by the number of clones, and execution agents run on `sonnet` — both keep this fan-out safe. If a workspace ever has more than ~8 clones, cap each wave at 8 light agents (or 4 if you escalate them to a heavier model). If a wave reports `Server is temporarily limiting requests · Rate limited`, wait 30–60s and re-launch only the failed issues. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 Each agent should:
 1. Navigate to its assigned clone directory
 2. Run `/startup` to initialize the session

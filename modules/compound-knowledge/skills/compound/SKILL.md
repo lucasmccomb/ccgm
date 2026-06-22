@@ -46,6 +46,8 @@ If the user runs `/compound` with no arguments and the session is short or still
 
 Dispatch four subagents in parallel with the pass-paths-not-contents pattern (see `modules/subagent-patterns/rules/subagent-patterns.md`). Each returns a short structured report; the orchestrator merges them.
 
+> **Concurrency — avoid the 429 throttle.** Dispatch these four at `model: "sonnet"` with medium reasoning effort — they are bounded researchers returning a short report, not deep synthesizers. Four light agents in one wave is within the safe band; do not widen this fan-out or escalate to a heavier model without capping simultaneous heavy agents at 4 and waving the rest. Bursting >5 heavy agents trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole dispatch. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 ### Context Analyzer
 
 Objective: Restate the problem in one paragraph and identify what would make this learning retrievable.

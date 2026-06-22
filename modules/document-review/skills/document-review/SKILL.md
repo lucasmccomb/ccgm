@@ -69,6 +69,8 @@ In headless mode, suppress commentary and return only the structured output bloc
 
 Dispatch the selected lens agents in parallel. Use the pass-paths-not-contents pattern (see `modules/subagent-patterns/rules/subagent-patterns.md`) - pass `doc_path` and the review context, let each agent Read the doc itself.
 
+> **Concurrency — avoid the 429 throttle.** Dispatch the lens agents at `model: "sonnet"` with medium reasoning effort — they are bounded analyzers reading one doc, not deep synthesizers. At Sonnet, all 7 lenses in one parallel wave is within the safe band. If you ever escalate the lenses to a heavier model or higher effort, launch at most 4 at once and run the rest in a second wave — bursting >5 heavy agents trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole dispatch. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+
 Each agent is installed under `~/.claude/agents/{lens}-reviewer.md`. Each agent returns JSON matching:
 
 ```json
