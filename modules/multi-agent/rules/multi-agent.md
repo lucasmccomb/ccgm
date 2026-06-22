@@ -13,6 +13,8 @@ When a task involves multiple independent issues or work items, prefer spawning 
 
 **Workspace model** (preferred for delegated work): Use `/workspace-setup {repo}` to create isolated workspace groups. Each workspace has 4 clones. Point a coordinator agent at a workspace directory - it discovers its clones and delegates.
 
+**Cap peak concurrency.** Preferring parallelism does NOT mean launching everything at once. Too many heavy agents firing simultaneously - whether via the Workflow tool's `parallel()`/`pipeline()` or many Agent calls in one message - trips a server-side 429 throttle (`Server is temporarily limiting requests · Rate limited`) that fails the *entire* burst, not just the marginal agent. Keep simultaneous **heavy** agents (Opus, high/max effort, or large-context) to **4** (never exceed 5), launch in waves, and default fan-out agents to cheaper models / lower effort unless thoroughness is explicitly requested. If you have `subagent-patterns` installed, `concurrency-and-rate-limits.md` carries the full defaults table and the throttled-mid-run recovery procedure.
+
 ---
 
 # Dev Server Port Allocation (Multi-Clone)
