@@ -1,6 +1,6 @@
 ---
 name: editorial-critique
-description: Deep editorial critique of any long-form writing. Runs 8 parallel analysis passes covering prose craft, AI-tell detection, argument architecture, sentence-level quality, grammar, data accuracy, structure, and conciseness. Use when reviewing blog posts, essays, reports, or any prose that needs to be sharp.
+description: Deep editorial critique of any long-form writing. Runs 8 parallel analysis passes covering prose craft, AI-tell detection, argument architecture, sentence-level quality, grammar, data accuracy, structure, and conciseness. Judges prose against a Hemingway standard, not David Foster Wallace: concise, concrete, and semantically dense, with a wide vocabulary but no ornamentation for its own sake. Use when reviewing blog posts, essays, reports, or any prose that needs to be sharp.
 disable-model-invocation: true
 ---
 
@@ -32,6 +32,13 @@ Launch **8 agents in parallel** (single message, all `subagent_type: "Explore"`)
 Each agent receives the full text and analyzes it from one lens.
 
 Include the full text in each agent's prompt (not a file path - the agent needs to analyze text, not explore code).
+
+Every agent prompt must begin with this shared house style, so all 8 lenses judge against the same standard:
+
+```
+HOUSE STYLE (the standard you are judging against):
+This writing aims for Hemingway, not David Foster Wallace. Prize prose that is concise, concrete, and semantically dense, where every word earns its place. A wide, precise vocabulary is an asset: reach for the exact word even when it is uncommon. What we reject is ornamentation, not sophistication. Treat flourish for its own sake as a defect: maximalist sentences, nested subordinate clauses, hyper-qualification, and decorative phrasing that adds syllables but no meaning. Favor the short declarative sentence, the strong verb, and the concrete noun. Never confuse a rich vocabulary with a flowery one; the goal is the right word, not more words.
+```
 
 Every agent prompt must end with:
 
@@ -77,6 +84,13 @@ Sentence rhythm:
 - Flag sections with no short sentences (short sentences create emphasis; their absence flattens impact)
 - Flag sentences that end weakly (the power position is the end of the sentence; bury "however" and qualifiers mid-sentence)
 
+Maximalism and ornamentation (house style prefers Hemingway over David Foster Wallace):
+- Flag recursive, nested syntax that buries the point under stacked subordinate clauses (split it or cut it)
+- Flag hyper-qualification: caveats, hedges, and parentheticals piled on until the claim dissolves
+- Flag ornamental phrasing, words or clauses added for flourish that the sentence means exactly the same without
+- Flag a sophisticated word reached for as decoration where a more precise word (plain or not) would land cleaner
+- Reward the right uncommon word used precisely; the target is economy and exactness, not a smaller vocabulary
+
 Paragraph craft:
 - Flag paragraphs that bury their strongest point in the middle (lead with it or close with it)
 - Flag paragraphs longer than 6 sentences (consider splitting for pacing)
@@ -86,9 +100,10 @@ DO NOT flag:
 - Intentional sentence fragments used for rhetorical effect
 - Informal/conversational tone when it serves the piece
 - Starting sentences with conjunctions ("And", "But", "So")
+- Precise, uncommon vocabulary used correctly (a rich lexicon is an asset; flag floweriness, not sophistication)
 
 Return findings as a JSON array:
-[{"text": "...", "issue": "...", "rewrite": "...", "type": "weak-verb|nominalization|passive|abstract|latinate|adverb|cliche|rhythm|sentence-length|structure-repetition|weak-ending|buried-point|paragraph-length"}]
+[{"text": "...", "issue": "...", "rewrite": "...", "type": "weak-verb|nominalization|passive|abstract|latinate|adverb|cliche|rhythm|sentence-length|structure-repetition|weak-ending|buried-point|paragraph-length|ornamentation|hyper-qualification"}]
 ```
 
 ---
@@ -361,6 +376,7 @@ Restraint:
 - Places where the text oversells a point (if the evidence is strong, let it speak)
 - Multiple exclamation points, excessive emphasis, or hyperbolic language
 - Stacking three examples when one strong one would suffice
+- Ornamental or maximalist phrasing that pads the line without adding meaning (house style favors lean, Hemingway-style prose over flourish; a rich vocabulary is welcome, floweriness is not)
 
 Surprise and tension:
 - Does the piece ever surprise the reader? If not, where could it?

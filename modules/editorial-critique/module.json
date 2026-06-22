@@ -1,7 +1,7 @@
 {
   "name": "editorial-critique",
   "displayName": "Editorial Critique",
-  "description": "/editorial-critique - deep editorial review of long-form writing. 8 parallel analysis passes: prose craft, AI-tell detection, argument architecture, conciseness, data verification, structure, impact, grammar. Scored report with optional auto-fix.",
+  "description": "/editorial-critique - deep editorial review of long-form writing. 8 parallel analysis passes: prose craft, AI-tell detection, argument architecture, conciseness, data verification, structure, impact, grammar. Judges prose against a lean, Hemingway-style house standard over ornate maximalism. Scored report with optional auto-fix.",
   "category": "commands",
   "scope": ["global"],
   "dependencies": [],
