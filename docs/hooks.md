@@ -18,7 +18,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 13 hooks, 2 Python libraries, and a settings partial. The **self-improving** module installs 2 additional hooks. Total: 15 hooks across 2 modules.
+The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. The **self-improving** module installs 2 additional hooks and the **branch-guard** module 1. Total: 18 hooks across 3 modules (the **autoheal** module's observational hooks are documented in their own section below).
 
 ---
 
@@ -269,6 +269,18 @@ Pauses destructive Bash commands for confirmation. Catches `rm -rf`, SQL `DROP`/
 Scope-locks file edits to a frozen directory. When `~/.claude/freeze-dir.txt` contains a directory path, any Edit or Write outside that directory is denied. Paths are normalised (symlinks resolved, `..` collapsed) before the containment check.
 
 **Activation**: `/freeze <dir>` to set, `/unfreeze` to clear.
+
+---
+
+### branch-guard.py
+
+**Type**: PreToolUse:Edit/MultiEdit/Write/NotebookEdit/filesystem-MCP writes + PreToolUse:Bash
+**Module**: branch-guard
+**Can block**: Yes (exit 2 — survives bypass mode)
+
+Hard gate against work on a repo's default branch (main/master, per `origin/HEAD` with fallbacks). Blocks file edits whose target file lives in a repo checked out on its default branch (symlinks resolved; the file's repo is checked, not the session cwd), and mutating git commands — `git commit`/`add`/`stage`/`apply` — in any `&&`/`;`/`|` segment, honoring `git -C <path>`. Fires before the first edit so uncommitted work can never be stranded on main and destroyed by a later origin sync. The denial teaches the fix: `git fetch origin && git checkout -b <type>/<short-desc> origin/<default>` (type: feature/fix/chore/docs).
+
+**Exemptions**: `ALLOW_MAIN_COMMIT=1` (env or inline), in-progress rebase/merge/cherry-pick/revert/bisect, unborn HEAD, repos with no origin remote, and `~/.claude/git-flow-direct-to-main-repos.json` entries.
 
 ---
 

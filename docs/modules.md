@@ -111,7 +111,7 @@ Base `settings.json` with 800+ pre-configured tool permission entries.
 
 Python hooks that automate and enforce development workflows.
 
-**Installs**: 9 hook scripts, 2 Python libraries, settings.json fragment
+**Installs**: 15 hook scripts, 6 Python libraries, settings.json fragment
 
 This module installs the most hooks of any module. See [Hooks Reference](hooks.md) for detailed documentation of each hook.
 
@@ -128,6 +128,12 @@ This module installs the most hooks of any module. See [Hooks Reference](hooks.m
 | `agent-tracking-pre.py` | PreToolUse:Bash | Warns when claiming already-claimed issues |
 | `agent-tracking-post.py` | PostToolUse:Bash | Records issue claims, status transitions in tracking CSV |
 | `check-migration-timestamps.py` | PreToolUse | Validates Supabase migration file timestamps for duplicates before commit |
+| `pretooluse-bash-dispatch.py` | PreToolUse:Bash | Consolidated dispatcher running the Bash check chain (git-workflow, destructive, patterns, port, tracking, careful) in one process |
+| `check-careful.py` | PreToolUse:Bash | Force-push-to-main hard block + careful-mode destructive-command prompts |
+| `check-freeze.py` | PreToolUse | Scope-locks Edit/Write to the `/freeze` directory |
+| `orphan-process-check.py` | SessionStart | Warns about orphaned test worker processes (vitest/jest) |
+| `session-start-enforce.py` | SessionStart | Opt-in rule-enforcement meta-instruction injection |
+| `sync-ccgm-canonical.py` | PostToolUse:Bash | Auto-pulls the canonical CCGM clone after PR merges |
 
 **Config prompts**: Protected branches (custom list), auto update check (yes/no)
 
