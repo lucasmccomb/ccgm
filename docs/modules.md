@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 71 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 72 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -132,6 +132,18 @@ This module installs the most hooks of any module. See [Hooks Reference](hooks.m
 **Config prompts**: Protected branches (custom list), auto update check (yes/no)
 
 **Template variables**: `__USERNAME__`
+
+**Dependencies**: settings
+
+---
+
+### branch-guard
+
+Hard PreToolUse gate that stops any work from being produced on a repo's default branch.
+
+**Installs**: `hooks/branch-guard.py`, `rules/branch-guard.md`, settings.json fragment
+
+**What it does**: While a repo's HEAD is on its default branch (main/master, per `origin/HEAD` with fallbacks), hard-blocks (exit 2, survives bypass mode) Edit/MultiEdit/Write/NotebookEdit and filesystem-MCP writes targeting files in that repo, plus mutating git Bash commands (`git commit`, `git add`, `git stage`, `git apply`, with `git -C` resolved). Fires before the first edit — not at commit time — so uncommitted work can never be stranded on main and destroyed by a later sync. The denial teaches the fix: `git fetch origin && git checkout -b <type>/<short-desc> origin/<default>` (type: feature/fix/chore/docs). Exempts `ALLOW_MAIN_COMMIT=1` (env or inline), in-progress rebase/merge/cherry-pick states, unborn HEAD (fresh `git init`), and repos in `~/.claude/git-flow-direct-to-main-repos.json`. Complements the `hooks` module: the advisory `<workflow-reminder>` stays, `enforce-git-workflow.py` still owns commit/push time; this closes the edit-time gap.
 
 **Dependencies**: settings
 

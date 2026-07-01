@@ -127,6 +127,19 @@
       ]
     },
     {
+      "category": "core",
+      "description": "Hard PreToolUse gate that blocks Edit/Write/NotebookEdit and mutating git commands (commit, add, stage, apply) while HEAD is on the repo's default branch. Fires before the first edit so no work is ever produced on main. Bypass-proof (exit 2); ALLOW_MAIN_COMMIT=1 escape hatch; exempts in-progress rebase/merge/cherry-pick, unborn HEAD, and direct-to-main allowlisted repos.",
+      "name": "branch-guard",
+      "source": "./branch-guard",
+      "tags": [
+        "branch-protection",
+        "enforcement",
+        "git",
+        "hooks",
+        "workflow"
+      ]
+    },
+    {
       "category": "commands",
       "description": "Slash commands for brand naming research: /brand (full naming pipeline with word exploration, domain/trademark/app store checks) and /brand-check (single-name deep verification). Optionally adds Instant Domain Search MCP server for fast domain availability checks.",
       "name": "brand-naming",

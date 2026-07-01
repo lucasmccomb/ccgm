@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit|mcp__filesystem__write_file|mcp__filesystem__edit_file|mcp__filesystem__move_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/branch-guard.py",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/branch-guard.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}

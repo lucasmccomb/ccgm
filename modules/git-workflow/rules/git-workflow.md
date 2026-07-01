@@ -95,3 +95,17 @@ This ensures the working directory reflects the latest merged state and avoids s
 **`git add packages/foo/...` will fail with exit 128 ("pathspec did not match any files") if you run it from inside another sub-package directory.** Git resolves pathspecs relative to the current working directory, not the repository root. This bites in monorepos when you start in a package subdir and stage paths from sibling packages.
 
 **Fix**: `cd` to the repo root first, or use `git -C <repo-root> add <paths>`. Same rule applies to every git subcommand that takes pathspecs (`add`, `rm`, `restore`, `checkout -- <paths>`, etc.).
+
+---
+
+# Work Starts on a Branch, Never on the Default Branch
+
+**Before the first edit** in any repo, get off the default branch:
+
+```bash
+git fetch origin && git checkout -b <type>/<short-desc> origin/main
+```
+
+with `<type>` one of `feature | fix | chore | docs`. Uncommitted work on main is destroyed the next time main is synced to origin — branch first, then work.
+
+When the **branch-guard** module is installed, this is not advisory: a PreToolUse hook hard-blocks Edit/Write/NotebookEdit and `git commit`/`add`/`stage`/`apply` while HEAD is on the default branch (escape hatch for intentional main-only ops: `ALLOW_MAIN_COMMIT=1`; rebase/merge/cherry-pick states are exempt). See `branch-guard.md` for the full contract.

@@ -1,0 +1,28 @@
+{
+  "name": "branch-guard",
+  "displayName": "Branch Guard",
+  "description": "Hard PreToolUse gate that blocks Edit/Write/NotebookEdit and mutating git commands (commit, add, stage, apply) while HEAD is on the repo's default branch. Fires before the first edit so no work is ever produced on main. Bypass-proof (exit 2); ALLOW_MAIN_COMMIT=1 escape hatch; exempts in-progress rebase/merge/cherry-pick, unborn HEAD, and direct-to-main allowlisted repos.",
+  "category": "core",
+  "scope": ["global"],
+  "dependencies": ["settings"],
+  "files": {
+    "hooks/branch-guard.py": {
+      "target": "hooks/branch-guard.py",
+      "type": "hook",
+      "template": false
+    },
+    "rules/branch-guard.md": {
+      "target": "rules/branch-guard.md",
+      "type": "rule",
+      "template": false
+    },
+    "settings.partial.json": {
+      "target": "settings.json",
+      "type": "config",
+      "merge": true,
+      "template": false
+    }
+  },
+  "tags": ["git", "hooks", "branch-protection", "enforcement", "workflow"],
+  "configPrompts": []
+}
