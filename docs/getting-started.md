@@ -151,7 +151,7 @@ Removes only CCGM-installed files (tracked via a manifest). Your personal files 
 
 ## Next steps
 
-- [Module Catalog](modules.md) - explore all 71 modules in detail
+- [Module Catalog](modules.md) - explore all 72 modules in detail
 - [Commands Reference](commands.md) - learn every slash command
 - [Hooks Reference](hooks.md) - understand the workflow automation
 - [Configuration](configuration.md) - customize CCGM after installation
