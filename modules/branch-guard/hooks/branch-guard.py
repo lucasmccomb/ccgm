@@ -30,6 +30,8 @@ ALLOWS:
   - In-progress rebase / merge / cherry-pick / revert / bisect states
     (conflict resolution and `git add` during a merge must keep working)
   - Unborn HEAD (fresh `git init` before the first commit) so bootstrap works
+  - Repos with NO origin remote — nothing to sync from means the loss
+    scenario cannot occur; scratch repos and local journals stay frictionless
   - Repos allowlisted in ~/.claude/git-flow-direct-to-main-repos.json (the
     same allowlist enforce-git-workflow.py honors, e.g. agent-log repos)
   - Files outside any git repo; non-git Bash commands; unknown tools
@@ -130,13 +132,22 @@ def current_branch(cwd: str) -> str | None:
 
 def default_branch(cwd: str) -> str | None:
     """The repo's default branch: origin/HEAD if known, else origin/{main,master},
-    else local {main,master}. None when undeterminable (fail open)."""
+    else — only when an origin remote exists — local {main,master}. None when
+    undeterminable (fail open).
+
+    Repos with NO origin remote return None on purpose: the loss scenario this
+    guard exists for is uncommitted work destroyed when the default branch is
+    hard-reset to origin. A local-only repo has nothing to sync from, so
+    scratch `git init` repos and local journals stay frictionless.
+    """
     head = _git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd)
     if head and "/" in head:
         return head.split("/", 1)[1]
     for cand in ("main", "master"):
         if _git(["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{cand}"], cwd) is not None:
             return cand
+    if _git(["remote", "get-url", "origin"], cwd) is None:
+        return None
     for cand in ("main", "master"):
         if _git(["show-ref", "--verify", "--quiet", f"refs/heads/{cand}"], cwd) is not None:
             return cand
