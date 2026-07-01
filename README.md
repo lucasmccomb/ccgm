@@ -23,7 +23,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 71 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 72 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 
@@ -131,9 +131,9 @@ For a quick install with a preset:
 | Preset | Modules | Best For |
 |--------|---------|----------|
 | **minimal** | global-claude-md, autonomy, git-workflow | Getting started |
-| **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, settings, commands-core, commands-utility, output-formatting, statusline | Most users |
-| **full** | 68 modules | Power users |
-| **team** | global-claude-md, autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, ce-review, pr-feedback, document-review, compound-knowledge (+ deps) | Teams |
+| **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, settings, commands-core, commands-utility, output-formatting, statusline | Most users |
+| **full** | 69 modules | Power users |
+| **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, ce-review, pr-feedback, document-review, compound-knowledge (+ deps) | Teams |
 
 ### Other install options
 
