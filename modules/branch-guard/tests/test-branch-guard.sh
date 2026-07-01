@@ -55,12 +55,18 @@ TMP="$(cd "${TMP}" && pwd -P)"
 
 make_repo() {
     # $1 = path, $2 = initial branch
+    # Creates a repo with a bare origin and pushed default branch: the guard
+    # only fires for origin-backed repos (a local-only repo has nothing to
+    # sync from, so the loss scenario cannot occur there).
     git init -q -b "$2" "$1"
     git -C "$1" config user.email a@b
     git -C "$1" config user.name a
     # Hermetic fixtures: don't run the user's global pre-commit hooks.
     git -C "$1" config core.hooksPath /dev/null
     (cd "$1" && touch seed && git add seed && git commit -q -m init)
+    git init -q --bare -b "$2" "$1.origin.git"
+    git -C "$1" remote add origin "$1.origin.git"
+    git -C "$1" push -q -u origin "$2"
 }
 
 # run_hook TOOL TOOL_INPUT_PYDICT CWD
@@ -106,6 +112,22 @@ R_DETACHED="${TMP}/repo-detached";   make_repo "${R_DETACHED}" main
 git -C "${R_DETACHED}" checkout -q --detach
 R_UNBORN="${TMP}/repo-unborn";       git init -q -b main "${R_UNBORN}"
 NONREPO="${TMP}/plain";              mkdir -p "${NONREPO}"
+# Local-only repo: on main, has commits, but NO origin remote.
+R_LOCAL="${TMP}/repo-local-only"
+git init -q -b main "${R_LOCAL}"
+git -C "${R_LOCAL}" config user.email a@b
+git -C "${R_LOCAL}" config user.name a
+git -C "${R_LOCAL}" config core.hooksPath /dev/null
+(cd "${R_LOCAL}" && touch seed && git add seed && git commit -q -m init)
+# Origin remote configured but never fetched (no origin/* refs): the guard
+# must still fire using the local default-branch fallback.
+R_STALE="${TMP}/repo-stale-origin"
+git init -q -b main "${R_STALE}"
+git -C "${R_STALE}" config user.email a@b
+git -C "${R_STALE}" config user.name a
+git -C "${R_STALE}" config core.hooksPath /dev/null
+(cd "${R_STALE}" && touch seed && git add seed && git commit -q -m init)
+git -C "${R_STALE}" remote add origin "${TMP}/nonexistent-remote.git"
 
 # ─── File tools: the gate fires BEFORE the first edit ────────────────
 
@@ -221,6 +243,18 @@ assert_eq "$?" "0" "Edit on detached HEAD is allowed"
 # 26. Unborn HEAD (fresh git init, no commits) → allowed so bootstrap works.
 run_hook Write "{'file_path': '${R_UNBORN}/first.txt', 'content': 'x'}" "${R_UNBORN}"
 assert_eq "$?" "0" "Write on unborn HEAD (fresh init) is allowed"
+
+# 26b. Local-only repo (no origin remote) on main → allowed: nothing to sync
+# from, so the loss scenario cannot occur; scratch repos stay frictionless.
+run_hook Edit "{'file_path': '${R_LOCAL}/seed', 'old_string': 'a', 'new_string': 'b'}" "${R_LOCAL}"
+assert_eq "$?" "0" "Edit in local-only repo (no origin) is allowed"
+run_hook Bash "{'command': 'git add .'}" "${R_LOCAL}"
+assert_eq "$?" "0" "git add in local-only repo (no origin) is allowed"
+
+# 26c. Origin configured but never fetched (no origin/* refs) → still guarded
+# via the local default-branch fallback.
+run_hook Edit "{'file_path': '${R_STALE}/seed', 'old_string': 'a', 'new_string': 'b'}" "${R_STALE}"
+assert_eq "$?" "2" "Edit on main with stale (unfetched) origin is hard-blocked"
 
 # ─── Robustness ──────────────────────────────────────────────────────
 

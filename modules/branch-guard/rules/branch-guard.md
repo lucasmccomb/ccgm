@@ -28,6 +28,7 @@ where `<type>` is one of `feature | fix | chore | docs` (e.g. `feature/add-login
 - **Any non-default branch**, including detached HEAD — work there freely.
 - **In-progress rebase / merge / cherry-pick / revert / bisect** — conflict resolution requires editing files and running `git add` while the repo may report the default branch. The guard detects these states via `$GIT_DIR` markers and stands down.
 - **Unborn HEAD** (fresh `git init` before the first commit) — a new repo's first commit legitimately lands on the default branch; bootstrap must work.
+- **Repos with no `origin` remote** — the loss scenario this guard exists for is work destroyed when the default branch is hard-reset to origin. A local-only repo has nothing to sync from, so scratch `git init` repos and local journals stay frictionless. (An origin that exists but was never fetched is still guarded, via the local main/master fallback.)
 - **Direct-to-main allowlisted repos** (`~/.claude/git-flow-direct-to-main-repos.json`, matched as substrings of the origin URL) — the same allowlist `enforce-git-workflow.py` honors, e.g. agent-log repos that commit tracking data straight to main.
 - **Read-only git** (`status`, `log`, `diff`, `fetch`, `pull`, `checkout`, `switch`, branch creation) — the escape route must never be blocked.
 - **`git push`** — already owned by `enforce-git-workflow.py`; the guard does not double-handle it.

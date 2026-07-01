@@ -11,7 +11,7 @@ Installs `branch-guard.py`, a PreToolUse hook wired (via settings.json merge) to
 
 The denial message teaches the fix: `git fetch origin && git checkout -b <type>/<short-desc> origin/<default>` with `<type>` ∈ feature/fix/chore/docs.
 
-Default-branch detection: `origin/HEAD` → `origin/main`/`origin/master` → local `main`/`master`. Fails open on any git error — the guard only denies on a positive determination.
+Default-branch detection: `origin/HEAD` → `origin/main`/`origin/master` → (only when an origin remote exists) local `main`/`master`. Fails open on any git error — the guard only denies on a positive determination.
 
 ### Exemptions (allowed even on the default branch)
 
@@ -20,6 +20,7 @@ Default-branch detection: `origin/HEAD` → `origin/main`/`origin/master` → lo
 | `ALLOW_MAIN_COMMIT=1` (env or inline Bash prefix) | Intentional main-only ops (appcast version bumps, release tagging). Same hatch as `enforce-git-workflow.py`. |
 | In-progress rebase / merge / cherry-pick / revert / bisect | Conflict resolution needs edits + `git add` mid-operation. Detected via `$GIT_DIR` markers. |
 | Unborn HEAD (fresh `git init`) | A new repo's first commit legitimately lands on the default branch. |
+| No `origin` remote | Nothing to sync from — the loss scenario cannot occur. Scratch repos and local journals stay frictionless. (Origin present but unfetched is still guarded via the local fallback.) |
 | Repos in `~/.claude/git-flow-direct-to-main-repos.json` | Same allowlist the commit-time hook honors (e.g. agent-log repos). |
 | Detached HEAD, any non-default branch | Not the default branch. |
 
