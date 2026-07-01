@@ -40,7 +40,7 @@ The installer offers five presets, or you can select modules one by one:
 | **minimal** | Core autonomy + git workflow rules | Trying CCGM for the first time |
 | **standard** | Minimal + hooks, settings, core commands | Most individual developers |
 | **team** | Standard + github-protocols, code-quality, debugging, verification | Teams with shared repos |
-| **full** | 68 modules | Power users who want everything |
+| **full** | 69 modules | Power users who want everything |
 | **cloud-agent** | Full minus desktop-only modules, plus agent orchestration | Headless cloud VMs dispatching parallel agents |
 
 See [Presets](presets.md) for detailed breakdowns.

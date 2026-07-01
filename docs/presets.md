@@ -19,11 +19,13 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **Best for**: Most individual developers. The recommended starting point.
 
-**Modules (9)**:
+**Modules (11)**:
 - Everything in **minimal**, plus:
 - `identity` - two foundational context files: soul.md and human-context.md
 - `settings` - base `settings.json` with 800+ pre-configured tool permissions
 - `hooks` - Python hooks for workflow enforcement (branch protection, commit format, auto-approval)
+- `branch-guard` - hard PreToolUse gate: no edits or git mutations while HEAD is on the default branch
+- `statusline` - custom status line for Claude Code sessions
 - `commands-core` - essential slash commands (`/commit`, `/pr`, `/cpm`, `/gs`, `/ghi`)
 - `commands-utility` - utility commands (`/cws-submit`, `/ccgm-sync`, `/user-test`)
 - `output-formatting` - copy-pasteable content goes in fenced code blocks, never blockquotes
@@ -34,8 +36,9 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **Best for**: Teams with shared repositories who want consistent practices across contributors.
 
-**Modules (19)**:
+**Modules (20)**:
 - Everything in **standard** (minus `identity` and `commands-utility`), plus:
+- `branch-guard` - hard PreToolUse gate: no edits or git mutations while HEAD is on the default branch
 - `github-protocols` - issue-first workflow, PR conventions, label taxonomy, code review standards
 - `code-quality` - code standards, testing requirements, error handling, security, build verification
 - `systematic-debugging` - structured 4-phase debugging methodology
@@ -49,7 +52,7 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **Best for**: Power users who want the complete CCGM experience, including multi-agent coordination, brand research, and tech-specific guides.
 
-**Modules (68)**: Every stable module — `full` is defined as the set of all modules whose `module.json` status is not `beta` or `deprecated`. This includes **autoheal** (continuous self-improvement; opt-in real-time alerts and auto-apply) and `cloud-dispatch`. The only modules omitted are the beta ones (`plugin-marketplace`, `relevance-injection`) and the deprecated `agent-manager`; install those individually via the module selector if you need them.
+**Modules (69)**: Every stable module — `full` is defined as the set of all modules whose `module.json` status is not `beta` or `deprecated`. This includes **autoheal** (continuous self-improvement; opt-in real-time alerts and auto-apply) and `cloud-dispatch`. The only modules omitted are the beta ones (`plugin-marketplace`, `relevance-injection`) and the deprecated `agent-manager`; install those individually via the module selector if you need them.
 
 **What you get**: The full suite. Includes multi-agent workflows, planning frameworks, tech-specific patterns (Cloudflare, Supabase, Tailwind, shadcn, MCP development), specialized commands, and the autoheal observability loop with three opt-in toggles (`/autoheal-toggle realtime|autoapply|webhook`).
 
@@ -57,7 +60,7 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **Best for**: Running CCGM on headless cloud VMs that dispatch parallel agents to work on GitHub issues. Includes the `cloud-dispatch` orchestration module plus the review and authoring skills agents lean on most.
 
-**Modules (53)**: Curated for headless cloud agents — a headless-oriented selection drawn from the stable module set, including `cloud-dispatch` (Hetzner Cloud VM provisioning for parallel GitHub-issue work) and persona-relevant skills (`ce-review`, `pr-feedback`, `document-review`, `skill-authoring`, `rule-authoring`, `agent-native`, `git-worktrees`, `ship-readiness`, with their dependencies). The deprecated `agent-manager` (tmux-based dashboard) is not included; install it individually if you still need it.
+**Modules (54)**: Curated for headless cloud agents — a headless-oriented selection drawn from the stable module set, including `cloud-dispatch` (Hetzner Cloud VM provisioning for parallel GitHub-issue work) and persona-relevant skills (`ce-review`, `pr-feedback`, `document-review`, `skill-authoring`, `rule-authoring`, `agent-native`, `git-worktrees`, `ship-readiness`, with their dependencies). The deprecated `agent-manager` (tmux-based dashboard) is not included; install it individually if you still need it.
 
 **What you get**: The cloud-agent preset with cloud-dispatch commands (`/dispatch`, `/dispatch-status`, `/dispatch-stop`, `/vm-manage`). Intended for machines that provision cloud VMs and launch autonomous agents, not day-to-day laptop use.
 
