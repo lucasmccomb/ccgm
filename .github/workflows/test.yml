@@ -61,6 +61,22 @@ jobs:
             bash "$t"
           done
 
+      - name: Install pytest
+        run: python3 -m pip install pytest
+
+      - name: Module unit suites (Python + shell)
+        run: |
+          set -e
+          # Exercises every module's own test-*.py / test-*.sh -- previously
+          # only reachable by a human/agent running them manually (#773).
+          # Runs after "Hooks test suites" above so ~/.claude/lib is already
+          # staged for the hooks/branch-guard suites this glob re-covers.
+          python3 -m pytest modules/ -q
+          for t in modules/*/tests/test-*.sh; do
+            echo "=== Running $t ==="
+            bash "$t"
+          done
+
   test-macos:
     runs-on: macos-latest
     steps:
@@ -111,6 +127,22 @@ jobs:
           mkdir -p "$HOME/.claude/lib"
           cp modules/hooks/lib/*.py "$HOME/.claude/lib/"
           for t in modules/hooks/tests/*.sh modules/branch-guard/tests/*.sh; do
+            echo "=== Running $t ==="
+            bash "$t"
+          done
+
+      - name: Install pytest
+        run: python3 -m pip install pytest
+
+      - name: Module unit suites (Python + shell)
+        run: |
+          set -e
+          # Exercises every module's own test-*.py / test-*.sh -- previously
+          # only reachable by a human/agent running them manually (#773).
+          # Runs after "Hooks test suites" above so ~/.claude/lib is already
+          # staged for the hooks/branch-guard suites this glob re-covers.
+          python3 -m pytest modules/ -q
+          for t in modules/*/tests/test-*.sh; do
             echo "=== Running $t ==="
             bash "$t"
           done

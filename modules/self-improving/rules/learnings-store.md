@@ -21,22 +21,37 @@ MEMORY.md still exists as an index and human-readable rendered view, but the JSO
 
 ## Storage Layout
 
+`~/.claude/learnings/` is a git repository (see "Versioning & Sync" below):
+
 ```
 ~/.claude/learnings/
-    config.json                 # Cross-project opt-in + tunables
+    config.json                     # Cross-project opt-in + tunables
+    .gitattributes                  # *.jsonl merge=union
     {project-slug}/
-        learnings.jsonl         # Append-only per project
+        learnings.jsonl             # Legacy pre-shard file -- read-only from
+                                     # the current write path's perspective;
+                                     # still folded on every read for
+                                     # backward compatibility, but no new
+                                     # writes land here
+        agents/
+            {agent_id}.jsonl        # Per-agent shard -- ALL new writes
+                                     # (add/verify/contradict/supersede/
+                                     # deprecate) land in the writer's own
+                                     # shard, never learnings.jsonl
     _global/
-        learnings.jsonl         # Learnings that apply across projects
+        agents/
+            {agent_id}.jsonl        # Promotion-only -- see "_global promotion"
 ```
 
-The project slug is auto-derived from the git remote (`{owner}_{repo}` sanitized). Override via `CCGM_LEARNINGS_PROJECT` or `--project`.
+The project slug is auto-derived from the git remote (`{owner}_{repo}` sanitized). Override via `CCGM_LEARNINGS_PROJECT` or `--project`. `agent_id` resolves via `CCGM_AGENT_ID` env → `AGENT_ID` in `.env.clone` → `solo`.
 
 ---
 
 ## Schema
 
-Each line is a JSON object:
+Every line on disk is an **op-event** (`add`/`verify`/`contradict`/`supersede`/`deprecate`); the table below is the **projected, read-time view** returned by `load_all()`/`search()` — the shape callers actually consume, not the physical write format. Writing a raw line by hand is unsupported; always go through `ccgm-learnings-log` (or the store's Python API), which emits the correct op-event and lets the projection derive `uses`/`contradictions`/`deprecated`/`superseded_by` from the op chain.
+
+Each returned entry is a JSON object:
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|

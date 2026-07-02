@@ -5,7 +5,7 @@
 # Discovers and runs:
 #   - Python tests (modules/*/tests/test_*.py) via `python3 -m pytest`
 #     (handles both unittest.TestCase and pytest assertion-style tests)
-#   - Shell tests (modules/*/tests/test_*.sh) via `bash`
+#   - Shell tests (modules/*/tests/test-*.sh) via `bash`
 #
 # Exits 0 if all suites pass, 1 otherwise.
 #
@@ -56,7 +56,7 @@ while IFS= read -r -d '' test_script; do
         SH_STATUS=1
     fi
     rm -f /tmp/ccgm-test-$$.log
-done < <(find modules -path '*/tests/test_*.sh' -type f -print0 2>/dev/null)
+done < <(find modules -path '*/tests/test-*.sh' -type f -print0 2>/dev/null)
 
 if [ "$SH_COUNT" -eq 0 ]; then
     echo "  (no shell unit tests found)"

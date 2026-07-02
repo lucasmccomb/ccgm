@@ -6,11 +6,13 @@
 # per-script pass/fail summary, and exits 0 only if every script passed.
 #
 # Why a per-module aggregator: the repo-level `tests/run-all.sh` runs
-# top-level structural tests, and `tests/run-unit-tests.sh` discovers
-# `test_*.sh` under `modules/*/tests/` (underscore prefix, pytest-style).
-# Autoheal's tests use the `test-*.sh` (dash) naming. This aggregator
-# bridges the gap so contributors can run "every autoheal test" with
-# one command, without having to discover all the test files.
+# top-level structural tests, and `tests/run-unit-tests.sh` discovers every
+# module's `test-*.sh` (dash) suites repo-wide (fixed in #773 -- it
+# previously looked for a `test_*.sh` underscore pattern that matched
+# nothing anywhere in this repo). This aggregator predates that fix and
+# stays useful as a scoped convenience: run "every autoheal test, and only
+# autoheal's" with one command, without pulling in every other module's
+# suites.
 #
 # Run: bash modules/autoheal/tests/run-all.sh
 

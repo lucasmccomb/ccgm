@@ -18,7 +18,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. The **self-improving** module installs 2 additional hooks and the **branch-guard** module 1. Total: 18 hooks across 3 modules (the **autoheal** module's observational hooks are documented in their own section below).
+The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. The **self-improving** module installs 3 additional hooks and the **branch-guard** module 1. Total: 19 hooks across 3 modules (the **autoheal** module's observational hooks are documented in their own section below).
 
 ---
 
@@ -245,6 +245,22 @@ Reminds Claude to capture unwritten patterns before context compaction compresse
 **When it fires**: Before context compression begins. By the time PostCompact fires, session context is already compressed and learnings may be lost.
 
 **Output**: `<precompact-reflection>` instruction prompting Claude to run the reflection checklist or invoke `/reflect`.
+
+---
+
+### learnings-inject.py
+
+**Type**: SessionStart (matcher: `startup`)
+**Module**: self-improving
+**Can block**: No (context injection only)
+
+Opt-in, prefix-cache-safe injection of the current project's top-ranked durable learnings at fresh session start. Strict no-op unless `CCGM_LEARNINGS_INJECT` is truthy AND the event fires with `source == "startup"` (never on resume/compaction — re-ranking and re-rendering per turn is the exact per-turn re-injection pattern this hook exists to avoid).
+
+**Resolution**: Project slug via `learnings_store.detect_project_slug()` (never `session-history`'s `repo_detect.py` — the two compute different strings for the same repo). Selection reuses `learnings_store.search()`'s own ranking/decay/token-budget; conflicted rows (`conflict: true`, competing supersedes) are suppressed before rendering rather than handed to an agent as settled truth.
+
+**Output**: `<ccgm-learnings-injection>` block, each entry rendered with the same age/verification wrapper `ccgm-learnings-search`'s preamble output uses.
+
+**Opt in**: Set `CCGM_LEARNINGS_INJECT=true` in your environment.
 
 ---
 

@@ -653,17 +653,18 @@ SSH access to a configured remote server.
 
 ### self-improving
 
-Meta-learning system with automated reflection triggers, commands, and hooks.
+Meta-learning system with automated reflection triggers, commands, and hooks, backed by a schema-validated JSONL learnings store.
 
-**Installs**: `rules/self-improving.md`, `commands/reflect.md`, `commands/consolidate.md`, `hooks/reflection-trigger.py`, `hooks/precompact-reflection.py`, `settings.partial.json`
+**Installs**: `rules/self-improving.md`, `rules/learnings-store.md`, `commands/reflect.md`, `commands/consolidate.md`, `commands/retro.md`, `hooks/reflection-trigger.py`, `hooks/precompact-reflection.py`, `hooks/learnings-inject.py`, `lib/learnings_store.py`, `bin/ccgm-learnings-log`, `bin/ccgm-learnings-search`, `bin/ccgm-learnings-sync`, `settings.partial.json`
 
-**What it does**: Combines rules, commands, and hooks to create an active self-improvement loop:
+**What it does**: Combines rules, commands, hooks, and a durable store to create an active self-improvement loop:
 
 - **Prescriptive triggers**: Reflection fires at specific moments (after PR merge, after 3+ debugging attempts, before context compaction, after user corrections)
 - **Reflection checklist**: Mechanical checklist walked at each trigger point to identify patterns worth capturing
-- **Commands**: `/reflect` (inline structured reflection) and `/consolidate` (memory maintenance via subagent)
-- **Hooks**: PostToolUse hook injects reflection reminder after `gh pr merge` and `gh issue close`; PreCompact hook reminds agent to capture patterns before context compression
-- **Cross-module integration**: Works with systematic-debugging (three-strike capture) and common-mistakes (living document)
+- **Learnings store**: `lib/learnings_store.py` -- append-only, per-agent-sharded JSONL with confidence decay, staleness detection, prompt-injection sanitization, supersede chains, and a promotion-only `_global` scope. `~/.claude/learnings/` is a git repo (`ccgm-learnings-sync`) for versioning, rollback, and cross-machine sync.
+- **Commands**: `/reflect` (inline structured reflection, dual-writes to the JSONL store), `/consolidate` (delta-first store maintenance via subagent -- supersede/verify/contradict over whole-entry rewrites), `/retro` (windowed retrospective surfacing candidate learnings)
+- **Hooks**: PostToolUse hook injects a reflection reminder after `gh pr merge` and `gh issue close`; PreCompact hook reminds the agent to capture patterns before context compression; opt-in SessionStart hook (`learnings-inject.py`, `CCGM_LEARNINGS_INJECT=true`) surfaces the project's top-ranked learnings at fresh session start
+- **Cross-module integration**: Works with systematic-debugging (three-strike capture), common-mistakes (living document), and `dreaming` (the nightly mining pipeline that proposes changes to this same store)
 
 **Dependencies**: None (soft references to systematic-debugging, common-mistakes)
 
@@ -782,9 +783,9 @@ Continuous self-improvement loop: capture hook events, daily transcript analysis
 
 Nightly, cost-capped service that mines session transcripts for cross-session failure patterns and proposes evidence-tagged memory-store changes behind a human gate. `autoheal`'s capture-analyze-propose pipeline, retargeted at transcripts instead of permission events.
 
-**Installs**: `lib/transcript_miner.py`, `lib/evidence-bundle-schema.json`
+**Installs**: `rules/dreaming.md`; 6 bin scripts (`dream-analyze.sh`, `dream-digest.sh`, `dream-daily.sh`, `dream-reconcile.sh`, `dream-eval.sh`, `dream-install.sh`); 3 commands (`/dream`, `/dream-digest`, `/dream-apply`); lib files for the transcript miner, map/reduce analyzer, apply path, auto-memory reconciliation, evidence-bundle and proposal JSON schemas, prompt templates, and LaunchAgent/cron templates; 9 eval seed tasks plus fixtures under `eval/tasks/`.
 
-**What it does**: Ships incrementally. This landing provides the deterministic transcript miner: `discover()` enumerates transcript files under `~/.claude/projects/*/` by re-deriving each transcript's owning learnings-store slug from its own `cwd` field (never from a directory-name heuristic); `mine()` extracts friction events (tool errors, hook errors, prevented-continuation), user-correction sequences, PR links, and token/cache economics from one transcript; `cluster()` groups events by `(kind, tool, command prefix)`; `budget()` trims to a token cap without ever dropping a friction cluster entirely; `schema_canary()` fails loud if the undocumented transcript schema appears to have drifted rather than silently mining zero friction. Every excerpt is redacted for both secrets (`hook_utils.redact_secrets`) and PII (this module's own `redact_pii`, covering email/phone/address) before it is stored anywhere. No network calls, no LLM calls, no scheduling yet -- the map-reduce analyzer, apply path, scheduler, and eval harness land in later epics of the same module.
+**What it does**: The deterministic transcript miner (`discover()`/`mine()`/`cluster()`/`budget()` plus a schema-drift canary) turns session transcripts into a bounded, redacted (secrets + PII) evidence bundle, re-deriving each transcript's owning learnings-store slug from its own `cwd` field rather than a directory-name heuristic. The map-reduce analyzer (`dream_analyze.py`, direct Anthropic API over `curl` -- no nested agent runtime) turns that evidence into per-change proposals against the `self-improving` learnings store, written to `~/.claude/dreaming/proposals/{date}.jsonl` and rendered as a digest (`/dream-digest`). `/dream-apply` is the only write path from a proposal into the store, including the one path a `_global` proposal can be promoted through. A nightly `launchd` LaunchAgent (`dream-install.sh`) chains analyze -> digest -> reconcile -> auto-apply -> retention; auto-apply is default OFF (`auto_apply_counters`), eval-gated, and restricted to `verify` ops only -- never add/supersede/deprecate/contradict. A read-only reconciliation report (`reconcile_automemory.py`) compares Claude Code's own harness auto-memory (`~/.claude/projects/*/memory/`) against the learnings store and appends import-candidate/contradiction findings to the digest, never writing to auto-memory itself. The memory eval harness (`eval/`) runs a with/without-memory A/B (plus a full-context-dump third arm) across 9 seed tasks -- uplift, canary, contradiction, and one end-to-end task exercising the analyzer's own mined output -- with four-bucket outcome classification; `dream-eval.sh --gate` is the regression gate auto-apply must pass.
 
 **Dependencies**: hooks, self-improving, session-history
 
