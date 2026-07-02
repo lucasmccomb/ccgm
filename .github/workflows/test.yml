@@ -61,21 +61,6 @@ jobs:
             bash "$t"
           done
 
-      - name: Install pytest
-        run: python3 -m pip install pytest
-
-      - name: Module unit suites (Python + shell)
-        run: |
-          # Exercises every module's own test-*.py / test-*.sh, including
-          # suites nested under modules/*/tests/ subdirectories (e.g.
-          # modules/commands-extra/skills/audit/tests/) -- previously only
-          # reachable by a human/agent running them manually (#773). Reuses
-          # tests/run-unit-tests.sh (recursive `find`) rather than a
-          # hand-rolled glob so the two never drift out of sync. Runs after
-          # "Hooks test suites" above so ~/.claude/lib is already staged
-          # for the hooks/branch-guard suites this also re-covers.
-          bash tests/run-unit-tests.sh
-
   test-macos:
     runs-on: macos-latest
     steps:
@@ -129,18 +114,3 @@ jobs:
             echo "=== Running $t ==="
             bash "$t"
           done
-
-      - name: Install pytest
-        run: python3 -m pip install pytest
-
-      - name: Module unit suites (Python + shell)
-        run: |
-          # Exercises every module's own test-*.py / test-*.sh, including
-          # suites nested under modules/*/tests/ subdirectories (e.g.
-          # modules/commands-extra/skills/audit/tests/) -- previously only
-          # reachable by a human/agent running them manually (#773). Reuses
-          # tests/run-unit-tests.sh (recursive `find`) rather than a
-          # hand-rolled glob so the two never drift out of sync. Runs after
-          # "Hooks test suites" above so ~/.claude/lib is already staged
-          # for the hooks/branch-guard suites this also re-covers.
-          bash tests/run-unit-tests.sh
