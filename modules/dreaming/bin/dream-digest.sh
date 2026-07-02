@@ -35,6 +35,9 @@
 
 set -u
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 DATE_ARG="${1:-}"
 
 if [ -n "${DATE_ARG}" ]; then
@@ -72,9 +75,23 @@ OUTPUT="$(
     CCGM_DIGEST_YESTERDAY_PROPOSALS_FILE="${PROPOSALS_DIR}/${YESTERDAY}.jsonl" \
     CCGM_DIGEST_RUN_SUMMARY_FILE="${STATE_DIR}/runs/${TARGET_DATE}.json" \
     CCGM_DIGEST_CANARY_FILE="${STATE_DIR}/canary.json" \
+    CCGM_DIGEST_MODULE_ROOT="${MODULE_ROOT}" \
     python3 - <<'PYEOF'
 import json
 import os
+import sys
+
+# Render-time defense-in-depth for evidence excerpts (#769 Stage-2 P1 #2):
+# reuse the SAME sanitizer the write path already applies, via the
+# module's established cross-module import helper, rather than
+# re-deriving the injection patterns here. See finalize_proposal() in
+# lib/dream_analyze.py for the write-path sanitization this backstops.
+sys.path.insert(0, os.path.join(os.environ["CCGM_DIGEST_MODULE_ROOT"], "lib"))
+import transcript_miner as tm  # noqa: E402  (sibling module, same lib/ dir)
+
+learnings_store = tm._import_sibling_module(  # noqa: SLF001
+    "self-improving", "learnings_store", "sanitize_content for render-time excerpt neutralization"
+)
 
 target_date = os.environ["CCGM_DIGEST_TARGET_DATE"]
 yesterday = os.environ["CCGM_DIGEST_YESTERDAY"]
@@ -109,7 +126,10 @@ def load_json(path, default):
 proposals = load_jsonl(os.environ["CCGM_DIGEST_PROPOSALS_FILE"])
 yesterday_proposals = load_jsonl(os.environ["CCGM_DIGEST_YESTERDAY_PROPOSALS_FILE"])
 run_summary = load_json(os.environ["CCGM_DIGEST_RUN_SUMMARY_FILE"], None)
-canary = load_json(os.environ["CCGM_DIGEST_CANARY_FILE"], {"active_incidents": {}, "untested_versions_observed": {}})
+canary = load_json(
+    os.environ["CCGM_DIGEST_CANARY_FILE"],
+    {"active_incidents": {}, "untested_versions_observed": {}, "reduce_failures": {}},
+)
 
 out = []
 out.append(f"# Dreaming digest — {target_date}")
@@ -118,7 +138,15 @@ out.append("")
 # --- Durable canary banner (adrev-014 + #753 handoff) ----------------------
 active_incidents = canary.get("active_incidents") or {}
 untested_versions = canary.get("untested_versions_observed") or {}
-if active_incidents or untested_versions:
+# Reduce-phase parse failures (#769 Stage-2 P1 #1): main() aborts without
+# writing proposals or advancing watermarks when the reduce model never
+# returns parseable JSON, even after the retry nudge. That abort is
+# otherwise only a stderr line an unattended launchd job will not
+# surface -- record_reduce_failure_incident() writes it into this SAME
+# durable file so it gets the same loud, persists-until-acknowledged
+# banner as a schema_canary incident.
+reduce_failures = canary.get("reduce_failures") or {}
+if active_incidents or untested_versions or reduce_failures:
     out.append("## ⚠️ Canary banner (durable — shown until acknowledged)")
     out.append("")
     if active_incidents:
@@ -132,6 +160,12 @@ if active_incidents or untested_versions:
         out.append("")
         for version, count in sorted(untested_versions.items()):
             out.append(f"- `{version}` — {count} session(s)")
+        out.append("")
+    if reduce_failures:
+        out.append("**Reduce-phase parse failures (mined evidence NOT consumed, watermark NOT advanced):**")
+        out.append("")
+        for slug, info in sorted(reduce_failures.items()):
+            out.append(f"- `{slug}` (last failed {info.get('date', '?')}): {info.get('detail', '')}")
         out.append("")
 
 # --- Run summary -------------------------------------------------------------
@@ -167,17 +201,25 @@ def render_evidence(evidence):
     for e in (evidence or [])[:3]:
         sid = e.get("session_id") or "(unknown session)"
         excerpt = e.get("excerpt") or ""
+        # Render-time defense-in-depth (#769 Stage-2 P1 #2): the excerpt
+        # was already sanitized at the proposal write path
+        # (finalize_proposal), but this renderer must not assume every row
+        # on disk went through that path -- neutralize again here so a
+        # stale/hand-edited/pre-fix proposals file can never surface a
+        # live injection pattern in the one artifact a human (or a
+        # summarizing agent) actually reads.
+        if excerpt:
+            excerpt = learnings_store.sanitize_content(excerpt)
         lines.append(f"  - `{sid}`: {excerpt}")
     return lines
 
 
 def render_proposal(p):
-    kind = p.get("kind", "(no-kind)")
     pid = p.get("id", "(no-id)")
     confidence = p.get("confidence", "?")
     prevalence = p.get("prevalence") or {}
     lines = [
-        f"#### {kind} — `{pid}`",
+        f"##### `{pid}`",
         "",
         f"- **status**: {p.get('status', 'pending')}",
         f"- **confidence**: {confidence}/10",
@@ -213,16 +255,25 @@ else:
     out.append(f"_{len(proposals)} proposal(s), {pending} pending._")
     out.append("")
 
+    # Grouped by project, then by kind (#769 Stage-1 concern 2: plan.md
+    # §5 Epic 3 specifies "proposals grouped by project/kind" -- kind was
+    # previously shown per-card only, not as its own grouping dimension).
     grouped = {}
     for p in proposals:
-        grouped.setdefault(p.get("project", "(unknown)"), []).append(p)
+        key = (p.get("project", "(unknown)"), p.get("kind", "(no-kind)"))
+        grouped.setdefault(key, []).append(p)
 
-    for project in sorted(grouped):
+    projects = sorted({proj for proj, _kind in grouped})
+    for project in projects:
         out.append(f"### {project}")
         out.append("")
-        rows = sorted(grouped[project], key=lambda p: (-(int(p.get("confidence") or 0)), p.get("id", "")))
-        for p in rows:
-            out.append(render_proposal(p))
+        kinds = sorted({k for (proj, k) in grouped if proj == project})
+        for kind in kinds:
+            out.append(f"#### {kind}")
+            out.append("")
+            rows = sorted(grouped[(project, kind)], key=lambda p: (-(int(p.get("confidence") or 0)), p.get("id", "")))
+            for p in rows:
+                out.append(render_proposal(p))
 
 # --- Yesterday's applied/rejected tally --------------------------------------
 out.append("## Yesterday's tally")

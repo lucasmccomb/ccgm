@@ -352,13 +352,17 @@ def _write_json_atomic(path: Path, obj: Any) -> None:
     tmp.replace(path)
 
 
+def _default_canary_state() -> dict[str, Any]:
+    return {"active_incidents": {}, "untested_versions_observed": {}, "reduce_failures": {}}
+
+
 def record_canary_incident(slug: str, date: str, detail: str) -> None:
     """Durable marker (adrev-014 + the #753 handoff note): a schema_canary
     firing is easy to miss in a log line swallowed by an exit-tolerant
     chain (Epic 6's dream-daily.sh). Keyed by slug (latest incident wins)
     so a persistently-drifted slug does not pile up duplicate rows -- the
     banner stays loud until Epic 6 adds an explicit ack/clear action."""
-    state = _read_json(canary_state_path(), {"active_incidents": {}, "untested_versions_observed": {}})
+    state = _read_json(canary_state_path(), _default_canary_state())
     state.setdefault("active_incidents", {})
     state["active_incidents"][slug] = {"date": date, "detail": detail}
     state["last_updated"] = _utc_now_iso()
@@ -368,10 +372,26 @@ def record_canary_incident(slug: str, date: str, detail: str) -> None:
 def record_untested_versions(untested_versions: list[str]) -> None:
     if not untested_versions:
         return
-    state = _read_json(canary_state_path(), {"active_incidents": {}, "untested_versions_observed": {}})
+    state = _read_json(canary_state_path(), _default_canary_state())
     state.setdefault("untested_versions_observed", {})
     for v in untested_versions:
         state["untested_versions_observed"][v] = int(state["untested_versions_observed"].get(v, 0)) + 1
+    state["last_updated"] = _utc_now_iso()
+    _write_json_atomic(canary_state_path(), state)
+
+
+def record_reduce_failure_incident(slug: str, date: str, detail: str) -> None:
+    """Durable marker for a reduce-phase parse failure (#769 Stage-2 P1
+    #1): when the reduce model never returns parseable JSON even after the
+    retry nudge, main() aborts WITHOUT writing proposals or advancing
+    watermarks for the planned slugs -- an abort that would otherwise only
+    be visible as a stderr line an unattended launchd job never surfaces.
+    Recorded in the SAME durable-incident file dream-digest.sh already
+    renders as a loud banner (mirrors record_canary_incident's shape and
+    per-slug, latest-incident-wins keying)."""
+    state = _read_json(canary_state_path(), _default_canary_state())
+    state.setdefault("reduce_failures", {})
+    state["reduce_failures"][slug] = {"date": date, "detail": detail}
     state["last_updated"] = _utc_now_iso()
     _write_json_atomic(canary_state_path(), state)
 
@@ -808,7 +828,14 @@ def run_reduce(
     api_url: str,
     offline_dir: Path | None,
     instructions: str | None,
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
+) -> tuple[list[dict[str, Any]], dict[str, int], bool]:
+    """Returns (raw_proposals, usage, ok). `ok` is False ONLY when the
+    reduce phase never obtained a parseable {"proposals": [...]} object,
+    even after the one JSON-only retry nudge (#769 Stage-2 P1 #1) -- the
+    caller MUST treat that as a failed run (no watermark advance, no
+    proposals write) rather than a legitimate zero-proposal night, since
+    both attempts fail identically and deterministically when the model's
+    output truncates against max_output_tokens."""
     max_output_tokens = int(cfg.get("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS))
     user_obj: dict[str, Any] = {
         "map_candidates": [{"slug": slug, "candidates": cands} for slug, cands in map_results.items()],
@@ -851,11 +878,15 @@ def run_reduce(
         total_usage["input_tokens"] += usage2.get("input_tokens", 0)
         total_usage["output_tokens"] += usage2.get("output_tokens", 0)
         if parsed is None or not isinstance(parsed.get("proposals"), list):
-            print("dream_analyze: reduce response still unparseable after retry; producing 0 proposals", file=sys.stderr)
-            return [], total_usage
+            print(
+                "dream_analyze: reduce response still unparseable after retry; the mined+mapped "
+                "evidence for this run is NOT consumed (see the reduce-failure handling in main())",
+                file=sys.stderr,
+            )
+            return [], total_usage, False
 
     raw_proposals = [p for p in parsed["proposals"] if isinstance(p, dict)]
-    return raw_proposals, total_usage
+    return raw_proposals, total_usage, True
 
 
 # ---------------------------------------------------------------------------
@@ -896,7 +927,17 @@ def finalize_proposal(
         if target_id not in store_by_id.get(project, {}):
             return None, f"target_id {target_id!r} does not resolve in the store projection for project {project!r}"
     else:
-        target_id = None  # learning_add never carries a target
+        # learning_add never carries a target, so it never gets the
+        # project-membership check the other four kinds get for free via
+        # target_id resolution above (#769 Stage-1 concern 1 / arch-1
+        # defense-in-depth: "never let a wrong slug reach a proposal" was
+        # enforced by prompt instruction alone for this one kind). Reject
+        # any project the reduce phase was not actually given a store
+        # projection for -- store_by_id's keys are EXACTLY
+        # planned_slugs union {GLOBAL_SLUG} (see build_store_projection()).
+        target_id = None
+        if project not in store_by_id:
+            return None, f"learning_add project {project!r} is not a known project scope"
 
     if kind in KINDS_REQUIRING_CONTENT:
         if not isinstance(content, str) or not content.strip():
@@ -918,7 +959,23 @@ def finalize_proposal(
     evidence = []
     for e in evidence_raw:
         if isinstance(e, dict) and isinstance(e.get("excerpt"), str) and e["excerpt"].strip():
-            evidence.append({"session_id": e.get("session_id"), "excerpt": e["excerpt"]})
+            # sec-3 (#769 Stage-2 P1): the prompts instruct the reduce
+            # model to reuse `excerpt` verbatim -- already redacted
+            # upstream by the transcript miner -- rather than paraphrase
+            # it like content/justification, so this was previously the
+            # one written proposal field that skipped sanitize_content().
+            # That exemption was enforced by prompt compliance alone, with
+            # no code-level check that a written excerpt is actually
+            # byte-identical to its source, and the reduce phase is a
+            # second LLM hop that re-emits its own evidence array. Treat
+            # it like every other free-text field at the write path; a
+            # genuinely verbatim, already-redacted excerpt is unaffected
+            # (sanitize_content is a no-op unless it matches an
+            # injection-shaped pattern).
+            evidence.append({
+                "session_id": e.get("session_id"),
+                "excerpt": learnings_store.sanitize_content(e["excerpt"]),
+            })
     if not evidence:
         return None, "evidence contained no usable excerpts"
 
@@ -949,7 +1006,34 @@ def finalize_proposal(
     sanitized_content = learnings_store.sanitize_content(content) if content else None
     sanitized_justification = learnings_store.sanitize_content(justification)
 
-    key_basis = learnings_store.content_sha256(sanitized_content) if sanitized_content else (target_id or "")
+    if sanitized_content:
+        # learning_add / learning_supersede: the proposed content itself is
+        # the correct dedup key -- a re-run with the SAME proposed change
+        # collides with itself (idempotent), and a DIFFERENT proposed
+        # change for the same target gets its own fingerprint via its own
+        # content hash.
+        key_basis = learnings_store.content_sha256(sanitized_content)
+    else:
+        # learning_verify / learning_contradict / learning_deprecate carry
+        # no content -- they act on target_id alone. A bare target_id key
+        # (#769 Stage-2 P1) permanently defines the FIRST verify/
+        # contradict fingerprint ever written for a target: every later
+        # night's re-verification or re-contradiction of the same target,
+        # however different its supporting evidence, collides with that
+        # first row and is silently deduped forever across every prior
+        # proposals/*.jsonl file (existing_fingerprints() has no expiry) --
+        # the opposite of the store's own repeated-reinforcement design
+        # (self-improving/rules/learnings-store.md: "Each successful
+        # reuse... slightly boosts effective confidence and refreshes
+        # last_verified"). Fold in a component that varies with the
+        # supporting evidence (distinct session ids + the sanitized
+        # justification) so an identical re-run of the SAME inputs still
+        # dedupes, but genuinely new evidence produces a new fingerprint.
+        evidence_session_ids = sorted({e["session_id"] for e in evidence if e.get("session_id")})
+        evidence_key = learnings_store.content_sha256(
+            "|".join(evidence_session_ids) + "\n" + sanitized_justification
+        )
+        key_basis = f"{target_id or ''}:{evidence_key}"
     fingerprint = _compute_fingerprint(kind, project, key_basis)
 
     row: dict[str, Any] = {
@@ -1132,6 +1216,14 @@ def main(argv: list[str] | None = None) -> int:
 
     api_url = os.environ.get("CCGM_DREAMING_API_URL", DEFAULT_API_URL)
 
+    # Neither this loop's run_map() call nor run_reduce() below is wrapped
+    # in a try/except around ApiCallError: a transport failure partway
+    # through aborts main() before the watermark-advance loop, discarding
+    # already-paid-for map results with no partial credit (a retry re-mines
+    # slug 1 from scratch). This is a deliberate fail-safe-over-fail-lossy
+    # tradeoff (#769 Stage-2 Recommend, accepted as-is) -- it never falsely
+    # advances a watermark, unlike the reduce-parse-failure case handled
+    # below, so it does not share that case's data-loss property.
     map_results: dict[str, list[dict[str, Any]]] = {}
     total_input_tokens = 0
     total_output_tokens = 0
@@ -1152,6 +1244,7 @@ def main(argv: list[str] | None = None) -> int:
     total_candidates = sum(len(c) for c in map_results.values())
     raw_proposals: list[dict[str, Any]] = []
     reduce_calls = 0
+    reduce_ok = True
     store_payload: dict[str, list[dict[str, Any]]] = {}
     store_by_id: dict[str, dict[str, dict[str, Any]]] = {}
 
@@ -1164,7 +1257,7 @@ def main(argv: list[str] | None = None) -> int:
             except OSError:
                 instructions = None
 
-        raw_proposals, usage = run_reduce(
+        raw_proposals, usage, reduce_ok = run_reduce(
             map_results, store_payload, cfg=cfg, reduce_system_prompt=reduce_system_prompt,
             api_key=api_key, api_url=api_url, offline_dir=offline_dir, instructions=instructions,
         )
@@ -1179,6 +1272,54 @@ def main(argv: list[str] | None = None) -> int:
         # consistent to look up against, even though there is nothing to
         # reduce -- keeps the code path uniform for the (empty) loop below.
         store_by_id = {}
+
+    if not reduce_ok:
+        # Reduce phase never produced parseable output, even after the
+        # retry nudge (#769 Stage-2 P1 #1: both attempts fail identically
+        # and deterministically when the model's output truncates against
+        # max_output_tokens). The mined + mapped evidence for every
+        # planned slug is real, already-paid-for work; consuming it
+        # requires a parseable reduce response, so on failure:
+        #   - do NOT advance any watermark (the mined evidence would be
+        #     permanently lost -- it would never be re-mined);
+        #   - do NOT write or overwrite the target day's proposals file
+        #     (an existing valid file, e.g. under --force-day, must
+        #     survive a failed re-run instead of being silently wiped);
+        #   - record a durable, digest-visible marker so the loss is
+        #     visible instead of a stderr line an unattended launchd job
+        #     will not surface;
+        #   - exit non-zero.
+        detail = "reduce phase produced no parseable proposal array, even after the retry nudge"
+        for slug in planned_slugs:
+            record_reduce_failure_incident(slug, today, detail)
+        run_summary = {
+            "date": today,
+            "generated_at": _utc_now_iso(),
+            "offline": offline_dir is not None,
+            "candidate_slugs": candidate_slugs,
+            "slugs_considered": list(bundles.keys()),
+            "slugs_planned": planned_slugs,
+            "skip_reasons": skip_reasons,
+            "map_calls": map_calls,
+            "reduce_calls": reduce_calls,
+            "proposals_written": 0,
+            "proposals_rejected": 0,
+            "proposals_deduped": 0,
+            "reduce_failed": True,
+            "reduce_failure_detail": detail,
+            "cost_breakdown": cost_breakdown,
+            "actual_input_tokens": total_input_tokens,
+            "actual_output_tokens": total_output_tokens,
+            "untested_versions": [],
+        }
+        runs_dir().mkdir(parents=True, exist_ok=True)
+        _write_json_atomic(runs_dir() / f"{today}.json", run_summary)
+        print(
+            f"dream_analyze: {detail}; NOT writing proposals or advancing watermarks for "
+            f"{len(planned_slugs)} planned slug(s) -- see state/canary.json (reduce_failures).",
+            file=sys.stderr,
+        )
+        return 1
 
     proposal_schema = _load_proposal_schema()
     target_path = proposals_dir() / f"{today}.jsonl"

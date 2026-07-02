@@ -20,7 +20,10 @@
 #
 # Exit codes (propagated from dream_analyze.py):
 #   0  success, including "nothing to do" and "no API key configured"
-#   1  fatal error (bad prompts/schema files, curl transport failure)
+#   1  fatal error (bad prompts/schema files, curl transport failure,
+#      reduce phase never parseable after its retry -- see
+#      state/canary.json's reduce_failures for which slug(s); no
+#      watermark advance and no proposals write happen on this path)
 #   2  daily cost cap reached before any slug could be processed
 
 set -u

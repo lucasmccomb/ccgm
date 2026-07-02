@@ -85,7 +85,7 @@
           "session_id": { "type": ["string", "null"] },
           "excerpt": {
             "type": "string",
-            "description": "Already redacted (secrets + PII) and truncated to <=400 chars by the transcript miner (Epic 2); never re-derived from raw transcript text at this layer."
+            "description": "Sourced from the transcript miner's already-redacted (secrets + PII), <=400-char excerpt; never re-derived from raw transcript text at this layer. The map/reduce prompts instruct the model to reuse it verbatim rather than paraphrase (unlike content/justification), but that is a prompt instruction, not a code-enforced guarantee across the reduce phase's own re-emission of this field -- dream_analyze.py also passes it through learnings_store.sanitize_content() at the proposal write path (sec-3), the same as content/justification, since a two-model-hop re-emission is not independently verified to be byte-identical to its source."
           }
         }
       }
