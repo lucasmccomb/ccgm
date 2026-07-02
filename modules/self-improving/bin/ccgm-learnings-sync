@@ -507,14 +507,25 @@ def cmd_pull(args: argparse.Namespace) -> int:
             _emit({"ok": False, "reason": f"git fetch failed: {err.strip()}"})
             return 1
 
-        rc, ahead_behind, _ = _run_git(
+        rc, ahead_behind, err = _run_git(
             ["rev-list", "--left-right", "--count", f"HEAD...origin/{branch}"]
         )
+        if rc != 0:
+            # Fail closed, loudly -- NOT a silent "up to date". If this
+            # call fails (e.g. the remote's actual default branch has a
+            # different name than this repo's local "main", so
+            # `origin/{branch}` never resolves), falling through to
+            # behind=0 would report ok:true forever while the remote's
+            # real content never syncs.
+            _emit({
+                "ok": False,
+                "reason": f"cannot compare against origin/{branch}: {err.strip()}",
+            })
+            return 1
         behind = 0
-        if rc == 0:
-            parts = ahead_behind.split()
-            if len(parts) == 2:
-                behind = int(parts[1])
+        parts = ahead_behind.split()
+        if len(parts) == 2:
+            behind = int(parts[1])
         if behind == 0:
             _emit({"ok": True, "action": "noop", "reason": "up to date"})
             return 0
@@ -523,14 +534,18 @@ def cmd_pull(args: argparse.Namespace) -> int:
 
         rc, _, err = _run_git(["merge", "--no-edit", f"origin/{branch}"])
         if rc != 0:
-            # Merge stopped (conflict). NEVER abort here (adrev-401,
-            # EMPIRICAL: the old rebase-based fallback's --abort wiped a
-            # concurrently-appended learning). Leave it for a human;
-            # `status` reports it loudly until resolved.
+            # Merge stopped (conflict, or e.g. unrelated histories). NEVER
+            # abort here (adrev-401, EMPIRICAL: the old rebase-based
+            # fallback's --abort wiped a concurrently-appended learning).
+            # Leave it for a human; `status` reports it loudly until
+            # resolved. Surface the actual git diagnostic -- every other
+            # failure branch in this file does (cmd_init, _commit_if_dirty,
+            # cmd_push); a fixed "conflict" message misreports non-conflict
+            # merge failures like "refusing to merge unrelated histories".
             _emit({
                 "ok": False,
                 "action": "conflict",
-                "reason": "merge stopped with conflicts; resolve manually (see status), never auto-abort",
+                "reason": f"merge stopped: {err.strip()}; resolve manually (see status), never auto-abort",
             })
             return 1
 
