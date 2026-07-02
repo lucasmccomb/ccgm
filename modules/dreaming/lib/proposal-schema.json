@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "CCGM Dreaming Proposal Row",
+  "description": "One line of ~/.claude/dreaming/proposals/{YYYY-MM-DD}.jsonl, produced by dream_analyze.py's reduce phase (plan.md §3.3 'Dreaming proposal row schema'; §5 Epic 3). Every proposal is a per-change delta against the learnings store (modules/self-improving/lib/learnings_store.py), never a whole-store swap. Validated with the SAME stdlib-only validator Epic 2 wrote (transcript_miner.validate_against_schema) -- see evidence-bundle-schema.json for the sibling contract this mirrors (arch-3 spirit). This validator does not enforce additionalProperties, so this schema deliberately omits that keyword rather than making a claim it cannot check.",
+  "type": "object",
+  "required": [
+    "id",
+    "kind",
+    "project",
+    "target_id",
+    "content",
+    "type",
+    "confidence",
+    "prevalence",
+    "evidence",
+    "justification",
+    "fingerprint",
+    "generated_at",
+    "status"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "uuid4 hex[:12], assigned by dream_analyze.py (deterministic bookkeeping, never trusted from the model -- latent-vs-deterministic rule)."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "learning_add",
+        "learning_verify",
+        "learning_contradict",
+        "learning_supersede",
+        "learning_deprecate",
+        "reconcile_report"
+      ],
+      "description": "Maps 1:1 onto a learnings_store op. dream_analyze.py (Epic 3) only ever emits the five learning_* kinds; 'reconcile_report' is reserved for Epic 8's reconciliation report and is never produced by the reduce phase."
+    },
+    "project": {
+      "type": "string",
+      "minLength": 1,
+      "description": "learnings-store slug this proposal targets, or the literal '_global'. ALWAYS learnings_store.detect_project_slug()-derived (arch-1) -- never a session-history repo_detect.py string."
+    },
+    "target_id": {
+      "type": ["string", "null"],
+      "description": "id of the existing store row this proposal acts on. Required (non-null) for verify/contradict/supersede/deprecate; null for add. dream_analyze.py rejects (does not write) any proposal whose target_id does not resolve against the pre-loaded store projection for its project scope."
+    },
+    "content": {
+      "type": ["string", "null"],
+      "description": "Proposed new content. Present for add/supersede; null for verify/contradict/deprecate (those act on an id, not new prose). Sanitized via learnings_store.sanitize_content() before this row is ever written to disk (sec-3)."
+    },
+    "type": {
+      "type": ["string", "null"],
+      "enum": ["pattern", "pitfall", "preference", "architecture", "tool", "operational", null],
+      "description": "learnings_store type vocabulary. Required for add/supersede; null for verify/contradict/deprecate."
+    },
+    "confidence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10,
+      "description": "Reduce model's confidence that THIS PROPOSED ACTION is warranted (distinct from the target row's own stored confidence, which is unaffected by this field)."
+    },
+    "prevalence": {
+      "type": "object",
+      "required": ["sessions", "agents"],
+      "properties": {
+        "sessions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of distinct session ids in `evidence` supporting this proposal."
+        },
+        "agents": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of distinct writer/agent identities the supporting evidence spans. Per plan.md §1.4, this is typically 1 for a solo/single-clone user -- the '_global' breadth gate (promotion_min_sessions/promotion_min_agents) is informational at proposal time, never a silent drop (adrev-009/adrev-405)."
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["session_id", "excerpt"],
+        "properties": {
+          "session_id": { "type": ["string", "null"] },
+          "excerpt": {
+            "type": "string",
+            "description": "Already redacted (secrets + PII) and truncated to <=400 chars by the transcript miner (Epic 2); never re-derived from raw transcript text at this layer."
+          }
+        }
+      }
+    },
+    "justification": {
+      "type": "string",
+      "description": "Why this warrants a store change. Sanitized via learnings_store.sanitize_content() before this row is ever written to disk (sec-3), same as `content`."
+    },
+    "fingerprint": {
+      "type": "string",
+      "minLength": 1,
+      "description": "sha256 hex over the normalized (kind, project, key) tuple, computed by dream_analyze.py -- never trusted from the model. Used for cross-run dedup against every prior proposals/*.jsonl file (--force-day excludes its own target-day file from that dedup corpus, adrev-013)."
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ISO 8601 UTC timestamp dream_analyze.py wrote this row."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "accepted", "rejected", "auto_applied"],
+      "description": "Every Epic 3-produced row starts 'pending'. Epic 6's /dream-apply and auto-apply gate are the only writers of the other three values."
+    },
+    "needs_manual_promotion": {
+      "type": "string",
+      "description": "OPTIONAL. Present only on '_global' proposals whose prevalence falls below the configured promotion_min_sessions/promotion_min_agents thresholds. The proposal is NOT dropped -- adrev-009/adrev-405: breadth gates the automated apply path, not digest visibility. Text points the human at /dream-apply (its accept path is the actual promotion mechanism), never at the CCGM_LEARNINGS_ADMIN terminal hatch."
+    },
+    "compaction_guard_failed": {
+      "type": "object",
+      "properties": {
+        "dropped_tokens": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "description": "OPTIONAL. Present only on 'learning_supersede' proposals where learnings_store.compact_preserves_facts(old_content, new_content) returned false (sec-11). The proposal stays 'pending' but is flagged for extra human scrutiny rather than treated as an ordinary supersede."
+    }
+  }
+}
