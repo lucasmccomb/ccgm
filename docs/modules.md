@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 72 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 73 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -775,6 +775,18 @@ Continuous self-improvement loop: capture hook events, daily transcript analysis
 **What it does**: Four event-capture hooks (`PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `UserPromptSubmit`) record permission requests, tool failures, and user-correction phrases to `~/.claude/autoheal/events/{date}.jsonl` (cross-clone fcntl-locked). A daily `launchd` LaunchAgent runs `autoheal-analyze.sh` (direct `curl` to Anthropic — no claude -p, no exec-escape surface), which proposes small hook/settings fixes filtered by a privilege-escalation gate. Proposals render to a local markdown digest, optionally email via Resend (multi-recipient with per-recipient idempotency keys), and feed into `/permission-fix` (in-session) and `/autoheal-apply` (manual or auto-applied via the strict confidence-9 / breadth-1 / settings-only gate). Default OFF for the three opt-in surfaces (real-time alerts, auto-apply, email/webhook).
 
 **Dependencies**: hooks
+
+---
+
+### dreaming [BETA]
+
+Nightly, cost-capped service that mines session transcripts for cross-session failure patterns and proposes evidence-tagged memory-store changes behind a human gate. `autoheal`'s capture-analyze-propose pipeline, retargeted at transcripts instead of permission events.
+
+**Installs**: `lib/transcript_miner.py`, `lib/evidence-bundle-schema.json`
+
+**What it does**: Ships incrementally. This landing provides the deterministic transcript miner: `discover()` enumerates transcript files under `~/.claude/projects/*/` by re-deriving each transcript's owning learnings-store slug from its own `cwd` field (never from a directory-name heuristic); `mine()` extracts friction events (tool errors, hook errors, prevented-continuation), user-correction sequences, PR links, and token/cache economics from one transcript; `cluster()` groups events by `(kind, tool, command prefix)`; `budget()` trims to a token cap without ever dropping a friction cluster entirely; `schema_canary()` fails loud if the undocumented transcript schema appears to have drifted rather than silently mining zero friction. Every excerpt is redacted for both secrets (`hook_utils.redact_secrets`) and PII (this module's own `redact_pii`, covering email/phone/address) before it is stored anywhere. No network calls, no LLM calls, no scheduling yet -- the map-reduce analyzer, apply path, scheduler, and eval harness land in later epics of the same module.
+
+**Dependencies**: hooks, self-improving, session-history
 
 ---
 

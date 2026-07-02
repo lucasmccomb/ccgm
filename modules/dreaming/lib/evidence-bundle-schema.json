@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "CCGM Dreaming Evidence Bundle",
+  "description": "Output contract of modules/dreaming/lib/transcript_miner.py's mine_to_evidence_bundle(). This is the Wave-1 cross-epic contract (arch-3): Epic 3's dream_analyze.py validates its input against this SAME schema on load, using the SAME stdlib-only validator (transcript_miner.validate_against_schema), so a shape drift that still parses as JSON fails a test instead of silently degrading.",
+  "type": "object",
+  "required": [
+    "generated_at",
+    "slugs",
+    "session_count",
+    "sessions",
+    "clusters",
+    "friction_cluster_count",
+    "routine_cluster_count",
+    "token_estimate",
+    "max_input_tokens",
+    "over_budget",
+    "malformed_line_total",
+    "canary"
+  ],
+  "properties": {
+    "generated_at": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ISO 8601 UTC timestamp the bundle was assembled."
+    },
+    "slugs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Sorted, de-duplicated set of learnings-store slugs (detect_project_slug output) represented across all mined sessions."
+    },
+    "session_count": { "type": "integer", "minimum": 0 },
+    "sessions": {
+      "type": "array",
+      "description": "One summary row per mined transcript (MinedSession, minus friction_events -- friction lives in clusters[] instead).",
+      "items": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "slug",
+          "token_totals",
+          "cache_read_ratio",
+          "user_corrections",
+          "pr_links",
+          "malformed_line_count",
+          "tool_use_count",
+          "friction_field_presence"
+        ],
+        "properties": {
+          "session_id": { "type": ["string", "null"] },
+          "slug": { "type": "string" },
+          "git_branch": { "type": ["string", "null"] },
+          "started_at": { "type": ["string", "null"] },
+          "ended_at": { "type": ["string", "null"] },
+          "token_totals": {
+            "type": "object",
+            "required": [
+              "input_tokens",
+              "output_tokens",
+              "cache_creation_input_tokens",
+              "cache_read_input_tokens"
+            ],
+            "properties": {
+              "input_tokens": { "type": "integer", "minimum": 0 },
+              "output_tokens": { "type": "integer", "minimum": 0 },
+              "cache_creation_input_tokens": { "type": "integer", "minimum": 0 },
+              "cache_read_input_tokens": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "cache_read_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+          "user_corrections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["excerpt", "session_id", "line", "turns_after_failure", "friction_line"],
+              "properties": {
+                "excerpt": { "type": "string" },
+                "timestamp": { "type": ["string", "null"] },
+                "session_id": { "type": ["string", "null"] },
+                "line": { "type": "integer", "minimum": 1 },
+                "turns_after_failure": { "type": "integer", "minimum": 0, "maximum": 2 },
+                "friction_line": { "type": "integer", "minimum": 1 }
+              }
+            }
+          },
+          "pr_links": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pr_number": { "type": ["integer", "null"] },
+                "pr_repository": { "type": ["string", "null"] },
+                "pr_url": { "type": ["string", "null"] }
+              }
+            }
+          },
+          "malformed_line_count": { "type": "integer", "minimum": 0 },
+          "tool_use_count": { "type": "integer", "minimum": 0 },
+          "friction_field_presence": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count of times a recognized friction-bearing field (is_error/hookErrors/preventedContinuation/toolUseResult) was structurally present, regardless of value. Distinguishes a genuinely quiet session (fields present, no problems) from schema drift (fields absent) -- see schema_canary()."
+          }
+        }
+      }
+    },
+    "clusters": {
+      "type": "array",
+      "description": "Friction clusters first (count desc), then routine clusters (count desc). See transcript_miner.cluster()/budget().",
+      "items": {
+        "type": "object",
+        "required": ["event_kind", "count", "is_friction", "sample_session_ids", "exemplars"],
+        "properties": {
+          "event_kind": { "type": "string" },
+          "tool_name": { "type": ["string", "null"] },
+          "command_prefix": { "type": ["string", "null"] },
+          "count": { "type": "integer", "minimum": 1 },
+          "is_friction": { "type": "boolean" },
+          "sample_session_ids": { "type": "array", "items": { "type": ["string", "null"] } },
+          "exemplars": {
+            "type": "array",
+            "description": "Redacted excerpts. Always empty for routine (is_friction=false) clusters. Friction clusters retain at least 1 exemplar even under tight budget (see budget()'s round-robin down-sample floor).",
+            "items": {
+              "type": "object",
+              "required": ["excerpt"],
+              "properties": {
+                "session_id": { "type": ["string", "null"] },
+                "excerpt": { "type": "string" },
+                "timestamp": { "type": ["string", "null"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "friction_cluster_count": { "type": "integer", "minimum": 0 },
+    "routine_cluster_count": { "type": "integer", "minimum": 0 },
+    "token_estimate": { "type": "integer", "minimum": 0 },
+    "max_input_tokens": { "type": "integer", "minimum": 1 },
+    "over_budget": {
+      "type": "boolean",
+      "description": "True iff token_estimate still exceeds max_input_tokens after every friction cluster was down-sampled to its 1-exemplar floor."
+    },
+    "malformed_line_total": { "type": "integer", "minimum": 0 },
+    "canary": {
+      "type": "object",
+      "required": ["observed_versions", "untested_versions"],
+      "properties": {
+        "observed_versions": {
+          "type": "object",
+          "description": "Map of observed transcript `version` string to session count."
+        },
+        "untested_versions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Subset of observed_versions' keys not in TESTED_TRANSCRIPT_VERSIONS -- a warn signal, not itself a failure."
+        }
+      }
+    }
+  }
+}
