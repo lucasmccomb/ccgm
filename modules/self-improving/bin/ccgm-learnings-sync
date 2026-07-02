@@ -1,0 +1,670 @@
+#!/usr/bin/env python3
+"""
+ccgm-learnings-sync -- git-substrate versioning/sync for the learnings store.
+
+Makes ~/.claude/learnings/ (or $CCGM_LEARNINGS_DIR) a self-versioning git
+repo with safe, idempotent sync verbs. No remote provisioning here -- see
+the "Versioning & sync" section of rules/learnings-store.md for the H2
+(optional cross-machine remote) setup.
+
+Usage:
+    ccgm-learnings-sync init                # git init + .gitattributes/.gitignore + first commit
+    ccgm-learnings-sync commit [-m MSG]      # stage + commit if dirty
+    ccgm-learnings-sync pull                 # fetch + merge --no-edit -- NEVER rebase (adrev-401)
+    ccgm-learnings-sync push                 # push to the configured remote
+    ccgm-learnings-sync status               # porcelain + ahead/behind + in-progress + quarantine
+
+Every subcommand's LAST stdout line is a single machine-parseable JSON
+object with an "ok" boolean (plus contextual fields). Process exit code is
+0 iff ok is true, EXCEPT for deliberate no-ops (a stand-down is success,
+not failure -- e.g. `commit` invoked while a merge is in progress).
+
+pull is merge-only, on purpose (adrev-401, EMPIRICAL): a prior rebase-based
+design's conflict-fallback was tested (git 2.50.1, scratch repos) to
+silently WIPE a concurrently-appended learning from the worktree when the
+fallback ran `git rebase --abort`. `pull` here never rebases and never
+aborts a stopped merge -- a conflict is left in place for a human to
+resolve; `status` reports it loudly. A store-wide sync lock (a flock'd file
+inside .git/, never tracked) serializes pull/commit/push against each
+other. The learnings_store.py write-path autocommit hook always fires
+through THIS file's `commit` subcommand, so its "stand down while a
+merge/rebase is in progress" behavior is a property of `commit` itself --
+identical whether commit is invoked by autocommit or by a human (arch-6:
+sync orchestration lives here, not inside the store's write path).
+
+Known residual (documented, not fixed here -- would require touching
+Epic 1's frozen learnings_store.py write path, out of this file's scope):
+ordinary learnings_store.py writes (ccgm-learnings-log add/verify/
+supersede/...) do NOT themselves take this sync lock, only the sync verbs
+in this file do. A write that lands in the sub-second window while `pull`
+is actively applying a merge to that same shard file is not structurally
+protected against the merge's own file write. See rules/learnings-store.md
+"Versioning & sync" for the full writeup.
+
+Post-merge validation (sec-2 / adrev-307): after a clean merge, every
+NEWLY-landed op-event line (an id not present locally before the merge) is
+re-validated. Content-bearing rows (op in {None, "add", "supersede"} --
+legacy v1 snapshots and any row carrying real content) run through
+learnings_store.validate_entry(). Counter-ops (verify/contradict/
+deprecate) carry no free-text content by design (content=None) and would
+ALWAYS fail that schema check, so they get a lighter structural check
+instead (a recognized op naming a real target-id). A line that fails
+validation is NEVER removed from its shard -- rewriting another writer's
+shard breaks the append-only invariant union-merge safety depends on
+(adrev-307: "the original re-converges on next sync") -- instead a copy is
+appended to that project's local, gitignored `<slug>/.quarantine.jsonl`
+index. This is a residual against raw git bypass (a plain `git pull` or
+`git rebase` run directly against this repo skips this check entirely);
+document raw git as unsupported (adrev-307) and always use this CLI.
+
+Exit codes:
+    0  ok (including deliberate no-ops)
+    1  operational failure (not a repo, dirty tree, no remote, conflict,
+       git command failed)
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import fcntl
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent / "lib"))
+
+import learnings_store as ls  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# Same plumbing markers branch-guard.py checks under $GIT_DIR to detect a
+# multi-step git operation mid-flight. Mirrored here (not imported --
+# branch-guard lives in a different, unrelated module) so `commit`'s
+# stand-down and `status`'s loud report use the identical detection.
+IN_PROGRESS_MARKERS = (
+    "rebase-merge",
+    "rebase-apply",
+    "MERGE_HEAD",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "BISECT_LOG",
+)
+
+GITATTRIBUTES_LINES = ["*.jsonl merge=union"]
+
+# Per-machine rebuildable caches + secrets never belong in this repo's
+# history (adrev-301/sec-12/adrev-401). Note: the snapshot cache
+# (snapshot.jsonl + watermark.json) is NOT listed here -- it already lives
+# OUTSIDE ~/.claude/learnings/ entirely (LEARNINGS_CACHE_ROOT, a sibling
+# directory -- see learnings_store.py), so it is structurally never a
+# candidate for this repo's working tree and needs no gitignore entry.
+GITIGNORE_LINES = [".env*", "*.quarantine.jsonl", "config.json"]
+GITIGNORE_HEADER = "# CCGM learnings store -- per-machine state, never synced"
+
+# Op-rows carrying real free-text content: legacy v1 snapshots (op is
+# absent), `add`, and `supersede`. These are exactly the rows
+# learnings_store.validate_entry() was written to check (it requires
+# non-empty `type` + `content`).
+_CONTENT_BEARING_OPS = {None, "add", "supersede"}
+# Counter-ops never carry content (content=None by design -- see
+# learnings_store._build_op_row); validate_entry() would reject every
+# legitimate one of these. Structural check only: a real op naming a
+# real target.
+_COUNTER_OPS = {"verify", "contradict", "deprecate"}
+
+
+# ---------------------------------------------------------------------------
+# git plumbing helpers
+# ---------------------------------------------------------------------------
+
+def _run_git(args: list[str]) -> tuple[int, str, str]:
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=str(ls.LEARNINGS_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, "", str(e)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def _git_dir_exists() -> bool:
+    return (ls.LEARNINGS_ROOT / ".git").is_dir()
+
+
+def _current_branch() -> str | None:
+    # symbolic-ref (not rev-parse --abbrev-ref) so this also resolves on an
+    # unborn HEAD right after `git init`, before the first commit exists.
+    rc, out, _ = _run_git(["symbolic-ref", "--short", "HEAD"])
+    return out.strip() if rc == 0 and out.strip() else None
+
+
+def _has_remote() -> bool:
+    rc, _, _ = _run_git(["remote", "get-url", "origin"])
+    return rc == 0
+
+
+def _is_dirty() -> bool:
+    rc, out, _ = _run_git(["status", "--porcelain"])
+    return rc == 0 and bool(out.strip())
+
+
+def _in_progress() -> list[str]:
+    git_dir = ls.LEARNINGS_ROOT / ".git"
+    if not git_dir.is_dir():
+        return []
+    return [m for m in IN_PROGRESS_MARKERS if (git_dir / m).exists()]
+
+
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _emit(obj: dict[str, Any]) -> None:
+    print(json.dumps(obj, sort_keys=True))
+
+
+# ---------------------------------------------------------------------------
+# Store-wide sync lock (adrev-401)
+# ---------------------------------------------------------------------------
+
+def _lock_path() -> Path:
+    # Inside .git/ so it is never a tracked file (mirrors git's own
+    # index.lock convention) -- needs no .gitignore entry.
+    return ls.LEARNINGS_ROOT / ".git" / "ccgm-sync.lock"
+
+
+@contextlib.contextmanager
+def _sync_lock():
+    """
+    Serializes pull/commit/push against each other. Blocking acquire,
+    mirroring hook_utils.file_locked_append's discipline (never raises on
+    contention -- waits for the holder to release).
+    """
+    lock_path = _lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+# ---------------------------------------------------------------------------
+# .gitattributes / .gitignore (idempotent: only ever appends missing lines)
+# ---------------------------------------------------------------------------
+
+def _ensure_lines(path: Path, required_lines: list[str], header: str | None = None) -> None:
+    existing = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    existing_set = set(existing)
+    missing = [ln for ln in required_lines if ln not in existing_set]
+    if not missing:
+        return
+    with path.open("a", encoding="utf-8") as f:
+        if not existing and header:
+            f.write(header + "\n")
+        for ln in missing:
+            f.write(ln + "\n")
+
+
+def _write_gitattributes_if_needed() -> None:
+    _ensure_lines(ls.LEARNINGS_ROOT / ".gitattributes", GITATTRIBUTES_LINES)
+
+
+def _write_gitignore_if_needed() -> None:
+    _ensure_lines(ls.LEARNINGS_ROOT / ".gitignore", GITIGNORE_LINES, header=GITIGNORE_HEADER)
+
+
+def _commit_if_dirty(message: str) -> tuple[str, str | None]:
+    """
+    Stage everything; commit iff something is actually staged.
+
+    Returns (status, detail):
+      ("nothing_to_commit", None)     -- add -A had nothing to stage
+      ("committed", "<short sha>")    -- committed successfully
+      ("failed", "<git stderr>")      -- something WAS staged but git
+                                          rejected the commit (e.g. a
+                                          local pre-commit hook, missing
+                                          identity config) -- this is
+                                          deliberately NOT folded into
+                                          "nothing_to_commit": a caller
+                                          that treated a rejected commit
+                                          as a clean no-op would silently
+                                          drop the staged change from the
+                                          working tree's history forever.
+    """
+    rc, _, err = _run_git(["add", "-A"])
+    if rc != 0:
+        return "failed", (err.strip() or "git add failed")
+    rc, out, _ = _run_git(["status", "--porcelain"])
+    if rc != 0:
+        return "failed", "git status failed"
+    if not out.strip():
+        return "nothing_to_commit", None
+    rc, _, err = _run_git(["commit", "-m", message])
+    if rc != 0:
+        return "failed", (err.strip() or "git commit failed")
+    rc, sha, _ = _run_git(["rev-parse", "--short", "HEAD"])
+    return "committed", (sha.strip() if rc == 0 and sha.strip() else "unknown")
+
+
+# ---------------------------------------------------------------------------
+# Post-merge re-validation + quarantine (sec-2 / adrev-307)
+# ---------------------------------------------------------------------------
+
+def _iter_shard_files() -> list[Path]:
+    """Every legacy learnings.jsonl + agents/*.jsonl under the store,
+    excluding quarantine indexes and anything under .git/."""
+    if not ls.LEARNINGS_ROOT.is_dir():
+        return []
+    out: list[Path] = []
+    for p in ls.LEARNINGS_ROOT.rglob("*.jsonl"):
+        if p.name == ".quarantine.jsonl":
+            continue
+        if ".git" in p.parts:
+            continue
+        out.append(p)
+    return out
+
+
+def _collect_ids(paths: list[Path]) -> dict[Path, set[str]]:
+    """Snapshot the set of op-event ids present in each file, for
+    before/after comparison across a merge. Best-effort JSON parse;
+    malformed lines are simply absent from the set (harmless -- they will
+    also fail validation below if they land as "new" after the merge)."""
+    out: dict[Path, set[str]] = {}
+    for path in paths:
+        ids: set[str] = set()
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                _id = obj.get("id") if isinstance(obj, dict) else None
+                if isinstance(_id, str):
+                    ids.add(_id)
+        except OSError:
+            pass
+        out[path] = ids
+    return out
+
+
+def _project_dir_for_shard(path: Path) -> Path:
+    rel = path.relative_to(ls.LEARNINGS_ROOT)
+    return ls.LEARNINGS_ROOT / rel.parts[0]
+
+
+def _quarantine_path_for(shard_path: Path) -> Path:
+    return _project_dir_for_shard(shard_path) / ".quarantine.jsonl"
+
+
+def _line_is_valid(obj: dict[str, Any]) -> bool:
+    op = obj.get("op")
+    if op in _CONTENT_BEARING_OPS:
+        try:
+            ls.validate_entry(obj)
+            return True
+        except ls.ValidationError:
+            return False
+    if op in _COUNTER_OPS:
+        return bool(obj.get("target_id")) and isinstance(obj.get("id"), str) and bool(obj.get("id"))
+    # Unrecognized op value entirely -- not a shape validate_entry() or the
+    # counter-op check can vouch for.
+    return False
+
+
+def _quarantine_line(shard_path: Path, raw_line: str, parsed: dict[str, Any], reason: str) -> None:
+    """
+    Copy the bad line into a local, gitignored quarantine index for its
+    project. NEVER rewrites/removes the line from the original shard --
+    doing so would mutate another writer's append-only history, which
+    breaks the very union-merge safety property this store depends on
+    (adrev-307: "the original re-converges on next sync").
+    """
+    q_path = _quarantine_path_for(shard_path)
+    envelope = {
+        "quarantined_at": _iso_now(),
+        "reason": reason,
+        "source_file": str(shard_path.relative_to(ls.LEARNINGS_ROOT)),
+        "line_id": parsed.get("id"),
+        "raw": raw_line,
+    }
+    ls.file_locked_append(str(q_path), json.dumps(envelope, sort_keys=True))
+
+
+def _revalidate_after_merge(before_ids: dict[Path, set[str]]) -> int:
+    """
+    For every shard file, validate every line whose id was NOT present
+    before the merge (i.e. it landed via this merge). Returns the count
+    quarantined.
+    """
+    quarantined = 0
+    for path in _iter_shard_files():
+        prev_ids = before_ids.get(path, set())
+        try:
+            raw_lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for raw in raw_lines:
+            stripped = raw.strip()
+            if not stripped:
+                continue
+            try:
+                obj = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            line_id = obj.get("id")
+            if not isinstance(line_id, str) or line_id in prev_ids:
+                continue  # pre-existing line, not new from this merge
+            if not _line_is_valid(obj):
+                _quarantine_line(path, stripped, obj, "schema validation failed on merged line")
+                quarantined += 1
+    return quarantined
+
+
+def _quarantine_counts() -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if not ls.LEARNINGS_ROOT.is_dir():
+        return counts
+    for slug_dir in ls.LEARNINGS_ROOT.iterdir():
+        if not slug_dir.is_dir():
+            continue
+        q = slug_dir / ".quarantine.jsonl"
+        if not q.is_file():
+            continue
+        n = sum(1 for line in q.read_text(encoding="utf-8").splitlines() if line.strip())
+        if n:
+            counts[slug_dir.name] = n
+    return counts
+
+
+# ---------------------------------------------------------------------------
+# Subcommands
+# ---------------------------------------------------------------------------
+
+def cmd_init(args: argparse.Namespace) -> int:
+    ls.LEARNINGS_ROOT.mkdir(parents=True, exist_ok=True)
+
+    created_repo = False
+    if not _git_dir_exists():
+        rc, _, err = _run_git(["init", "-q", "-b", "main"])
+        if rc != 0:
+            _emit({"ok": False, "reason": f"git init failed: {err.strip()}"})
+            return 1
+        created_repo = True
+
+    with _sync_lock():
+        _write_gitattributes_if_needed()
+        _write_gitignore_if_needed()
+        status, detail = _commit_if_dirty(f"learnings: init on {ls.agent_id()}")
+
+    if status == "failed":
+        _emit({
+            "ok": False,
+            "action": "init",
+            "created_repo": created_repo,
+            "reason": f"commit failed: {detail}",
+        })
+        return 1
+
+    _emit({
+        "ok": True,
+        "action": "init",
+        "created_repo": created_repo,
+        "committed": status == "committed",
+        "sha": detail if status == "committed" else None,
+    })
+    return 0
+
+
+def cmd_commit(args: argparse.Namespace) -> int:
+    if not _git_dir_exists():
+        _emit({"ok": False, "reason": "not a git repo; run 'ccgm-learnings-sync init' first"})
+        return 1
+
+    with _sync_lock():
+        markers = _in_progress()
+        if markers:
+            # Provable no-op (adrev-401): never commit over an in-progress
+            # merge/rebase. This is the SAME check whether `commit` was
+            # invoked by learnings_store.py's autocommit hook or by hand.
+            _emit({
+                "ok": True,
+                "action": "noop",
+                "reason": "merge/rebase in progress; standing down",
+                "markers": markers,
+            })
+            return 0
+
+        message = args.message or f"learnings: {_iso_now()} on {ls.agent_id()}"
+        status, detail = _commit_if_dirty(message)
+
+    if status == "nothing_to_commit":
+        _emit({"ok": True, "action": "noop", "reason": "clean"})
+        return 0
+    if status == "failed":
+        _emit({"ok": False, "action": "failed", "reason": detail})
+        return 1
+    _emit({"ok": True, "action": "committed", "sha": detail})
+    return 0
+
+
+def cmd_pull(args: argparse.Namespace) -> int:
+    if not _git_dir_exists():
+        _emit({"ok": False, "reason": "not a git repo; run 'ccgm-learnings-sync init' first"})
+        return 1
+    if _is_dirty():
+        _emit({"ok": False, "reason": "dirty working tree; commit first"})
+        return 1
+    if not _has_remote():
+        _emit({
+            "ok": False,
+            "reason": "no remote configured; see 'Versioning & sync' > H2 in rules/learnings-store.md",
+        })
+        return 1
+
+    with _sync_lock():
+        markers = _in_progress()
+        if markers:
+            # A prior pull left this unresolved. Never auto-continue or
+            # auto-abort (adrev-401) -- surface it and stop.
+            _emit({
+                "ok": False,
+                "action": "blocked",
+                "reason": "merge already in progress; resolve manually (see status)",
+                "markers": markers,
+            })
+            return 1
+
+        branch = _current_branch()
+        if not branch:
+            _emit({"ok": False, "reason": "cannot determine current branch"})
+            return 1
+
+        rc, _, err = _run_git(["fetch", "origin"])
+        if rc != 0:
+            _emit({"ok": False, "reason": f"git fetch failed: {err.strip()}"})
+            return 1
+
+        rc, ahead_behind, _ = _run_git(
+            ["rev-list", "--left-right", "--count", f"HEAD...origin/{branch}"]
+        )
+        behind = 0
+        if rc == 0:
+            parts = ahead_behind.split()
+            if len(parts) == 2:
+                behind = int(parts[1])
+        if behind == 0:
+            _emit({"ok": True, "action": "noop", "reason": "up to date"})
+            return 0
+
+        before_ids = _collect_ids(_iter_shard_files())
+
+        rc, _, err = _run_git(["merge", "--no-edit", f"origin/{branch}"])
+        if rc != 0:
+            # Merge stopped (conflict). NEVER abort here (adrev-401,
+            # EMPIRICAL: the old rebase-based fallback's --abort wiped a
+            # concurrently-appended learning). Leave it for a human;
+            # `status` reports it loudly until resolved.
+            _emit({
+                "ok": False,
+                "action": "conflict",
+                "reason": "merge stopped with conflicts; resolve manually (see status), never auto-abort",
+            })
+            return 1
+
+        quarantined = _revalidate_after_merge(before_ids)
+
+    _emit({"ok": True, "action": "merged", "quarantined": quarantined})
+    return 0
+
+
+def cmd_push(args: argparse.Namespace) -> int:
+    if not _git_dir_exists():
+        _emit({"ok": False, "reason": "not a git repo; run 'ccgm-learnings-sync init' first"})
+        return 1
+    if not _has_remote():
+        _emit({
+            "ok": False,
+            "reason": "no remote configured; see 'Versioning & sync' > H2 in rules/learnings-store.md",
+        })
+        return 1
+
+    with _sync_lock():
+        markers = _in_progress()
+        if markers:
+            _emit({
+                "ok": False,
+                "reason": "merge/rebase in progress; resolve before pushing",
+                "markers": markers,
+            })
+            return 1
+
+        branch = _current_branch()
+        if not branch:
+            _emit({"ok": False, "reason": "cannot determine current branch"})
+            return 1
+
+        rc, _, err = _run_git(["push", "origin", f"HEAD:{branch}"])
+        if rc != 0:
+            # Likely no upstream tracking configured yet (first push).
+            rc, _, err = _run_git(["push", "-u", "origin", branch])
+        if rc != 0:
+            _emit({"ok": False, "reason": f"git push failed: {err.strip()}"})
+            return 1
+
+    _emit({"ok": True, "action": "pushed"})
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    if not _git_dir_exists():
+        _emit({"ok": True, "initialized": False})
+        return 0
+
+    markers = _in_progress()
+    rc, porcelain, _ = _run_git(["status", "--porcelain"])
+    dirty_count = len([ln for ln in porcelain.splitlines() if ln.strip()]) if rc == 0 else None
+
+    branch = _current_branch()
+    has_remote = _has_remote()
+    ahead: int | None = None
+    behind: int | None = None
+    if has_remote and branch:
+        rc, ab, _ = _run_git(["rev-list", "--left-right", "--count", f"HEAD...origin/{branch}"])
+        if rc == 0:
+            parts = ab.split()
+            if len(parts) == 2:
+                ahead, behind = int(parts[0]), int(parts[1])
+
+    q_counts = _quarantine_counts()
+    q_total = sum(q_counts.values())
+
+    if markers:
+        print(
+            f"WARNING: in-progress git state detected ({', '.join(markers)}) -- "
+            "resolve manually; ccgm-learnings-sync never auto-aborts (adrev-401)",
+            file=sys.stderr,
+        )
+    if q_total:
+        print(
+            f"WARNING: {q_total} quarantined line(s) across {len(q_counts)} project(s) -- "
+            "see <slug>/.quarantine.jsonl",
+            file=sys.stderr,
+        )
+
+    _emit({
+        "ok": True,
+        "initialized": True,
+        "branch": branch,
+        "dirty_files": dirty_count,
+        "has_remote": has_remote,
+        "ahead": ahead,
+        "behind": behind,
+        "in_progress": bool(markers),
+        "in_progress_markers": markers,
+        "quarantined_total": q_total,
+        "quarantined_by_project": q_counts,
+    })
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# CLI wiring
+# ---------------------------------------------------------------------------
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="ccgm-learnings-sync", description=__doc__.splitlines()[1])
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    init_p = sub.add_parser("init", help="git init the learnings store (idempotent)")
+    init_p.set_defaults(func=cmd_init)
+
+    commit_p = sub.add_parser(
+        "commit", help="stage + commit if dirty (no-ops on a clean tree or an in-progress merge)"
+    )
+    commit_p.add_argument("-m", "--message")
+    commit_p.set_defaults(func=cmd_commit)
+
+    pull_p = sub.add_parser("pull", help="fetch + merge --no-edit; NEVER rebase (adrev-401)")
+    pull_p.set_defaults(func=cmd_pull)
+
+    push_p = sub.add_parser("push", help="push to the configured remote (refuses if none configured)")
+    push_p.set_defaults(func=cmd_push)
+
+    status_p = sub.add_parser(
+        "status", help="porcelain + ahead/behind + in-progress state + quarantine counts"
+    )
+    status_p.set_defaults(func=cmd_status)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

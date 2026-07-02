@@ -424,6 +424,47 @@ def _is_global_admin() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Autocommit hook point (Epic 5, adrev-401)
+# ---------------------------------------------------------------------------
+
+def _maybe_autocommit() -> None:
+    """
+    Fire-and-forget sync trigger, called at the tail of every successful
+    mutating write. Deliberately THIN (arch-6: sync orchestration is a
+    separate concern from the store's own write path) -- the only things
+    checked here are "is autocommit enabled" and "is this a git repo at
+    all". Everything else (the store-wide sync lock, standing down while a
+    merge/rebase is in progress, the actual `git add`/`git commit`) lives
+    inside `ccgm-learnings-sync commit` itself, not here, so that behavior
+    is identical whether commit is invoked by this hook or by a human.
+
+    Never raises and never blocks the caller: the subprocess is spawned
+    detached (its own session) and its output is discarded.
+    """
+    if os.environ.get("CCGM_LEARNINGS_AUTOCOMMIT") != "true":
+        return
+    if not (LEARNINGS_ROOT / ".git").is_dir():
+        return
+    sync_bin = os.environ.get(
+        "CCGM_LEARNINGS_SYNC_BIN",
+        os.path.expanduser("~/.claude/bin/ccgm-learnings-sync"),
+    )
+    if not os.path.isfile(sync_bin):
+        return
+    try:
+        import subprocess
+        subprocess.Popen(
+            [sys.executable, sync_bin, "commit"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Content hashing (CAS)
 # ---------------------------------------------------------------------------
 
@@ -706,6 +747,7 @@ def append_entry(entry: dict[str, Any], slug: str | None = None) -> Path:
     entry["timestamp"] = ts
     entry["last_verified"] = ts
     entry["project"] = target_slug
+    _maybe_autocommit()
     return shard
 
 
@@ -1579,6 +1621,7 @@ def update_entry_by_id(
             expected_sha256=expected_sha256 if kind == "deprecate" else None,
         )
         file_locked_append(str(shard), json.dumps(row, sort_keys=True))
+    _maybe_autocommit()
     return True
 
 
@@ -1670,6 +1713,7 @@ def supersede_entry(
     new_entry["last_verified"] = ts
     new_entry["writer"] = writer
     new_entry["source_session"] = source_session
+    _maybe_autocommit()
     return new_entry
 
 
@@ -1743,6 +1787,7 @@ def promote_to_global(
     new_entry["last_verified"] = ts
     new_entry["writer"] = writer
     new_entry["source_session"] = resolved_session
+    _maybe_autocommit()
     return new_entry
 
 

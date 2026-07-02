@@ -16,6 +16,7 @@
     "hooks/learnings-inject.py": { "target": "hooks/learnings-inject.py", "type": "hook", "template": false },
     "bin/ccgm-learnings-log": { "target": "bin/ccgm-learnings-log", "type": "script", "template": false },
     "bin/ccgm-learnings-search": { "target": "bin/ccgm-learnings-search", "type": "script", "template": false },
+    "bin/ccgm-learnings-sync": { "target": "bin/ccgm-learnings-sync", "type": "script", "template": false },
     "lib/learnings_store.py": { "target": "lib/learnings_store.py", "type": "lib", "template": false },
     "settings.partial.json": { "target": "settings.json", "type": "config", "template": false, "merge": true }
   },
