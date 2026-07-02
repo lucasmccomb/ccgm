@@ -1,0 +1,15 @@
+{
+  "name": "dreaming",
+  "displayName": "Dreaming: Durable Memory Mining",
+  "description": "Nightly, cost-capped dreaming service that mines Claude Code session transcripts for cross-session failure patterns and proposes evidence-tagged memory-store changes behind a human gate. Extends self-improving's learnings store with an out-of-band analyzer -- autoheal's capture-analyze-propose pipeline, retargeted at session transcripts instead of permission events. Ships incrementally: this module currently provides the deterministic transcript miner (discover/mine/cluster/budget plus a schema-drift canary); the map-reduce analyzer, apply path, scheduler, and eval harness land in later epics.",
+  "category": "workflow",
+  "scope": ["global"],
+  "status": "beta",
+  "dependencies": ["hooks", "self-improving", "session-history"],
+  "files": {
+    "lib/transcript_miner.py": { "target": "lib/transcript_miner.py", "type": "lib", "template": false },
+    "lib/evidence-bundle-schema.json": { "target": "lib/evidence-bundle-schema.json", "type": "lib", "template": false }
+  },
+  "tags": ["dreaming", "memory", "durable-memory", "transcript-mining", "jsonl", "self-improving"],
+  "configPrompts": []
+}
