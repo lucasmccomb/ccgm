@@ -86,6 +86,13 @@ from pathlib import Path
 
 FLAG = "CCGM_LEARNINGS_INJECT"
 
+# Rough chars-per-token approximation; matches learnings_store.py's own
+# "4 chars ~ 1 token" convention (search()'s char_budget = budget * 4).
+# Distinct from the *candidate over-fetch* multiplier used below (also 4,
+# but an unrelated "fetch this many times the cap" concept -- Stage-2
+# review nit).
+CHARS_PER_TOKEN = 4
+
 # learnings_store.py is installed at ~/.claude/lib/learnings_store.py by CCGM
 # and lives at ../lib/learnings_store.py relative to this file's own repo
 # location. Insert both so the hook resolves it whether it is running from
@@ -156,22 +163,107 @@ def _verify_wrapper(entry: dict, *, repo_root: "Path | None" = None, now: "float
     last_verified = entry.get("last_verified") or entry.get("timestamp") or ""
     date_str = last_verified[:10] if len(last_verified) >= 10 else "unknown"
     wrapper = f"[age: {age}d · last_verified: {date_str} · verify files[] anchors before asserting]"
-    if learnings_store.has_stale_file_refs(entry, repo_root):
+    # files[] elements are supposed to be strings, but learnings_store's own
+    # validate_entry() only checks list-ness, not element type -- a caller
+    # of build_entry(..., files=[123]) writes successfully through the
+    # store's public API and only crashes here, at read time, inside
+    # has_stale_file_refs(). Filter defensively (skip, don't crash) rather
+    # than trust the shape (Stage-2 review: "hook must never raise").
+    safe_files = [f for f in (entry.get("files") or []) if isinstance(f, str)]
+    if learnings_store.has_stale_file_refs({**entry, "files": safe_files}, repo_root):
         wrapper += " [anchor-missing]"
     return wrapper
 
 
-def _select_for_injection(slug: str, *, max_results: int, token_budget: int) -> "list[dict]":
+def _render_entry_lines(entry: dict, *, repo_root: "Path | None" = None) -> "list[str]":
+    """The exact two lines build_context() emits for one entry: the bullet
+    (type/confidence/content/tags) and the verification wrapper. Shared by
+    _select_for_injection()'s budget accounting and build_context()'s real
+    render so the two can never drift apart -- the root cause of the
+    Stage-2 budget-overflow finding was an estimate (`len(content) + 80`)
+    that did not know this second, wrapper line existed at all.
+    """
+    eff = learnings_store.effective_confidence(entry)
+    tags = ",".join(entry.get("tags", []))
+    bullet = (
+        f"  - [{entry.get('type')}] ({eff:.1f}) {entry.get('content')}"
+        + (f"  [tags: {tags}]" if tags else "")
+    )
+    wrapper = f"    {_verify_wrapper(entry, repo_root=repo_root)}"
+    return [bullet, wrapper]
+
+
+def _envelope_lines(count: int) -> "tuple[list[str], list[str]]":
+    """The exact header/footer line lists build_context() wraps entries in,
+    parameterized by the "N of top-ranked" count so the real render and the
+    budget pre-check below always use identical text."""
+    header = [
+        "<ccgm-learnings-injection>",
+        f"Durable learnings for this project ({count} of top-ranked, budget-capped).",
+        "Each is a claim recorded at write time, not a live guarantee -- verify before",
+        "treating as settled fact, especially any files[] anchor.",
+        "",
+    ]
+    footer = [
+        "",
+        "Run `ccgm-learnings-search --query <topic>` for more, or `--cross-project` to widen scope.",
+        "</ccgm-learnings-injection>",
+    ]
+    return header, footer
+
+
+def _envelope_char_cost(max_results: int) -> int:
+    """Reserved char cost of the header+footer envelope around the entries,
+    computed with max_results as an upper bound on the eventual "N of
+    top-ranked" digit count -- the real len(selected) can never exceed
+    max_results, so this can never *underestimate* the true reservation
+    (only ever reserve a few extra, harmless chars when the digit count of
+    the eventual real count is shorter than max_results's).
+
+    Mirrors exactly what "\\n".join(header + entries + footer) + "\\n" costs
+    when zero entries are spliced in: sum(line lengths) + (n-1) internal
+    separators + 1 trailing newline == sum(line lengths) + n. The per-entry
+    loop in _select_for_injection() adds its own "+2" per entry for the two
+    newline separators each entry's two lines introduce once spliced
+    between header and footer -- see that loop for the entry-side half of
+    this same accounting.
+    """
+    header, footer = _envelope_lines(max(max_results, 0))
+    all_lines = header + footer
+    return sum(len(line) for line in all_lines) + len(all_lines)
+
+
+def _select_for_injection(
+    slug: str, *, max_results: int, token_budget: int, repo_root: "Path | None" = None
+) -> "list[dict]":
     """Fetch a superset of ranked candidates via learnings_store.search()
     (ranking/relevance/decay stay entirely owned by the store), drop
     conflicted rows (adrev-011), then re-apply the real cap/budget over the
     filtered, already-ranked set -- mirroring search()'s own trailing budget
     loop so backfill works after conflict suppression.
 
+    Budget accounting uses the ACTUAL rendered text (_render_entry_lines(),
+    the same helper build_context() renders with) rather than an estimate,
+    and reserves the header/footer envelope's fixed cost
+    (_envelope_char_cost()) before the per-entry loop runs -- so the
+    invariant `len(build_context(...)) <= token_budget * CHARS_PER_TOKEN`
+    holds by construction, not by chance (Stage-2 review: the prior
+    `len(content) + 80` heuristic knew about neither the wrapper line nor
+    the envelope, and drifted 129-136% over budget under realistic,
+    non-default configs).
+
+    max_results <= 0 means "inject nothing": returns [] immediately, rather
+    than the previous pre-cap-check loop shape that appended before
+    checking the cap and so returned exactly 1 entry for max_results=0
+    (Stage-2 review, Recommend).
+
     Over-fetches 4x cap/budget: conflicts should be rare, and this margin is
     enough for a non-conflicted alternative to backfill in the common case
     without walking the entire store.
     """
+    if max_results <= 0:
+        return []
+
     over_fetched = learnings_store.search(
         slug=slug,
         max_results=max_results * 4,
@@ -179,15 +271,21 @@ def _select_for_injection(slug: str, *, max_results: int, token_budget: int) -> 
     )
     non_conflicted = [e for e in over_fetched if not e.get("conflict")]
 
-    char_budget = token_budget * 4
+    char_budget = token_budget * CHARS_PER_TOKEN
+    available = char_budget - _envelope_char_cost(max_results)
+
     used = 0
     out: "list[dict]" = []
     for e in non_conflicted:
-        snippet_len = len(e.get("content", "")) + 80
-        if used + snippet_len > char_budget:
+        bullet, wrapper = _render_entry_lines(e, repo_root=repo_root)
+        # +2: the two newline separators this entry's two lines add once
+        # spliced between the surrounding lines (see _envelope_char_cost()'s
+        # docstring for the matching header/footer half of this accounting).
+        entry_cost = len(bullet) + len(wrapper) + 2
+        if used + entry_cost > available:
             break
         out.append(e)
-        used += snippet_len
+        used += entry_cost
         if len(out) >= max_results:
             break
     return out
@@ -199,6 +297,14 @@ def build_context(hook_input: dict, env: "dict[str, str] | None" = None) -> "str
     Depends only on hook_input + env + store state -- no caller-visible
     side effects. Every "None" branch means the caller emits nothing and
     session behavior is exactly what it was before this hook existed.
+
+    NOTE: `env` only gates the CCGM_LEARNINGS_INJECT flag checked just
+    below -- project-slug resolution (resolve_slug() ->
+    learnings_store.detect_project_slug()) always reads the REAL process
+    os.environ, regardless of what is passed here. Harmless in production
+    (where `env` defaults to `os.environ` anyway); tests that need to
+    isolate slug resolution do so via CCGM_LEARNINGS_PROJECT/DIR, not via
+    this parameter.
     """
     env = env if env is not None else os.environ
     if not _truthy(env.get(FLAG)):
@@ -208,36 +314,33 @@ def build_context(hook_input: dict, env: "dict[str, str] | None" = None) -> "str
 
     cwd = hook_input.get("cwd") or os.getcwd()
     slug = resolve_slug(cwd)
+    repo_root = Path(cwd)
 
     cfg = learnings_store.load_config()
-    max_results = int(cfg.get("max_results", learnings_store.DEFAULT_MAX_RESULTS))
-    token_budget = int(cfg.get("token_budget", learnings_store.DEFAULT_TOKEN_BUDGET))
+    # cfg values come from a user-editable config.json: syntactically valid
+    # JSON with the wrong type (a string, or null) must fall back to the
+    # store's own defaults, never crash a SessionStart hook (Stage-2
+    # review, matches this file's own established local-guard idiom).
+    try:
+        max_results = int(cfg.get("max_results", learnings_store.DEFAULT_MAX_RESULTS))
+    except (TypeError, ValueError):
+        max_results = learnings_store.DEFAULT_MAX_RESULTS
+    try:
+        token_budget = int(cfg.get("token_budget", learnings_store.DEFAULT_TOKEN_BUDGET))
+    except (TypeError, ValueError):
+        token_budget = learnings_store.DEFAULT_TOKEN_BUDGET
 
-    selected = _select_for_injection(slug, max_results=max_results, token_budget=token_budget)
+    selected = _select_for_injection(
+        slug, max_results=max_results, token_budget=token_budget, repo_root=repo_root
+    )
     if not selected:
         return None
 
-    repo_root = Path(cwd)
-    lines = [
-        "<ccgm-learnings-injection>",
-        f"Durable learnings for this project ({len(selected)} of top-ranked, budget-capped).",
-        "Each is a claim recorded at write time, not a live guarantee -- verify before",
-        "treating as settled fact, especially any files[] anchor.",
-        "",
-    ]
+    header, footer = _envelope_lines(len(selected))
+    lines = list(header)
     for e in selected:
-        eff = learnings_store.effective_confidence(e)
-        tags = ",".join(e.get("tags", []))
-        lines.append(
-            f"  - [{e.get('type')}] ({eff:.1f}) {e.get('content')}"
-            + (f"  [tags: {tags}]" if tags else "")
-        )
-        lines.append(f"    {_verify_wrapper(e, repo_root=repo_root)}")
-    lines += [
-        "",
-        "Run `ccgm-learnings-search --query <topic>` for more, or `--cross-project` to widen scope.",
-        "</ccgm-learnings-injection>",
-    ]
+        lines.extend(_render_entry_lines(e, repo_root=repo_root))
+    lines.extend(footer)
     return "\n".join(lines) + "\n"
 
 
@@ -253,7 +356,15 @@ def main() -> None:
     if hook_input.get("source", "") != "startup":
         return
 
-    context = build_context(hook_input)
+    # Defense-in-depth (Stage-2 review): build_context() should never raise,
+    # but a SessionStart hook must NEVER surface a traceback regardless of
+    # what upstream guard might have a gap -- any unexpected failure here is
+    # a silent no-op, same as every other "nothing to inject" branch above.
+    try:
+        context = build_context(hook_input)
+    except Exception:
+        return
+
     if context:
         sys.stdout.write(context)
 

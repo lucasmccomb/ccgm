@@ -27,9 +27,15 @@ Every preamble/markdown entry is wrapped with a verification reminder --
 asserting]` -- since a learning is a claim recorded at write time, not a
 live guarantee about the codebase now (epic 4: verification-on-read). When a
 listed files[] anchor no longer exists under the current working directory,
-the wrapper additionally appends `[anchor-missing]`. `--format jsonl` output
-gains a matching `age_days` integer field; nothing else about its shape
-changes.
+the wrapper additionally appends `[anchor-missing]`. When the entry has two
+live competing supersedes (adrev-011), the wrapper additionally appends
+`[conflict: competing heads -- not settled]` -- conflicted rows are shown
+here, not suppressed; only the SessionStart injection path
+(hooks/learnings-inject.py) hides them outright, since that path has no
+human in the loop to notice the flag. `--format jsonl` output gains a
+matching `age_days` integer field; nothing else about its shape changes
+(the `conflict` field, when present on an entry, was already passed through
+unmodified).
 """
 
 from __future__ import annotations
@@ -92,13 +98,21 @@ def _age_days(entry: dict, *, now: float | None = None) -> int:
 def _verify_wrapper(entry: dict, *, repo_root: Path | None = None, now: float | None = None) -> str:
     """`[age: Nd · last_verified: DATE · verify files[] anchors before
     asserting]`, plus a trailing `[anchor-missing]` when a listed files[]
-    path does not exist under `repo_root`."""
+    path does not exist under `repo_root`, and `[conflict: competing heads
+    — not settled]` when the entry has two live competing supersedes
+    (adrev-011). Unlike the SessionStart injection path
+    (hooks/learnings-inject.py), which suppresses conflicted rows outright
+    since no human is in the loop to notice a flag, a human running this
+    CLI directly should SEE the conflict -- so it is tagged here, never
+    hidden."""
     age = _age_days(entry, now=now)
     last_verified = entry.get("last_verified") or entry.get("timestamp") or ""
     date_str = last_verified[:10] if len(last_verified) >= 10 else "unknown"
     wrapper = f"[age: {age}d · last_verified: {date_str} · verify files[] anchors before asserting]"
     if ls.has_stale_file_refs(entry, repo_root):
         wrapper += " [anchor-missing]"
+    if entry.get("conflict"):
+        wrapper += " [conflict: competing heads — not settled]"
     return wrapper
 
 

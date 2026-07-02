@@ -79,8 +79,13 @@ search_cli = _load_module("ccgm_learnings_search_cli", SEARCH_CLI_PATH)
 
 
 class HermeticEnvTestCase(unittest.TestCase):
-    """Base class: saves + restores CCGM_LEARNINGS_PROJECT and
-    CCGM_LEARNINGS_DIR around every test (issue #764 defense-in-depth).
+    """Base class: saves + restores CCGM_LEARNINGS_PROJECT, CCGM_LEARNINGS_DIR,
+    and config.json around every test (issue #764 defense-in-depth). The
+    config.json guard exists for the Stage-2-review regression tests below
+    (budget/config-cast/conflict-render) that call `ls.save_config(...)` --
+    CONFIG_PATH lives inside the SAME shared CCGM_LEARNINGS_DIR tempdir
+    every test in this file runs against, so a config left behind by one
+    test would otherwise leak into every test that runs after it.
 
     Subclasses that override setUp() must call super().setUp() FIRST (before
     mutating either var) so the pre-test value is captured accurately.
@@ -94,6 +99,12 @@ class HermeticEnvTestCase(unittest.TestCase):
                 self.addCleanup(os.environ.pop, key, None)
             else:
                 self.addCleanup(os.environ.__setitem__, key, saved)
+
+        if ls.CONFIG_PATH.is_file():
+            saved_config = ls.CONFIG_PATH.read_bytes()
+            self.addCleanup(ls.CONFIG_PATH.write_bytes, saved_config)
+        else:
+            self.addCleanup(lambda: ls.CONFIG_PATH.unlink(missing_ok=True))
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +245,79 @@ class SearchCliSubprocessTests(HermeticEnvTestCase):
         self.assertIn("age_days", rows[0])
 
 
+class SearchCliConflictRenderingTests(HermeticEnvTestCase):
+    """adrev-011 half (b): unlike the SessionStart injection path (which
+    suppresses conflicted rows outright, hooks/learnings-inject.py), the
+    search CLI must render a visible marker on a conflicted row -- a human
+    running this CLI directly should see the conflict, not have it silently
+    hidden as if it were settled truth. Same fixture technique as
+    ConflictSuppressionTests below (two independent supersedes on the same
+    target -> conflict: true on both live heads)."""
+
+    def setUp(self):
+        super().setUp()
+        self.slug = f"search-conflict-{uuid.uuid4().hex[:10]}"
+        os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
+        os.environ.pop("CCGM_AGENT_ID", None)
+
+        contested = ls.build_entry(type_="pattern", content="contested cli-render learning", confidence=9)
+        ls.append_entry(contested)
+        self.old_id = contested["id"]
+        ls.supersede_entry(self.old_id, content="conflicted cli branch A", slug=self.slug)
+        ls.supersede_entry(self.old_id, content="conflicted cli branch B", slug=self.slug)
+
+    def tearDown(self):
+        shutil.rmtree(ls.project_dir(self.slug), ignore_errors=True)
+        shutil.rmtree(ls._cache_dir(self.slug), ignore_errors=True)
+        os.environ.pop("CCGM_AGENT_ID", None)
+        super().tearDown()
+
+    def _conflicted_rows(self) -> list[dict]:
+        rows = [r for r in ls.search(slug=self.slug) if r.get("conflict")]
+        self.assertEqual(len(rows), 2, "fixture setup should yield exactly 2 live conflicting heads")
+        return rows
+
+    def test_verify_wrapper_tags_conflicted_row(self):
+        wrapper = search_cli._verify_wrapper(self._conflicted_rows()[0])
+        self.assertIn("[conflict: competing heads", wrapper)
+        self.assertIn("not settled", wrapper)
+
+    def test_verify_wrapper_does_not_tag_clean_row(self):
+        clean = ls.build_entry(type_="pattern", content="clean cli-render learning", confidence=9)
+        wrapper = search_cli._verify_wrapper(clean)
+        self.assertNotIn("[conflict:", wrapper)
+
+    def test_preamble_shows_conflict_tag(self):
+        out = search_cli._render_preamble(self._conflicted_rows())
+        self.assertIn("[conflict: competing heads", out)
+
+    def test_markdown_shows_conflict_tag(self):
+        out = search_cli._render_markdown(self._conflicted_rows())
+        self.assertIn("[conflict: competing heads", out)
+
+    def test_cli_subprocess_shows_conflict_tag_and_does_not_suppress(self):
+        env = os.environ.copy()
+        env["CCGM_LEARNINGS_DIR"] = str(ls.LEARNINGS_ROOT)
+        result = subprocess.run(
+            [sys.executable, str(SEARCH_CLI_PATH), "--project", self.slug, "--max", "10"],
+            env=env, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[conflict: competing heads", result.stdout)
+        # Do NOT suppress: unlike the SessionStart injection path, a human
+        # running the CLI directly should still see both competing heads.
+        self.assertIn("conflicted cli branch A", result.stdout)
+        self.assertIn("conflicted cli branch B", result.stdout)
+
+    def test_jsonl_still_carries_conflict_field(self):
+        rows = self._conflicted_rows()
+        out = search_cli._render_jsonl(rows)
+        parsed = [json.loads(line) for line in out.strip().splitlines()]
+        self.assertEqual(len(parsed), 2)
+        for row in parsed:
+            self.assertTrue(row.get("conflict"))
+
+
 # ---------------------------------------------------------------------------
 # learnings-inject.py: opt-in gate, budget, ordering, conflict suppression
 # ---------------------------------------------------------------------------
@@ -366,16 +450,20 @@ class SelectForInjectionBudgetTests(HermeticEnvTestCase):
         shutil.rmtree(ls._cache_dir(self.slug), ignore_errors=True)
         super().tearDown()
 
-    def test_respects_small_token_budget(self):
-        # ~90-char content -> ~170-char snippet (content + 80 overhead) each.
-        # A 90-token (360-char) budget fits exactly 2 of the 6 entries
-        # (2*170=340 <= 360 < 510=3*170), so this pins a genuine partial cap
-        # rather than an all-or-nothing budget.
-        selected = hook._select_for_injection(self.slug, max_results=6, token_budget=90)
+    def test_partial_selection_under_tight_budget(self):
+        # A 200-token (800-char) budget with 6 sizeable entries should
+        # select some but not all -- a genuine partial cap, not an
+        # all-or-nothing budget. (The envelope alone costs ~352 real chars
+        # for this fixture, and each real entry ~195 -- a budget much
+        # smaller than 800 would be consumed entirely by the envelope
+        # reservation and legitimately select zero; see
+        # BuildContextTokenBudgetTests below for the actual
+        # budget-compliance regression assertion, which checks the real
+        # observable len(build_context(...)) rather than recomputing the
+        # code's own internal estimate here.)
+        selected = hook._select_for_injection(self.slug, max_results=6, token_budget=200)
         self.assertGreater(len(selected), 0)
         self.assertLess(len(selected), 6)
-        total_chars = sum(len(e.get("content", "")) + 80 for e in selected)
-        self.assertLessEqual(total_chars, 90 * 4)
 
     def test_respects_max_results_cap(self):
         selected = hook._select_for_injection(self.slug, max_results=2, token_budget=2000)
@@ -384,6 +472,161 @@ class SelectForInjectionBudgetTests(HermeticEnvTestCase):
     def test_generous_budget_returns_all(self):
         selected = hook._select_for_injection(self.slug, max_results=8, token_budget=2000)
         self.assertEqual(len(selected), 6)
+
+    def test_max_results_zero_returns_empty(self):
+        # Stage-2 review, Recommend: the old loop appended before checking
+        # the cap, so max_results=0 returned exactly 1 entry instead of 0.
+        selected = hook._select_for_injection(self.slug, max_results=0, token_budget=2000)
+        self.assertEqual(selected, [])
+
+    def test_max_results_negative_returns_empty(self):
+        selected = hook._select_for_injection(self.slug, max_results=-1, token_budget=2000)
+        self.assertEqual(selected, [])
+
+
+class BuildContextTokenBudgetTests(HermeticEnvTestCase):
+    """Regression guard for the Stage-2 budget-overflow finding: the OLD
+    per-entry estimate (`len(content) + 80`) did not know about the second
+    (verify-wrapper) rendered line per entry, nor about the header/footer
+    envelope, and drifted 129-136% over the configured budget under
+    realistic (non-default) configs -- while the one test meant to catch it
+    recomputed that same broken estimate and could never fail. The only
+    assertion that actually proves the invariant is on build_context()'s
+    real, observable output length -- never an internal estimate.
+
+    60 entries (bigger than SelectForInjectionBudgetTests' 6-entry fixture)
+    so that at max_results=100/token_budget=2000 the token budget -- not
+    entry-count scarcity or the cap -- is genuinely the binding constraint,
+    same as it would be for a real, well-populated store.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.slug = f"inject-real-budget-{uuid.uuid4().hex[:10]}"
+        os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
+        for i in range(60):
+            e = ls.build_entry(
+                type_="pattern",
+                content=f"real budget regression fixture entry number {i} " + ("x" * 60),
+                confidence=9,
+            )
+            ls.append_entry(e)
+
+    def tearDown(self):
+        shutil.rmtree(ls.project_dir(self.slug), ignore_errors=True)
+        shutil.rmtree(ls._cache_dir(self.slug), ignore_errors=True)
+        super().tearDown()
+
+    def test_build_context_never_exceeds_configured_budget(self):
+        # The exact two (max_results, token_budget) configs the Stage-2
+        # review reproduced overflow with (129% and 136% of budget
+        # respectively, against an independently-sized store).
+        for max_results, token_budget in ((100, 2000), (8, 300)):
+            with self.subTest(max_results=max_results, token_budget=token_budget):
+                ls.save_config({"max_results": max_results, "token_budget": token_budget})
+                block = hook.build_context(
+                    {"source": "startup", "cwd": os.getcwd()},
+                    env={"CCGM_LEARNINGS_INJECT": "true"},
+                )
+                self.assertIsNotNone(block, "expected at least one entry to fit the budget")
+                self.assertLessEqual(len(block), token_budget * 4)
+
+
+class ConfigCastGuardTests(HermeticEnvTestCase):
+    """Stage-2 review Blocking #2: a syntactically-valid but
+    semantically-wrong-typed config.json (max_results/token_budget as a
+    string, or null) crashed the hook with an unhandled ValueError/TypeError
+    from the raw int() casts -- directly contradicting this file's own
+    "never raises" safety claim. Uses an EMPTY store so the assertion
+    isolates the crash-safety property (exit 0, no stderr, no stdout) from
+    selection correctness -- with nothing in the store to select, "prints
+    nothing" is the expected output regardless of which fallback default
+    the guard resolves to.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.slug = f"inject-badconfig-{uuid.uuid4().hex[:10]}"
+        os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
+
+    def tearDown(self):
+        shutil.rmtree(ls.project_dir(self.slug), ignore_errors=True)
+        shutil.rmtree(ls._cache_dir(self.slug), ignore_errors=True)
+        super().tearDown()
+
+    def _run(self) -> subprocess.CompletedProcess:
+        env = os.environ.copy()
+        env["CCGM_LEARNINGS_PROJECT"] = self.slug
+        env["CCGM_LEARNINGS_DIR"] = str(ls.LEARNINGS_ROOT)
+        env["CCGM_LEARNINGS_INJECT"] = "true"
+        return subprocess.run(
+            [sys.executable, str(INJECT_HOOK_PATH)],
+            input=json.dumps({"source": "startup", "cwd": os.getcwd()}),
+            env=env, capture_output=True, text=True,
+        )
+
+    def test_max_results_wrong_type_never_crashes(self):
+        ls.save_config({"max_results": "not-a-number", "token_budget": 2000})
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(result.stdout, "")
+
+    def test_max_results_null_never_crashes(self):
+        ls.save_config({"max_results": None, "token_budget": 2000})
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(result.stdout, "")
+
+    def test_token_budget_wrong_type_never_crashes(self):
+        ls.save_config({"max_results": 8, "token_budget": "not-a-number"})
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(result.stdout, "")
+
+
+class FilesFieldCrashGuardTests(HermeticEnvTestCase):
+    """Stage-2 review Blocking #2 (second reachable path): files[] elements
+    are supposed to be strings, but learnings_store.validate_entry() only
+    checks list-ness, not element type, so
+    learnings_store.build_entry(..., files=[123]) writes successfully
+    through the store's own public API and only crashes later, at read
+    time, inside has_stale_file_refs(). The hook must tolerate this (skip
+    the bad element, don't crash) and must not let one bad entry suppress
+    its well-formed siblings from the same injected block.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.slug = f"inject-badfiles-{uuid.uuid4().hex[:10]}"
+        os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
+        bad = ls.build_entry(
+            type_="pattern", content="entry with non-string files element", confidence=9, files=[123],
+        )
+        ls.append_entry(bad)
+        ls.append_entry(ls.build_entry(type_="pattern", content="clean sibling entry", confidence=9))
+
+    def tearDown(self):
+        shutil.rmtree(ls.project_dir(self.slug), ignore_errors=True)
+        shutil.rmtree(ls._cache_dir(self.slug), ignore_errors=True)
+        super().tearDown()
+
+    def test_non_string_files_element_never_crashes_and_still_injects_siblings(self):
+        env = os.environ.copy()
+        env["CCGM_LEARNINGS_PROJECT"] = self.slug
+        env["CCGM_LEARNINGS_DIR"] = str(ls.LEARNINGS_ROOT)
+        env["CCGM_LEARNINGS_INJECT"] = "true"
+        result = subprocess.run(
+            [sys.executable, str(INJECT_HOOK_PATH)],
+            input=json.dumps({"source": "startup", "cwd": os.getcwd()}),
+            env=env, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertIn("entry with non-string files element", result.stdout)
+        self.assertIn("clean sibling entry", result.stdout)
 
 
 class OrderingStabilityTests(HermeticEnvTestCase):
