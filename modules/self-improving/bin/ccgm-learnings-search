@@ -21,6 +21,21 @@ Examples:
 The search path applies time-based confidence decay, dedupes by (key, type),
 drops deprecated or stale-below-threshold entries, and caps output by the
 configured token budget (chars/4 approximation).
+
+Every preamble/markdown entry is wrapped with a verification reminder --
+`[age: {N}d · last_verified: {date} · verify files[] anchors before
+asserting]` -- since a learning is a claim recorded at write time, not a
+live guarantee about the codebase now (epic 4: verification-on-read). When a
+listed files[] anchor no longer exists under the current working directory,
+the wrapper additionally appends `[anchor-missing]`. When the entry has two
+live competing supersedes (adrev-011), the wrapper additionally appends
+`[conflict: competing heads -- not settled]` -- conflicted rows are shown
+here, not suppressed; only the SessionStart injection path
+(hooks/learnings-inject.py) hides them outright, since that path has no
+human in the loop to notice the flag. `--format jsonl` output gains a
+matching `age_days` integer field; nothing else about its shape changes
+(the `conflict` field, when present on an entry, was already passed through
+unmodified).
 """
 
 from __future__ import annotations
@@ -29,6 +44,8 @@ import argparse
 import json
 import os
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
@@ -37,7 +54,69 @@ sys.path.insert(0, str(_HERE.parent / "lib"))
 import learnings_store as ls  # noqa: E402
 
 
-def _render_markdown(entries: list[dict]) -> str:
+# ---------------------------------------------------------------------------
+# Age / verification wrapper (epic 4: verification-on-read)
+# ---------------------------------------------------------------------------
+#
+# learnings_store.py owns confidence decay and staleness math, but has no
+# public helper that returns a plain "days since last_verified" integer --
+# effective_confidence() folds age into a decayed score, and is_stale() only
+# returns a bool. Rather than modify the store (out of scope for this
+# change; see rules/learnings-store.md ownership), a small local ISO parser
+# mirrors the store's own tolerant format handling (with/without
+# milliseconds). The identical helper is duplicated in
+# hooks/learnings-inject.py, which renders the same wrapper for the
+# SessionStart injection block -- these are two independent entry points
+# that must not import each other.
+
+_ISO_FORMATS = ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_iso_epoch(value: str) -> float:
+    """Parse an ISO-8601 UTC timestamp (ms-precision or not) to epoch
+    seconds. Returns 0.0 for empty/unparseable input."""
+    if not value:
+        return 0.0
+    for fmt in _ISO_FORMATS:
+        try:
+            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            continue
+    return 0.0
+
+
+def _age_days(entry: dict, *, now: float | None = None) -> int:
+    """Whole days since `last_verified` (falling back to `timestamp`).
+    Deterministic arithmetic on data already in hand -- never estimated."""
+    ts = _parse_iso_epoch(entry.get("last_verified") or entry.get("timestamp", ""))
+    if ts <= 0:
+        return 0
+    now_ts = now if now is not None else time.time()
+    return max(0, int((now_ts - ts) // 86400))
+
+
+def _verify_wrapper(entry: dict, *, repo_root: Path | None = None, now: float | None = None) -> str:
+    """`[age: Nd · last_verified: DATE · verify files[] anchors before
+    asserting]`, plus a trailing `[anchor-missing]` when a listed files[]
+    path does not exist under `repo_root`, and `[conflict: competing heads
+    — not settled]` when the entry has two live competing supersedes
+    (adrev-011). Unlike the SessionStart injection path
+    (hooks/learnings-inject.py), which suppresses conflicted rows outright
+    since no human is in the loop to notice a flag, a human running this
+    CLI directly should SEE the conflict -- so it is tagged here, never
+    hidden."""
+    age = _age_days(entry, now=now)
+    last_verified = entry.get("last_verified") or entry.get("timestamp") or ""
+    date_str = last_verified[:10] if len(last_verified) >= 10 else "unknown"
+    wrapper = f"[age: {age}d · last_verified: {date_str} · verify files[] anchors before asserting]"
+    if ls.has_stale_file_refs(entry, repo_root):
+        wrapper += " [anchor-missing]"
+    if entry.get("conflict"):
+        wrapper += " [conflict: competing heads — not settled]"
+    return wrapper
+
+
+def _render_markdown(entries: list[dict], *, repo_root: Path | None = None, now: float | None = None) -> str:
     if not entries:
         return "_No learnings matched._\n"
     lines = ["# Learnings (ranked)", ""]
@@ -49,6 +128,8 @@ def _render_markdown(entries: list[dict]) -> str:
             lines.append(tag_str)
         lines.append("")
         lines.append(e.get("content", ""))
+        lines.append("")
+        lines.append(_verify_wrapper(e, repo_root=repo_root, now=now))
         if e.get("files"):
             lines.append("")
             lines.append("**Anchors:** " + ", ".join(f"`{f}`" for f in e["files"]))
@@ -56,7 +137,7 @@ def _render_markdown(entries: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _render_preamble(entries: list[dict]) -> str:
+def _render_preamble(entries: list[dict], *, repo_root: Path | None = None, now: float | None = None) -> str:
     """Compact preamble block suitable for injection at command start."""
     if not entries:
         return ""
@@ -68,12 +149,18 @@ def _render_preamble(entries: list[dict]) -> str:
             f"  - [{e.get('type')}] ({eff:.1f}) {e.get('content')}"
             + (f"  [tags: {tags}]" if tags else "")
         )
+        lines.append(f"    {_verify_wrapper(e, repo_root=repo_root, now=now)}")
     lines.append("</learnings>")
     return "\n".join(lines) + "\n"
 
 
-def _render_jsonl(entries: list[dict]) -> str:
-    return "\n".join(json.dumps(e, sort_keys=True) for e in entries) + ("\n" if entries else "")
+def _render_jsonl(entries: list[dict], *, now: float | None = None) -> str:
+    rows = []
+    for e in entries:
+        row = dict(e)
+        row["age_days"] = _age_days(e, now=now)
+        rows.append(json.dumps(row, sort_keys=True))
+    return "\n".join(rows) + ("\n" if rows else "")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -113,9 +200,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.format == "jsonl":
         sys.stdout.write(_render_jsonl(entries))
     elif args.format == "markdown":
-        sys.stdout.write(_render_markdown(entries))
+        sys.stdout.write(_render_markdown(entries, repo_root=Path.cwd()))
     else:
-        sys.stdout.write(_render_preamble(entries))
+        sys.stdout.write(_render_preamble(entries, repo_root=Path.cwd()))
     return 0
 
 

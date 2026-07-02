@@ -22,6 +22,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/learnings-inject.py",
+            "timeout": 5000
+          }
+        ]
+      }
     ]
   }
 }
