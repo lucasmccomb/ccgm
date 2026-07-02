@@ -259,6 +259,96 @@ Log a learning when all three hold:
 
 ---
 
+## Versioning & Sync
+
+`~/.claude/learnings/` (or `$CCGM_LEARNINGS_DIR`) is its own git repository, managed exclusively through `ccgm-learnings-sync` — never with raw `git pull`/`git rebase` against this repo (see "Raw git is unsupported" below).
+
+### Init
+
+```bash
+ccgm-learnings-sync init
+```
+
+Idempotent — safe to run repeatedly, and safe to run against a repo that already has a `.git` directory and a commit history from before this tool existed (e.g. a manual `git init` + baseline commit made during initial bring-up). `init`:
+
+- `git init` only if `.git` is missing.
+- Writes `.gitattributes` (`*.jsonl merge=union`) if the line isn't already present.
+- Writes `.gitignore` covering per-machine, never-synced state: `.env*`, `*.quarantine.jsonl`, `config.json`. The read-time snapshot cache (`snapshot.jsonl` + its watermark) needs **no** gitignore entry — it already lives outside this repo entirely, in a sibling `learnings-cache/` directory (`LEARNINGS_CACHE_ROOT` in `learnings_store.py`), so it is structurally never a sync participant.
+- Commits whatever that leaves dirty. Running `init` twice produces no second commit.
+
+### Commit cadence
+
+```bash
+ccgm-learnings-sync commit [-m "message"]
+```
+
+Stages everything and commits iff the tree is actually dirty; a clean tree is a no-op, not an error. Default message is `learnings: {ISO timestamp} on {agent_id}`.
+
+**Autocommit.** Set `CCGM_LEARNINGS_AUTOCOMMIT=true` and every successful mutating write (`add`/`verify`/`contradict`/`supersede`/`deprecate`/`promote_to_global`) fires a detached `ccgm-learnings-sync commit` after the write completes — it never blocks the write path, and its failure (or stand-down) is invisible to the caller. This is opt-in; unset by default.
+
+### Pull is merge-only — never rebase
+
+```bash
+ccgm-learnings-sync pull
+```
+
+`pull` is `git fetch` + `git merge --no-edit`, and **only** that — it never rebases and never runs `git merge --abort` / `git rebase --abort` on a stopped merge. This was tightened after an empirical finding (git 2.50.1, scratch repos): a rebase-based `pull` design's conflict fallback required `git rebase --abort` to recover, and that abort **silently wiped a concurrently-appended learning from the working tree** — no commit, no reflog entry, unrecoverable. The union merge driver itself was verified to work correctly under both rebase and plain merge; the defect was specifically in the abort-on-conflict recovery path. Removing rebase (and the abort it requires) from the picture removes the defect.
+
+If `pull` hits a real conflict (rare — union-attributed `*.jsonl` shards auto-resolve; a conflict means two machines edited the same *other* tracked file, e.g. `.gitattributes` itself), it leaves the repo exactly where a human would find it: `MERGE_HEAD` present, conflict markers in the offending file, nothing aborted. Resolve it with plain git (`git add <file> && git commit`) and move on. `ccgm-learnings-sync status` reports an in-progress merge loudly rather than staying silent about it.
+
+`pull` refuses outright (exit 1, no git operations attempted) when:
+- the working tree is dirty — commit first;
+- no remote is configured (see "Optional remote (H2)" below).
+
+**Sync lock.** `pull`/`commit`/`push` all take a store-wide lock file (`~/.claude/learnings/.git/ccgm-sync.lock`, never tracked) so they serialize against each other — a `pull` in flight and a `commit` cannot interleave. `commit` (and therefore autocommit, since it always routes through `commit`) additionally stands down as a **provable no-op** whenever `.git/MERGE_HEAD` or a rebase-state marker is present, rather than committing over an unresolved merge.
+
+**Known residual — not closed by this lock.** Ordinary learnings writes (`ccgm-learnings-log add`/`verify`/`supersede`/...) do **not** themselves take the sync lock; only the sync verbs do. A write that lands in the brief window while `pull`'s `git merge` is actively rewriting that same shard file is not structurally protected against the merge's own file write. In practice this window is short (a clean union merge completes in well under a second) and the write survives on disk in the overwhelmingly common case (git's checkout of merged content is a write, not a byte-level race, under normal filesystem semantics) — but it is not a proven-safe guarantee the way the lock-protected sync verbs are. Extending the lock into the store's own write path would require touching `learnings_store.py`'s write functions, which is deliberately out of scope for the sync layer (see "Autocommit lives outside the store" below).
+
+### Post-merge validation and quarantine
+
+`git merge=union` operates on raw text — it has no idea what `validate_entry()`, the write-time sanitizer, or CAS mean. A shard line arriving via merge from another machine (or a hand-edited file, or a compromised/buggy peer) is therefore **not** re-validated by git itself. Two layers close this gap:
+
+- **Eager, at merge time.** After every clean `ccgm-learnings-sync pull` merge, `pull` re-checks every line that is new since before the merge — content-bearing rows (legacy v1 snapshots, and any `add`/`supersede` op-event) run through `learnings_store.validate_entry()`; counter-ops (`verify`/`contradict`/`deprecate`) carry no free-text `content` by design, so they get a lighter structural check instead (a recognized op naming a real target) — applying the content schema check to counter-ops would falsely quarantine every legitimate one ever merged. This pass exists to give an immediate, loud report (`{"quarantined": N}`) and to pre-populate the quarantine index below; it is an optimization, not the load-bearing safety property.
+- **Load-bearing, at every projection.** `learnings_store.py`'s projection (`project_slug()`, which backs both `load_all()` and `search()` — the fold that produces the current heads for a slug) independently re-runs `validate_entry()` on every head, and additionally checks every model-influenceable free-text field (`content`, `supersede_reason`) for unneutralized injection-shaped content via `contains_unneutralized_injection()` — a detection-only check that recognizes text sanitize_content() already wrapped in `[neutralized]...[/neutralized]` and passes it, while catching the same INJECTION_PATTERNS shapes anywhere they survive unwrapped (never re-running the sanitizer itself, which is not idempotent). This is what actually makes quarantine an **exclusion mechanism**: a head that fails either check is dropped from the heads returned to the caller on the spot, and its id is recorded in `<slug>/.quarantine.jsonl` if it isn't there already. Because this runs inside the projection itself, it catches every ingestion path — `ccgm-learnings-sync pull`, a hand-edited shard file, or a raw `git pull`/`git rebase`/`revert` that bypassed `ccgm-learnings-sync` entirely — not just the one command that happens to have an eager check.
+
+A line that fails validation is **never removed or rewritten** in its original shard file — mutating another writer's line breaks the append-only invariant that union-merge safety depends on (a locally "fixed" line diverges from the still-unfixed original elsewhere, and a later sync reintroduces the original alongside it). Instead, its id is recorded in that project's `<slug>/.quarantine.jsonl` (gitignored, local, per-machine, shared by both layers above — same path, same `line_id`-keyed envelope shape). The projection consults this index (plus its own fresh validation) on every read and **excludes** matching ids from the heads it returns: isolation is real and enforced at read time, not just an audit trail nobody consults.
+
+`ccgm-learnings-sync status` surfaces the total quarantined-line count so it doesn't sit silently in a file nobody looks at.
+
+**Raw git skips the loud report, not the safety check.** The eager, immediate `{"quarantined": N}` report and quarantine-index pre-population only run inside `ccgm-learnings-sync pull`. A raw `git pull`, `git rebase`, or `git -C ~/.claude/learnings revert <sha>` (see Rollback, below) still applies `merge=union` via `.gitattributes` and skips that eager pass — but the very next `load_all()`/`search()` call independently re-validates and excludes whatever bad content the raw git operation landed, at projection time. Always prefer `ccgm-learnings-sync pull` for the immediate feedback and the pre-populated index; raw git is discouraged, not unsafe.
+
+### Optional remote (H2)
+
+v1 works entirely local-only; nothing requires a remote. To add one:
+
+```bash
+gh repo create <you>/ccgm-learnings --private --description "CCGM learnings store (personal memory -- private)"
+git -C ~/.claude/learnings remote add origin git@github.com:<you>/ccgm-learnings.git
+ccgm-learnings-sync commit && ccgm-learnings-sync push
+```
+
+This repo holds personal memory — keep it **private**; never point it at the public `ccgm` repo. `push` refuses cleanly (exit 1) with this same pointer if no remote is configured yet.
+
+**Cross-machine ordering assumes roughly NTP-sane clocks.** The projection's fold order is `(timestamp, id)`; timestamps are each writer's local wall clock. A single machine protects itself with per-writer monotonic stamps, but two *different* machines racing the same shard (both resolve `agent_id()` to `solo` unless `.env.clone`/`CCGM_AGENT_ID` disambiguate them) can still have their ops ordered by whichever clock is more skewed. This is a documented, accepted residual, not a bug to chase: badly-ordered ops still fold deterministically and safely (an op whose target hasn't materialized yet is deferred, then surfaced as `orphan_ops` if it never resolves — never silently dropped), it just means the *causal* order across machines isn't guaranteed under significant clock drift. Keep machines on NTP.
+
+### Rollback
+
+```bash
+git -C ~/.claude/learnings log --oneline
+git -C ~/.claude/learnings revert <sha>
+```
+
+Every commit is a normal git commit, so any batch of writes can be reverted like any other git history. Two caveats:
+
+- **Revert stops future reads, not the current session's.** A row that was already read, ranked, and injected into a live session's frozen SessionStart context (see "Injection Filter" above) stays in that session's prompt — the frozen prefix cannot be un-injected mid-session. `git revert` removes the row from every projection computed *after* the revert; an already-running session that picked it up must be restarted to actually drop it.
+- Pre-`init` mutations (writes made before this repo existed) have no commit to revert; use `ccgm-learnings-log deprecate <id>` instead.
+
+### Autocommit lives outside the store
+
+`learnings_store.py`'s write path carries exactly one small hook: after a successful mutating op, if `~/.claude/learnings/.git` exists and `CCGM_LEARNINGS_AUTOCOMMIT=true`, it spawns a detached `ccgm-learnings-sync commit` and returns immediately. Everything else — the sync lock, standing down mid-merge, the actual `git add`/`git commit` — lives inside `ccgm-learnings-sync`, not the store. This keeps the store's write path (a cross-epic-frozen file) storage-only; sync orchestration is `ccgm-learnings-sync`'s job alone, whether it was triggered by a human or by the autocommit hook.
+
+---
+
 ## Migration from MEMORY.md
 
 The legacy flow wrote narrative markdown to `~/.claude/projects/*/memory/MEMORY.md`. The new flow:

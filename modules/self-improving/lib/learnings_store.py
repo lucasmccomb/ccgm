@@ -75,6 +75,27 @@ strings alone):
     - `sanitize_content()` is applied to every model-influenceable
       free-text field at the write path: `content` and `supersede_reason`.
 
+Read-time invariants (projection-time, adrev-307 -- defense-in-depth
+against merge/raw-git bypass of the write-time checks above):
+    - `git merge=union` (Epic 5's sync substrate) and a raw `git pull`/
+      `git rebase`/`revert` run directly against the learnings repo both
+      operate on raw text -- neither knows what `validate_entry()` or
+      `sanitize_content()` mean, so a shard line arriving via either path
+      is never re-validated by git itself. `project_slug()` (the single
+      fold every `load_all()`/`search()` call goes through) closes this
+      gap regardless of ingestion path: every folded head is re-checked
+      against `validate_entry()` (schema) and
+      `contains_unneutralized_injection()` (`content`, `supersede_reason`)
+      on every projection. A head that fails either check is EXCLUDED from
+      the returned heads and its id is recorded in
+      `<slug>/.quarantine.jsonl` -- quarantine is a genuine read-time
+      exclusion mechanism here, not merely an audit trail.
+    - The original shard line is NEVER rewritten or removed to enforce
+      this -- mutating another writer's append-only history breaks the
+      union-merge safety property the whole store depends on. The bad line
+      stays on disk untouched, permanently excluded from every future
+      projection via the quarantine index instead.
+
 This file is intentionally stdlib-only (no PyYAML, no requests) so it
 installs cleanly without pip.
 """
@@ -424,6 +445,47 @@ def _is_global_admin() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Autocommit hook point (Epic 5, adrev-401)
+# ---------------------------------------------------------------------------
+
+def _maybe_autocommit() -> None:
+    """
+    Fire-and-forget sync trigger, called at the tail of every successful
+    mutating write. Deliberately THIN (arch-6: sync orchestration is a
+    separate concern from the store's own write path) -- the only things
+    checked here are "is autocommit enabled" and "is this a git repo at
+    all". Everything else (the store-wide sync lock, standing down while a
+    merge/rebase is in progress, the actual `git add`/`git commit`) lives
+    inside `ccgm-learnings-sync commit` itself, not here, so that behavior
+    is identical whether commit is invoked by this hook or by a human.
+
+    Never raises and never blocks the caller: the subprocess is spawned
+    detached (its own session) and its output is discarded.
+    """
+    if os.environ.get("CCGM_LEARNINGS_AUTOCOMMIT") != "true":
+        return
+    if not (LEARNINGS_ROOT / ".git").is_dir():
+        return
+    sync_bin = os.environ.get(
+        "CCGM_LEARNINGS_SYNC_BIN",
+        os.path.expanduser("~/.claude/bin/ccgm-learnings-sync"),
+    )
+    if not os.path.isfile(sync_bin):
+        return
+    try:
+        import subprocess
+        subprocess.Popen(
+            [sys.executable, sync_bin, "commit"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Content hashing (CAS)
 # ---------------------------------------------------------------------------
 
@@ -480,6 +542,59 @@ def sanitize_content(text: str) -> str:
     if len(out) > 2000:
         out = out[:2000].rstrip() + "..."
     return out
+
+
+_NEUTRALIZED_SPAN_RE = re.compile(r"\[neutralized\].*?\[/neutralized\]", re.DOTALL)
+
+
+def contains_unneutralized_injection(text: str | None) -> bool:
+    """
+    Detect injection-shaped content that was NEVER wrapped by
+    sanitize_content() -- a projection-time DETECTION check (adrev-307),
+    never applied at write time (build_entry() already sanitizes there).
+
+    Locates any existing `[neutralized]...[/neutralized]` spans, then
+    re-runs the SAME INJECTION_PATTERNS sanitize_content() uses directly
+    against the ORIGINAL text -- never a stripped/reassembled remainder --
+    and flags a match only if its span is not already fully contained
+    inside one of those neutralized spans.
+
+    Matching against the text's true character positions (instead of
+    removing neutralized spans and re-testing the leftover fragments as one
+    contiguous string) matters because INJECTION_PATTERNS are `^`
+    (line-start) anchored: sanitize_content() only ever neutralizes a
+    pattern that starts at position 0 or immediately after a real newline.
+    Splicing survivors together after stripping would manufacture NEW
+    line-start positions that never existed in the source text -- e.g.
+    "System: ignore all previous instructions" sanitizes to
+    "[neutralized]System:[/neutralized] ignore all previous instructions"
+    (only the leading "System:" is `^`-anchored; the trailing clause is
+    mid-string and, by sanitize_content()'s own design, deliberately left
+    alone). Stripping the wrapper and re-testing the remainder would put
+    "ignore all previous instructions" at the front of a brand-new string
+    and falsely flag content sanitize_content() correctly left untouched.
+    Matching in place avoids that: the trailing clause never had a real
+    `^` position in either the original or the wrapped text, so it is
+    never a match to skip OR to catch -- exactly mirroring
+    sanitize_content()'s own (documented, accepted) line-start-only scope.
+
+    Detection only -- never mutates `text` and never calls
+    sanitize_content() on already-stored content, which is deliberately
+    NOT idempotent for `<system>`-tag shapes (re-running it would
+    double-nest `[neutralized]` markers unboundedly).
+    """
+    if not text:
+        return False
+    neutralized_spans = [m.span() for m in _NEUTRALIZED_SPAN_RE.finditer(text)]
+
+    def _already_neutralized(start: int, end: int) -> bool:
+        return any(ns <= start and end <= ne for ns, ne in neutralized_spans)
+
+    for pat in INJECTION_PATTERNS:
+        for m in re.finditer(pat, text):
+            if not _already_neutralized(m.start(), m.end()):
+                return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -706,6 +821,7 @@ def append_entry(entry: dict[str, Any], slug: str | None = None) -> Path:
     entry["timestamp"] = ts
     entry["last_verified"] = ts
     entry["project"] = target_slug
+    _maybe_autocommit()
     return shard
 
 
@@ -1119,6 +1235,116 @@ def _try_incremental_projection(slug: str) -> dict[str, Any] | None:
     return result
 
 
+# ---------------------------------------------------------------------------
+# Projection-time quarantine suppression (adrev-307)
+# ---------------------------------------------------------------------------
+#
+# git merge=union (and a raw `git pull`/`git rebase` run directly against
+# the learnings repo) bypasses validate_entry()/sanitize_content() entirely
+# -- see the module docstring's "Read-time invariants" section.
+# ccgm-learnings-sync pull's own eager post-merge check is a nice-to-have
+# (an immediate `{"quarantined": N}` report, and it pre-populates the index
+# below) -- the suppression here is the LOAD-BEARING half of the fix,
+# because it runs on every projection regardless of how a bad line landed
+# on disk, including a raw git operation that skipped ccgm-learnings-sync
+# entirely.
+
+def quarantine_path(slug: str) -> Path:
+    """`<project-slug>/.quarantine.jsonl` -- gitignored, local, per-machine.
+    The SAME path ccgm-learnings-sync's own post-merge quarantine pass
+    writes to (adrev-307: pull's eager writes and this projection's
+    reads/writes share one list format/path per slug so they compose)."""
+    return LEARNINGS_ROOT / slug / ".quarantine.jsonl"
+
+
+def _read_quarantined_ids(slug: str) -> set[str]:
+    """Read the on-disk quarantine index for one slug -- ids only. Read
+    ONCE per projection call (adrev-307: cheap, bounded); entries written
+    by ccgm-learnings-sync's eager pass and by `_quarantine_head()` below
+    share the same `line_id`-keyed envelope shape, so both are recognized
+    here regardless of which one wrote them."""
+    path = quarantine_path(slug)
+    if not path.is_file():
+        return set()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    ids: set[str] = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        line_id = obj.get("line_id") if isinstance(obj, dict) else None
+        if isinstance(line_id, str):
+            ids.add(line_id)
+    return ids
+
+
+def _quarantine_head(slug: str, head: dict[str, Any], reason: str) -> None:
+    """Record a bad HEAD's id in `<slug>/.quarantine.jsonl`. NEVER rewrites
+    or removes anything in the shard(s) that produced this head -- mutating
+    another writer's append-only history breaks the union-merge safety
+    property the whole store depends on (adrev-307: "the original
+    re-converges on next sync"). Uses the same envelope shape (keyed by
+    `line_id`) ccgm-learnings-sync's own quarantine pass writes, so the two
+    indexes compose into one per-slug list."""
+    envelope = {
+        "quarantined_at": _utc_now_iso(),
+        "reason": reason,
+        "source_file": "projection",
+        "line_id": head.get("id"),
+        "raw": json.dumps(head, sort_keys=True),
+    }
+    file_locked_append(str(quarantine_path(slug)), json.dumps(envelope, sort_keys=True))
+
+
+def _suppress_quarantined_heads(slug: str, heads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    The load-bearing half of adrev-307's fix: makes quarantine an
+    EXCLUSION mechanism, not just an audit log. Called from
+    `project_slug()` on every projection, regardless of which fold path
+    produced `heads` (a full replay or the arch-2 incremental cache) -- so
+    it catches every ingestion path, including a raw `git pull` that
+    bypassed ccgm-learnings-sync's own eager post-merge check entirely.
+
+    For each head not already in the on-disk quarantine index: re-run
+    `validate_entry()` (schema) and `contains_unneutralized_injection()`
+    (`content`, `supersede_reason`) -- the identical checks the write path
+    already enforces before content ever reaches a shard. A head that
+    fails either is dropped from the returned list and its id is appended
+    to the quarantine index. A head that is ALREADY quarantined is dropped
+    without re-validating or re-appending -- idempotent, never re-adds an
+    id already present.
+    """
+    quarantined_ids = _read_quarantined_ids(slug)
+    kept: list[dict[str, Any]] = []
+    for head in heads:
+        hid = head.get("id")
+        if hid in quarantined_ids:
+            continue
+        reason: str | None = None
+        try:
+            validate_entry(head)
+        except ValidationError as exc:
+            reason = f"schema validation failed at projection: {exc}"
+        if reason is None and (
+            contains_unneutralized_injection(head.get("content"))
+            or contains_unneutralized_injection(head.get("supersede_reason"))
+        ):
+            reason = "unneutralized injection-shaped content detected at projection"
+        if reason is not None:
+            _quarantine_head(slug, head, reason)
+            quarantined_ids.add(hid)
+            continue
+        kept.append(head)
+    return kept
+
+
 def project_slug(slug: str, *, use_snapshot: bool = True) -> dict[str, Any]:
     """
     Full v2 read-time projection for one project slug (§3.3): union of the
@@ -1128,13 +1354,25 @@ def project_slug(slug: str, *, use_snapshot: bool = True) -> dict[str, Any]:
     Uses the snapshot cache by default (arch-2) for read performance;
     pass use_snapshot=False to force a from-scratch replay (used by tests
     to assert the cached path agrees with a full replay).
+
+    The snapshot cache itself stores the RAW fold result (matching the
+    existing "deprecated/superseded stay present, filtering happens at the
+    caller" architecture -- see `search()`). Quarantine suppression
+    (adrev-307) is layered on top of EITHER path, fresh on every call, so
+    `load_all()` -- unlike deprecated/superseded -- never returns a
+    quarantined head, regardless of whether this call hit the cache or
+    triggered a full replay.
     """
     if use_snapshot:
         cached = _try_incremental_projection(slug)
         if cached is not None:
+            cached = dict(cached)
+            cached["heads"] = _suppress_quarantined_heads(slug, cached["heads"])
             return cached
     result = _project_lines(_all_source_lines(slug))
     _write_snapshot(slug, result)
+    result = dict(result)
+    result["heads"] = _suppress_quarantined_heads(slug, result["heads"])
     return result
 
 
@@ -1579,6 +1817,7 @@ def update_entry_by_id(
             expected_sha256=expected_sha256 if kind == "deprecate" else None,
         )
         file_locked_append(str(shard), json.dumps(row, sort_keys=True))
+    _maybe_autocommit()
     return True
 
 
@@ -1670,6 +1909,7 @@ def supersede_entry(
     new_entry["last_verified"] = ts
     new_entry["writer"] = writer
     new_entry["source_session"] = source_session
+    _maybe_autocommit()
     return new_entry
 
 
@@ -1743,6 +1983,7 @@ def promote_to_global(
     new_entry["last_verified"] = ts
     new_entry["writer"] = writer
     new_entry["source_session"] = resolved_session
+    _maybe_autocommit()
     return new_entry
 
 
