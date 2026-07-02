@@ -24,14 +24,75 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "lib"))
 
+# Drop any pre-existing `learnings_store` entry from a prior import under
+# the same bare module name (#764). modules/dreaming's transcript_miner.py
+# also imports `learnings_store` (to reach detect_project_slug), via either
+# the ~/.claude/lib installed symlink or this same repo-relative path. If
+# pytest collects that test file first (e.g. `pytest modules/dreaming/tests
+# modules/self-improving/tests`), `learnings_store` is already cached in
+# sys.modules -- with LEARNINGS_ROOT computed from whatever
+# CCGM_LEARNINGS_DIR was (or was not) set to at THAT import, before this
+# file ever gets a chance to override it below. Reusing that cached module
+# would silently point this whole test file's reads/writes at the real
+# ~/.claude/learnings/ (or a stale checkout via the installed symlink)
+# instead of the tempdir, and cause exactly one symptom: any test that
+# shells out to the CLI (a fresh subprocess, which always re-imports
+# learnings_store from the CURRENT environment) disagrees with this
+# process's stale copy about where the store lives. Popping first
+# guarantees the `import learnings_store` below always re-executes fresh,
+# picking up CCGM_LEARNINGS_DIR (set immediately after) and this file's own
+# sys.path entry (inserted immediately above), regardless of what any
+# other test module already imported earlier in the same pytest process.
+sys.modules.pop("learnings_store", None)
+
 # Point the store at a tempdir BEFORE importing the lib
 _TMP = tempfile.mkdtemp(prefix="ccgm-learnings-test-")
+_ORIG_CCGM_LEARNINGS_DIR = os.environ.get("CCGM_LEARNINGS_DIR")
 os.environ["CCGM_LEARNINGS_DIR"] = _TMP
 
 import learnings_store as ls  # noqa: E402
 
 CLI_PATH = HERE.parent / "bin" / "ccgm-learnings-log"
 SEARCH_CLI_PATH = HERE.parent / "bin" / "ccgm-learnings-search"
+
+
+def tearDownModule() -> None:
+    """Undo the module-level CCGM_LEARNINGS_DIR override set above (before
+    `import learnings_store`, so this file's tests never touch the real
+    ~/.claude/learnings/ store) so it cannot leak into whatever test
+    module pytest imports and runs next in the same process (#764: a
+    leaked CCGM_LEARNINGS_PROJECT from this file previously broke
+    modules/dreaming's transcript_miner tests when both suites ran in one
+    pytest invocation). pytest calls tearDownModule() once, after every
+    test in this module has finished, per its unittest-module support."""
+    if _ORIG_CCGM_LEARNINGS_DIR is not None:
+        os.environ["CCGM_LEARNINGS_DIR"] = _ORIG_CCGM_LEARNINGS_DIR
+    else:
+        os.environ.pop("CCGM_LEARNINGS_DIR", None)
+
+
+def _isolate_env(testcase: unittest.TestCase, key: str) -> None:
+    """Snapshot os.environ[key]'s current value (or absence) and register
+    an addCleanup that restores it -- so a test's setUp() that sets or
+    pops `key` can never leak it past that single test, into a later test
+    in this file or (worse) into a different test module running later in
+    the same pytest process (#764).
+
+    Call this immediately BEFORE mutating `key`. addCleanup callbacks fire
+    even if a later line in the same setUp() raises, which a manual
+    tearDown() override would not guard against -- unittest never calls
+    tearDown() if setUp() itself raised partway through.
+    """
+    had_prior = key in os.environ
+    prior = os.environ.get(key)
+
+    def _restore() -> None:
+        if had_prior:
+            os.environ[key] = prior
+        else:
+            os.environ.pop(key, None)
+
+    testcase.addCleanup(_restore)
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +226,7 @@ class WriteReadTests(unittest.TestCase):
     def setUp(self):
         # Fresh slug per test via env override
         self.slug = f"test-proj-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
 
     def tearDown(self):
@@ -253,6 +315,7 @@ class DecayTests(unittest.TestCase):
 class SearchTests(unittest.TestCase):
     def setUp(self):
         self.slug = f"search-proj-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
         # Seed entries
         self.entries = []
@@ -303,6 +366,7 @@ class SearchTests(unittest.TestCase):
 class UpdateTests(unittest.TestCase):
     def setUp(self):
         self.slug = f"upd-proj-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
         e = ls.build_entry(type_="pattern", content="testme", confidence=5)
         ls.append_entry(e)
@@ -337,6 +401,7 @@ class UpdateTests(unittest.TestCase):
 class SupersedeTests(unittest.TestCase):
     def setUp(self):
         self.slug = f"sup-proj-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
         e = ls.build_entry(
             type_="pattern",
@@ -449,7 +514,9 @@ class CompactGuardTests(unittest.TestCase):
 class V2ShardTests(unittest.TestCase):
     def setUp(self):
         self.slug = f"v2-shard-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
+        _isolate_env(self, "CCGM_AGENT_ID")
         os.environ.pop("CCGM_AGENT_ID", None)
 
     def tearDown(self):
@@ -497,6 +564,7 @@ class BackwardCompatProjectionTests(unittest.TestCase):
 
     def setUp(self):
         self.slug = f"v1-compat-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
 
     def tearDown(self):
@@ -641,7 +709,9 @@ class ContradictionBeforeDedupTests(unittest.TestCase):
 class ConflictTests(unittest.TestCase):
     def setUp(self):
         self.slug = f"conflict-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
+        _isolate_env(self, "CCGM_AGENT_ID")
         os.environ.pop("CCGM_AGENT_ID", None)
         e = ls.build_entry(type_="pattern", content="contested entry")
         ls.append_entry(e)
@@ -706,6 +776,7 @@ class ConflictTests(unittest.TestCase):
 class CASTests(unittest.TestCase):
     def setUp(self):
         self.slug = f"cas-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
         e = ls.build_entry(type_="pattern", content="cas target content")
         ls.append_entry(e)
@@ -748,6 +819,7 @@ class CASTests(unittest.TestCase):
 class OriginBindingTests(unittest.TestCase):
     def setUp(self):
         self.slug = f"origin-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
         self._orig_projects_root = ls.CLAUDE_PROJECTS_ROOT
         self._tmp_projects = Path(tempfile.mkdtemp(prefix="ccgm-transcripts-test-"))
@@ -968,6 +1040,7 @@ class GlobalPromotionGuardTests(unittest.TestCase):
 class TrustedWriterOriginBindingTests(unittest.TestCase):
     def setUp(self):
         self.slug = f"trusted-writer-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
         os.environ.pop("CCGM_LEARNINGS_ADMIN", None)
         self._orig_agent_id = os.environ.get("CCGM_AGENT_ID")
@@ -1075,6 +1148,7 @@ class TrustedWriterOriginBindingTests(unittest.TestCase):
 class SupersedeReasonSanitizationTests(unittest.TestCase):
     def setUp(self):
         self.slug = f"reason-sani-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
         e = ls.build_entry(type_="pattern", content="entry to supersede")
         ls.append_entry(e)
@@ -1107,6 +1181,7 @@ class SupersedeReasonSanitizationTests(unittest.TestCase):
 class SnapshotCacheTests(unittest.TestCase):
     def setUp(self):
         self.slug = f"snapshot-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
 
     def tearDown(self):
@@ -1248,6 +1323,7 @@ class AgentIdTests(unittest.TestCase):
 class PerformanceTests(unittest.TestCase):
     def setUp(self):
         self.slug = f"perf-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
         os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
 
     def tearDown(self):
