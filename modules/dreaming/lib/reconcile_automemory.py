@@ -101,16 +101,17 @@ def resolve_slug_for_project_dir(project_dir: Path) -> str | None:
     return None
 
 
-def discover_slug_to_memory_dirs(projects_root: Path) -> dict[str, list[Path]]:
-    """Enumerate `<projects_root>/*/memory/` dirs that contain at least one
-    `*.md` fact file, grouped by their RESOLVED learnings-store slug (never
-    by the harness directory name -- see resolve_slug_for_project_dir).
-    Multiple harness project dirs (sibling clones) can map to the same
-    learnings-store slug; their memory dirs are grouped under that one key.
-    """
+def _scan_project_dirs_with_facts(projects_root: Path):
+    """Yield `(project_dir, memory_dir, slug)` for every harness project dir
+    directly under `projects_root` whose `memory/` subdir contains at least
+    one `*.md` fact file. `slug` is the RESOLVED learnings-store slug, or
+    `None` when no sibling transcript could resolve one (see
+    resolve_slug_for_project_dir). Shared by discover_slug_to_memory_dirs()
+    (keeps only the resolved entries) and count_unresolvable_slug_dirs()
+    (counts the excluded/unresolved ones) so both walk the filesystem via
+    one shared scan rather than duplicating the directory-listing logic."""
     if not projects_root.is_dir():
-        return {}
-    out: dict[str, list[Path]] = {}
+        return
     for project_dir in sorted(projects_root.iterdir()):
         if not project_dir.is_dir():
             continue
@@ -120,10 +121,37 @@ def discover_slug_to_memory_dirs(projects_root: Path) -> dict[str, list[Path]]:
         if not any(memory_dir.glob("*.md")):
             continue
         slug = resolve_slug_for_project_dir(project_dir)
+        yield project_dir, memory_dir, slug
+
+
+def discover_slug_to_memory_dirs(projects_root: Path) -> dict[str, list[Path]]:
+    """Enumerate `<projects_root>/*/memory/` dirs that contain at least one
+    `*.md` fact file, grouped by their RESOLVED learnings-store slug (never
+    by the harness directory name -- see resolve_slug_for_project_dir).
+    Multiple harness project dirs (sibling clones) can map to the same
+    learnings-store slug; their memory dirs are grouped under that one key.
+    Dirs whose slug cannot be resolved are silently excluded here -- see
+    count_unresolvable_slug_dirs() for visibility into how many were.
+    """
+    out: dict[str, list[Path]] = {}
+    for _project_dir, memory_dir, slug in _scan_project_dirs_with_facts(projects_root):
         if slug is None:
             continue
         out.setdefault(slug, []).append(memory_dir)
     return out
+
+
+def count_unresolvable_slug_dirs(projects_root: Path) -> int:
+    """Count harness project dirs with fact files whose owning
+    learnings-store slug could not be resolved (see
+    resolve_slug_for_project_dir). These dirs are excluded from
+    discover_slug_to_memory_dirs()'s mapping -- and therefore from the
+    entire reconciliation report -- with no other trace. reconcile_all()
+    surfaces this count as a one-line summary so a shrinking reconciliation
+    surface (e.g. transcript retention pruning old sessions while
+    memory/*.md files persist) is visible instead of silent (#775 Stage-2
+    Recommend)."""
+    return sum(1 for _pd, _md, slug in _scan_project_dirs_with_facts(projects_root) if slug is None)
 
 
 # ---------------------------------------------------------------------------
@@ -401,7 +429,12 @@ def reconcile_slug(slug: str, facts: list[dict[str, Any]], entries: list[dict[st
         lines.append("")
         for c in import_candidates:
             fact = c["fact"]
-            lines.append(f"- `{fact.get('name')}` -- {_safe_text(fact.get('description') or '')} (`{fact.get('path')}`)")
+            # Both `name` and `description` are model-influenceable (the
+            # harness's own memory tool chooses both when it writes a fact)
+            # and never passed through the store's write-time sanitizer --
+            # _safe_text() must wrap BOTH at render time (#775 Stage-2
+            # Blocking: `name` was previously interpolated raw here).
+            lines.append(f"- `{_safe_text(fact.get('name') or '')}` -- {_safe_text(fact.get('description') or '')} (`{fact.get('path')}`)")
         lines.append("")
 
     if contradictions:
@@ -412,7 +445,7 @@ def reconcile_slug(slug: str, facts: list[dict[str, Any]], entries: list[dict[st
             entry = c["match"] or {}
             lines.append(
                 f"- store row `{entry.get('id', '?')}` ({_dispute_reason(entry)}) conflicts with auto-memory fact "
-                f"`{fact.get('name')}`: store says \"{_store_excerpt(entry.get('content') or '')}\"; "
+                f"`{_safe_text(fact.get('name') or '')}`: store says \"{_store_excerpt(entry.get('content') or '')}\"; "
                 f"auto-memory says \"{_safe_text(fact.get('description') or '')}\""
             )
         lines.append("")
@@ -449,6 +482,14 @@ def reconcile_all(projects_root: str | Path | None = None, target_slug: str | No
     section (all slugs, or just `target_slug` when given)."""
     root = Path(projects_root) if projects_root else default_projects_root()
     header = list(REPORT_HEADER)
+
+    excluded_count = count_unresolvable_slug_dirs(root)
+    if excluded_count:
+        header.append(
+            f"_{excluded_count} project dir(s) had fact files but no resolvable learnings-store slug; "
+            "excluded from this comparison._"
+        )
+        header.append("")
 
     slug_to_dirs = discover_slug_to_memory_dirs(root)
     if target_slug:

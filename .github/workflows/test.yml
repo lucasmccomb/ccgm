@@ -66,16 +66,15 @@ jobs:
 
       - name: Module unit suites (Python + shell)
         run: |
-          set -e
-          # Exercises every module's own test-*.py / test-*.sh -- previously
-          # only reachable by a human/agent running them manually (#773).
-          # Runs after "Hooks test suites" above so ~/.claude/lib is already
-          # staged for the hooks/branch-guard suites this glob re-covers.
-          python3 -m pytest modules/ -q
-          for t in modules/*/tests/test-*.sh; do
-            echo "=== Running $t ==="
-            bash "$t"
-          done
+          # Exercises every module's own test-*.py / test-*.sh, including
+          # suites nested under modules/*/tests/ subdirectories (e.g.
+          # modules/commands-extra/skills/audit/tests/) -- previously only
+          # reachable by a human/agent running them manually (#773). Reuses
+          # tests/run-unit-tests.sh (recursive `find`) rather than a
+          # hand-rolled glob so the two never drift out of sync. Runs after
+          # "Hooks test suites" above so ~/.claude/lib is already staged
+          # for the hooks/branch-guard suites this also re-covers.
+          bash tests/run-unit-tests.sh
 
   test-macos:
     runs-on: macos-latest
@@ -136,13 +135,12 @@ jobs:
 
       - name: Module unit suites (Python + shell)
         run: |
-          set -e
-          # Exercises every module's own test-*.py / test-*.sh -- previously
-          # only reachable by a human/agent running them manually (#773).
-          # Runs after "Hooks test suites" above so ~/.claude/lib is already
-          # staged for the hooks/branch-guard suites this glob re-covers.
-          python3 -m pytest modules/ -q
-          for t in modules/*/tests/test-*.sh; do
-            echo "=== Running $t ==="
-            bash "$t"
-          done
+          # Exercises every module's own test-*.py / test-*.sh, including
+          # suites nested under modules/*/tests/ subdirectories (e.g.
+          # modules/commands-extra/skills/audit/tests/) -- previously only
+          # reachable by a human/agent running them manually (#773). Reuses
+          # tests/run-unit-tests.sh (recursive `find`) rather than a
+          # hand-rolled glob so the two never drift out of sync. Runs after
+          # "Hooks test suites" above so ~/.claude/lib is already staged
+          # for the hooks/branch-guard suites this also re-covers.
+          bash tests/run-unit-tests.sh
