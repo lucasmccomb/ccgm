@@ -1,0 +1,17 @@
+{
+  "id": "msg_fixture_01",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-fixture-map",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 500,
+    "output_tokens": 150
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"candidates\": []}"
+    }
+  ]
+}

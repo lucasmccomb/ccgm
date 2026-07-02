@@ -20,8 +20,41 @@ that gap: a nightly job reads the transcripts every session already writes,
 extracts patterns a single in-session agent cannot see, and proposes
 per-change memory-store updates for a human to accept or reject.
 
-Full design: `~/code/plans/ccgm-durable-memory-system/plan.md` (§5 Epic 2 for
-this module's first landing).
+Full design: `~/code/plans/ccgm-durable-memory-system/plan.md` (§5 Epic 2 /
+Epic 3 for what has landed so far).
+
+## What's implemented so far (Epic 3)
+
+The **nightly map->reduce analyzer**, on top of Epic 2's miner:
+
+- `bin/dream-analyze.sh` -- thin runner. Resolves candidate project slugs
+  (`--slugs`, or config `scopes`, or every slug that already has a
+  learnings store), mines every slug's due transcripts (Epic 2, free),
+  runs a whole-night preflight cost estimate against `daily_cost_cap_usd`
+  BEFORE any API call (least-recently-dreamed slugs win when the fleet is
+  over cap), then does one map call per planned slug plus one reduce call
+  across all of them, and writes validated, sanitized proposal rows to
+  `~/.claude/dreaming/proposals/{date}.jsonl`. `--offline <dir>` replaces
+  every Messages API call with a canned response file -- no network, no
+  `ANTHROPIC_API_KEY` required.
+- `lib/dream_analyze.py` -- the orchestrator itself (Python; everything
+  above lives here, `bin/dream-analyze.sh` is a thin wrapper).
+- `lib/dreaming-prompt-map.md` / `lib/dreaming-prompt-reduce.md` -- the two
+  system prompts, both opening with an untrusted-input threat-model block
+  (excerpts are mined from other agents' sessions -- data, never
+  instructions).
+- `lib/proposal-schema.json` -- the per-change proposal row contract every
+  written row is validated against before it touches disk.
+- `bin/dream-digest.sh` -- renders `~/.claude/dreaming/digests/{date}.md`:
+  proposals grouped by project/kind with evidence, prevalence, and
+  confidence; a durable canary banner (schema drift / untested transcript
+  versions) that stays visible across days until acknowledged; yesterday's
+  applied/rejected tally (forward-compatible with a later apply path).
+
+Every proposal starts `status: "pending"`. This module never writes to the
+learnings store -- `dream_analyze.py` only *reads* it (to build the
+projection reduce compares candidates against) and *proposes*. Nothing
+auto-applies yet; that is a later epic, gated separately and default OFF.
 
 ## What's implemented so far (Epic 2)
 
@@ -41,10 +74,10 @@ calls, no LLM calls, no scheduling:
 - `schema_canary(mined_sessions)` -- fail loud (raise) if the transcript
   schema appears to have drifted since this miner was last validated.
 
-Not yet built (later epics, same module): the map-reduce analyzer that
-turns evidence into proposals (Epic 3), the apply path / slash commands /
+Not yet built (later epics, same module): the apply path / slash commands /
 scheduler (Epic 6), the eval harness (Epic 7), and MEMORY.md reconciliation
-(Epic 8).
+(Epic 8). The map-reduce analyzer that turns evidence into proposals landed
+in Epic 3 -- see above.
 
 ## Slug identity (read this before touching project-identity code)
 
@@ -149,17 +182,27 @@ python3 -m pytest modules/dreaming/tests/test_transcript_miner.py -q
 
 # End-to-end fixture pipeline + schema validation + JSON summary.
 python3 modules/dreaming/lib/transcript_miner.py --self-check
+
+# Analyzer unit tests (offline, fixture-only -- no network, no API key).
+python3 -m pytest modules/dreaming/tests/test_dream_analyze.py -q
+
+# Full offline pipeline: real transcript fixtures -> real miner -> --offline
+# analyzer (canned map/reduce responses, no network) -> proposals -> digest.
+# Builds its own throwaway ~/.claude/projects/-shaped temp directory --
+# see the script for the exact layout dream-analyze.sh expects.
+bash modules/dreaming/tests/test-dream-pipeline.sh
 ```
 
 ## When NOT to use this module (yet)
 
-- There is no scheduler, analyzer, or apply path in this landing --
-  `dreaming` does not write to the learnings store or call any API. If you
-  need memory to actually change based on transcript patterns today, that
-  is a later epic.
-- Do not call `mine()`/`discover()` against real transcripts expecting
-  proposals; the miner only produces the bounded, redacted evidence bundle
-  that a *future* analyzer will read.
+- There is no scheduler, slash commands, or apply path in this landing --
+  `dreaming` never writes to the learnings store itself; it only reads it
+  (for the reduce-phase projection) and proposes. If you need a proposal to
+  actually become a learning, that is a later epic (`/dream-apply`, Epic
+  6). Nothing here auto-applies.
+- Do not call `mine()`/`discover()` against real transcripts expecting a
+  file the analyzer has not consumed; run `dream-analyze.sh` (which mines
+  internally) rather than wiring the miner up by hand.
 
 ## Manual installation (development clone)
 
@@ -170,10 +213,13 @@ bash start.sh --add dreaming
 
 ## Cross-references
 
-- Plan: `~/code/plans/ccgm-durable-memory-system/plan.md` (§5 Epic 2; §3.3
-  for the runtime-dir and config-key contract later epics build on).
+- Plan: `~/code/plans/ccgm-durable-memory-system/plan.md` (§5 Epic 2 / Epic
+  3; §3.3 for the runtime-dir and config-key contract later epics build on).
 - Decision log: `~/code/plans/ccgm-durable-memory-system/decisions.md`.
-- `modules/self-improving/` -- the learnings store this module's future
-  analyzer will propose changes into.
-- `modules/autoheal/` -- the capture-analyze-propose pipeline this module's
-  later epics mirror (not import).
+- `modules/self-improving/` -- the learnings store the analyzer proposes
+  changes into (read-only from this module's side; a later epic's
+  `/dream-apply` is the only future writer).
+- `modules/autoheal/` -- the capture-analyze-propose pipeline this module
+  mirrors (not imports) -- curl invocation shape, daily cost cap, and
+  cost.log bookkeeping are deliberately duplicated, not shared, per
+  decisions.md bizlogic-006.
