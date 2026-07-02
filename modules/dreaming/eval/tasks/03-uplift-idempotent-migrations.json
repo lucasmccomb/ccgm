@@ -1,0 +1,23 @@
+{
+  "id": "uplift-03-idempotent-migration-patterns",
+  "kind": "uplift",
+  "prompt": "Add a new migration file at supabase/migrations/0003_users_updated_at.sql that: (1) creates an index on users.email, and (2) creates a trigger named set_updated_at on the users table that calls the existing touch_updated_at() function before update.",
+  "fixture": {
+    "files": {
+      "supabase/migrations/0001_users.sql": "CREATE TABLE IF NOT EXISTS users (\n  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n  email text NOT NULL,\n  updated_at timestamptz NOT NULL DEFAULT now()\n);\n\nCREATE OR REPLACE FUNCTION touch_updated_at()\nRETURNS trigger AS $$\nBEGIN\n  NEW.updated_at = now();\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql;\n"
+    }
+  },
+  "seed_learnings": [
+    {
+      "type": "pattern",
+      "content": "Migrations in this project must be idempotent: use CREATE INDEX IF NOT EXISTS for indexes, and DROP TRIGGER IF EXISTS <name> ON <table>; followed by CREATE TRIGGER for triggers, so re-running a migration never errors.",
+      "confidence": 8,
+      "tags": ["supabase", "migrations", "idempotent"]
+    }
+  ],
+  "criteria": [
+    "The new migration file supabase/migrations/0003_users_updated_at.sql exists.",
+    "It creates the index using CREATE INDEX IF NOT EXISTS (not a bare CREATE INDEX).",
+    "It creates the trigger using a DROP TRIGGER IF EXISTS set_updated_at ON users; statement followed by CREATE TRIGGER set_updated_at (not a bare CREATE TRIGGER with no guard)."
+  ]
+}

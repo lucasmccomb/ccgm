@@ -1,0 +1,24 @@
+{
+  "id": "uplift-02-env-example-sync",
+  "kind": "uplift",
+  "prompt": "Add support for a new required environment variable STRIPE_WEBHOOK_SECRET: read it in server/config.js as process.env.STRIPE_WEBHOOK_SECRET and export it from the config object as stripeWebhookSecret.",
+  "fixture": {
+    "files": {
+      "server/config.js": "const config = {\n  port: process.env.PORT || 3000,\n  databaseUrl: process.env.DATABASE_URL,\n};\n\nmodule.exports = config;\n",
+      ".env.example": "PORT=3000\nDATABASE_URL=postgres://localhost:5432/app\n"
+    }
+  },
+  "seed_learnings": [
+    {
+      "type": "pattern",
+      "content": "Whenever a new required environment variable is read in code, add a matching placeholder line to .env.example in the same change so local setup instructions stay accurate.",
+      "confidence": 7,
+      "tags": ["env", "config", "onboarding"]
+    }
+  ],
+  "criteria": [
+    "server/config.js reads process.env.STRIPE_WEBHOOK_SECRET and exports it on the config object (e.g. as stripeWebhookSecret).",
+    ".env.example has a new line for STRIPE_WEBHOOK_SECRET (e.g. STRIPE_WEBHOOK_SECRET=).",
+    "The existing PORT and DATABASE_URL lines in .env.example are preserved."
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "id": "dreamed-01-pipeline-end-to-end",
+  "kind": "dreamed",
+  "transcript_corpus": {
+    "slug": "dreamed-fixture-repo",
+    "files": ["dreamed-session-1.jsonl", "dreamed-session-2.jsonl"]
+  },
+  "noise_corpus": {
+    "slug": "dreamed-noise-repo",
+    "files": ["dreamed-noise-session-1.jsonl"]
+  },
+  "follow_up": {
+    "prompt": "Add a new migration file at supabase/migrations/0002_add_check_flag.sql that creates a table items_review with columns: id (uuid primary key default gen_random_uuid()) and check (boolean not null default false) -- whether the item passed manual review. Use CREATE TABLE IF NOT EXISTS.",
+    "fixture": {
+      "files": {
+        "supabase/migrations/0001_init.sql": "CREATE TABLE IF NOT EXISTS items (\n  id uuid PRIMARY KEY DEFAULT gen_random_uuid()\n);\n"
+      }
+    },
+    "criteria": [
+      "The new migration file supabase/migrations/0002_add_check_flag.sql exists.",
+      "The column named check is written as the double-quoted identifier \"check\" in the CREATE TABLE statement, not the bare word check.",
+      "The statement uses CREATE TABLE IF NOT EXISTS."
+    ]
+  }
+}

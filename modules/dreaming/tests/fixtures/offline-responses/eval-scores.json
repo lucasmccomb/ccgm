@@ -1,0 +1,53 @@
+{
+  "_comment": "Canned per-(task_id, arm) judge scores + synthetic usage/cost for memory_eval.py --offline. Plumbing-only: proves the classifier/summary/gate pipeline runs end-to-end without a live judge or claude -p call. Not evidence that memory helps in reality -- see live H3 runs for that.",
+  "default": {
+    "baseline":     {"score": 3.0, "input_tokens": 900,  "output_tokens": 180, "turns": 3, "cost_usd": 0.004},
+    "treatment":    {"score": 8.0, "input_tokens": 1000, "output_tokens": 200, "turns": 3, "cost_usd": 0.005},
+    "full_context": {"score": 6.0, "input_tokens": 1300, "output_tokens": 200, "turns": 3, "cost_usd": 0.006}
+  },
+  "uplift-01-migration-reserved-keywords": {
+    "baseline":     {"score": 3.2, "input_tokens": 950,  "output_tokens": 190, "turns": 3, "cost_usd": 0.004},
+    "treatment":    {"score": 8.7, "input_tokens": 1020, "output_tokens": 210, "turns": 3, "cost_usd": 0.005},
+    "full_context": {"score": 6.1, "input_tokens": 1350, "output_tokens": 210, "turns": 3, "cost_usd": 0.006}
+  },
+  "uplift-02-env-example-sync": {
+    "baseline":     {"score": 3.5, "input_tokens": 880,  "output_tokens": 170, "turns": 3, "cost_usd": 0.004},
+    "treatment":    {"score": 8.4, "input_tokens": 960,  "output_tokens": 195, "turns": 3, "cost_usd": 0.005},
+    "full_context": {"score": 6.3, "input_tokens": 1280, "output_tokens": 195, "turns": 3, "cost_usd": 0.006}
+  },
+  "uplift-03-idempotent-migration-patterns": {
+    "baseline":     {"score": 3.0, "input_tokens": 1000, "output_tokens": 210, "turns": 4, "cost_usd": 0.005},
+    "treatment":    {"score": 8.6, "input_tokens": 1080, "output_tokens": 230, "turns": 4, "cost_usd": 0.006},
+    "full_context": {"score": 5.8, "input_tokens": 1420, "output_tokens": 230, "turns": 4, "cost_usd": 0.007}
+  },
+  "uplift-04-path-alias-imports": {
+    "baseline":     {"score": 4.0, "input_tokens": 850,  "output_tokens": 160, "turns": 3, "cost_usd": 0.004},
+    "treatment":    {"score": 8.3, "input_tokens": 920,  "output_tokens": 180, "turns": 3, "cost_usd": 0.005},
+    "full_context": {"score": 6.5, "input_tokens": 1220, "output_tokens": 180, "turns": 3, "cost_usd": 0.005}
+  },
+  "uplift-05-semantic-design-tokens": {
+    "baseline":     {"score": 3.3, "input_tokens": 900,  "output_tokens": 175, "turns": 3, "cost_usd": 0.004},
+    "treatment":    {"score": 8.5, "input_tokens": 970,  "output_tokens": 195, "turns": 3, "cost_usd": 0.005},
+    "full_context": {"score": 6.0, "input_tokens": 1290, "output_tokens": 195, "turns": 3, "cost_usd": 0.006}
+  },
+  "canary-01-unrelated-rename": {
+    "baseline":     {"score": 8.8, "input_tokens": 700,  "output_tokens": 130, "turns": 2, "cost_usd": 0.003},
+    "treatment":    {"score": 8.6, "input_tokens": 760,  "output_tokens": 140, "turns": 2, "cost_usd": 0.003},
+    "full_context": {"score": 8.7, "input_tokens": 1000, "output_tokens": 140, "turns": 2, "cost_usd": 0.004}
+  },
+  "canary-02-unrelated-math-util": {
+    "baseline":     {"score": 9.0, "input_tokens": 600,  "output_tokens": 110, "turns": 2, "cost_usd": 0.003},
+    "treatment":    {"score": 8.9, "input_tokens": 650,  "output_tokens": 120, "turns": 2, "cost_usd": 0.003},
+    "full_context": {"score": 8.9, "input_tokens": 880,  "output_tokens": 120, "turns": 2, "cost_usd": 0.003}
+  },
+  "contradiction-01-branch-update-workflow": {
+    "baseline":     {"score": 4.2, "input_tokens": 820,  "output_tokens": 160, "turns": 3, "cost_usd": 0.004},
+    "treatment":    {"score": 8.2, "input_tokens": 900,  "output_tokens": 180, "turns": 3, "cost_usd": 0.005},
+    "full_context": {"score": 6.0, "input_tokens": 1220, "output_tokens": 180, "turns": 3, "cost_usd": 0.005}
+  },
+  "dreamed-01-pipeline-end-to-end": {
+    "baseline":     {"score": 3.4, "input_tokens": 950,  "output_tokens": 190, "turns": 3, "cost_usd": 0.004},
+    "treatment":    {"score": 8.3, "input_tokens": 1020, "output_tokens": 210, "turns": 3, "cost_usd": 0.005},
+    "full_context": {"score": 6.2, "input_tokens": 1350, "output_tokens": 210, "turns": 3, "cost_usd": 0.006}
+  }
+}
