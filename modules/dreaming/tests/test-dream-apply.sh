@@ -11,6 +11,17 @@
 #      `/dream-apply`'s untrusted-evidence discipline is documented and
 #      the sanitizer's [neutralized] markers survive the read path.
 #
+# Also covers the Stage-2 review fixes for PR #772: malformed/schema-drifted
+# proposal rows (missing "content", invalid `type` on a `_global` add) never
+# crash the process and are always audited (`internal_error`); one malformed
+# row in an auto-apply batch never aborts evaluation of later, well-formed
+# rows; a corrupt sibling line in the same day's file never strands a good
+# proposal's status rewrite; two concurrent `apply_proposal()` calls for the
+# SAME pending id never both invoke the handler (single-flight under
+# `_apply_lock()`); and a `ccgm-learnings-log` exit code of 1 is correctly
+# disambiguated between a genuine "target not found" and an uncaught
+# exception in that subprocess (traceback in stderr).
+#
 # Isolated: never touches the real ~/.claude/{dreaming,learnings} or
 # ~/.claude/projects/. All state lives under a mktemp sandbox, cleaned up
 # on exit. HOME is also sandboxed so `apply_dream_proposal.py`'s sibling-
@@ -673,6 +684,302 @@ if command -v plutil >/dev/null 2>&1; then
 else
     echo "SKIP: plutil not available on this platform; skipping plist -lint check"
 fi
+
+# ---------------------------------------------------------------------
+# Step 8: Blocking Finding #1 regressions (Stage-2 review, PR #772) --
+# malformed/schema-drifted proposal rows never crash the process; every
+# outcome is still audited (adrev-012/adrev-302 "never silent"); one bad
+# row in a batch never aborts evaluation of the rest; a corrupt sibling
+# line never strands a good proposal's own status rewrite.
+# ---------------------------------------------------------------------
+
+AUDIT_FILE="${DREAMING_DIR}/state/apply-audit.jsonl"
+
+# --- 8a: learning_add missing the required "content" key.
+MALFORMED_DAY="2026-09-01"
+MALFORMED_FILE="${DREAMING_DIR}/proposals/${MALFORMED_DAY}.jsonl"
+cat >"${MALFORMED_FILE}" <<'EOF'
+{"id": "malformed-add", "kind": "learning_add", "project": "widget-app", "target_id": null, "type": "pattern", "confidence": 8, "prevalence": {"sessions": 1, "agents": 1}, "evidence": [{"session_id": "sess-fixture", "excerpt": "example"}], "justification": "fixture -- missing content key (schema drift)", "fingerprint": "fp-malformed-add", "generated_at": "2026-09-01T00:00:00.000Z", "status": "pending"}
+EOF
+
+OUT_MALFORMED="$(env "${RUN_ENV[@]}" python3 "${APPLY_LIB}" accept malformed-add --reviewed-by tester)"
+RC_MALFORMED=$?
+assert_eq "${RC_MALFORMED}" "0" "malformed row (missing content): CLI exits 0, never crashes"
+assert_eq "$(json_field "${OUT_MALFORMED}" outcome)" "internal_error" "malformed row (missing content): outcome internal_error"
+MALFORMED_STATUS="$(python3 -c "
+import json
+for line in open('${MALFORMED_FILE}'):
+    row = json.loads(line)
+    if row['id'] == 'malformed-add':
+        print(row['status'])
+")"
+assert_eq "${MALFORMED_STATUS}" "pending" "malformed row (missing content): proposal LEFT pending, not silently dropped"
+AUDIT_BODY="$(cat "${AUDIT_FILE}" 2>/dev/null || true)"
+assert_contains "${AUDIT_BODY}" '"proposal_id": "malformed-add"' "malformed row (missing content) is audited"
+assert_contains "${AUDIT_BODY}" '"outcome": "internal_error"' "malformed row (missing content): audit records outcome internal_error"
+
+# --- 8b: learning_add on project=_global with an invalid `type` enum value
+#     -- promote_to_global() raises learnings_store.ValidationError, which
+#     _apply_global_add's except clause (GlobalPromotionError only) does
+#     NOT catch; only the broad guard in apply_proposal() closes this.
+BADTYPE_DAY="2026-09-02"
+BADTYPE_FILE="${DREAMING_DIR}/proposals/${BADTYPE_DAY}.jsonl"
+cat >"${BADTYPE_FILE}" <<EOF
+{"id": "badtype-global", "kind": "learning_add", "project": "_global", "target_id": null, "content": "Example content.", "type": "not-a-real-type", "confidence": 7, "prevalence": {"sessions": 1, "agents": 1}, "evidence": [{"session_id": "${FAKE_SESSION}", "excerpt": "example"}], "justification": "fixture -- invalid type enum", "fingerprint": "fp-badtype-global", "generated_at": "2026-09-02T00:00:00.000Z", "status": "pending"}
+EOF
+
+OUT_BADTYPE="$(env "${RUN_ENV[@]}" python3 "${APPLY_LIB}" accept badtype-global --reviewed-by tester)"
+RC_BADTYPE=$?
+assert_eq "${RC_BADTYPE}" "0" "_global add with invalid type enum: CLI exits 0, never crashes"
+assert_eq "$(json_field "${OUT_BADTYPE}" outcome)" "internal_error" "_global add with invalid type enum: outcome internal_error"
+BADTYPE_STATUS="$(python3 -c "
+import json
+for line in open('${BADTYPE_FILE}'):
+    row = json.loads(line)
+    if row['id'] == 'badtype-global':
+        print(row['status'])
+")"
+assert_eq "${BADTYPE_STATUS}" "pending" "_global add with invalid type enum: proposal LEFT pending"
+
+# --- 8c: batch-abort -- a middle row missing target_id must not stop
+#     auto-apply from evaluating/applying a later well-formed row.
+BATCHBAD_DAY="2026-09-03"
+BATCHBAD_FILE="${DREAMING_DIR}/proposals/${BATCHBAD_DAY}.jsonl"
+ID_BATCHBAD_1="$(seed_learning "Seed target for batch-abort regression row1.")"
+ID_BATCHBAD_3="$(seed_learning "Seed target for batch-abort regression row3.")"
+env "${RUN_ENV[@]}" python3 - "${BATCHBAD_FILE}" "${ID_BATCHBAD_1}" "${ID_BATCHBAD_3}" <<'PY'
+import json
+import sys
+
+path, id1, id3 = sys.argv[1:4]
+
+rows = [
+    {"id": "bb-row1", "kind": "learning_verify", "project": "widget-app", "target_id": id1,
+     "content": None, "type": None, "confidence": 10,
+     "prevalence": {"sessions": 1, "agents": 1},
+     "evidence": [{"session_id": "sess-fixture", "excerpt": "example"}],
+     "justification": "fixture", "fingerprint": "fp-bb-row1",
+     "generated_at": "2026-09-03T00:00:00.000Z", "status": "pending"},
+    {"id": "bb-row2", "kind": "learning_verify", "project": "widget-app",
+     "content": None, "type": None, "confidence": 10,
+     "prevalence": {"sessions": 1, "agents": 1},
+     "evidence": [{"session_id": "sess-fixture", "excerpt": "example"}],
+     "justification": "fixture -- missing target_id (schema drift)", "fingerprint": "fp-bb-row2",
+     "generated_at": "2026-09-03T00:00:00.000Z", "status": "pending"},
+    {"id": "bb-row3", "kind": "learning_verify", "project": "widget-app", "target_id": id3,
+     "content": None, "type": None, "confidence": 10,
+     "prevalence": {"sessions": 1, "agents": 1},
+     "evidence": [{"session_id": "sess-fixture", "excerpt": "example"}],
+     "justification": "fixture", "fingerprint": "fp-bb-row3",
+     "generated_at": "2026-09-03T00:00:00.000Z", "status": "pending"},
+]
+with open(path, "w", encoding="utf-8") as fh:
+    for r in rows:
+        fh.write(json.dumps(r, sort_keys=True) + "\n")
+PY
+
+BATCHBAD_OUT="$(env "${RUN_ENV[@]}" python3 "${APPLY_LIB}" auto-apply --day "${BATCHBAD_DAY}")"
+RC_BATCHBAD=$?
+assert_eq "${RC_BATCHBAD}" "0" "batch-abort regression: auto-apply CLI exits 0, never crashes"
+assert_eq "$(json_field "${BATCHBAD_OUT}" evaluated)" "3" "batch-abort regression: all 3 rows evaluated (row2's crash did not abort the loop)"
+assert_eq "$(json_field "${BATCHBAD_OUT}" applied)" "2" "batch-abort regression: both well-formed rows (1 and 3) applied"
+assert_eq "$(json_field "${BATCHBAD_OUT}" failed)" "1" "batch-abort regression: exactly 1 row failed (the malformed row2)"
+
+BATCHBAD_STATUSES="$(python3 -c "
+import json
+statuses = {}
+for line in open('${BATCHBAD_FILE}'):
+    row = json.loads(line)
+    statuses[row['id']] = row['status']
+for k in ('bb-row1', 'bb-row2', 'bb-row3'):
+    print(f'{k}={statuses[k]}')
+")"
+assert_eq "$(printf '%s\n' "${BATCHBAD_STATUSES}" | grep '^bb-row1=' | cut -d= -f2)" "auto_applied" "batch-abort regression: row1 auto_applied"
+assert_eq "$(printf '%s\n' "${BATCHBAD_STATUSES}" | grep '^bb-row2=' | cut -d= -f2)" "pending" "batch-abort regression: row2 (malformed) left pending"
+assert_eq "$(printf '%s\n' "${BATCHBAD_STATUSES}" | grep '^bb-row3=' | cut -d= -f2)" "auto_applied" "batch-abort regression: row3 (never evaluated pre-fix) now auto_applied"
+
+# --- 8d: a corrupt (non-JSON) sibling line in the same day's file must not
+#     crash _rewrite_status and must not strand the GOOD proposal's own
+#     status at pending after its store mutation already landed.
+SIBLING_DAY="2026-09-04"
+SIBLING_FILE="${DREAMING_DIR}/proposals/${SIBLING_DAY}.jsonl"
+ID_SIBLING_GOOD="$(seed_learning "Seed target for the corrupt-sibling-line regression.")"
+env "${RUN_ENV[@]}" python3 - "${SIBLING_FILE}" "${ID_SIBLING_GOOD}" <<'PY'
+import json
+import sys
+
+path, target_id = sys.argv[1:3]
+row = {
+    "id": "sibling-good", "kind": "learning_verify", "project": "widget-app",
+    "target_id": target_id, "content": None, "type": None, "confidence": 10,
+    "prevalence": {"sessions": 1, "agents": 1},
+    "evidence": [{"session_id": "sess-fixture", "excerpt": "example"}],
+    "justification": "fixture", "fingerprint": "fp-sibling-good",
+    "generated_at": "2026-09-04T00:00:00.000Z", "status": "pending",
+}
+with open(path, "w", encoding="utf-8") as fh:
+    fh.write(json.dumps(row, sort_keys=True) + "\n")
+    fh.write("{this is not valid json -- simulates a torn/partial sibling write}\n")
+PY
+
+OUT_SIBLING="$(env "${RUN_ENV[@]}" python3 "${APPLY_LIB}" accept sibling-good --reviewed-by tester)"
+RC_SIBLING=$?
+assert_eq "${RC_SIBLING}" "0" "corrupt sibling line: CLI exits 0, never crashes"
+assert_eq "$(json_field "${OUT_SIBLING}" outcome)" "applied" "corrupt sibling line: good proposal still applied"
+
+SIBLING_STATUS="$(python3 -c "
+import json
+for line in open('${SIBLING_FILE}'):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        row = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if row.get('id') == 'sibling-good':
+        print(row['status'])
+")"
+assert_eq "${SIBLING_STATUS}" "accepted" "corrupt sibling line: good proposal's status correctly rewritten to accepted (not stranded at pending)"
+
+SIBLING_LINE_COUNT="$(wc -l < "${SIBLING_FILE}" | tr -d ' ')"
+assert_eq "${SIBLING_LINE_COUNT}" "2" "corrupt sibling line: file still has both lines (corrupt line preserved verbatim, not dropped)"
+
+SIBLING_USES="$(env "${RUN_ENV[@]}" python3 - "${SELF_IMPROVING_LIB}" "${ID_SIBLING_GOOD}" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import learnings_store as ls
+heads = {h["id"]: h for h in ls.load_all("widget-app")}
+print(heads[sys.argv[2]]["uses"])
+PY
+)"
+assert_eq "${SIBLING_USES}" "1" "corrupt sibling line: store uses=1, consistent with status=accepted (no stranded double-count risk)"
+
+# ---------------------------------------------------------------------
+# Step 9: Blocking Finding #2 regression (Stage-2 review, PR #772) --
+# two concurrent apply_proposal() calls for the SAME pending id must never
+# both invoke the handler. White-box monkeypatch of _apply_counter_op to
+# inject a sleep before returning, widening the race window deterministically
+# (mirrors the CAS-retry section's own white-box convention in Step 3) --
+# this proves the fix at apply_dream_proposal.py's own control-flow level,
+# independent of whatever happens to race underneath it in the real
+# subprocess/store (a separate, real, non-mocked confirmation of this fix
+# was also run manually against the actual subprocess boundary).
+# ---------------------------------------------------------------------
+
+ID_RACE_TARGET="$(seed_learning "Seed target for the concurrent-apply regression.")"
+
+RACE_OUT="$(env "${RUN_ENV[@]}" python3 - "${MODULE_ROOT}/lib" "${ID_RACE_TARGET}" <<'PY'
+import json
+import sys
+import threading
+import time
+
+sys.path.insert(0, sys.argv[1])
+import apply_dream_proposal as adp
+
+target_id = sys.argv[2]
+path = adp.proposals_dir() / "2026-09-05.jsonl"
+path.parent.mkdir(parents=True, exist_ok=True)
+row = {
+    "id": "race-verify", "kind": "learning_verify", "project": "widget-app",
+    "target_id": target_id, "content": None, "type": None, "confidence": 10,
+    "prevalence": {"sessions": 1, "agents": 1},
+    "evidence": [{"session_id": "sess-fixture", "excerpt": "example"}],
+    "justification": "concurrent-apply regression", "fingerprint": "fp-race-verify",
+    "generated_at": "2026-09-05T00:00:00.000Z", "status": "pending",
+}
+with path.open("w", encoding="utf-8") as fh:
+    fh.write(json.dumps(row, sort_keys=True) + "\n")
+
+invocations = {"n": 0}
+counter_lock = threading.Lock()
+
+
+def slow_apply_counter_op(row, op):
+    with counter_lock:
+        invocations["n"] += 1
+    time.sleep(0.4)  # simulate real subprocess latency, widen the race window
+    return {"outcome": "applied"}
+
+
+adp._apply_counter_op = slow_apply_counter_op
+
+barrier = threading.Barrier(2)
+results = [None, None]
+
+
+def worker(idx):
+    barrier.wait()  # both threads reach apply_proposal() at (as close to) the same instant
+    results[idx] = adp.apply_proposal("race-verify", method="human_accept", reviewed_by=f"tester{idx}")
+
+
+t1 = threading.Thread(target=worker, args=(0,))
+t2 = threading.Thread(target=worker, args=(1,))
+t1.start()
+t2.start()
+t1.join()
+t2.join()
+
+outcomes = sorted(r.get("outcome") for r in results)
+print(f"INVOCATIONS={invocations['n']}")
+print(f"OUTCOMES={','.join(outcomes)}")
+PY
+)"
+
+RACE_INVOCATIONS="$(printf '%s\n' "${RACE_OUT}" | grep '^INVOCATIONS=' | cut -d= -f2)"
+RACE_OUTCOMES="$(printf '%s\n' "${RACE_OUT}" | grep '^OUTCOMES=' | cut -d= -f2)"
+assert_eq "${RACE_INVOCATIONS}" "1" "concurrent apply of the same id: handler invoked exactly once (no double-apply)"
+assert_eq "${RACE_OUTCOMES}" "applied,refused_not_pending" "concurrent apply of the same id: one thread applied, the other refused_not_pending"
+
+# ---------------------------------------------------------------------
+# Step 10: Recommend finding regression (Stage-2 review, PR #772) -- exit
+# code 1 from ccgm-learnings-log is ambiguous: BOTH the deliberate "target
+# not found" signal (silent on stderr) AND Python's own default exit code
+# for an uncaught exception in that subprocess (a traceback on stderr).
+# White-box monkeypatch of _run_learnings_log to return a canned
+# CompletedProcess for each case, pinning the disambiguation rule directly
+# (the real cross-process race that can ALSO trigger the crash case is
+# demonstrated separately and is inherently non-deterministic, so it is not
+# re-asserted here).
+# ---------------------------------------------------------------------
+
+EXIT1_OUT="$(env "${RUN_ENV[@]}" python3 - "${MODULE_ROOT}/lib" <<'PY'
+import subprocess
+import sys
+
+sys.path.insert(0, sys.argv[1])
+import apply_dream_proposal as adp
+
+CRASH_STDERR = (
+    "Traceback (most recent call last):\n"
+    '  File "ccgm-learnings-log", line 113, in _cmd_verify\n'
+    "    ok = ls.update_entry_by_id(args.id, slug=args.project, verify=True)\n"
+    '  File "learnings_store.py", line 1114, in _write_snapshot\n'
+    "    snap_tmp.replace(_snapshot_path(slug))\n"
+    "FileNotFoundError: [Errno 2] No such file or directory\n"
+)
+
+row = {"target_id": "does-not-exist", "project": "widget-app", "evidence": []}
+
+adp._run_learnings_log = lambda args: subprocess.CompletedProcess(
+    args=args, returncode=1, stdout="", stderr=CRASH_STDERR,
+)
+crash_result = adp._apply_counter_op(row, "verify")
+print(f"CRASH_OUTCOME={crash_result.get('outcome')}")
+
+adp._run_learnings_log = lambda args: subprocess.CompletedProcess(
+    args=args, returncode=1, stdout="", stderr="",
+)
+genuine_result = adp._apply_counter_op(row, "verify")
+print(f"GENUINE_OUTCOME={genuine_result.get('outcome')}")
+PY
+)"
+
+assert_eq "$(printf '%s\n' "${EXIT1_OUT}" | grep '^CRASH_OUTCOME=' | cut -d= -f2)" "unexpected_exit_code" \
+    "exit 1 with a Python traceback in stderr: classified unexpected_exit_code, not target_not_found"
+assert_eq "$(printf '%s\n' "${EXIT1_OUT}" | grep '^GENUINE_OUTCOME=' | cut -d= -f2)" "target_not_found" \
+    "exit 1 with clean (no-traceback) stderr: still classified target_not_found"
 
 # ---------------------------------------------------------------------
 # Summary.

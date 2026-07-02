@@ -118,6 +118,10 @@ files.
      script never opens). Report the detail; this is not silently retried.
    - `validation_error` / `unexpected_exit_code` — report the detail
      verbatim; do not guess at a fix.
+  - `internal_error` — the apply library itself hit an unexpected exception
+     while applying this proposal (e.g. a malformed/schema-drifted row).
+     The proposal is left `pending`; report the detail verbatim and suggest
+     the proposal be re-reviewed rather than retried blindly.
 5. The command always prints a `ccgm-learnings-sync commit` result too
    (whether or not the apply succeeded — a batch-of-one still syncs). A
    sync failure (e.g., no git remote configured) does not undo the store

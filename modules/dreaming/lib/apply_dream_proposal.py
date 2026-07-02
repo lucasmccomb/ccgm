@@ -57,16 +57,28 @@ This module writes `accepted`/`auto_applied`/`rejected` ONLY on an outcome
 that actually landed a store change (or, for reject, a deliberate no-store-
 write refusal); every failure/refusal outcome (refused_not_pending,
 target_no_longer_live, failed_cas, failed_promotion, validation_error,
-target_not_found, unsupported_kind) leaves `status` untouched at `pending` --
-schema-safe, and keeps the proposal visible for retry. The FULL outcome
-detail for every attempt -- success or failure -- lives in
-~/.claude/dreaming/state/apply-audit.jsonl, never only in a return value that
-evaporates when the caller exits (adrev-012/adrev-302: "never silent").
+target_not_found, unsupported_kind, internal_error) leaves `status`
+untouched at `pending` -- schema-safe, and keeps the proposal visible for
+retry. The FULL outcome detail for every attempt -- success or failure --
+lives in ~/.claude/dreaming/state/apply-audit.jsonl, never only in a return
+value that evaporates when the caller exits (adrev-012/adrev-302: "never
+silent"). `internal_error` covers any handler failure NOT already modeled
+by one of the named outcomes above (e.g. a malformed/schema-drifted
+proposal row) -- `apply_proposal()` never lets a handler exception escape
+uncaught, so a single bad row can never crash the process or (via
+`run_auto_apply`'s loop) abort the rest of a batch.
 
 adrev-013 (refuse non-pending): a proposal whose `status` is already
 anything other than `pending` is refused outright -- no CLI call is even
 attempted -- so a stray re-apply can never double-count a counter-op or
-re-supersede an already-superseded target.
+re-supersede an already-superseded target. This refusal is only meaningful
+if it cannot itself be raced: `apply_proposal()` holds `_apply_lock()` across
+the ENTIRE read -> not-pending-check -> handler-dispatch -> status-rewrite
+sequence for a given proposal id (not just the final rewrite), so two
+concurrent invocations of the same id -- same process or two separate OS
+processes (e.g. the nightly auto-apply LaunchAgent racing a human's
+`/dream-apply accept`) -- can never both observe `pending` and both mutate
+the store.
 """
 from __future__ import annotations
 
@@ -78,6 +90,7 @@ import json
 import os
 import subprocess
 import sys
+import traceback
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -288,38 +301,70 @@ def _apply_lock():
         os.close(fd)
 
 
-def _rewrite_status(path: Path, proposal_id: str, new_status: str) -> dict[str, Any] | None:
-    """Locked read-modify-write of exactly the `status` field on one row.
+def _rewrite_status_locked(path: Path, proposal_id: str, new_status: str) -> dict[str, Any] | None:
+    """Read-modify-write of exactly the `status` field on one row.
 
-    Every row is re-serialized (not hand-patched as a text diff), so the
-    frozen proposal-schema.json shape Epic 3 owns is round-tripped exactly
-    as dream_analyze.py wrote it, plus the one field this module is
-    licensed to touch. Returns the updated row, or None if `proposal_id`
-    is not present in `path` (caller's problem to report -- this function
-    never raises on a not-found).
+    Callers MUST already hold `_apply_lock()` -- this function never
+    acquires it itself (acquiring the same fcntl.flock a second time via a
+    fresh `os.open()` would block forever, since flock's lock domain is the
+    open file description, not the process: see `apply_proposal()`, which
+    now holds the lock across its whole critical section and calls this
+    directly instead of the locking `_rewrite_status()` wrapper below).
+
+    Every parseable row is re-serialized (not hand-patched as a text diff),
+    so the frozen proposal-schema.json shape Epic 3 owns is round-tripped
+    exactly as dream_analyze.py wrote it, plus the one field this module is
+    licensed to touch. A line that fails to parse as a JSON object (a
+    corrupt or torn write from an unrelated, sibling proposal) is preserved
+    VERBATIM rather than crashing the rewrite -- mirrors `_read_jsonl()`'s
+    own defensive skip-on-read, applied here to skip-on-rewrite instead, so
+    one bad sibling line can never prevent this proposal's own status from
+    being recorded (a crash here previously left the store mutation already
+    landed but the status stuck at `pending`, indistinguishable from "never
+    attempted" and liable to be double-applied on retry). Returns the
+    updated row, or None if `proposal_id` is not present in `path`
+    (caller's problem to report -- this function never raises on a
+    not-found).
     """
-    with _apply_lock():
+    try:
+        raw_lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    updated: dict[str, Any] | None = None
+    out_lines: list[str] = []
+    for line in raw_lines:
+        line = line.strip()
+        if not line:
+            continue
         try:
-            raw_lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            return None
-        updated: dict[str, Any] | None = None
-        out_lines: list[str] = []
-        for line in raw_lines:
-            line = line.strip()
-            if not line:
-                continue
             row = json.loads(line)
-            if row.get("id") == proposal_id:
-                row["status"] = new_status
-                updated = row
-            out_lines.append(json.dumps(row, sort_keys=True))
-        if updated is None:
-            return None
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
-        tmp.replace(path)
-        return updated
+        except json.JSONDecodeError:
+            out_lines.append(line)  # corrupt sibling line -- preserve verbatim, do not crash
+            continue
+        if not isinstance(row, dict):
+            out_lines.append(line)  # valid JSON but not an object -- preserve verbatim (mirrors _read_jsonl)
+            continue
+        if row.get("id") == proposal_id:
+            row["status"] = new_status
+            updated = row
+        out_lines.append(json.dumps(row, sort_keys=True))
+    if updated is None:
+        return None
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+    tmp.replace(path)
+    return updated
+
+
+def _rewrite_status(path: Path, proposal_id: str, new_status: str) -> dict[str, Any] | None:
+    """Locked entry point for `_rewrite_status_locked()` -- acquires
+    `_apply_lock()` itself. Used by callers (`reject_proposal()`) that are
+    NOT already holding the lock; `apply_proposal()` holds the lock across
+    its whole critical section and calls `_rewrite_status_locked()`
+    directly to avoid a re-entrant flock deadlock (see that function's
+    docstring)."""
+    with _apply_lock():
+        return _rewrite_status_locked(path, proposal_id, new_status)
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +450,24 @@ def _apply_global_add(row: dict[str, Any], *, reviewed_by: str) -> dict[str, Any
     return {"outcome": "applied", "new_entry_id": new_entry["id"]}
 
 
+def _looks_like_uncaught_exception(stderr: str) -> bool:
+    """True if `stderr` is a Python traceback dump rather than a clean,
+    intentional error message.
+
+    Exit code 1 is heavily overloaded in `ccgm-learnings-log`'s CLI: it is
+    BOTH the deliberate "target not found" signal (`return 0 if ok else 1`
+    in `_cmd_verify`/`_cmd_contradict`, which prints nothing to stderr) AND
+    Python's own default exit code for any uncaught exception in that
+    subprocess (which DOES dump a traceback to stderr). Blindly trusting
+    exit 1 as "target not found" mislabels a genuine internal crash as a
+    permanent, don't-retry condition -- exactly the wrong guidance (see
+    commands/dream-apply.md's instruction to report `target_not_found`
+    verbatim and suggest re-review rather than retrying). This is a cheap,
+    conservative text check, not a fix for whatever caused the crash.
+    """
+    return "Traceback (most recent call last):" in stderr
+
+
 def _apply_counter_op(row: dict[str, Any], op: str) -> dict[str, Any]:
     args = [op, row["target_id"], "--project", row["project"]]
     session = _first_evidence_session(row)
@@ -413,7 +476,7 @@ def _apply_counter_op(row: dict[str, Any], op: str) -> dict[str, Any]:
     proc = _run_learnings_log(args)
     if proc.returncode == 0:
         return {"outcome": "applied"}
-    if proc.returncode == 1:
+    if proc.returncode == 1 and not _looks_like_uncaught_exception(proc.stderr):
         return {"outcome": "target_not_found", "detail": proc.stderr.strip()}
     if proc.returncode == 4:
         return {"outcome": "failed_promotion", "detail": proc.stderr.strip()}
@@ -477,7 +540,7 @@ def _apply_cas_op(row: dict[str, Any], *, build_argv: Callable[[str], list[str]]
             return result
         if proc.returncode == 3:
             continue  # CAS mismatch -- loop re-checks liveness + fresh sha
-        if proc.returncode == 1:
+        if proc.returncode == 1 and not _looks_like_uncaught_exception(proc.stderr):
             return {"outcome": "target_not_found", "detail": proc.stderr.strip(), "cas_retries": attempt}
         if proc.returncode == 2:
             return {"outcome": "validation_error", "detail": proc.stderr.strip(), "cas_retries": attempt}
@@ -548,49 +611,70 @@ def apply_proposal(proposal_id: str, *, method: str = "human_accept", reviewed_b
     states this path is licensed to write. Every OTHER outcome leaves the
     row 'pending' (schema-safe, retry-visible). Always writes exactly one
     audit record, whatever the outcome (adrev-012/adrev-302: never silent).
+
+    The ENTIRE read -> not-pending-check -> handler-dispatch -> status-
+    rewrite sequence runs under a single `_apply_lock()` acquisition, so two
+    concurrent invocations of the same `proposal_id` (same process or two
+    separate OS processes) cannot both observe `pending` and both mutate the
+    store -- see `_rewrite_status_locked()`'s docstring for why this calls
+    that function directly instead of the locking `_rewrite_status()`
+    wrapper (re-entrant flock acquisition would deadlock). The handler call
+    itself is never allowed to raise past this function: an unexpected
+    exception (a malformed/schema-drifted proposal row, for example) is
+    caught and turned into an audited `internal_error` outcome rather than
+    crashing the process -- which matters doubly for `run_auto_apply()`,
+    whose per-row loop calls this function and depends on one bad row never
+    aborting evaluation of the rest of the batch.
     """
     reviewed_by = reviewed_by or os.environ.get("USER") or os.environ.get("LOGNAME") or "human"
-    path, row = find_proposal(proposal_id)
-    if row is None or path is None:
-        record = {"proposal_id": proposal_id, "method": method, "outcome": "not_found", "ok": False}
-        _write_audit(record)
-        return record
 
-    if row.get("status") != "pending":
-        record = {
-            "proposal_id": proposal_id, "kind": row.get("kind"), "project": row.get("project"),
-            "target_id": row.get("target_id"), "method": method, "outcome": "refused_not_pending",
-            "detail": f"status is {row.get('status')!r}, not pending", "ok": False,
-        }
-        _write_audit(record)
-        return record
+    with _apply_lock():
+        path, row = find_proposal(proposal_id)
+        if row is None or path is None:
+            record = {"proposal_id": proposal_id, "method": method, "outcome": "not_found", "ok": False}
+            _write_audit(record)
+            return record
 
-    kind = row.get("kind")
-    handler = _HANDLERS.get(kind)
-    if handler is None:
+        if row.get("status") != "pending":
+            record = {
+                "proposal_id": proposal_id, "kind": row.get("kind"), "project": row.get("project"),
+                "target_id": row.get("target_id"), "method": method, "outcome": "refused_not_pending",
+                "detail": f"status is {row.get('status')!r}, not pending", "ok": False,
+            }
+            _write_audit(record)
+            return record
+
+        kind = row.get("kind")
+        handler = _HANDLERS.get(kind)
+        if handler is None:
+            record = {
+                "proposal_id": proposal_id, "kind": kind, "project": row.get("project"),
+                "target_id": row.get("target_id"), "method": method, "outcome": "unsupported_kind",
+                "detail": f"no apply handler for kind {kind!r}", "ok": False,
+            }
+            _write_audit(record)
+            return record
+
+        try:
+            result = handler(row, reviewed_by=reviewed_by)
+        except Exception:  # noqa: BLE001 -- deliberate: a handler crash must become
+            # an audited outcome, never an uncaught exception (adrev-012/adrev-302
+            # "never silent"; also what keeps run_auto_apply's batch loop alive).
+            result = {"outcome": "internal_error", "detail": traceback.format_exc()}
+        outcome = result.get("outcome")
+        ok = outcome == "applied"
+
+        if ok:
+            new_status = "auto_applied" if method == "auto_apply" else "accepted"
+            _rewrite_status_locked(path, proposal_id, new_status)
+
         record = {
             "proposal_id": proposal_id, "kind": kind, "project": row.get("project"),
-            "target_id": row.get("target_id"), "method": method, "outcome": "unsupported_kind",
-            "detail": f"no apply handler for kind {kind!r}", "ok": False,
+            "target_id": row.get("target_id"), "method": method, "reviewed_by": reviewed_by,
+            "ok": ok, **result,
         }
         _write_audit(record)
         return record
-
-    result = handler(row, reviewed_by=reviewed_by)
-    outcome = result.get("outcome")
-    ok = outcome == "applied"
-
-    if ok:
-        new_status = "auto_applied" if method == "auto_apply" else "accepted"
-        _rewrite_status(path, proposal_id, new_status)
-
-    record = {
-        "proposal_id": proposal_id, "kind": kind, "project": row.get("project"),
-        "target_id": row.get("target_id"), "method": method, "reviewed_by": reviewed_by,
-        "ok": ok, **result,
-    }
-    _write_audit(record)
-    return record
 
 
 def reject_proposal(proposal_id: str, *, method: str = "human_reject") -> dict[str, Any]:
