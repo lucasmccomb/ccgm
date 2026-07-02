@@ -1,0 +1,17 @@
+{
+  "id": "msg_fixture_dreamed_map_noise",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-fixture-map",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 350,
+    "output_tokens": 90
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"candidates\": [{\"type\": \"preference\", \"content\": \"NOISE FIXTURE (offline negative-control candidate, not a real pattern): renamed greet() to sayHello() in src/greet.js in a single session with no recurring theme across sessions.\", \"occurrence_count\": 1, \"evidence\": [{\"session_id\": \"dreamed-noise-0001\", \"excerpt\": \"Rename the greet() function to sayHello() in src/greet.js and update its one call site.\"}], \"notes\": \"Stage-2 #771 offline noise negative-control fixture -- single-session, task-specific busywork with no cross-session recurrence; must not be promoted as a durable pattern. Exists so the noise slug's map phase does not fall through dream_analyze's missing-fixture-treat-as-empty fallback in offline mode; the final reduce.json (unchanged) still attributes no proposal to this slug, so noise_high_value stays false.\"}]}"
+    }
+  ]
+}

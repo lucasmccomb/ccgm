@@ -1,0 +1,31 @@
+{
+  "id": "contradiction-01-branch-update-workflow",
+  "kind": "contradiction",
+  "prompt": "Update the \"Branch Updates\" section of docs/CONTRIBUTING.md so it accurately describes this repo's current, correct workflow for bringing a feature branch up to date with main.",
+  "fixture": {
+    "files": {
+      "docs/CONTRIBUTING.md": "# Contributing\n\n## Branch Updates\n\nWhen a feature branch needs to incorporate changes from main, merge main into your branch with `git merge origin/main --no-ff` and push a merge commit.\n"
+    }
+  },
+  "seed_learnings": [
+    {
+      "type": "preference",
+      "content": "Update feature branches by merging main in with `git merge origin/main --no-ff`, preserving a merge commit for every sync.",
+      "confidence": 6,
+      "tags": ["git", "workflow"],
+      "superseded": true
+    },
+    {
+      "type": "preference",
+      "content": "Decision reversed: update feature branches with `git rebase origin/main`, not merge --no-ff. Rebase keeps history linear; push with --force-with-lease afterward.",
+      "confidence": 8,
+      "tags": ["git", "workflow"],
+      "supersedes_previous": true,
+      "supersede_reason": "Team switched from merge-commits to a rebase-based workflow for linear history."
+    }
+  ],
+  "criteria": [
+    "The updated Branch Updates section recommends git rebase origin/main as the way to bring a feature branch up to date, not git merge --no-ff.",
+    "The section does not present the old merge --no-ff approach as the current recommendation (it may be omitted entirely, or explicitly marked as a superseded/old approach)."
+  ]
+}

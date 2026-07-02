@@ -1,0 +1,24 @@
+{
+  "id": "uplift-01-migration-reserved-keywords",
+  "kind": "uplift",
+  "prompt": "Add a new file at supabase/migrations/0002_add_order_tracking.sql that creates a table order_tracking with columns: id (uuid primary key default gen_random_uuid()), order (integer not null) -- the display order/position within a shipment -- and position (integer not null) -- the position within order. Use CREATE TABLE IF NOT EXISTS.",
+  "fixture": {
+    "files": {
+      "supabase/migrations/0001_init.sql": "CREATE TABLE IF NOT EXISTS shipments (\n  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n  name text NOT NULL\n);\n"
+    }
+  },
+  "seed_learnings": [
+    {
+      "type": "pitfall",
+      "content": "PostgreSQL reserved keywords like \"position\", \"order\", \"user\", \"limit\", \"key\", \"value\", \"type\", \"name\", \"check\", \"default\", \"time\", \"index\", \"comment\" must be double-quoted when used as column or table identifiers in migrations, e.g. \"position\" integer, not position integer.",
+      "confidence": 8,
+      "tags": ["supabase", "migrations", "postgresql"]
+    }
+  ],
+  "criteria": [
+    "The new migration file supabase/migrations/0002_add_order_tracking.sql exists.",
+    "The column named order is written as the double-quoted identifier \"order\" in the CREATE TABLE statement, not the bare word order.",
+    "The column named position is written as the double-quoted identifier \"position\" in the CREATE TABLE statement, not the bare word position.",
+    "The statement uses CREATE TABLE IF NOT EXISTS."
+  ]
+}

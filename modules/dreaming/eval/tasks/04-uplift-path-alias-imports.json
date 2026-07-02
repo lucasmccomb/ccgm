@@ -1,0 +1,23 @@
+{
+  "id": "uplift-04-path-alias-imports",
+  "kind": "uplift",
+  "prompt": "Create src/components/PriceTag.tsx: a functional component PriceTag({ cents }: { cents: number }) that renders the formatted currency using the formatCurrency helper from src/utils/format.ts.",
+  "fixture": {
+    "files": {
+      "src/utils/format.ts": "export function formatCurrency(cents: number): string {\n  return `$${(cents / 100).toFixed(2)}`;\n}\n",
+      "tsconfig.json": "{\n  \"compilerOptions\": {\n    \"baseUrl\": \".\",\n    \"paths\": {\n      \"@/*\": [\"src/*\"]\n    }\n  }\n}\n"
+    }
+  },
+  "seed_learnings": [
+    {
+      "type": "pattern",
+      "content": "Use the @/ path alias (mapped to src/) for imports instead of relative ../../ paths -- e.g. import { formatCurrency } from \"@/utils/format\", not \"../../utils/format\".",
+      "confidence": 7,
+      "tags": ["typescript", "imports", "path-aliases"]
+    }
+  ],
+  "criteria": [
+    "src/components/PriceTag.tsx exists and exports a PriceTag component that renders formatted currency using formatCurrency.",
+    "The import of formatCurrency uses the @/ alias form (e.g. \"@/utils/format\"), not a relative ../ path."
+  ]
+}

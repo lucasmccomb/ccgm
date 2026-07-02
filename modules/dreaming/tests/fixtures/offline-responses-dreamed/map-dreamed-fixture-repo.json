@@ -1,0 +1,17 @@
+{
+  "id": "msg_fixture_dreamed_map",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-fixture-map",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 600,
+    "output_tokens": 180
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"candidates\": [{\"type\": \"pitfall\", \"content\": \"PostgreSQL reserved keywords like order and position cause a syntax error when used as unquoted column identifiers in a migration; double-quote them, e.g. \\\"order\\\" integer, \\\"position\\\" integer.\", \"occurrence_count\": 2, \"evidence\": [{\"session_id\": \"dreamed-src-0001\", \"excerpt\": \"syntax error at or near \\\"order\\\"\"}, {\"session_id\": \"dreamed-src-0002\", \"excerpt\": \"syntax error at or near \\\"position\\\"\"}], \"notes\": \"Same root cause observed twice across two independent sessions, three days apart.\"}]}"
+    }
+  ]
+}

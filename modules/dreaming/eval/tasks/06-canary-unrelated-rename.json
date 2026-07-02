@@ -1,0 +1,24 @@
+{
+  "id": "canary-01-unrelated-rename",
+  "kind": "canary",
+  "prompt": "Rename the function formatDate to formatDateTime throughout src/utils/date.ts, and update its one call site in src/components/Timestamp.tsx to use the new name. Do not change behavior.",
+  "fixture": {
+    "files": {
+      "src/utils/date.ts": "export function formatDate(iso) {\n  return new Date(iso).toLocaleString();\n}\n",
+      "src/components/Timestamp.tsx": "import { formatDate } from \"../utils/date\";\n\nexport function Timestamp({ iso }) {\n  return <span>{formatDate(iso)}</span>;\n}\n"
+    }
+  },
+  "seed_learnings": [
+    {
+      "type": "pitfall",
+      "content": "PostgreSQL reserved keywords like \"position\", \"order\", \"user\", \"limit\", \"key\", \"value\", \"type\", \"name\", \"check\", \"default\", \"time\", \"index\", \"comment\" must be double-quoted when used as column or table identifiers in migrations, e.g. \"position\" integer, not position integer.",
+      "confidence": 8,
+      "tags": ["supabase", "migrations", "postgresql"]
+    }
+  ],
+  "criteria": [
+    "src/utils/date.ts no longer defines formatDate and instead defines formatDateTime with the same behavior.",
+    "src/components/Timestamp.tsx imports and calls formatDateTime, not formatDate.",
+    "No SQL, migration, or database content was introduced anywhere; this is a pure rename with no relationship to the seeded migration pitfall."
+  ]
+}

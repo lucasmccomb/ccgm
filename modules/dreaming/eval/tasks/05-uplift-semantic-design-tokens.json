@@ -1,0 +1,22 @@
+{
+  "id": "uplift-05-semantic-design-tokens",
+  "kind": "uplift",
+  "prompt": "Create src/components/Badge.tsx: a small Badge({ children, variant }: { children: React.ReactNode; variant: \"default\" | \"warning\" }) component styled with Tailwind classes, consistent with the existing Button component's token usage in this design system.",
+  "fixture": {
+    "files": {
+      "src/components/Button.tsx": "export function Button({ children }: { children: React.ReactNode }) {\n  return (\n    <button className=\"bg-primary-500 text-primary-foreground hover:bg-primary-600 rounded-md px-4 py-2\">\n      {children}\n    </button>\n  );\n}\n"
+    }
+  },
+  "seed_learnings": [
+    {
+      "type": "pattern",
+      "content": "This design system uses semantic Tailwind tokens (bg-primary-500, text-muted-foreground, bg-destructive) rather than raw palette classes (bg-blue-500, text-gray-500) or hardcoded hex colors. Reference tokens exclusively, never bg-[#hex].",
+      "confidence": 7,
+      "tags": ["tailwind", "design-tokens", "shadcn"]
+    }
+  ],
+  "criteria": [
+    "src/components/Badge.tsx exists and exports a Badge component accepting children and a variant prop.",
+    "The component's className uses semantic token classes (e.g. bg-primary-500, bg-destructive, text-muted-foreground) and does not use raw palette classes like bg-blue-500/text-gray-500 or hardcoded hex colors."
+  ]
+}
