@@ -393,6 +393,37 @@ class OfflineScoresTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# _aggregate_arm_runs(): the memory-write-format-error-rate arithmetic
+# (bizlogic-003) -- a pure-function test that a run marked is_error=True
+# actually surfaces as a non-zero rate, not just that the happy path stays
+# at zero (which PerBackboneReportingTests below already covers).
+# ---------------------------------------------------------------------------
+
+class AggregateArmRunsTests(unittest.TestCase):
+    def _run(self, *, score=7.0, is_error=False):
+        return {
+            "score": score, "pass": score >= 6.0, "input_tokens": 100, "output_tokens": 20,
+            "turns": 2, "run_cost_usd": 0.01, "judge_input_tokens": 10, "judge_output_tokens": 5,
+            "is_error": is_error,
+        }
+
+    def test_format_error_rate_zero_when_no_failures(self):
+        agg = me._aggregate_arm_runs([self._run(), self._run(), self._run()])  # noqa: SLF001
+        self.assertEqual(agg["format_error_rate"], 0.0)
+
+    def test_format_error_rate_reflects_fraction_of_failed_runs(self):
+        runs = [self._run(is_error=True), self._run(), self._run(), self._run()]
+        agg = me._aggregate_arm_runs(runs)  # noqa: SLF001
+        self.assertAlmostEqual(agg["format_error_rate"], 0.25)
+
+    def test_empty_runs_list_is_a_safe_zeroed_default(self):
+        agg = me._aggregate_arm_runs([])  # noqa: SLF001
+        self.assertEqual(agg["runs"], 0)
+        self.assertEqual(agg["format_error_rate"], 0.0)
+        self.assertEqual(agg["mean_score"], 0.0)
+
+
+# ---------------------------------------------------------------------------
 # Per-backbone reporting (bizlogic-003): run a real (small, fast) task
 # offline under >=2 backbones and assert both appear, distinctly, in both
 # the returned rows and the rendered summary table.
