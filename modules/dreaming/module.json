@@ -1,7 +1,7 @@
 {
   "name": "dreaming",
   "displayName": "Dreaming: Durable Memory Mining",
-  "description": "Nightly, cost-capped dreaming service that mines Claude Code session transcripts for cross-session failure patterns and proposes evidence-tagged memory-store changes behind a human gate. Extends self-improving's learnings store with an out-of-band analyzer -- autoheal's capture-analyze-propose pipeline, retargeted at session transcripts instead of permission events. Ships incrementally: this module currently provides the deterministic transcript miner (discover/mine/cluster/budget plus a schema-drift canary) and the map-reduce analyzer (evidence bundle -> per-change proposals -> digest, with cost caps and a human gate); the apply path, scheduler, and eval harness land in later epics.",
+  "description": "Nightly, cost-capped dreaming service that mines Claude Code session transcripts for cross-session failure patterns and proposes evidence-tagged memory-store changes behind a human gate. Extends self-improving's learnings store with an out-of-band analyzer -- autoheal's capture-analyze-propose pipeline, retargeted at session transcripts instead of permission events. Ships incrementally: this module currently provides the deterministic transcript miner (discover/mine/cluster/budget plus a schema-drift canary), the map-reduce analyzer (evidence bundle -> per-change proposals -> digest, with cost caps and a human gate), and the human-gated apply path (/dream, /dream-digest, /dream-apply) plus the nightly LaunchAgent scheduler; the eval harness lands in a later epic.",
   "category": "workflow",
   "scope": ["global"],
   "status": "beta",
@@ -13,8 +13,24 @@
     "lib/dreaming-prompt-map.md": { "target": "lib/dreaming-prompt-map.md", "type": "lib", "template": false },
     "lib/dreaming-prompt-reduce.md": { "target": "lib/dreaming-prompt-reduce.md", "type": "lib", "template": false },
     "lib/proposal-schema.json": { "target": "lib/proposal-schema.json", "type": "lib", "template": false },
+    "lib/apply_dream_proposal.py": { "target": "lib/apply_dream_proposal.py", "type": "lib", "template": false },
+    "lib/com.__USERNAME__.ccgm.dreaming.daily.plist.template": {
+      "target": "lib/com.__USERNAME__.ccgm.dreaming.daily.plist",
+      "type": "lib",
+      "template": true
+    },
+    "lib/dreaming.cron.template": {
+      "target": "lib/dreaming.cron",
+      "type": "lib",
+      "template": true
+    },
     "bin/dream-analyze.sh": { "target": "bin/dream-analyze.sh", "type": "script", "template": false },
-    "bin/dream-digest.sh": { "target": "bin/dream-digest.sh", "type": "script", "template": false }
+    "bin/dream-digest.sh": { "target": "bin/dream-digest.sh", "type": "script", "template": false },
+    "bin/dream-daily.sh": { "target": "bin/dream-daily.sh", "type": "script", "template": false },
+    "bin/dream-install.sh": { "target": "bin/dream-install.sh", "type": "script", "template": false },
+    "commands/dream.md": { "target": "commands/dream.md", "type": "command", "template": false },
+    "commands/dream-digest.md": { "target": "commands/dream-digest.md", "type": "command", "template": false },
+    "commands/dream-apply.md": { "target": "commands/dream-apply.md", "type": "command", "template": false }
   },
   "tags": ["dreaming", "memory", "durable-memory", "transcript-mining", "jsonl", "self-improving"],
   "configPrompts": []
