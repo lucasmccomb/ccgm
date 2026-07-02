@@ -38,11 +38,13 @@ from content -- not from a project-directory name.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import importlib
 import json
 import os
 import re
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -210,13 +212,43 @@ def redact_pii(text: str) -> str:
     tests/test-no-personal-data.sh's own bar (its SECRET_PATTERN already
     treats any email shape as PII) and extend it to phone/address, per
     the Epic 2 spec.
+
+    Cheap substring pre-checks guard each pattern against catastrophic
+    backtracking on large text with no plausible match: _EMAIL_RE's
+    greedy local-part class immediately followed by a literal "@" that
+    may not exist anywhere in the text is the textbook O(n^2)
+    backtracking shape, and this function runs on FULL, untruncated
+    transcript text by design (make_excerpt() redacts before
+    truncating). Skipping a pattern entirely when its cheap precondition
+    ("@" present / a digit present) is absent keeps every pattern
+    linear-time on the common case without weakening what any pattern
+    matches -- the same substitutions still run, in the same order, for
+    any text that could plausibly contain a match.
     """
     if not text:
         return text
-    out = _ADDRESS_RE.sub("[REDACTED:address]", text)
-    out = _PHONE_RE.sub("[REDACTED:phone]", out)
-    out = _EMAIL_RE.sub("[REDACTED:email]", out)
+    out = text
+    if any(ch.isdigit() for ch in text):
+        out = _ADDRESS_RE.sub("[REDACTED:address]", out)
+        out = _PHONE_RE.sub("[REDACTED:phone]", out)
+    if "@" in text:
+        out = _EMAIL_RE.sub("[REDACTED:email]", out)
     return out
+
+
+def _redact(text: str) -> str:
+    """Run the redact_secrets -> redact_pii chain make_excerpt() uses,
+    without the truncation step.
+
+    Shared by normalize_command_prefix() and the tool_name capture in
+    mine() -- command_prefix and tool_name are raw transcript text same
+    as any excerpt, and are required/always-populated fields in the
+    evidence bundle, so they need the identical redaction guarantee
+    make_excerpt() already gives every excerpt field (sec-6).
+    """
+    if not text:
+        return text
+    return redact_pii(redact_secrets(text))
 
 
 def make_excerpt(text: str) -> str:
@@ -261,6 +293,18 @@ def _text_from_content(content: Any) -> str:
 def normalize_command_prefix(command: str, max_len: int = 80) -> str:
     """Normalize a shell command to a stable clustering key.
 
+    Redacts secrets/PII (via _redact(), the same redact_secrets ->
+    redact_pii chain make_excerpt() uses) BEFORE collapsing whitespace
+    and truncating. command_prefix is raw, untrusted transcript text --
+    it routinely carries tokens and PII (curl -H "Authorization: Bearer
+    ghp_...", "psql postgres://user:pass@host/db", "mail -s hi
+    user@example.com") and is a required, always-populated field in the
+    evidence bundle schema, so it needs the same redaction guarantee
+    every excerpt field already gets. Redacting first (not after
+    truncating) mirrors make_excerpt()'s own ordering contract, so
+    max_len can never lop a redaction marker -- or worse, a raw secret
+    fragment -- in half.
+
     Collapses whitespace and truncates to `max_len` chars -- mirrors
     autoheal's own clustering signature (`(tool_name, cmd[:80])`, see
     modules/autoheal/bin/autoheal-analyze.sh `signature()`) so the two
@@ -268,7 +312,8 @@ def normalize_command_prefix(command: str, max_len: int = 80) -> str:
     """
     if not isinstance(command, str):
         return ""
-    return re.sub(r"\s+", " ", command.strip())[:max_len]
+    redacted = _redact(command)
+    return re.sub(r"\s+", " ", redacted.strip())[:max_len]
 
 
 def _bash_exit_code(
@@ -446,7 +491,14 @@ def mine(path: str | Path) -> dict[str, Any]:
                     if name == "Bash" and isinstance(tinput, dict):
                         command_prefix = normalize_command_prefix(tinput.get("command", ""))
                     if isinstance(tu_id, str):
-                        tool_uses[tu_id] = {"name": name, "command_prefix": command_prefix}
+                        tool_uses[tu_id] = {
+                            # Defensive: tool_name is drawn from a small
+                            # fixed vocabulary in practice but is never
+                            # validated against an enum, so it gets the
+                            # same redaction guarantee as command_prefix.
+                            "name": _redact(name) if isinstance(name, str) else name,
+                            "command_prefix": command_prefix,
+                        }
 
         elif line_type == "user":
             turn_index = len(turn_sequence)
@@ -860,7 +912,13 @@ def watermark_path() -> Path:
 def read_watermark() -> dict[str, str]:
     """Read {slug: ISO8601-of-newest-mined-line} from state/last-dreamed.json.
     Returns {} if the file is absent or corrupt (fails open, never crashes
-    a caller that has not dreamed yet)."""
+    a caller that has not dreamed yet).
+
+    Intentionally a plain, unlocked read: write_watermark()'s on-disk
+    swap is a tempfile + os.replace() (atomic), so a concurrent,
+    lock-free read here can only ever observe a fully-old or fully-new
+    file, never a torn one.
+    """
     path = watermark_path()
     if not path.is_file():
         return {}
@@ -871,20 +929,78 @@ def read_watermark() -> dict[str, str]:
     return data if isinstance(data, dict) else {}
 
 
+def _watermark_is_newer(candidate: str, existing: str | None) -> bool:
+    """True if `candidate` should replace `existing` as the stored watermark.
+
+    Compares by epoch-seconds via _iso_to_epoch() rather than raw string
+    ordering: a fractional-precision timestamp ("...T10:00:00.500Z")
+    must compare newer than the non-fractional form of the same second
+    ("...T10:00:00Z"), but lexicographic string comparison gets this
+    backwards -- "." (0x2E) sorts below "Z" (0x5A), so the fractional
+    value would wrongly compare as NOT newer. Falls back to raw string
+    comparison only when either side fails to parse, matching
+    write_watermark()'s original fail-open posture for malformed input.
+    """
+    if existing is None:
+        return True
+    candidate_epoch = _iso_to_epoch(candidate)
+    existing_epoch = _iso_to_epoch(existing)
+    if candidate_epoch is not None and existing_epoch is not None:
+        return candidate_epoch > existing_epoch
+    return candidate > existing
+
+
 def write_watermark(slug: str, iso_timestamp: str) -> None:
     """Update the watermark for one slug, preserving every other slug's
     entry (read-modify-write; the watermark file is a small dict, not a
-    log -- schema per plan.md §3.3). Only advances forward: a call with an
-    ISO timestamp older than (or equal to) the stored value is a no-op,
-    so a watermark is never regressed and history never gets re-mined.
+    log -- schema per plan.md §3.3). Only advances forward: a call whose
+    timestamp is not strictly newer than the stored value (per
+    _watermark_is_newer()) is a no-op, so a watermark is never regressed
+    and history never gets re-mined.
+
+    The read+merge+write critical section is fcntl-locked (mirrors
+    hook_utils.file_locked_append's cross-process discipline) so two
+    concurrent writers -- e.g. a manual `--force-day` run overlapping the
+    scheduled nightly job -- cannot race: without the lock, a writer that
+    reads the file before another writer's update lands can clobber that
+    update when it writes last, silently losing a DIFFERENT slug's
+    advance. The on-disk swap itself goes through a tempfile +
+    os.replace() (atomic) rather than an in-place write, so any caller
+    that reads without taking the lock (read_watermark() is
+    intentionally unlocked -- see its own docstring) never observes a
+    partially written file.
     """
     path = watermark_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = read_watermark()
-    existing = data.get(slug)
-    if existing is None or iso_timestamp > existing:
-        data[slug] = iso_timestamp
-        path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+
+    lock_fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        try:
+            data = read_watermark()
+            existing = data.get(slug)
+            if not _watermark_is_newer(iso_timestamp, existing):
+                return
+            data[slug] = iso_timestamp
+            payload = json.dumps(data, indent=2, sort_keys=True)
+            tmp_fd, tmp_name = tempfile.mkstemp(
+                dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+            )
+            try:
+                os.fchmod(tmp_fd, 0o644)
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_fh:
+                    tmp_fh.write(payload)
+                os.replace(tmp_name, path)
+            except Exception:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    finally:
+        os.close(lock_fd)
 
 
 # ---------------------------------------------------------------------------

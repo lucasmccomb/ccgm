@@ -22,6 +22,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -132,6 +134,157 @@ class RedactionTests(unittest.TestCase):
         excerpt = tm.make_excerpt(text)
         self.assertNotIn("ghp_", excerpt)
         self.assertNotIn("A" * 20, excerpt)
+
+
+class RedactionPerformanceTests(unittest.TestCase):
+    def test_large_at_free_digit_free_text_stays_fast(self):
+        # Regression guard for the O(n^2) _EMAIL_RE backtracking blowup
+        # on large text with no "@" (measured ~8s @ 100K chars before
+        # redact_pii's short-circuits were added; this input is 2x that
+        # and, quadratically, would have taken tens of seconds pre-fix).
+        # Bound kept generous (2s) to avoid CI flake -- post-fix this
+        # completes in low milliseconds.
+        block = "abcdefghijklmnopqrstuvwxyz "  # no digits, no "@"
+        text = (block * (200_000 // len(block) + 1))[:200_000]
+        self.assertNotIn("@", text)
+        self.assertFalse(any(ch.isdigit() for ch in text))
+
+        start = time.monotonic()
+        tm.make_excerpt(text)
+        elapsed = time.monotonic() - start
+
+        self.assertLess(
+            elapsed, 2.0, f"make_excerpt() took {elapsed:.2f}s on 200K @-free/digit-free chars"
+        )
+
+
+class CommandPrefixRedactionTests(unittest.TestCase):
+    """Regression guard: command_prefix and tool_name must be redacted the
+    same way every other transcript-derived string is, all the way
+    through to the assembled evidence bundle (Stage-2 review finding)."""
+
+    def test_command_prefix_secrets_and_pii_masked_in_bundle(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "command-secret.jsonl"
+            command = (
+                "token=ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE "
+                "email=probe-user@fixture-example.test"
+            )
+            lines = [
+                json.dumps(
+                    {
+                        "type": "user",
+                        "sessionId": "cmd-secret-0001",
+                        "cwd": "/Users/fixtureuser/code/command-secret",
+                        "gitBranch": "main",
+                        "version": "2.1.198",
+                        "timestamp": "2026-01-01T10:00:00.000Z",
+                        "message": {"role": "user", "content": [{"type": "text", "text": "run the probe"}]},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "sessionId": "cmd-secret-0001",
+                        "cwd": "/Users/fixtureuser/code/command-secret",
+                        "gitBranch": "main",
+                        "version": "2.1.198",
+                        "timestamp": "2026-01-01T10:00:01.000Z",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "tool_use", "id": "tool_1", "name": "Bash", "input": {"command": command}}
+                            ],
+                            "usage": {},
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "user",
+                        "sessionId": "cmd-secret-0001",
+                        "cwd": "/Users/fixtureuser/code/command-secret",
+                        "gitBranch": "main",
+                        "version": "2.1.198",
+                        "timestamp": "2026-01-01T10:00:02.000Z",
+                        "toolUseResult": {"exit_code": 1},
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {"type": "tool_result", "tool_use_id": "tool_1", "is_error": True, "content": "probe failed"}
+                            ],
+                        },
+                    }
+                ),
+            ]
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            bundle = tm.mine_to_evidence_bundle([path])
+            self.assertEqual(bundle["friction_cluster_count"], 1)
+            command_prefix = bundle["clusters"][0]["command_prefix"]
+            self.assertNotIn("ghp_FAKE", command_prefix)
+            self.assertNotIn("probe-user@fixture-example.test", command_prefix)
+            self.assertIn("[REDACTED:", command_prefix)
+            self.assertIn("[REDACTED:email]", command_prefix)
+
+    def test_tool_name_redacted_defensively(self):
+        # tool_name is drawn from a small fixed vocabulary in real
+        # transcripts but is never validated against an enum -- confirm
+        # it goes through the same redaction chain as command_prefix.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "tool-name-secret.jsonl"
+            lines = [
+                json.dumps(
+                    {
+                        "type": "user",
+                        "sessionId": "tool-name-0001",
+                        "cwd": "/x",
+                        "timestamp": "2026-01-01T10:00:00.000Z",
+                        "message": {"role": "user", "content": [{"type": "text", "text": "go"}]},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "sessionId": "tool-name-0001",
+                        "cwd": "/x",
+                        "timestamp": "2026-01-01T10:00:01.000Z",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "id": "tool_1",
+                                    "name": "ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE",
+                                    "input": {},
+                                }
+                            ],
+                            "usage": {},
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "user",
+                        "sessionId": "tool-name-0001",
+                        "cwd": "/x",
+                        "timestamp": "2026-01-01T10:00:02.000Z",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {"type": "tool_result", "tool_use_id": "tool_1", "is_error": True, "content": "failed"}
+                            ],
+                        },
+                    }
+                ),
+            ]
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            mined = tm.mine(path)
+            self.assertEqual(len(mined["friction_events"]), 1)
+            tool_name = mined["friction_events"][0]["tool_name"]
+            self.assertNotIn("ghp_FAKE", tool_name)
+            self.assertIn("[REDACTED:", tool_name)
 
 
 class ClusterAndBudgetTests(unittest.TestCase):
@@ -284,6 +437,54 @@ class WatermarkTests(unittest.TestCase):
         # An older timestamp is a no-op (never regress).
         tm.write_watermark("slug-a", "2026-01-03T00:00:00.000Z")
         self.assertEqual(tm.read_watermark()["slug-a"], "2026-01-05T00:00:00.000Z")
+
+    def test_fractional_precision_timestamp_advances_over_non_fractional(self):
+        # Regression guard: raw string comparison would refuse this
+        # advance ("2026-01-01T10:00:00.500Z" > "2026-01-01T10:00:00Z" is
+        # False in Python) even though the fractional value is 500ms
+        # later in real time.
+        tm.write_watermark("slug-precision", "2026-01-01T10:00:00Z")
+        tm.write_watermark("slug-precision", "2026-01-01T10:00:00.500Z")
+        self.assertEqual(tm.read_watermark()["slug-precision"], "2026-01-01T10:00:00.500Z")
+
+    def test_older_non_fractional_does_not_regress_newer_fractional(self):
+        # The other direction of the same string-vs-epoch comparison:
+        # confirms the fix is epoch-correct both ways, not just flipped.
+        tm.write_watermark("slug-precision-2", "2026-01-01T10:00:00.500Z")
+        tm.write_watermark("slug-precision-2", "2026-01-01T10:00:00Z")
+        self.assertEqual(tm.read_watermark()["slug-precision-2"], "2026-01-01T10:00:00.500Z")
+
+    def test_concurrent_writers_on_distinct_slugs_all_land(self):
+        # Regression guard for the unlocked read-modify-write race:
+        # without the fcntl lock, a writer that reads the file before
+        # another writer's update lands can clobber that update when it
+        # writes last, silently dropping a DIFFERENT slug's watermark.
+        # Threads genuinely race at the OS I/O level here -- fcntl.flock()
+        # and file I/O release the GIL during the blocking syscall -- so
+        # a Barrier-released burst of writers is a real concurrency test,
+        # not just an interleaving simulation.
+        n_workers = 16
+        barrier = threading.Barrier(n_workers)
+        errors: list[BaseException] = []
+
+        def worker(i: int) -> None:
+            try:
+                barrier.wait(timeout=5)
+                tm.write_watermark(f"slug-{i}", f"2026-01-01T00:00:{i:02d}.000Z")
+            except BaseException as exc:  # noqa: BLE001 -- surfaced via `errors`, not swallowed
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        self.assertEqual(errors, [])
+        result = tm.read_watermark()
+        self.assertEqual(len(result), n_workers)
+        for i in range(n_workers):
+            self.assertEqual(result[f"slug-{i}"], f"2026-01-01T00:00:{i:02d}.000Z")
 
 
 class DiscoverTests(unittest.TestCase):
