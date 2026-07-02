@@ -662,6 +662,11 @@ class ConflictTests(unittest.TestCase):
         # Both retained -- neither competing branch is itself superseded.
         self.assertIsNone(heads[new1["id"]].get("superseded_by"))
         self.assertIsNone(heads[new2["id"]].get("superseded_by"))
+        # adrev-011: the flag must ALSO land on the two LIVE competing
+        # heads, not only the already-hidden old head -- those live heads
+        # are what a reader actually receives from default search().
+        self.assertTrue(heads[new1["id"]].get("conflict"))
+        self.assertTrue(heads[new2["id"]].get("conflict"))
 
     def test_double_supersede_across_agent_ids_flags_conflict(self):
         # adrev-010: two DIFFERENT agent-ids supersede the same live row.
@@ -675,6 +680,23 @@ class ConflictTests(unittest.TestCase):
         self.assertTrue(heads[self.old_id].get("conflict"))
         self.assertIn(new1["id"], heads)
         self.assertIn(new2["id"], heads)
+        self.assertTrue(heads[new1["id"]].get("conflict"))
+        self.assertTrue(heads[new2["id"]].get("conflict"))
+
+    def test_conflict_flag_survives_into_default_search_results(self):
+        # The old head is already excluded from default search() by the
+        # pre-existing superseded_by filter -- that was never the gap.
+        # The gap was that the two LIVE heads default search() actually
+        # returns carried no indicator at all (review Concern C).
+        ls.supersede_entry(self.old_id, content="branch A search visible", slug=self.slug)
+        ls.supersede_entry(self.old_id, content="branch B search visible", slug=self.slug)
+
+        results = ls.search(slug=self.slug)
+        result_ids = {r["id"] for r in results}
+        self.assertNotIn(self.old_id, result_ids, "old head should still be hidden by default")
+        conflicted = [r for r in results if r.get("conflict")]
+        self.assertEqual(len(conflicted), 2,
+                          "both live competing heads must reach default search() flagged")
 
 
 # ---------------------------------------------------------------------------
@@ -850,7 +872,200 @@ class GlobalPromotionGuardTests(unittest.TestCase):
         self.assertEqual(new["project"], ls.GLOBAL_SLUG)
         heads = {h["id"]: h for h in ls.load_all(ls.GLOBAL_SLUG)}
         self.assertIn(new["id"], heads)
-        self.assertEqual(heads[new["id"]]["writer"], ls.agent_id("/tmp/promo/cwd"))
+        # "/tmp/promo/cwd" has no .env.clone, so the honestly-derived
+        # writer is 'solo' -- asserted as a literal, NOT recomputed via
+        # any agent-id-resolving function under the test's own (also
+        # env-var-free) environment. A tautological re-derivation using
+        # the same function under the same environment cannot distinguish
+        # "derived from cwd" from "derived from the ambient env var" (see
+        # TrustedWriterOriginBindingTests below for the forged-env-var
+        # variant that actually exercises that distinction).
+        self.assertEqual(heads[new["id"]]["writer"], "solo")
+
+    # -----------------------------------------------------------------
+    # Finding A (Stage-1 review, PR #763): update_entry_by_id() -- which
+    # backs the CLI's verify/contradict/deprecate subcommands -- resolves
+    # its write target's shard from the ENTRY'S OWN recorded `project`,
+    # not the caller-supplied slug. It must be gated exactly like
+    # append_entry()/supersede_entry(), unconditionally, regardless of
+    # which op (verify/contradict/deprecate) is requested.
+    # -----------------------------------------------------------------
+
+    def _seed_global_entry(self, content: str = "global entry for update-gate tests") -> str:
+        os.environ["CCGM_LEARNINGS_ADMIN"] = "1"
+        try:
+            entry = ls.build_entry(type_="pattern", content=content, project=ls.GLOBAL_SLUG)
+            ls.append_entry(entry)
+        finally:
+            os.environ.pop("CCGM_LEARNINGS_ADMIN", None)
+        return entry["id"]
+
+    def test_verify_global_entry_without_admin_rejected(self):
+        gid = self._seed_global_entry()
+        with self.assertRaises(ls.GlobalPromotionError):
+            ls.update_entry_by_id(gid, slug=ls.GLOBAL_SLUG, verify=True)
+
+    def test_contradict_global_entry_without_admin_rejected(self):
+        gid = self._seed_global_entry()
+        with self.assertRaises(ls.GlobalPromotionError):
+            ls.update_entry_by_id(gid, slug=ls.GLOBAL_SLUG, contradict=True)
+
+    def test_deprecate_global_entry_without_admin_rejected(self):
+        gid = self._seed_global_entry()
+        with self.assertRaises(ls.GlobalPromotionError):
+            ls.update_entry_by_id(gid, slug=ls.GLOBAL_SLUG, deprecate=True)
+
+    def test_verify_global_entry_with_admin_succeeds(self):
+        gid = self._seed_global_entry()
+        os.environ["CCGM_LEARNINGS_ADMIN"] = "1"
+        ok = ls.update_entry_by_id(gid, slug=ls.GLOBAL_SLUG, verify=True)
+        self.assertTrue(ok)
+        heads = {h["id"]: h for h in ls.load_all(ls.GLOBAL_SLUG)}
+        self.assertEqual(heads[gid]["uses"], 1)
+
+    def test_contradict_global_entry_with_admin_succeeds(self):
+        gid = self._seed_global_entry()
+        os.environ["CCGM_LEARNINGS_ADMIN"] = "1"
+        ok = ls.update_entry_by_id(gid, slug=ls.GLOBAL_SLUG, contradict=True)
+        self.assertTrue(ok)
+        heads = {h["id"]: h for h in ls.load_all(ls.GLOBAL_SLUG)}
+        self.assertEqual(heads[gid]["contradictions"], 1)
+
+    def test_deprecate_global_entry_with_admin_succeeds(self):
+        gid = self._seed_global_entry()
+        os.environ["CCGM_LEARNINGS_ADMIN"] = "1"
+        ok = ls.update_entry_by_id(gid, slug=ls.GLOBAL_SLUG, deprecate=True)
+        self.assertTrue(ok)
+        heads = {h["id"]: h for h in ls.load_all(ls.GLOBAL_SLUG)}
+        self.assertTrue(heads[gid]["deprecated"])
+
+    def test_contradict_promoted_global_entry_without_admin_rejected(self):
+        # The guard must hold regardless of WHICH legitimate path landed
+        # the _global entry -- promote_to_global() as well as the ADMIN
+        # hatch used by _seed_global_entry() above.
+        _make_transcript(self._tmp_projects, "sess-update-gate", "/tmp/update-gate/cwd")
+        new = ls.promote_to_global(
+            {"type": "pattern", "content": "promoted entry for update-gate test"},
+            evidence_sessions=["sess-update-gate"],
+            reviewed_by="lucas",
+        )
+        with self.assertRaises(ls.GlobalPromotionError):
+            ls.update_entry_by_id(new["id"], slug=ls.GLOBAL_SLUG, contradict=True)
+
+
+# ---------------------------------------------------------------------------
+# v2: writer bound to a VERIFIED transcript's cwd, never CCGM_AGENT_ID
+# (Finding B, Stage-1 review PR #763 -- promote_to_global() and
+# supersede_entry()'s tier-raise branch must not derive `writer` from the
+# ambient, freely-exportable env var). Every assertion below compares
+# against a LITERAL expected value the test fixture controls (either
+# "solo" because the transcript's cwd has no .env.clone, or a distinct
+# .env.clone value) -- never a value recomputed via agent_id()/
+# _trusted_writer_from_cwd() under the same environment as the code under
+# test, which is the exact tautology that let the original bug pass.
+# ---------------------------------------------------------------------------
+
+class TrustedWriterOriginBindingTests(unittest.TestCase):
+    def setUp(self):
+        self.slug = f"trusted-writer-{int(time.time()*1e6)}"
+        os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
+        os.environ.pop("CCGM_LEARNINGS_ADMIN", None)
+        self._orig_agent_id = os.environ.get("CCGM_AGENT_ID")
+        os.environ.pop("CCGM_AGENT_ID", None)
+        self._orig_projects_root = ls.CLAUDE_PROJECTS_ROOT
+        self._tmp_projects = Path(tempfile.mkdtemp(prefix="ccgm-transcripts-test-"))
+        ls.CLAUDE_PROJECTS_ROOT = self._tmp_projects
+
+    def tearDown(self):
+        ls.CLAUDE_PROJECTS_ROOT = self._orig_projects_root
+        shutil.rmtree(self._tmp_projects, ignore_errors=True)
+        shutil.rmtree(ls.project_dir(self.slug), ignore_errors=True)
+        shutil.rmtree(ls._cache_dir(self.slug), ignore_errors=True)
+        shutil.rmtree(ls.project_dir(ls.GLOBAL_SLUG), ignore_errors=True)
+        shutil.rmtree(ls._cache_dir(ls.GLOBAL_SLUG), ignore_errors=True)
+        os.environ.pop("CCGM_LEARNINGS_ADMIN", None)
+        if self._orig_agent_id is not None:
+            os.environ["CCGM_AGENT_ID"] = self._orig_agent_id
+        else:
+            os.environ.pop("CCGM_AGENT_ID", None)
+
+    def test_promote_to_global_ignores_forged_env_var_no_env_clone(self):
+        # Reproduction 1 (review Finding B): transcript's cwd has NO
+        # .env.clone, so the honest derivation is 'solo'. A forged
+        # CCGM_AGENT_ID must not leak into the stored writer.
+        cwd = tempfile.mkdtemp(prefix="ccgm-no-envclone-")
+        self.addCleanup(shutil.rmtree, cwd, ignore_errors=True)
+        _make_transcript(self._tmp_projects, "sess-forge-promo", cwd)
+        os.environ["CCGM_AGENT_ID"] = "FORGED-ATTACKER-IDENTITY"
+
+        new = ls.promote_to_global(
+            {"type": "pattern", "content": "promoted while env var forged"},
+            evidence_sessions=["sess-forge-promo"],
+            reviewed_by="lucas",
+        )
+
+        heads = {h["id"]: h for h in ls.load_all(ls.GLOBAL_SLUG)}
+        self.assertEqual(heads[new["id"]]["writer"], "solo")
+        self.assertNotEqual(heads[new["id"]]["writer"], "FORGED-ATTACKER-IDENTITY")
+
+    def test_promote_to_global_uses_env_clone_at_transcript_cwd_not_forged_var(self):
+        # Belt-and-suspenders: the transcript's cwd DOES have a real
+        # .env.clone -- the honest derivation reads ITS AGENT_ID, not the
+        # ambient (forged) CCGM_AGENT_ID.
+        cwd = tempfile.mkdtemp(prefix="ccgm-with-envclone-")
+        self.addCleanup(shutil.rmtree, cwd, ignore_errors=True)
+        (Path(cwd) / ".env.clone").write_text("AGENT_ID=agent-w4-c1\n")
+        _make_transcript(self._tmp_projects, "sess-forge-promo2", cwd)
+        os.environ["CCGM_AGENT_ID"] = "FORGED-VIA-ENV"
+
+        new = ls.promote_to_global(
+            {"type": "pattern", "content": "promoted with real env.clone present"},
+            evidence_sessions=["sess-forge-promo2"],
+            reviewed_by="lucas",
+        )
+
+        heads = {h["id"]: h for h in ls.load_all(ls.GLOBAL_SLUG)}
+        self.assertEqual(heads[new["id"]]["writer"], "agent-w4-c1")
+        self.assertNotEqual(heads[new["id"]]["writer"], "FORGED-VIA-ENV")
+
+    def test_tier_raise_supersede_ignores_forged_env_var(self):
+        # Reproduction 2 (review Finding B): a successful tier raise
+        # (inferred -> user-stated, distinct resolvable session) must bind
+        # `writer` to the transcript's cwd, not the forged env var.
+        cwd = tempfile.mkdtemp(prefix="ccgm-no-envclone-")
+        self.addCleanup(shutil.rmtree, cwd, ignore_errors=True)
+        _make_transcript(self._tmp_projects, "sess-forge-raise", cwd)
+        e = ls.build_entry(type_="pattern", content="inferred fact to raise", source="inferred")
+        ls.append_entry(e)
+
+        os.environ["CCGM_AGENT_ID"] = "FORGED-VIA-ENV"
+        new = ls.supersede_entry(
+            e["id"], content="now confirmed by the user", source="user-stated",
+            slug=self.slug, source_session="sess-forge-raise",
+        )
+
+        self.assertIsNotNone(new)
+        self.assertEqual(new["source"], "user-stated")
+        heads = {h["id"]: h for h in ls.load_all(self.slug)}
+        self.assertEqual(heads[new["id"]]["writer"], "solo")
+        self.assertNotEqual(heads[new["id"]]["writer"], "FORGED-VIA-ENV")
+
+    def test_non_raise_supersede_still_uses_ordinary_ambient_agent_id(self):
+        # Guardrail: the fix must NOT force every supersede onto the
+        # trusted-cwd path -- only a validated tier RAISE goes through
+        # _trusted_writer_from_cwd(). An ordinary (non-raising) supersede
+        # keeps agent_id()'s normal ambient shard label, unchanged.
+        os.environ["CCGM_AGENT_ID"] = "agent-ordinary"
+        e = ls.build_entry(type_="pattern", content="observed fact, no raise", source="observed")
+        ls.append_entry(e)
+
+        new = ls.supersede_entry(
+            e["id"], content="reworded, same tier", source="observed", slug=self.slug,
+        )
+
+        self.assertIsNotNone(new)
+        heads = {h["id"]: h for h in ls.load_all(self.slug)}
+        self.assertEqual(heads[new["id"]]["writer"], "agent-ordinary")
 
 
 # ---------------------------------------------------------------------------
@@ -991,6 +1206,40 @@ class AgentIdTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    # -----------------------------------------------------------------
+    # Finding B (Stage-1 review, PR #763): _trusted_writer_from_cwd() is
+    # the helper the two transcript-verified write paths (promote_to_global,
+    # supersede_entry's tier-raise branch) MUST use instead of agent_id() --
+    # it never consults CCGM_AGENT_ID and never falls back to the calling
+    # process's own os.getcwd().
+    # -----------------------------------------------------------------
+
+    def test_trusted_writer_from_cwd_ignores_env_var(self):
+        os.environ["CCGM_AGENT_ID"] = "should-be-ignored"
+        tmp = tempfile.mkdtemp(prefix="ccgm-trusted-writer-test-")
+        try:
+            self.assertEqual(ls._trusted_writer_from_cwd(tmp), "solo")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_trusted_writer_from_cwd_reads_env_clone_at_given_cwd(self):
+        os.environ["CCGM_AGENT_ID"] = "should-be-ignored"
+        tmp = tempfile.mkdtemp(prefix="ccgm-trusted-writer-test-")
+        try:
+            (Path(tmp) / ".env.clone").write_text("AGENT_ID=agent-w9-c9\n")
+            self.assertEqual(ls._trusted_writer_from_cwd(tmp), "agent-w9-c9")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_trusted_writer_from_cwd_none_resolves_to_solo_never_ambient_cwd(self):
+        os.environ["CCGM_AGENT_ID"] = "should-be-ignored"
+        # No resolvable cwd -> must land on 'solo' directly, NEVER fall
+        # through to the calling process's own os.getcwd() (that would
+        # silently reintroduce the exact ambient signal this helper exists
+        # to exclude).
+        self.assertEqual(ls._trusted_writer_from_cwd(None), "solo")
+        self.assertEqual(ls._trusted_writer_from_cwd(""), "solo")
+
 
 # ---------------------------------------------------------------------------
 # v2: performance (arch-2 acceptance -- <500ms warm read at ~50k ops)
@@ -1098,6 +1347,43 @@ class CLIExitCodeTests(unittest.TestCase):
     def test_global_add_with_admin_exits_0(self):
         result = self._run(
             ["--project", ls.GLOBAL_SLUG, "--type", "pattern", "--content", "cli global via admin"],
+            CCGM_LEARNINGS_ADMIN="1",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def _seed_global_cli_entry(self, content: str) -> str:
+        add = self._run(
+            ["--project", ls.GLOBAL_SLUG, "--type", "pattern", "--content", content],
+            CCGM_LEARNINGS_ADMIN="1",
+        )
+        self.assertEqual(add.returncode, 0, add.stderr)
+        return json.loads(add.stdout)["id"]
+
+    def test_global_verify_without_admin_exits_4(self):
+        # Finding A reproduction (Stage-1 review, PR #763): verify/
+        # contradict/deprecate against a _global entry must be gated
+        # exactly like the add/supersede subcommands above -- exit 4
+        # without CCGM_LEARNINGS_ADMIN=1, not exit 0.
+        entry_id = self._seed_global_cli_entry("cli global verify target")
+        result = self._run(["verify", entry_id, "--project", ls.GLOBAL_SLUG])
+        self.assertEqual(result.returncode, 4, result.stderr)
+
+    def test_global_contradict_without_admin_exits_4(self):
+        entry_id = self._seed_global_cli_entry("cli global contradict target")
+        result = self._run(["contradict", entry_id, "--project", ls.GLOBAL_SLUG])
+        self.assertEqual(result.returncode, 4, result.stderr)
+
+    def test_global_deprecate_without_admin_exits_4(self):
+        content = "cli global deprecate target"
+        entry_id = self._seed_global_cli_entry(content)
+        sha = ls.content_sha256(content)
+        result = self._run(["deprecate", entry_id, "--project", ls.GLOBAL_SLUG, "--expected-sha", sha])
+        self.assertEqual(result.returncode, 4, result.stderr)
+
+    def test_global_verify_with_admin_exits_0(self):
+        entry_id = self._seed_global_cli_entry("cli global verify ok target")
+        result = self._run(
+            ["verify", entry_id, "--project", ls.GLOBAL_SLUG],
             CCGM_LEARNINGS_ADMIN="1",
         )
         self.assertEqual(result.returncode, 0, result.stderr)

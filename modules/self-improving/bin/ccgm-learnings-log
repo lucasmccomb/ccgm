@@ -109,12 +109,20 @@ def _cmd_log(args: argparse.Namespace) -> int:
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
-    ok = ls.update_entry_by_id(args.id, slug=args.project, verify=True, source_session=args.session)
+    try:
+        ok = ls.update_entry_by_id(args.id, slug=args.project, verify=True, source_session=args.session)
+    except ls.GlobalPromotionError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 4
     return 0 if ok else 1
 
 
 def _cmd_contradict(args: argparse.Namespace) -> int:
-    ok = ls.update_entry_by_id(args.id, slug=args.project, contradict=True, source_session=args.session)
+    try:
+        ok = ls.update_entry_by_id(args.id, slug=args.project, contradict=True, source_session=args.session)
+    except ls.GlobalPromotionError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 4
     return 0 if ok else 1
 
 
@@ -124,6 +132,9 @@ def _cmd_deprecate(args: argparse.Namespace) -> int:
             args.id, slug=args.project, deprecate=True,
             expected_sha256=args.expected_sha, source_session=args.session,
         )
+    except ls.GlobalPromotionError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 4
     except ls.CASConflictError as e:
         print(json.dumps({"error": "cas_mismatch", "current_sha256": e.current_sha}), file=sys.stderr)
         return 3

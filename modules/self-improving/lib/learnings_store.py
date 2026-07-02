@@ -59,14 +59,19 @@ DETECTED via the conflict flag above.
 
 Security invariants (write-time, never bypassable via caller-supplied
 strings alone):
-    - `_global` writes require CCGM_LEARNINGS_ADMIN=1 (general CLI/API) or
-      go through `promote_to_global()`, the one structurally privileged
-      path, which verifies every cited evidence session against a REAL,
-      on-disk transcript file and derives `writer` from that transcript's
-      recorded cwd -- never from the freely-exportable CCGM_AGENT_ID.
+    - `_global` writes -- `add`/`supersede` AND `verify`/`contradict`/
+      `deprecate` against an existing `_global` entry -- require
+      CCGM_LEARNINGS_ADMIN=1 (general CLI/API) or go through
+      `promote_to_global()`, the one structurally privileged path, which
+      verifies every cited evidence session against a REAL, on-disk
+      transcript file and derives `writer` from that transcript's recorded
+      cwd -- never from the freely-exportable CCGM_AGENT_ID.
     - Raising a supersede chain's `source` tier (e.g. inferred ->
       user-stated) requires a NEW `source_session` (not already present in
-      the chain) that likewise resolves to a real transcript file.
+      the chain) that likewise resolves to a real transcript file, and the
+      supersede event's `writer` is derived from THAT transcript's
+      recorded cwd (`_trusted_writer_from_cwd()`) -- never from
+      CCGM_AGENT_ID, same as the `_global` rule above.
     - `sanitize_content()` is applied to every model-influenceable
       free-text field at the write path: `content` and `supersede_reason`.
 
@@ -358,21 +363,10 @@ def _parse_iso(s: str) -> float:
 # Agent identity
 # ---------------------------------------------------------------------------
 
-def agent_id(cwd: str | None = None) -> str:
-    """
-    Resolve the writer identity for a shard write / display label.
-
-    Precedence: CCGM_AGENT_ID env var -> AGENT_ID in <cwd>/.env.clone ->
-    'solo'. This is a DISPLAY/SHARD label only -- it is NEVER trusted for
-    `_global` promotion or an origin-binding tier raise. Both of those
-    derive `writer` from a verified transcript's own recorded `cwd`
-    instead (sec-1: a caller-exportable env var cannot bind provenance).
-    """
-    env = os.environ.get("CCGM_AGENT_ID")
-    if env:
-        return env
-    wd = cwd or os.getcwd()
-    env_clone = Path(wd) / ".env.clone"
+def _env_clone_agent_id(cwd: str) -> str | None:
+    """Read `AGENT_ID=` out of `<cwd>/.env.clone`, if present. None if the
+    file is missing, unreadable, or has no AGENT_ID line."""
+    env_clone = Path(cwd) / ".env.clone"
     if env_clone.is_file():
         try:
             for line in env_clone.read_text(encoding="utf-8").splitlines():
@@ -382,7 +376,47 @@ def agent_id(cwd: str | None = None) -> str:
                         return val
         except OSError:
             pass
-    return "solo"
+    return None
+
+
+def agent_id(cwd: str | None = None) -> str:
+    """
+    Resolve the writer identity for a shard write / display label.
+
+    Precedence: CCGM_AGENT_ID env var -> AGENT_ID in <cwd>/.env.clone ->
+    'solo'. This is a DISPLAY/SHARD label only -- it is NEVER trusted for
+    `_global` promotion or an origin-binding tier raise. Both of those
+    derive `writer` from a verified transcript's own recorded `cwd` via
+    `_trusted_writer_from_cwd()` instead (sec-1: a caller-exportable env
+    var cannot bind provenance).
+    """
+    env = os.environ.get("CCGM_AGENT_ID")
+    if env:
+        return env
+    wd = cwd or os.getcwd()
+    return _env_clone_agent_id(wd) or "solo"
+
+
+def _trusted_writer_from_cwd(cwd: str | None) -> str:
+    """
+    Derive `writer` for a TRANSCRIPT-VERIFIED write ONLY -- the two
+    structurally-privileged paths that must bind provenance to a real,
+    on-disk session rather than an ambient value: `promote_to_global()`
+    and `supersede_entry()`'s tier-raise branch. Mirrors `agent_id()`'s
+    `.env.clone` lookup and 'solo' fallback, but deliberately:
+
+    - NEVER consults CCGM_AGENT_ID (sec-1: once a transcript has been
+      verified, a freely-exportable env var must never be allowed to
+      override the identity it establishes -- that is the exact forgery
+      `agent_id()`'s env-var-first precedence would otherwise permit).
+    - NEVER falls back to the calling process's own os.getcwd() when `cwd`
+      is missing/unresolvable -- that would silently reintroduce the same
+      ambient signal this helper exists to exclude. A transcript with no
+      discoverable `cwd` resolves straight to 'solo'.
+    """
+    if not cwd:
+        return "solo"
+    return _env_clone_agent_id(cwd) or "solo"
 
 
 def _is_global_admin() -> bool:
@@ -820,18 +854,27 @@ def _apply_op(heads: dict[str, dict[str, Any]], op: dict[str, Any], target: dict
     elif kind == "supersede":
         new_id = op["id"]
         prior = target.get("superseded_by")
+        new_head = _seed_head_from_supersede_event(op, target)
         if prior is not None and prior != new_id:
             # Conflict detection (adrev-010/adrev-011): two supersedes
-            # targeting the same live row. Both new heads are retained;
-            # the OLD head is flagged so a human (or the read path) knows
-            # not to treat it as a settled single lineage.
+            # targeting the same live row. The OLD head is already
+            # excluded from default search() by the superseded_by filter,
+            # so the flag must ALSO land on the LIVE competing heads --
+            # the rows a reader would otherwise receive as settled
+            # (adrev-011: "the conflicted row is tagged/suppressed on the
+            # read path" only means something if the tag reaches a row
+            # search() actually returns).
             target["conflict"] = True
             chain = target.setdefault("conflicting_superseded_by", [])
             for cid in (prior, new_id):
                 if cid not in chain:
                     chain.append(cid)
+            new_head["conflict"] = True
+            prior_head = heads.get(prior)
+            if prior_head is not None:
+                prior_head["conflict"] = True
         target["superseded_by"] = new_id
-        heads[new_id] = _seed_head_from_supersede_event(op, target)
+        heads[new_id] = new_head
 
 
 def _fold(ordered: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1425,21 +1468,28 @@ def _enforce_origin_binding(
     *,
     new_source: str,
     session_id: str | None,
-) -> None:
+) -> dict[str, Any] | None:
     """
     §3.3 write rules: a supersede may never RAISE the source tier (e.g.
     inferred -> user-stated) unless the new event carries a session id
     that (a) is not already present anywhere in the chain, AND (b)
     resolves to a real, on-disk transcript file. Non-raises are always
     allowed with no session required.
+
+    Returns the resolved transcript info (`{"path": Path, "cwd": str|None}`
+    from `resolve_session_transcript()`) when this IS a validated tier
+    raise -- the caller MUST derive `writer` from that transcript's `cwd`
+    via `_trusted_writer_from_cwd()`, never from `agent_id()`'s ambient
+    CCGM_AGENT_ID (sec-1). Returns None for a non-raise, where `writer`
+    stays the ordinary ambient shard label.
     """
     old = by_id.get(old_id)
     if old is None:
-        return
+        return None
     old_rank = SOURCE_TIER_RANK.get(old.get("source", "observed"), 0)
     new_rank = SOURCE_TIER_RANK.get(new_source, 0)
     if new_rank <= old_rank:
-        return
+        return None
 
     if not session_id:
         raise OriginBindingError(
@@ -1458,6 +1508,7 @@ def _enforce_origin_binding(
             f"session {session_id!r} does not resolve to a real transcript "
             f"under {CLAUDE_PROJECTS_ROOT}/**"
         )
+    return info
 
 
 # ---------------------------------------------------------------------------
@@ -1481,12 +1532,27 @@ def update_entry_by_id(
     Returns True if `entry_id` currently resolves to a live head; False if
     not found (nothing is written). `deprecate` honors CAS when
     `expected_sha256` is given (raises CASConflictError on mismatch).
+
+    Raises GlobalPromotionError if the target's OWN `project` is `_global`
+    and CCGM_LEARNINGS_ADMIN=1 is not set -- verify/contradict/deprecate
+    are writes to `_global` exactly like `add`/`supersede` and share the
+    same unconditional promotion guard (§3.3, sec-1). This check runs
+    before CAS and before any write, keyed off the entry's own recorded
+    `project` (not the caller-supplied `slug`), since that is how the
+    write target's shard is resolved below.
     """
     target_slug = slug or detect_project_slug()
     heads = load_all(target_slug)
     target = next((h for h in heads if h.get("id") == entry_id), None)
     if target is None:
         return False
+
+    target_proj = target.get("project") or target_slug
+    if target_proj == GLOBAL_SLUG and not _is_global_admin():
+        raise GlobalPromotionError(
+            "verifying/contradicting/deprecating a _global entry requires CCGM_LEARNINGS_ADMIN=1 "
+            "(inline, never exported) or promote_to_global() from a reviewed, human-accepted proposal"
+        )
 
     if deprecate and expected_sha256 is not None:
         current_sha = content_sha256(target.get("content"))
@@ -1503,7 +1569,6 @@ def update_entry_by_id(
     if not kinds:
         return True
 
-    target_proj = target.get("project") or target_slug
     writer = agent_id()
     shard = agent_shard_path(target_proj, writer)
     for kind in kinds:
@@ -1562,7 +1627,7 @@ def supersede_entry(
         if current_sha != expected_sha256:
             raise CASConflictError(current_sha)
 
-    _enforce_origin_binding(by_id, old_id, new_source=source, session_id=source_session)
+    origin_info = _enforce_origin_binding(by_id, old_id, new_source=source, session_id=source_session)
 
     inherited_type = type_ or old.get("type")
     inherited_conf = confidence if confidence is not None else old.get("confidence", DEFAULT_CONFIDENCE)
@@ -1582,7 +1647,14 @@ def supersede_entry(
         supersedes=old_id, supersede_reason=reason,
     )
 
-    writer = agent_id()
+    # A tier-raising supersede is a transcript-verified, structurally
+    # privileged write (§3.3, sec-1): `writer` binds to the ALREADY-
+    # RESOLVED transcript's own cwd, never to agent_id()'s ambient
+    # CCGM_AGENT_ID. A non-raise keeps the ordinary ambient shard label.
+    if origin_info is not None:
+        writer = _trusted_writer_from_cwd(origin_info.get("cwd"))
+    else:
+        writer = agent_id()
     shard = agent_shard_path(target_proj, writer)
     ts = _next_writer_timestamp(shard)
     row = _build_op_row(
@@ -1642,7 +1714,7 @@ def promote_to_global(
             f"{CLAUDE_PROJECTS_ROOT}/**"
         )
 
-    writer = agent_id(resolved_cwd)
+    writer = _trusted_writer_from_cwd(resolved_cwd)
 
     new_entry = build_entry(
         type_=entry.get("type"),
