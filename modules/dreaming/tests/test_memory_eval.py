@@ -18,6 +18,8 @@ Run with: python3 -m pytest modules/dreaming/tests/test_memory_eval.py -q
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sys
@@ -44,6 +46,7 @@ import learnings_store  # noqa: E402
 
 TASKS_DIR = HERE.parent / "eval" / "tasks"
 OFFLINE_FIXTURES = HERE / "fixtures" / "offline-responses"
+OFFLINE_DREAMED_FIXTURES = HERE / "fixtures" / "offline-responses-dreamed"
 
 
 def _isolate_env(test: unittest.TestCase) -> Path:
@@ -246,6 +249,71 @@ class FixtureWorkdirTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# run_claude_p(): the isolated arm subprocess env (Stage-2 #771 Recommend)
+# must be built from an explicit allowlist, not an inherited-then-denylist-
+# popped copy of the operator's ambient environment (defense-in-depth:
+# "refuse unless proven safe"). Exercised with a monkeypatched
+# subprocess.run -- no real `claude` binary is ever spawned.
+# ---------------------------------------------------------------------------
+
+class RunClaudePEnvIsolationTests(unittest.TestCase):
+    def test_ambient_leak_vars_never_reach_the_subprocess_env(self):
+        captured = {}
+
+        def fake_run(cmd, *, cwd, env, capture_output, text, timeout):
+            captured["env"] = env
+            return types.SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({
+                    "is_error": False, "result": "ok", "num_turns": 1, "total_cost_usd": 0.0,
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                }),
+                stderr="",
+            )
+
+        polluted = {
+            "HOME": "/tmp/should-never-survive",
+            "CLAUDE_CONFIG_DIR": "/tmp/should-never-survive-config",
+            "ANTHROPIC_API_KEY": "sk-leak-should-never-survive",
+            "CCGM_LEARNINGS_INJECT": "leak-should-never-survive",
+            "XDG_CONFIG_HOME": "/tmp/leak-xdg",
+            "ANTHROPIC_BASE_URL": "https://leak.invalid/v1",
+            "CLAUDE_CODE_ENTRYPOINT": "leak-entrypoint",
+            "CLAUDE_SOME_FUTURE_VAR": "leak-future",
+            "PATH": "/usr/bin:/bin",
+        }
+        prev = {k: os.environ.get(k) for k in polluted}
+        os.environ.update(polluted)
+        try:
+            tmp = Path(tempfile.mkdtemp(prefix="ccgm-eval-test-envisol-"))
+            with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
+                me.run_claude_p(
+                    prompt="p", workdir=tmp / "work", config_dir=tmp / "cfg", home_dir=tmp / "home",
+                    model="fixture-model", inject=True, api_key="sk-real-isolated",
+                    learnings_dir=tmp / "learnings", claude_bin="claude", max_budget_usd=0.1, timeout_s=5,
+                )
+        finally:
+            for k, v in prev.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+        env = captured["env"]
+        self.assertEqual(env["HOME"], str(tmp / "home"))
+        self.assertEqual(env["CLAUDE_CONFIG_DIR"], str(tmp / "cfg"))
+        self.assertEqual(env["ANTHROPIC_API_KEY"], "sk-real-isolated")
+        self.assertEqual(env["CCGM_LEARNINGS_INJECT"], "true")
+        self.assertEqual(env["CCGM_LEARNINGS_DIR"], str(tmp / "learnings"))
+        self.assertNotIn("XDG_CONFIG_HOME", env)
+        self.assertNotIn("ANTHROPIC_BASE_URL", env)
+        self.assertNotIn("CLAUDE_CODE_ENTRYPOINT", env)
+        self.assertNotIn("CLAUDE_SOME_FUTURE_VAR", env)
+        # An allowlisted plumbing var DOES pass through unmodified.
+        self.assertEqual(env.get("PATH"), "/usr/bin:/bin")
+
+
+# ---------------------------------------------------------------------------
 # Judge-prompt blindness: no condition strings anywhere in the payload sent
 # to the judge (adrev-003a test contract).
 # ---------------------------------------------------------------------------
@@ -388,6 +456,119 @@ class CallJudgeApiTransportTests(unittest.TestCase):
 
         self.assertIsNone(parsed)
         self.assertEqual(usage, {"input_tokens": 0, "output_tokens": 0})
+
+
+# ---------------------------------------------------------------------------
+# judge_output(): Stage-2 #771 Blocking fix -- a judge-API transport/parse
+# failure must be tagged with "error" rather than silently coerced into a
+# fabricated score=0.0 indistinguishable from a genuine low score.
+# ---------------------------------------------------------------------------
+
+class JudgeErrorPropagationTests(unittest.TestCase):
+    def test_transport_failure_is_tagged_with_an_error(self):
+        with mock.patch("memory_eval._call_judge_api", return_value=(None, {"input_tokens": 0, "output_tokens": 0})):
+            judged = me.judge_output(
+                {"task_prompt": "p"}, judge_model="m", judge_system_prompt="s",
+                api_key="k", api_url="http://unused.invalid", offline_score=None,
+            )
+        self.assertEqual(judged["score"], 0.0)
+        self.assertFalse(judged["pass"])
+        self.assertIn("error", judged)
+        self.assertTrue(judged["error"])
+
+    def test_non_numeric_score_is_tagged_with_an_error(self):
+        with mock.patch(
+            "memory_eval._call_judge_api",
+            return_value=({"pass": True, "score": "not-a-number"}, {"input_tokens": 1, "output_tokens": 1}),
+        ):
+            judged = me.judge_output(
+                {"task_prompt": "p"}, judge_model="m", judge_system_prompt="s",
+                api_key="k", api_url="http://unused.invalid", offline_score=None,
+            )
+        self.assertEqual(judged["score"], 0.0)
+        self.assertIn("error", judged)
+        self.assertTrue(judged["error"])
+
+    def test_offline_short_circuit_never_carries_an_error(self):
+        judged = me.judge_output(
+            {"task_prompt": "p"}, judge_model="m", judge_system_prompt="s",
+            api_key=None, api_url="http://unused.invalid", offline_score={"score": 7.0},
+        )
+        self.assertNotIn("error", judged)
+        self.assertEqual(judged["score"], 7.0)
+
+    def test_live_success_never_carries_an_error(self):
+        with mock.patch(
+            "memory_eval._call_judge_api",
+            return_value=({"pass": True, "score": 8.0}, {"input_tokens": 1, "output_tokens": 1}),
+        ):
+            judged = me.judge_output(
+                {"task_prompt": "p"}, judge_model="m", judge_system_prompt="s",
+                api_key="k", api_url="http://unused.invalid", offline_score=None,
+            )
+        self.assertNotIn("error", judged)
+        self.assertEqual(judged["score"], 8.0)
+
+
+# ---------------------------------------------------------------------------
+# _aggregate_arm_runs(): Stage-2 #771 Blocking fix -- a run whose judge call
+# failed must be EXCLUDED from mean_score/pass_rate (not averaged in as a
+# fabricated 0.0/False), and judge_error_rate must reflect the fraction of
+# judge-failed runs.
+# ---------------------------------------------------------------------------
+
+class AggregateArmRunsJudgeErrorTests(unittest.TestCase):
+    def _run(self, *, score=7.0, is_error=False, judge_error=None):
+        return {
+            "score": score, "pass": score >= 6.0, "input_tokens": 100, "output_tokens": 20,
+            "turns": 2, "run_cost_usd": 0.01, "judge_input_tokens": 10, "judge_output_tokens": 5,
+            "is_error": is_error, "judge_error": judge_error,
+        }
+
+    def test_judge_errored_run_excluded_from_mean_score(self):
+        runs = [self._run(score=8.0), self._run(score=0.0, judge_error="judge did not return parseable {pass, score}")]
+        agg = me._aggregate_arm_runs(runs)  # noqa: SLF001
+        # The fabricated 0.0 must not drag the mean down -- only the one
+        # genuinely-scored run counts.
+        self.assertEqual(agg["mean_score"], 8.0)
+
+    def test_judge_errored_run_excluded_from_pass_rate(self):
+        runs = [self._run(score=8.0), self._run(score=0.0, judge_error="x")]
+        agg = me._aggregate_arm_runs(runs)  # noqa: SLF001
+        self.assertEqual(agg["pass_rate"], 1.0)
+
+    def test_judge_error_rate_reflects_fraction_of_judge_failed_runs(self):
+        runs = [self._run(judge_error="x"), self._run(), self._run(), self._run()]
+        agg = me._aggregate_arm_runs(runs)  # noqa: SLF001
+        self.assertAlmostEqual(agg["judge_error_rate"], 0.25)
+
+    def test_all_runs_judge_errored_is_a_safe_zeroed_mean_not_a_crash(self):
+        runs = [self._run(score=0.0, judge_error="x"), self._run(score=0.0, judge_error="y")]
+        agg = me._aggregate_arm_runs(runs)  # noqa: SLF001
+        self.assertEqual(agg["mean_score"], 0.0)
+        self.assertEqual(agg["pass_rate"], 0.0)
+        self.assertEqual(agg["judge_error_rate"], 1.0)
+
+    def test_no_judge_errors_rate_is_zero(self):
+        agg = me._aggregate_arm_runs([self._run(), self._run()])  # noqa: SLF001
+        self.assertEqual(agg["judge_error_rate"], 0.0)
+
+    def test_empty_runs_list_includes_zeroed_judge_error_rate(self):
+        agg = me._aggregate_arm_runs([])  # noqa: SLF001
+        self.assertEqual(agg["judge_error_rate"], 0.0)
+
+    def test_run_dict_missing_judge_error_key_entirely_is_not_excluded(self):
+        """Backward compatibility: a run dict built before this fix (no
+        judge_error key at all, e.g. an older row shape) must not be
+        treated as judge-errored."""
+        run_no_key = {
+            "score": 8.0, "pass": True, "input_tokens": 100, "output_tokens": 20,
+            "turns": 2, "run_cost_usd": 0.01, "judge_input_tokens": 10, "judge_output_tokens": 5,
+            "is_error": False,
+        }
+        agg = me._aggregate_arm_runs([run_no_key])  # noqa: SLF001
+        self.assertEqual(agg["mean_score"], 8.0)
+        self.assertEqual(agg["judge_error_rate"], 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -625,6 +806,164 @@ class SummaryTableOfflineDreamedLabelTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Stage-2 #771 Blocking: reproduces the review's own repro scenario -- a
+# judge-API outage confined to the baseline arm's runs while
+# treatment/full_context judge calls succeed normally -- and confirms the
+# fix's full chain: the affected arm's judge_error_rate is nonzero,
+# mean_score is NOT the fabricated 0.0 treated as real evidence, and (even
+# though classify_bucket(), a judge-error-unaware pure function, still
+# nominally computes a high_value-shaped delta from the excluded-to-zero
+# mean) gate_check() refuses to open on the resulting row. Exercised via a
+# single monkeypatched subprocess.run that distinguishes the `claude -p`
+# agent call from the `curl` judge call by argv[0] -- no network, no real
+# `claude` binary, no ANTHROPIC_API_KEY.
+# ---------------------------------------------------------------------------
+
+class LiveJudgeOutageIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+
+    def test_baseline_arm_judge_outage_does_not_fabricate_a_trusted_high_value_gate_open(self):
+        runs = 3
+        call_state = {"n": 0}
+
+        def fake_subprocess_run(cmd, **kwargs):
+            if cmd and cmd[0] == "curl":
+                idx = call_state["n"]
+                call_state["n"] += 1
+                if idx < runs:
+                    # First `runs` judge calls == the baseline arm (arms run
+                    # strictly sequentially in run_arms()) -- simulated outage.
+                    raise OSError("simulated curl transport failure (baseline arm outage)")
+                remaining = idx - runs
+                score = 8.0 if remaining < runs else 6.0  # treatment, then full_context
+                body = json.dumps({
+                    "content": [{"type": "text", "text": json.dumps({"pass": score >= 6.0, "score": score})}],
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                })
+                return types.SimpleNamespace(returncode=0, stdout=f"{body}\n200", stderr="")
+            # claude -p agent call -- irrelevant to this test, always "succeeds".
+            return types.SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({
+                    "is_error": False, "result": "ok", "num_turns": 1, "total_cost_usd": 0.0,
+                    "usage": {"input_tokens": 5, "output_tokens": 5},
+                }),
+                stderr="",
+            )
+
+        sandbox = self.tmp / "sandbox"
+        sandbox.mkdir()
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_subprocess_run):
+            arms = me.run_arms(
+                task_id="dreamed-repro", project_slug="dreamed-repro", prompt="Do X.",
+                fixture_files={}, criteria=["done"], facts=[], learnings_dir=self.tmp / "learnings",
+                backbone="fixture-model", runs=runs, api_key="sk-fixture", claude_bin="claude",
+                max_budget_usd=0.5, timeout_s=5, judge_model="fixture-judge", judge_system_prompt="sys",
+                api_url="https://api.anthropic.com/v1/messages", offline_scores=None, sandbox_root=sandbox,
+            )
+
+        # The affected arm: fabricated-0.0 is excluded, not averaged in.
+        self.assertEqual(arms["baseline"]["mean_score"], 0.0)
+        self.assertEqual(arms["baseline"]["judge_error_rate"], 1.0)
+        self.assertEqual(arms["treatment"]["mean_score"], 8.0)
+        self.assertEqual(arms["treatment"]["judge_error_rate"], 0.0)
+        self.assertEqual(arms["full_context"]["mean_score"], 6.0)
+        self.assertEqual(arms["full_context"]["judge_error_rate"], 0.0)
+
+        bucket, delta, delta_sat = me.classify_bucket(
+            baseline_mean=arms["baseline"]["mean_score"], treatment_mean=arms["treatment"]["mean_score"],
+            full_context_mean=arms["full_context"]["mean_score"],
+        )
+        # classify_bucket() is judge-error-unaware by design (a pure
+        # function over three floats) -- it still nominally computes a
+        # high_value-shaped delta from the excluded-to-zero baseline mean.
+        # This IS the review's own reproduced fabrication; the fix's
+        # safety property lives in gate_check() below, not here.
+        self.assertEqual(bucket, "high_value")
+        self.assertEqual(delta, 8.0)
+        self.assertEqual(delta_sat, 2.0)
+
+        row = me._build_result_row(  # noqa: SLF001
+            task_id="dreamed-repro", kind="dreamed", backbone="fixture-model", runs=runs, offline=False,
+            arms=arms, bucket=bucket, delta=delta, delta_sat=delta_sat,
+            extra={"mining": {"noise_proposals_written": 0, "noise_high_value": False}},
+        )
+        me.write_results([row], date=me.today_iso())
+
+        is_open, reason = me.gate_check()
+        self.assertFalse(is_open, reason)
+        self.assertIn("judge", reason)
+
+    def test_all_arms_clean_judge_calls_still_open_the_gate(self):
+        """The paired positive case: the SAME integration shape (three
+        sequential arms, each judged via the real _call_judge_api/
+        run_claude_p chain) but with NO simulated outage anywhere -- each
+        arm genuinely earns a distinct score in call order -- must still
+        classify high_value and open the gate. The fix must not make the
+        gate impossible to open."""
+        runs = 2
+        call_state = {"n": 0}
+        # baseline scores low, treatment high, full_context mid -- a
+        # genuine high_value + delta_sat>0 shape (same canonical numbers
+        # as ClassifyBucketTests.test_high_value_requires_delta_sat_positive),
+        # driven by the mocked judge responses in strict arm call order.
+        arm_scores = [3.0] * runs + [8.5] * runs + [6.0] * runs
+
+        def fake_subprocess_run(cmd, **kwargs):
+            if cmd and cmd[0] == "curl":
+                idx = call_state["n"]
+                call_state["n"] += 1
+                score = arm_scores[idx]
+                body = json.dumps({
+                    "content": [{"type": "text", "text": json.dumps({"pass": score >= 6.0, "score": score})}],
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                })
+                return types.SimpleNamespace(returncode=0, stdout=f"{body}\n200", stderr="")
+            return types.SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({
+                    "is_error": False, "result": "ok", "num_turns": 1, "total_cost_usd": 0.0,
+                    "usage": {"input_tokens": 5, "output_tokens": 5},
+                }),
+                stderr="",
+            )
+
+        sandbox = self.tmp / "sandbox"
+        sandbox.mkdir()
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_subprocess_run):
+            arms = me.run_arms(
+                task_id="dreamed-repro-clean", project_slug="dreamed-repro-clean", prompt="Do X.",
+                fixture_files={}, criteria=["done"], facts=[], learnings_dir=self.tmp / "learnings",
+                backbone="fixture-model", runs=runs, api_key="sk-fixture", claude_bin="claude",
+                max_budget_usd=0.5, timeout_s=5, judge_model="fixture-judge", judge_system_prompt="sys",
+                api_url="https://api.anthropic.com/v1/messages", offline_scores=None, sandbox_root=sandbox,
+            )
+
+        for arm in me.ARMS:
+            self.assertEqual(arms[arm]["judge_error_rate"], 0.0)
+        self.assertEqual(arms["baseline"]["mean_score"], 3.0)
+        self.assertEqual(arms["treatment"]["mean_score"], 8.5)
+        self.assertEqual(arms["full_context"]["mean_score"], 6.0)
+
+        bucket, delta, delta_sat = me.classify_bucket(
+            baseline_mean=arms["baseline"]["mean_score"], treatment_mean=arms["treatment"]["mean_score"],
+            full_context_mean=arms["full_context"]["mean_score"],
+        )
+        self.assertEqual(bucket, "high_value")
+
+        row = me._build_result_row(  # noqa: SLF001
+            task_id="dreamed-repro-clean", kind="dreamed", backbone="fixture-model", runs=runs, offline=False,
+            arms=arms, bucket=bucket, delta=delta, delta_sat=delta_sat,
+            extra={"mining": {"noise_proposals_written": 0, "noise_high_value": False}},
+        )
+        me.write_results([row], date=me.today_iso())
+
+        is_open, reason = me.gate_check()
+        self.assertTrue(is_open, reason)
+
+
+# ---------------------------------------------------------------------------
 # --gate (adrev-006/adrev-403/adrev-305): freshness (both bounds, both
 # directions), regression, no-high-value, and the live-dreamed requirement.
 # ---------------------------------------------------------------------------
@@ -779,6 +1118,39 @@ class GateTests(unittest.TestCase):
         is_open, reason = me.gate_check()
         self.assertTrue(is_open, reason)
 
+    def test_dreamed_row_with_judge_error_rate_does_not_satisfy_gate(self):
+        """Stage-2 #771 Blocking: a live dreamed high_value row whose own
+        arms show a nonzero judge_error_rate must not open the gate -- the
+        classification it rests on may be built on a fabricated judge-
+        failure score, not real evidence."""
+        rows = self._healthy_rows()
+        for r in rows:
+            if r["kind"] == "dreamed":
+                r["baseline"] = {"mean_score": 0.0, "judge_error_rate": 0.33}
+                r["treatment"] = {"mean_score": 8.5, "judge_error_rate": 0.0}
+                r["full_context"] = {"mean_score": 6.0, "judge_error_rate": 0.0}
+                r["mining"] = {"noise_proposals_written": 0, "noise_high_value": False}
+        self._write_results(rows)
+
+        is_open, reason = me.gate_check()
+        self.assertFalse(is_open)
+        self.assertIn("judge", reason)
+
+    def test_dreamed_row_with_zero_judge_error_rate_still_opens_gate(self):
+        """The paired positive case: explicit judge_error_rate=0.0 on
+        every arm must not itself block the gate."""
+        rows = self._healthy_rows()
+        for r in rows:
+            if r["kind"] == "dreamed":
+                r["baseline"] = {"mean_score": 3.0, "judge_error_rate": 0.0}
+                r["treatment"] = {"mean_score": 8.5, "judge_error_rate": 0.0}
+                r["full_context"] = {"mean_score": 6.0, "judge_error_rate": 0.0}
+                r["mining"] = {"noise_proposals_written": 0, "noise_high_value": False}
+        self._write_results(rows)
+
+        is_open, reason = me.gate_check()
+        self.assertTrue(is_open, reason)
+
     def test_gate_open_when_healthy(self):
         """_healthy_rows()'s dreamed row deliberately carries no `mining`
         key at all (pre-adrev-305-fix results shape) -- confirms the noise
@@ -803,6 +1175,175 @@ class GateTests(unittest.TestCase):
         rows.append({"task_id": "canary-01", "kind": "canary", "bucket": "regression", "offline": False, "delta_sat": -1.0})
         self._write_results(rows)
         self.assertEqual(me.main(["--gate"]), 1)
+
+
+# ---------------------------------------------------------------------------
+# main()'s task-level isolation (Stage-2 #771 Recommend): a single task's
+# own orchestration exception must not discard earlier tasks' already-
+# completed results.
+# ---------------------------------------------------------------------------
+
+class TaskLevelIsolationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+
+    def test_one_task_raising_does_not_discard_earlier_tasks_results(self):
+        tasks_dir = self.tmp / "tasks"
+        tasks_dir.mkdir()
+        ok_task = {"id": "iso-ok", "kind": "canary", "prompt": "p", "fixture": {"files": {"a.txt": "x\n"}}, "criteria": ["c"]}
+        fail_task = {"id": "iso-fail", "kind": "canary", "prompt": "p", "fixture": {"files": {"a.txt": "x\n"}}, "criteria": ["c"]}
+        (tasks_dir / "01-ok.json").write_text(json.dumps(ok_task), encoding="utf-8")
+        (tasks_dir / "02-fail.json").write_text(json.dumps(fail_task), encoding="utf-8")
+
+        real_run_task = me.run_task
+
+        def fake_run_task(task, **kwargs):
+            if task["id"] == "iso-fail":
+                raise RuntimeError("synthetic failure for isolation test")
+            return real_run_task(task, **kwargs)
+
+        with mock.patch("memory_eval.run_task", side_effect=fake_run_task):
+            exit_code = me.main([
+                "--tasks", str(tasks_dir / "*.json"),
+                "--offline", str(OFFLINE_FIXTURES),
+                "--runs", "1",
+                "--backbone", "fixture-model",
+            ])
+
+        self.assertEqual(exit_code, 0)
+        results = me._read_results_file(me._find_latest_results_file())  # noqa: SLF001
+        task_ids = {r["task_id"] for r in results}
+        self.assertEqual(task_ids, {"iso-ok", "iso-fail"})
+
+        ok_rows = [r for r in results if r["task_id"] == "iso-ok"]
+        self.assertEqual(len(ok_rows), 1)
+        self.assertNotEqual(ok_rows[0]["bucket"], "error")
+
+        fail_rows = [r for r in results if r["task_id"] == "iso-fail"]
+        self.assertEqual(len(fail_rows), 1)
+        self.assertEqual(fail_rows[0]["bucket"], "error")
+        self.assertIn("synthetic failure for isolation test", fail_rows[0]["task_error"])
+
+        # render_summary_table()/gate_check() must not crash on a mix of
+        # real rows and a synthetic error row.
+        table = me.render_summary_table(results)
+        self.assertIn("iso-ok", table)
+        self.assertIn("iso-fail", table)
+        self.assertIn("error", table)
+        is_open, _reason = me.gate_check()
+        self.assertFalse(is_open)  # no high_value rows in this fixture -- just must not crash
+
+    def test_results_survive_an_uncaught_basexception_via_incremental_writes(self):
+        """A BaseException the per-task `except Exception` deliberately
+        does NOT catch (e.g. KeyboardInterrupt) must not erase an EARLIER
+        task's already-completed results -- this only holds if results
+        are written inside the loop after each task, not solely once at
+        the very end (which, pre-fix, is never even reached here since
+        the loop never completes)."""
+        tasks_dir = self.tmp / "tasks"
+        tasks_dir.mkdir()
+        ok_task = {"id": "iso-ok-2", "kind": "canary", "prompt": "p", "fixture": {"files": {"a.txt": "x\n"}}, "criteria": ["c"]}
+        fatal_task = {"id": "iso-fatal", "kind": "canary", "prompt": "p", "fixture": {"files": {"a.txt": "x\n"}}, "criteria": ["c"]}
+        (tasks_dir / "01-ok.json").write_text(json.dumps(ok_task), encoding="utf-8")
+        (tasks_dir / "02-fatal.json").write_text(json.dumps(fatal_task), encoding="utf-8")
+
+        real_run_task = me.run_task
+
+        def fake_run_task(task, **kwargs):
+            if task["id"] == "iso-fatal":
+                raise KeyboardInterrupt("simulated Ctrl-C mid-task")
+            return real_run_task(task, **kwargs)
+
+        with mock.patch("memory_eval.run_task", side_effect=fake_run_task):
+            with self.assertRaises(KeyboardInterrupt):
+                me.main([
+                    "--tasks", str(tasks_dir / "*.json"),
+                    "--offline", str(OFFLINE_FIXTURES),
+                    "--runs", "1",
+                    "--backbone", "fixture-model",
+                ])
+
+        results = me._read_results_file(me._find_latest_results_file())  # noqa: SLF001
+        # iso-ok-2's already-completed row survived even though the run
+        # never reached the loop's end (let alone the post-loop
+        # write_results() call) -- only the within-loop incremental write
+        # can explain this.
+        self.assertEqual({r["task_id"] for r in results}, {"iso-ok-2"})
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 #771 Recommend: the noise corpus's map-phase offline fixture must
+# exist so run_dreamed_task's own offline plumbing check actually exercises
+# the per-slug map-candidate path for BOTH corpora, not just the signal one
+# (previously fell through dream_analyze's missing-fixture-treat-as-empty
+# fallback, silently).
+# ---------------------------------------------------------------------------
+
+class DreamedTaskOfflineNoiseFixtureTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+
+    def test_noise_slug_map_fixture_exists_and_offline_run_does_not_warn(self):
+        self.assertTrue(
+            (OFFLINE_DREAMED_FIXTURES / "map-dreamed-noise-repo.json").is_file(),
+            "map-dreamed-noise-repo.json must exist so the noise slug's map "
+            "phase does not fall through dream_analyze's missing-fixture "
+            "fallback in offline mode",
+        )
+
+        task = me.load_task(TASKS_DIR / "09-dreamed-pipeline-end-to-end.json")
+        offline_scores = me.load_offline_scores(OFFLINE_FIXTURES)
+        sandbox = self.tmp / "sandbox"
+        sandbox.mkdir()
+
+        stderr_capture = io.StringIO()
+        with contextlib.redirect_stderr(stderr_capture):
+            rows = me.run_dreamed_task(
+                task, backbones=["fixture-model"], runs=1, api_key="", claude_bin="claude",
+                max_budget_usd=0.1, timeout_s=5, judge_model="fixture-judge",
+                judge_system_prompt="unused in offline mode", api_url="http://unused.invalid",
+                offline=True, offline_dir=OFFLINE_FIXTURES, offline_all_scores=offline_scores,
+                sandbox_root=sandbox,
+            )
+
+        stderr_text = stderr_capture.getvalue()
+        self.assertNotIn("map-dreamed-noise-repo.json", stderr_text)
+        self.assertNotIn("no offline fixture found", stderr_text)
+
+        self.assertEqual(len(rows), 1)
+        mining = rows[0]["mining"]
+        # The map-phase fixture is now real/non-empty (proven above via
+        # the absent warning), but reduce.json -- the ONLY thing that
+        # determines the final proposals list in offline mode -- is
+        # deliberately left unchanged, so the negative control must still
+        # correctly report no noise-side proposal.
+        self.assertEqual(mining["noise_proposals_written"], 0)
+        self.assertFalse(mining["noise_high_value"])
+        self.assertEqual(mining["signal_proposals_written"], 1)
+
+
+# ---------------------------------------------------------------------------
+# --runs validation (Stage-2 #771 Recommend): --runs 0 (or negative) used
+# to be silently accepted and produce a meaningless, plausible-looking
+# results file.
+# ---------------------------------------------------------------------------
+
+class RunsValidationTests(unittest.TestCase):
+    def test_runs_zero_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            me.build_arg_parser().parse_args(["--runs", "0"])
+
+    def test_runs_negative_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            me.build_arg_parser().parse_args(["--runs", "-1"])
+
+    def test_runs_positive_is_accepted(self):
+        args = me.build_arg_parser().parse_args(["--runs", "3"])
+        self.assertEqual(args.runs, 3)
+
+    def test_default_runs_is_positive(self):
+        args = me.build_arg_parser().parse_args([])
+        self.assertGreaterEqual(args.runs, 1)
 
 
 if __name__ == "__main__":

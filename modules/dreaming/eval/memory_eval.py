@@ -110,6 +110,19 @@ GAP_MEAN_THRESHOLD = 5.0
 
 ARMS = ("baseline", "treatment", "full_context")
 
+# Stage-2 #771 Recommend fix (defense-in-depth: "refuse unless proven safe"
+# over "allow unless proven dangerous"): run_claude_p()'s isolated arm
+# subprocess builds its env from this ALLOWLIST rather than inheriting the
+# operator's full ambient environment and popping a few known-dangerous
+# keys -- an ambient XDG_CONFIG_HOME/ANTHROPIC_BASE_URL/stray CLAUDE_* var
+# would otherwise pass through into the "purpose-built, ephemeral" child
+# untouched. Shell/locale/binary-resolution plumbing only; NEVER anything
+# that could redirect Claude Code's own config/auth resolution --
+# HOME/CLAUDE_CONFIG_DIR/ANTHROPIC_API_KEY/CCGM_LEARNINGS_* are always the
+# explicit isolation overrides applied AFTER this allowlist, never
+# forwarded from the ambient environment regardless of what is in it.
+SUBPROCESS_ENV_ALLOWLIST = ("PATH", "SHELL", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "TMPDIR")
+
 # Content-shaping op-events (adrev-403): the gate's freshness bound is
 # scoped to these. Pure `verify` counter-ops -- the only thing auto-apply
 # itself can write -- are deliberately excluded, or the gate would
@@ -475,9 +488,7 @@ def run_claude_p(
     ended up looking like, which is the correct signal for a run that
     failed to execute)."""
     home_dir.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
-    for key in ("CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "CCGM_LEARNINGS_INJECT"):
-        env.pop(key, None)
+    env = {key: os.environ[key] for key in SUBPROCESS_ENV_ALLOWLIST if key in os.environ}
     env.update(
         {
             "HOME": str(home_dir),
@@ -620,12 +631,26 @@ def judge_output(
     api_url: str,
     offline_score: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Returns {"pass": bool, "score": float 0-10, "usage": {...}}.
+    """Returns {"pass": bool, "score": float 0-10, "usage": {...}}, plus an
+    "error" key (ONLY present on failure -- never on a genuine, parsed
+    judge verdict) whenever the score below is a placeholder rather than a
+    real judgment.
+
+    Stage-2 #771 Blocking fix: a transport failure (`_call_judge_api()`
+    returning `(None, ...)`) or a structurally-valid-but-non-numeric
+    `score` field used to be coerced into `score: 0.0` with NO visible
+    marker -- indistinguishable from a genuine low score to every
+    downstream consumer (`_run_one()`, `_aggregate_arm_runs()`,
+    `classify_bucket()`, `gate_check()`). Both failure branches below now
+    tag the sentinel with "error" so `_run_one()` can propagate it into
+    the row and `_aggregate_arm_runs()` can exclude it from `mean_score`
+    instead of silently averaging in a fabricated zero.
 
     `offline_score`, when given, short-circuits to a canned score with NO
     network call at all (memory_eval's own --offline contract) -- the
     canned value stands in for "what the judge would have said", so the
-    live judge-call machinery below is exercised only when actually live.
+    live judge-call machinery below is exercised only when actually live,
+    and NEVER carries an "error" key (a canned score is never a failure).
     """
     if offline_score is not None:
         score = max(0.0, min(10.0, float(offline_score["score"])))
@@ -644,7 +669,10 @@ def judge_output(
     try:
         score = max(0.0, min(10.0, float(parsed.get("score"))))
     except (TypeError, ValueError):
-        score = 0.0
+        return {
+            "pass": False, "score": 0.0, "usage": usage,
+            "error": f"judge returned a non-numeric score: {parsed.get('score')!r}",
+        }
     return {"pass": bool(parsed.get("pass", score >= 6.0)), "score": score, "usage": usage}
 
 
@@ -745,6 +773,11 @@ def _run_one(
         "judge_input_tokens": int(judged.get("usage", {}).get("input_tokens", 0) or 0),
         "judge_output_tokens": int(judged.get("usage", {}).get("output_tokens", 0) or 0),
         "is_error": bool(result.get("is_error", False)),
+        # Stage-2 #771: None on a genuine judge verdict (including the
+        # --offline canned path); a non-empty string whenever `score`
+        # above is a failure sentinel, not a real judgment -- consumed by
+        # _aggregate_arm_runs() to exclude this run from mean_score.
+        "judge_error": judged.get("error"),
     }
     shutil.rmtree(run_root, ignore_errors=True)
     return row
@@ -754,17 +787,29 @@ def _aggregate_arm_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     if not runs:
         return {
             "mean_score": 0.0, "pass_rate": 0.0, "mean_input_tokens": 0.0, "mean_output_tokens": 0.0,
-            "mean_turns": 0.0, "mean_cost_usd": 0.0, "format_error_rate": 0.0, "runs": 0,
+            "mean_turns": 0.0, "mean_cost_usd": 0.0, "format_error_rate": 0.0, "judge_error_rate": 0.0, "runs": 0,
         }
-    scores = [r["score"] for r in runs]
+    # Stage-2 #771 Blocking fix: a run whose judge call itself failed
+    # (transport/parse failure -- judge_output() tags it via "judge_error")
+    # carries a FABRICATED score=0.0/pass=False sentinel, not a real
+    # judgment. Averaging it into mean_score/pass_rate would let a judge
+    # outage masquerade as "the agent scored 0.0 here", which is exactly
+    # the silent-fabrication defect the fix closes -- both stats are
+    # computed only from runs the judge actually scored. format_error_rate
+    # stays scoped to the AGENT's own is_error flag (unrelated -- an agent
+    # run can succeed while its judge call fails, and vice versa);
+    # judge_error_rate is the judge-side counterpart, tracked separately so
+    # gate_check() can refuse to trust a classification built on it.
+    scored_runs = [r for r in runs if not r.get("judge_error")]
     return {
-        "mean_score": statistics.fmean(scores),
-        "pass_rate": sum(1 for r in runs if r["pass"]) / len(runs),
+        "mean_score": statistics.fmean(r["score"] for r in scored_runs) if scored_runs else 0.0,
+        "pass_rate": (sum(1 for r in scored_runs if r["pass"]) / len(scored_runs)) if scored_runs else 0.0,
         "mean_input_tokens": statistics.fmean(r["input_tokens"] for r in runs),
         "mean_output_tokens": statistics.fmean(r["output_tokens"] for r in runs),
         "mean_turns": statistics.fmean(r["turns"] for r in runs),
         "mean_cost_usd": statistics.fmean(r["run_cost_usd"] for r in runs),
         "format_error_rate": sum(1 for r in runs if r["is_error"]) / len(runs),
+        "judge_error_rate": sum(1 for r in runs if r.get("judge_error")) / len(runs),
         "runs": len(runs),
     }
 
@@ -1321,6 +1366,32 @@ def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float 
     if not live_dreamed_high_value:
         return False, "kind:dreamed task has not classified high_value with Δ_sat>0 under a live (non-offline) run"
 
+    # Stage-2 #771 Blocking fix: classify_bucket() is a judge-error-unaware
+    # pure function -- a judge-API transport/parse failure on one arm
+    # (judge_output()'s fabricated score=0.0 sentinel, EXCLUDED from that
+    # arm's mean_score by _aggregate_arm_runs() but still capable of
+    # driving the mean to a degenerate value when every run in the arm
+    # failed) can still produce a high_value-shaped delta/delta_sat that
+    # LOOKS healthy but rests on no real judgment at all. Refuse to trust
+    # any live dreamed high_value row where ANY of its three arms carries
+    # a nonzero judge_error_rate -- mirrors dream_analyze.py's own
+    # accepted "abort loud rather than trust a coercible sentinel" pattern
+    # (ApiCallError, dream_analyze.py:618-702) at the one point this
+    # module's own judge sentinel is actually consumed as evidence. A row
+    # with no judge_error_rate field at all (e.g. a pre-fix results file)
+    # is treated as "no evidence of a judge failure", matching the same
+    # graceful-degradation convention the noise-mining check below uses.
+    judge_unreliable = [
+        r for r in live_dreamed_high_value
+        if any(float((r.get(arm) or {}).get("judge_error_rate", 0) or 0) > 0 for arm in ARMS)
+    ]
+    if judge_unreliable:
+        return False, (
+            "live kind:dreamed high_value row has a nonzero judge-error rate in at least one arm -- "
+            "classification is not trustworthy (judge API transport/parse failures were silently "
+            "present; Stage-2 #771)"
+        )
+
     # adrev-305 Acceptance: the live dreamed task classifying high_value
     # with Δ_sat>0 is necessary but NOT sufficient -- the paired noise-only
     # negative-control corpus mined alongside it must ALSO have yielded no
@@ -1347,9 +1418,13 @@ def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float 
 
 
 def render_summary_table(rows: list[dict[str, Any]]) -> str:
-    headers = ["task_id", "kind", "backbone", "baseline", "treatment", "full_context", "delta", "delta_sat", "bucket", "fmt_err%"]
+    headers = [
+        "task_id", "kind", "backbone", "baseline", "treatment", "full_context",
+        "delta", "delta_sat", "bucket", "fmt_err%", "judge_err%",
+    ]
     lines = [" | ".join(headers), "-" * 100]
     any_offline_dreamed = False
+    any_judge_error = False
     for r in rows:
         # adrev-305 part (b): the offline dreamed run is a plumbing/
         # regression check only, explicitly NOT evidence of value -- label
@@ -1358,11 +1433,17 @@ def render_summary_table(rows: list[dict[str, Any]]) -> str:
         is_offline_dreamed = r.get("kind") == "dreamed" and bool(r.get("offline"))
         any_offline_dreamed = any_offline_dreamed or is_offline_dreamed
         bucket_cell = f"{r['bucket']}*" if is_offline_dreamed else r["bucket"]
+        # Stage-2 #771: worst-case (max) judge_error_rate across the three
+        # arms -- surfaces a judge outage in the printed summary, not only
+        # the JSONL row, so a human running this interactively sees it too.
+        judge_err_rate = max((r.get(arm) or {}).get("judge_error_rate", 0.0) or 0.0 for arm in ARMS)
+        any_judge_error = any_judge_error or judge_err_rate > 0
         lines.append(" | ".join([
             r["task_id"], r["kind"], r["backbone"],
             f"{r['baseline']['mean_score']:.2f}", f"{r['treatment']['mean_score']:.2f}", f"{r['full_context']['mean_score']:.2f}",
             f"{r['delta']:+.2f}", f"{r['delta_sat']:+.2f}", bucket_cell,
             f"{r['treatment']['format_error_rate'] * 100:.0f}",
+            f"{judge_err_rate * 100:.0f}",
         ]))
     bucket_counts: dict[str, int] = {}
     for r in rows:
@@ -1371,6 +1452,11 @@ def render_summary_table(rows: list[dict[str, Any]]) -> str:
     lines.append("Buckets: " + ", ".join(f"{k}={v}" for k, v in sorted(bucket_counts.items())))
     if any_offline_dreamed:
         lines.append("* offline dreamed row -- plumbing/regression check only, NOT evidence of value (adrev-305)")
+    if any_judge_error:
+        lines.append(
+            "judge_err% > 0 on at least one row -- judge API transport/parse failures occurred; "
+            "affected runs are excluded from mean_score, not averaged in as a fabricated 0.0 (Stage-2 #771)"
+        )
     return "\n".join(lines)
 
 
@@ -1379,10 +1465,24 @@ def render_summary_table(rows: list[dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _positive_int(value: str) -> int:
+    """argparse `type=` validator (Stage-2 #771 Recommend): `--runs 0` (or
+    negative) used to be silently accepted and produced a fully-populated,
+    plausible-looking results file where every task falls into the "gap"
+    bucket (0 runs -> _aggregate_arm_runs([])'s zeroed defaults for every
+    arm) -- a human could misread that as "memory doesn't help here"
+    rather than "no runs were ever attempted". Reject it loud at parse
+    time instead."""
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(f"must be >= 1 (got {value!r})")
+    return parsed
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="CCGM dreaming: memory eval harness (Epic 7).")
     p.add_argument("--tasks", metavar="GLOB", default=default_tasks_glob(), help="glob of task JSON files")
-    p.add_argument("--runs", type=int, default=DEFAULT_RUNS, help="runs per arm per task per backbone")
+    p.add_argument("--runs", type=_positive_int, default=DEFAULT_RUNS, help="runs per arm per task per backbone")
     p.add_argument("--backbone", metavar="A,B", help="comma-separated model list (default: configured map_model,reduce_model)")
     p.add_argument("--judge-model", metavar="MODEL", help="default: configured reduce_model")
     p.add_argument("--offline", metavar="DIR", help="canned judge/arm scores + analyzer responses; no network, no API key")
@@ -1393,6 +1493,40 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-budget-usd", type=float, default=DEFAULT_MAX_BUDGET_USD_PER_RUN)
     p.add_argument("--timeout-s", type=int, default=DEFAULT_RUN_TIMEOUT_S)
     return p
+
+
+def _synthetic_error_row(
+    task: dict[str, Any], *, backbones: list[str], runs: int, offline: bool, exc: BaseException,
+) -> dict[str, Any]:
+    """A placeholder row recorded when a task's own orchestration (mine/
+    seed/apply/run) raises before it can produce real arm results (Stage-2
+    #771 Recommend). Schema-compatible with a real _build_result_row()
+    output (zeroed arms via the same _aggregate_arm_runs([]) defaults
+    every other empty-runs case uses) so write_results()/
+    render_summary_table()/gate_check() all handle it without special-
+    casing. `bucket: "error"` is a value classify_bucket() itself never
+    returns, and gate_check() treats it as neither high_value nor
+    regression -- inert to the gate, visible in the JSONL and summary."""
+    empty_arm = _aggregate_arm_runs([])
+    return {
+        "date": today_iso(),
+        "generated_at": _utc_now_iso(),
+        "task_id": task["id"],
+        "kind": task["kind"],
+        "backbone": ",".join(backbones) if backbones else "unknown",
+        "runs": runs,
+        "offline": offline,
+        "baseline": empty_arm,
+        "treatment": empty_arm,
+        "full_context": empty_arm,
+        "delta": 0.0,
+        "delta_sat": 0.0,
+        "token_delta": 0.0,
+        "turn_delta": 0.0,
+        "cost_usd": 0.0,
+        "bucket": "error",
+        "task_error": f"{type(exc).__name__}: {exc}",
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1433,21 +1567,37 @@ def main(argv: list[str] | None = None) -> int:
     try:
         for task in tasks:
             print(f"memory_eval: running task {task['id']} (kind={task['kind']})...", file=sys.stderr)
-            if task["kind"] == "dreamed":
-                rows = run_dreamed_task(
-                    task, backbones=backbones, runs=args.runs, api_key=api_key or "", claude_bin=args.claude_bin,
-                    max_budget_usd=args.max_budget_usd, timeout_s=args.timeout_s, judge_model=judge_model,
-                    judge_system_prompt=judge_system_prompt, api_url=api_url, offline=offline_dir is not None,
-                    offline_dir=offline_dir, offline_all_scores=offline_all_scores, sandbox_root=sandbox_root,
-                )
-            else:
-                rows = run_task(
-                    task, backbones=backbones, runs=args.runs, api_key=api_key or "", claude_bin=args.claude_bin,
-                    max_budget_usd=args.max_budget_usd, timeout_s=args.timeout_s, judge_model=judge_model,
-                    judge_system_prompt=judge_system_prompt, api_url=api_url, offline_all_scores=offline_all_scores,
-                    sandbox_root=sandbox_root,
-                )
+            # Stage-2 #771 Recommend fix: isolate each task's own failure --
+            # an unguarded exception anywhere in the mine/seed/apply/run
+            # chain (e.g. a missing fixture, an orphan supersede, an
+            # unrecognized proposal shape) used to propagate straight out
+            # of this loop, discarding every already-completed (live:
+            # already-paid-for) task's rows with nothing written to disk.
+            try:
+                if task["kind"] == "dreamed":
+                    rows = run_dreamed_task(
+                        task, backbones=backbones, runs=args.runs, api_key=api_key or "", claude_bin=args.claude_bin,
+                        max_budget_usd=args.max_budget_usd, timeout_s=args.timeout_s, judge_model=judge_model,
+                        judge_system_prompt=judge_system_prompt, api_url=api_url, offline=offline_dir is not None,
+                        offline_dir=offline_dir, offline_all_scores=offline_all_scores, sandbox_root=sandbox_root,
+                    )
+                else:
+                    rows = run_task(
+                        task, backbones=backbones, runs=args.runs, api_key=api_key or "", claude_bin=args.claude_bin,
+                        max_budget_usd=args.max_budget_usd, timeout_s=args.timeout_s, judge_model=judge_model,
+                        judge_system_prompt=judge_system_prompt, api_url=api_url, offline_all_scores=offline_all_scores,
+                        sandbox_root=sandbox_root,
+                    )
+            except Exception as exc:  # noqa: BLE001 -- ANY task-orchestration failure degrades to a recorded row; it must never discard earlier tasks' results
+                print(f"memory_eval: task {task['id']!r} raised {exc!r}; recording an error row and continuing", file=sys.stderr)
+                rows = [_synthetic_error_row(task, backbones=backbones, runs=args.runs, offline=offline_dir is not None, exc=exc)]
             all_rows.extend(rows)
+            # Written after EVERY task, not only at the end -- a later
+            # task's failure (or an uncaught BaseException the `except
+            # Exception` above deliberately does not swallow, e.g.
+            # KeyboardInterrupt) must not discard already-completed tasks'
+            # results either.
+            write_results(all_rows, date=date)
     finally:
         shutil.rmtree(sandbox_root, ignore_errors=True)
 
