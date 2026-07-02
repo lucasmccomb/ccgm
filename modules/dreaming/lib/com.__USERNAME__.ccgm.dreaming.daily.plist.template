@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  CCGM dreaming daily LaunchAgent template (Epic 6).
+
+  __USERNAME__ is substituted at module-install time by CCGM's normal
+  template mechanism. The substituted plist installs to
+  ~/Library/LaunchAgents/com.__USERNAME__.ccgm.dreaming.daily.plist
+  and is bootstrapped via `launchctl bootstrap gui/$UID`.
+
+  NOTE (bring-up mechanics): dream-install.sh does the ACTUAL scheduling
+  via `sched_platform.install_scheduled_job()`, which generates its own
+  plist dict programmatically (see modules/hooks/lib/sched_platform.py) --
+  it does not read this file at runtime. This template exists as the
+  human-readable reference for what that generated plist looks like
+  (mirrors modules/autoheal/lib/com.__USERNAME__.ccgm.autoheal.daily.plist.template,
+  which has the identical relationship to autoheal-install.sh), and its
+  substituted form is exercised directly by tests/test-dream-apply.sh's
+  `plutil -lint` check.
+
+  Schedule: fires once daily at 03:30 local time (plan.md §3.6 -- distinct
+  from autoheal's 09:00 so the two nightly jobs do not compete for CPU/API
+  budget in the same window). `RunAtLoad` is false so a fresh `launchctl
+  bootstrap` does NOT immediately replay the daily run.
+
+  Environment policy: PATH is whitelisted; ANTHROPIC_API_KEY is
+  deliberately ABSENT here. dream_analyze.py's own load_env() reads it
+  directly from ~/.claude/dreaming/.env (falling back to
+  ~/.claude/autoheal/.env) at process start -- no shell-level sourcing is
+  load-bearing for the analyzer itself. The daily entrypoint shim
+  dream-install.sh writes still sources .env before exec'ing the real
+  chain anyway, purely for parity with autoheal's shim and any future step
+  that is not as self-contained as dream_analyze.py. Embedding secrets in
+  the plist itself would put them in plain text inside a user-readable
+  directory, which is the failure mode this design avoids either way.
+
+  Logs land in ~/.claude/logs/ rather than stderr so the user can inspect
+  them between runs without scraping launchd's system logs.
+-->
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.__USERNAME__.ccgm.dreaming.daily</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/sh</string>
+      <string>-lc</string>
+      <string>$HOME/.claude/dreaming/dream-daily.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+      <key>Hour</key>
+      <integer>3</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.claude/logs/dreaming.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.claude/logs/dreaming.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+  </dict>
+</plist>

@@ -3,7 +3,7 @@
   "author": {
     "name": "CCGM"
   },
-  "description": "Nightly, cost-capped dreaming service that mines Claude Code session transcripts for cross-session failure patterns and proposes evidence-tagged memory-store changes behind a human gate. Extends self-improving's learnings store with an out-of-band analyzer -- autoheal's capture-analyze-propose pipeline, retargeted at session transcripts instead of permission events. Ships incrementally: this module currently provides the deterministic transcript miner (discover/mine/cluster/budget plus a schema-drift canary) and the map-reduce analyzer (evidence bundle -> per-change proposals -> digest, with cost caps and a human gate); the apply path, scheduler, and eval harness land in later epics.",
+  "description": "Nightly, cost-capped dreaming service that mines Claude Code session transcripts for cross-session failure patterns and proposes evidence-tagged memory-store changes behind a human gate. Extends self-improving's learnings store with an out-of-band analyzer -- autoheal's capture-analyze-propose pipeline, retargeted at session transcripts instead of permission events. Ships incrementally: this module currently provides the deterministic transcript miner (discover/mine/cluster/budget plus a schema-drift canary), the map-reduce analyzer (evidence bundle -> per-change proposals -> digest, with cost caps and a human gate), and the human-gated apply path (/dream, /dream-digest, /dream-apply) plus the nightly LaunchAgent scheduler; the eval harness lands in a later epic.",
   "displayName": "Dreaming: Durable Memory Mining",
   "keywords": [
     "dreaming",
