@@ -23,8 +23,10 @@ import os
 import sys
 import tempfile
 import time
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 
@@ -271,6 +273,124 @@ class JudgeBlindnessTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# _call_judge_api(): the live judge-call transport. --offline short-circuits
+# judge_output() before this function is ever reached, so without this class
+# the request shape / 429-retry / response-parse logic has zero automated
+# coverage. Exercised here with a monkeypatched subprocess.run -- no
+# network, no ANTHROPIC_API_KEY, no `curl` subprocess is ever spawned.
+# ---------------------------------------------------------------------------
+
+class CallJudgeApiTransportTests(unittest.TestCase):
+    @staticmethod
+    def _fake_proc(*, returncode: int = 0, body: str = "", http_code: str = "200", stderr: str = ""):
+        return types.SimpleNamespace(returncode=returncode, stdout=f"{body}\n{http_code}", stderr=stderr)
+
+    @staticmethod
+    def _messages_api_body(parsed_obj: dict, *, input_tokens: int = 42, output_tokens: int = 7) -> str:
+        return json.dumps({
+            "content": [{"type": "text", "text": json.dumps(parsed_obj)}],
+            "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+        })
+
+    def test_request_carries_temperature_zero_model_system_and_messages(self):
+        captured = {}
+
+        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002 - matches subprocess.run's own kwarg name
+            captured["cmd"] = cmd
+            captured["input"] = input
+            return self._fake_proc(body=self._messages_api_body({"pass": True, "score": 8.5}))
+
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
+            parsed, usage = me._call_judge_api(  # noqa: SLF001
+                model="claude-judge-fixture", system_prompt="You are a blind judge.",
+                user_obj={"task_prompt": "Do X.", "criteria": ["done"], "final_files": {}, "agent_summary": "done"},
+                max_output_tokens=200, api_key="sk-test-fixture", api_url="https://api.anthropic.com/v1/messages",
+            )
+
+        self.assertEqual(parsed, {"pass": True, "score": 8.5})
+        self.assertEqual(usage, {"input_tokens": 42, "output_tokens": 7})
+
+        request_body = json.loads(captured["input"])
+        self.assertEqual(request_body["temperature"], 0)
+        self.assertEqual(request_body["model"], "claude-judge-fixture")
+        self.assertEqual(request_body["system"], "You are a blind judge.")
+        self.assertEqual(request_body["max_tokens"], 200)
+        self.assertEqual(len(request_body["messages"]), 1)
+        self.assertEqual(request_body["messages"][0]["role"], "user")
+        # The user_obj is JSON-encoded into the message content, not
+        # flattened -- round-trips back to the exact payload sent in.
+        self.assertEqual(json.loads(request_body["messages"][0]["content"]), {
+            "task_prompt": "Do X.", "criteria": ["done"], "final_files": {}, "agent_summary": "done",
+        })
+        self.assertIn("sk-test-fixture", " ".join(captured["cmd"]))
+
+    def test_429_retries_then_succeeds_on_the_next_attempt(self):
+        calls = []
+
+        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002
+            calls.append(input)
+            if len(calls) == 1:
+                return self._fake_proc(body="", http_code="429")
+            return self._fake_proc(body=self._messages_api_body({"pass": False, "score": 3.0}))
+
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run), \
+                mock.patch("memory_eval.time.sleep", return_value=None) as fake_sleep:
+            parsed, usage = me._call_judge_api(  # noqa: SLF001
+                model="claude-judge-fixture", system_prompt="sys",
+                user_obj={"a": 1}, max_output_tokens=100,
+                api_key="sk-test-fixture", api_url="https://api.anthropic.com/v1/messages",
+            )
+
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(fake_sleep.called)
+        self.assertEqual(parsed, {"pass": False, "score": 3.0})
+        self.assertEqual(usage, {"input_tokens": 42, "output_tokens": 7})
+
+    def test_429_exhausts_retries_and_returns_none(self):
+        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002
+            return self._fake_proc(body="", http_code="429")
+
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run), \
+                mock.patch("memory_eval.time.sleep", return_value=None):
+            parsed, usage = me._call_judge_api(  # noqa: SLF001
+                model="claude-judge-fixture", system_prompt="sys",
+                user_obj={"a": 1}, max_output_tokens=100,
+                api_key="sk-test-fixture", api_url="https://api.anthropic.com/v1/messages",
+            )
+
+        self.assertIsNone(parsed)
+        self.assertEqual(usage, {"input_tokens": 0, "output_tokens": 0})
+
+    def test_non_200_non_429_returns_none(self):
+        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002
+            return self._fake_proc(body="server error", http_code="500")
+
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
+            parsed, usage = me._call_judge_api(  # noqa: SLF001
+                model="claude-judge-fixture", system_prompt="sys",
+                user_obj={"a": 1}, max_output_tokens=100,
+                api_key="sk-test-fixture", api_url="https://api.anthropic.com/v1/messages",
+            )
+
+        self.assertIsNone(parsed)
+        self.assertEqual(usage, {"input_tokens": 0, "output_tokens": 0})
+
+    def test_curl_launch_failure_returns_none_without_raising(self):
+        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002
+            raise OSError("curl: command not found")
+
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
+            parsed, usage = me._call_judge_api(  # noqa: SLF001
+                model="claude-judge-fixture", system_prompt="sys",
+                user_obj={"a": 1}, max_output_tokens=100,
+                api_key="sk-test-fixture", api_url="https://api.anthropic.com/v1/messages",
+            )
+
+        self.assertIsNone(parsed)
+        self.assertEqual(usage, {"input_tokens": 0, "output_tokens": 0})
+
+
+# ---------------------------------------------------------------------------
 # seed_temp_store(): basic add + the contradiction chain (supersede
 # filtering) the kind:contradiction task depends on.
 # ---------------------------------------------------------------------------
@@ -463,6 +583,48 @@ class PerBackboneReportingTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# render_summary_table(): an offline dreamed row is a plumbing/regression
+# check only and must be visibly labeled as NOT evidence of value in the
+# printed stdout summary (adrev-305 part (b)) -- the JSONL already carries
+# this in `note`, but a human running dream-eval.sh interactively and
+# reading only stdout would otherwise miss the distinction.
+# ---------------------------------------------------------------------------
+
+class SummaryTableOfflineDreamedLabelTests(unittest.TestCase):
+    @staticmethod
+    def _row(*, kind: str, offline: bool, bucket: str = "high_value") -> dict:
+        arm = {"mean_score": 8.0, "format_error_rate": 0.0}
+        return {
+            "task_id": f"{kind}-task", "kind": kind, "backbone": "fixture-model",
+            "baseline": arm, "treatment": arm, "full_context": arm,
+            "delta": 0.0, "delta_sat": 0.0, "bucket": bucket, "offline": offline,
+        }
+
+    def test_offline_dreamed_row_is_marked_and_footnoted(self):
+        table = me.render_summary_table([self._row(kind="dreamed", offline=True)])
+        self.assertIn("high_value*", table)
+        self.assertIn("NOT evidence of value", table)
+
+    def test_live_dreamed_row_is_not_marked(self):
+        table = me.render_summary_table([self._row(kind="dreamed", offline=False)])
+        self.assertNotIn("high_value*", table)
+        self.assertNotIn("NOT evidence of value", table)
+
+    def test_offline_non_dreamed_row_is_not_marked(self):
+        """Only the dreamed task's offline run carries adrev-305's
+        NOT-evidence caveat -- the other 8 tasks running under --offline
+        are a general plumbing check with no such per-task caveat."""
+        table = me.render_summary_table([self._row(kind="uplift", offline=True)])
+        self.assertNotIn("high_value*", table)
+        self.assertNotIn("NOT evidence of value", table)
+
+    def test_bucket_counts_summary_line_is_unaffected_by_the_marker(self):
+        rows = [self._row(kind="dreamed", offline=True), self._row(kind="uplift", offline=False)]
+        table = me.render_summary_table(rows)
+        self.assertIn("Buckets: high_value=2", table)
+
+
+# ---------------------------------------------------------------------------
 # --gate (adrev-006/adrev-403/adrev-305): freshness (both bounds, both
 # directions), regression, no-high-value, and the live-dreamed requirement.
 # ---------------------------------------------------------------------------
@@ -583,7 +745,46 @@ class GateTests(unittest.TestCase):
         self.assertFalse(is_open)
         self.assertIn("Δ_sat", reason)
 
+    def test_noise_only_corpus_producing_high_value_proposal_closes_gate(self):
+        """adrev-305's own Acceptance sentence: a live dreamed task
+        classifying high_value with Δ_sat>0 is necessary but NOT
+        sufficient -- the paired noise-only corpus mined alongside it must
+        ALSO have yielded no high-value proposal. mining.noise_high_value
+        is the pipeline's own record of that; True means noise produced a
+        proposal (a caught mining false-positive/poisoning bug), and the
+        gate must stay CLOSED even though the signal-side row looks
+        healthy in every other respect. Mirrors the Stage-1 review's
+        prove_gap.py reproduction as a permanent regression test."""
+        rows = self._healthy_rows()
+        for r in rows:
+            if r["kind"] == "dreamed":
+                r["mining"] = {"noise_proposals_written": 1, "noise_high_value": True}
+        self._write_results(rows)
+
+        is_open, reason = me.gate_check()
+        self.assertFalse(is_open)
+        self.assertIn("noise", reason)
+
+    def test_noise_clean_dreamed_row_still_opens_gate(self):
+        """The paired positive case: an explicit, clean mining record
+        (noise corpus was actually mined and yielded nothing) alongside a
+        live high_value+Δ_sat>0 dreamed row must open the gate -- the fix
+        must not make the gate impossible to open."""
+        rows = self._healthy_rows()
+        for r in rows:
+            if r["kind"] == "dreamed":
+                r["mining"] = {"noise_proposals_written": 0, "noise_high_value": False}
+        self._write_results(rows)
+
+        is_open, reason = me.gate_check()
+        self.assertTrue(is_open, reason)
+
     def test_gate_open_when_healthy(self):
+        """_healthy_rows()'s dreamed row deliberately carries no `mining`
+        key at all (pre-adrev-305-fix results shape) -- confirms the noise
+        check above degrades to "no evidence of contamination" rather than
+        hard-failing on an absent field, so the existing all-good scenario
+        still opens."""
         self._write_results(self._healthy_rows())
         is_open, reason = me.gate_check()
         self.assertTrue(is_open, reason)

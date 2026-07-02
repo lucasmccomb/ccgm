@@ -26,8 +26,12 @@ negative-control corpus that must yield zero high-value proposals
 recent results file exists, is fresh (newer than the configured freshness
 bound AND newer than the last CONTENT-SHAPING store mutation -- pure
 `verify` counter-ops are excluded from that bound, adrev-403), has zero
-`regression` rows, at least one `high_value` row, AND the live (non-offline)
-`kind:dreamed` row itself classifies `high_value` with Δ_sat>0 (adrev-305).
+`regression` rows, at least one `high_value` row, the live (non-offline)
+`kind:dreamed` row itself classifies `high_value` with Δ_sat>0 (adrev-305),
+AND that same row's paired noise-only corpus produced NO high-value
+proposal (`mining.noise_high_value` is not true -- adrev-305's own
+Acceptance sentence: a pipeline that manufactures memories from noise must
+not open the gate even when its signal-side output looks healthy).
 Fails closed -- same reason shape for "stale" as for "missing".
 
 Isolation (adrev-003a, CRITICAL): every `claude -p` arm runs under a
@@ -1277,9 +1281,13 @@ def latest_content_shaping_mutation_epoch(learnings_root: Path) -> float | None:
 def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float | None = None) -> tuple[bool, str]:
     """Returns (open, reason). Fails closed on every branch: missing
     results, stale results (either bound), any regression row, no
-    high_value row, or no LIVE dreamed row classifying high_value with
-    Δ_sat>0 (adrev-305) -- exactly one reason string per failure mode,
-    "stale" handled identically to "missing"."""
+    high_value row, no LIVE dreamed row classifying high_value with
+    Δ_sat>0 (adrev-305), or that live dreamed row's paired noise-only
+    corpus itself yielding a high-value proposal (`mining.noise_high_value`
+    -- adrev-305's Acceptance sentence, the mining-side negative control
+    that must ALSO hold before auto-apply's gate can open) -- exactly one
+    reason string per failure mode, "stale" handled identically to
+    "missing"."""
     now = now if now is not None else time.time()
 
     latest = _find_latest_results_file()
@@ -1313,6 +1321,23 @@ def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float 
     if not live_dreamed_high_value:
         return False, "kind:dreamed task has not classified high_value with Δ_sat>0 under a live (non-offline) run"
 
+    # adrev-305 Acceptance: the live dreamed task classifying high_value
+    # with Δ_sat>0 is necessary but NOT sufficient -- the paired noise-only
+    # negative-control corpus mined alongside it must ALSO have yielded no
+    # high-value proposal. mining.noise_high_value records exactly that;
+    # True here is a caught mining false-positive/poisoning bug, so the
+    # gate must stay closed even though the signal-side row looks healthy.
+    # A row with no `mining` block at all (e.g. a pre-adrev-305 results
+    # file) is treated as "no evidence of contamination", not as a hard
+    # failure -- the field is always populated by run_dreamed_task() in
+    # real usage; only synthetic/legacy rows can lack it.
+    noise_contaminated = [r for r in live_dreamed_high_value if bool((r.get("mining") or {}).get("noise_high_value"))]
+    if noise_contaminated:
+        return False, (
+            "noise-only negative-control corpus yielded a high-value proposal -- "
+            "mining false-positive (adrev-305)"
+        )
+
     return True, "ok"
 
 
@@ -1324,11 +1349,19 @@ def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float 
 def render_summary_table(rows: list[dict[str, Any]]) -> str:
     headers = ["task_id", "kind", "backbone", "baseline", "treatment", "full_context", "delta", "delta_sat", "bucket", "fmt_err%"]
     lines = [" | ".join(headers), "-" * 100]
+    any_offline_dreamed = False
     for r in rows:
+        # adrev-305 part (b): the offline dreamed run is a plumbing/
+        # regression check only, explicitly NOT evidence of value -- label
+        # it as such in the summary (the JSONL already carries this in
+        # `note`, but a human reading only stdout would otherwise miss it).
+        is_offline_dreamed = r.get("kind") == "dreamed" and bool(r.get("offline"))
+        any_offline_dreamed = any_offline_dreamed or is_offline_dreamed
+        bucket_cell = f"{r['bucket']}*" if is_offline_dreamed else r["bucket"]
         lines.append(" | ".join([
             r["task_id"], r["kind"], r["backbone"],
             f"{r['baseline']['mean_score']:.2f}", f"{r['treatment']['mean_score']:.2f}", f"{r['full_context']['mean_score']:.2f}",
-            f"{r['delta']:+.2f}", f"{r['delta_sat']:+.2f}", r["bucket"],
+            f"{r['delta']:+.2f}", f"{r['delta_sat']:+.2f}", bucket_cell,
             f"{r['treatment']['format_error_rate'] * 100:.0f}",
         ]))
     bucket_counts: dict[str, int] = {}
@@ -1336,6 +1369,8 @@ def render_summary_table(rows: list[dict[str, Any]]) -> str:
         bucket_counts[r["bucket"]] = bucket_counts.get(r["bucket"], 0) + 1
     lines.append("")
     lines.append("Buckets: " + ", ".join(f"{k}={v}" for k, v in sorted(bucket_counts.items())))
+    if any_offline_dreamed:
+        lines.append("* offline dreamed row -- plumbing/regression check only, NOT evidence of value (adrev-305)")
     return "\n".join(lines)
 
 
