@@ -488,6 +488,29 @@ class WatermarkTests(unittest.TestCase):
 
 
 class DiscoverTests(unittest.TestCase):
+    def setUp(self):
+        # Hermetic against upstream env leaks (#764): a test module that ran
+        # earlier in the same pytest process (e.g. self-improving's
+        # test_learnings_store.py) may have set CCGM_LEARNINGS_PROJECT (or
+        # CCGM_LEARNINGS_DIR) without restoring it. detect_project_slug()
+        # treats CCGM_LEARNINGS_PROJECT as a priority-1 override, so a leaked
+        # value would make every call below return the SAME slug regardless
+        # of cwd/git-remote, silently breaking the assertions in this class.
+        # Neutralize both here and restore whatever this process actually
+        # had on the way out.
+        self._prev_learnings_project = os.environ.pop("CCGM_LEARNINGS_PROJECT", None)
+        self._prev_learnings_dir = os.environ.pop("CCGM_LEARNINGS_DIR", None)
+
+    def tearDown(self):
+        if self._prev_learnings_project is not None:
+            os.environ["CCGM_LEARNINGS_PROJECT"] = self._prev_learnings_project
+        else:
+            os.environ.pop("CCGM_LEARNINGS_PROJECT", None)
+        if self._prev_learnings_dir is not None:
+            os.environ["CCGM_LEARNINGS_DIR"] = self._prev_learnings_dir
+        else:
+            os.environ.pop("CCGM_LEARNINGS_DIR", None)
+
     def _write_transcript(self, root: Path, project_dir: str, filename: str, cwd: str, ts_epoch: float | None = None):
         d = root / project_dir
         d.mkdir(parents=True, exist_ok=True)
@@ -576,6 +599,25 @@ class SlugAgreementTests(unittest.TestCase):
     basename-fallback-only test would trivially "pass" without proving
     arch-1's fix is wired correctly.
     """
+
+    def setUp(self):
+        # Hermetic against upstream env leaks (#764): see DiscoverTests.setUp
+        # for the full rationale -- a leaked CCGM_LEARNINGS_PROJECT would
+        # make detect_project_slug() ignore this test's real git remote
+        # entirely and return the leaked value instead, breaking the
+        # equality assertions below silently.
+        self._prev_learnings_project = os.environ.pop("CCGM_LEARNINGS_PROJECT", None)
+        self._prev_learnings_dir = os.environ.pop("CCGM_LEARNINGS_DIR", None)
+
+    def tearDown(self):
+        if self._prev_learnings_project is not None:
+            os.environ["CCGM_LEARNINGS_PROJECT"] = self._prev_learnings_project
+        else:
+            os.environ.pop("CCGM_LEARNINGS_PROJECT", None)
+        if self._prev_learnings_dir is not None:
+            os.environ["CCGM_LEARNINGS_DIR"] = self._prev_learnings_dir
+        else:
+            os.environ.pop("CCGM_LEARNINGS_DIR", None)
 
     def test_miner_slug_matches_detect_project_slug_for_real_repo(self):
         with tempfile.TemporaryDirectory() as td:
