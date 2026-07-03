@@ -50,6 +50,11 @@ The **nightly map->reduce analyzer**, on top of Epic 2's miner:
   confidence; a durable canary banner (schema drift / untested transcript
   versions) that stays visible across days until acknowledged; yesterday's
   applied/rejected tally (forward-compatible with a later apply path).
+- `bin/dream-scorecard.sh` / `lib/scorecard.py` -- read-only weekly
+  observability scorecard (`/dream-scorecard`) rendered to
+  `~/.claude/dreaming/scorecards/{date}.md`: captured / injected / reused /
+  applied counts plus store health, aggregated from the learnings store,
+  injection telemetry, and proposals. Never writes to the store.
 
 Every proposal starts `status: "pending"`. This module never writes to the
 learnings store -- `dream_analyze.py` only *reads* it (to build the

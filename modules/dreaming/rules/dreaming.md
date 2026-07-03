@@ -61,6 +61,7 @@ cat ~/.claude/dreaming/config.json
 | `/dream` | Status overview + subcommand surface. Read-only. |
 | `/dream-digest [date]` | Render today's (or a specific date's) digest. |
 | `/dream-apply [id\|list]` | List pending proposals, or accept/reject one by id — the only write path into the store. |
+| `/dream-scorecard [week]` | Read-only weekly observability scorecard (captured / injected / reused / applied + store health). Renders to `~/.claude/dreaming/scorecards/{date}.md`. |
 
 ## When NOT to invoke
 
