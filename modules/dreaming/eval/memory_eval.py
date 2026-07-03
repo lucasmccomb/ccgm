@@ -945,9 +945,13 @@ def classify_bucket(
         if delta_sat > 0:
             return "high_value", delta, delta_sat
         # Path B (efficiency win): memory MATCHES the dump's outcome (does
-        # not lose beyond noise) at materially fewer input tokens.
+        # not lose beyond noise) at materially fewer input tokens. BOTH
+        # token means must be positive -- a degenerate zero-input treatment
+        # arm (a total run failure) is trivially <= any ratio of the dump
+        # and must never spuriously satisfy the efficiency condition.
         if (
             delta_sat >= -HIGH_VALUE_SAT_TOLERANCE
+            and treatment_input_tokens > 0
             and full_context_input_tokens > 0
             and treatment_input_tokens <= HIGH_VALUE_EFFICIENCY_RATIO * full_context_input_tokens
         ):

@@ -192,6 +192,22 @@ class ClassifyBucketTests(unittest.TestCase):
         self.assertEqual(delta_sat, 0.0)
         self.assertNotEqual(bucket, "high_value")
 
+    def test_efficiency_path_inert_when_treatment_arm_has_zero_input_tokens(self):
+        """#784 defense-in-depth (Stage-2 Recommend): a degenerate treatment
+        arm that recorded ZERO input tokens (a total run failure) is
+        trivially <= any ratio of the full dump, and would otherwise
+        spuriously satisfy the efficiency condition. The symmetric
+        `treatment_input_tokens > 0` guard keeps Path B inert here even with
+        a huge full_context arm, a matching score (delta_sat=0), and
+        delta >= HIGH_VALUE_DELTA_THRESHOLD."""
+        bucket, delta, delta_sat = me.classify_bucket(
+            baseline_mean=5.0, treatment_mean=8.0, full_context_mean=8.0,
+            treatment_input_tokens=0, full_context_input_tokens=20000,
+        )
+        self.assertGreaterEqual(delta, me.HIGH_VALUE_DELTA_THRESHOLD)
+        self.assertEqual(delta_sat, 0.0)
+        self.assertEqual(bucket, "inconclusive")
+
     def test_efficiency_path_inert_when_memory_loses_beyond_tolerance(self):
         """#784: memory LOSES to the dump by more than the noise tolerance
         (delta_sat=-2.0 < -0.5) -- not a match, so Path B must NOT fire even
