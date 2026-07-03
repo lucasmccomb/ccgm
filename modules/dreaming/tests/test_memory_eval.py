@@ -1622,6 +1622,81 @@ class DreamedTaskOfflineNoiseFixtureTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# #789: pin the CALLER wiring. run_task() and run_dreamed_task() must feed
+# classify_bucket()'s efficiency args from mean_total_input_tokens, NOT
+# mean_input_tokens. With run_arms() mocked to return arms whose two token
+# means DIFFER (TOTAL 3000 vs 11000 across treatment/full_context, but
+# MARGINAL 3000 vs 3000 everywhere), the efficiency ratio only clears 0.5 on
+# the total counts -> bucket high_value. If either caller reverts to
+# mean_input_tokens the ratio is 1.0 and the bucket collapses to
+# inconclusive, failing these -- the mutation Stage-1 review found unpinned.
+# ---------------------------------------------------------------------------
+
+class CallerWiringToTotalInputTokensTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+
+    @staticmethod
+    def _arm(*, mean_score, mean_total_input_tokens, mean_input_tokens=3000.0):
+        """Mirror _aggregate_arm_runs()'s output shape (every key
+        _build_result_row and classify_bucket read). mean_input_tokens is
+        pinned at 3000 across ALL arms so the OLD (buggy) metric sees a 1.0
+        ratio; only mean_total_input_tokens carries the real spread."""
+        return {
+            "mean_score": mean_score, "pass_rate": 1.0 if mean_score >= 6.0 else 0.0,
+            "mean_input_tokens": mean_input_tokens, "mean_total_input_tokens": mean_total_input_tokens,
+            "mean_output_tokens": 10.0, "mean_turns": 1.0, "mean_cost_usd": 0.0,
+            "format_error_rate": 0.0, "judge_error_rate": 0.0, "runs": 1,
+        }
+
+    def _efficiency_arms(self):
+        # treatment MATCHES full_context on score (delta_sat 0) at far fewer
+        # TOTAL input tokens (3000 vs 11000, ratio 0.27 <= 0.5) -> Path B.
+        return {
+            "baseline": self._arm(mean_score=0.0, mean_total_input_tokens=3000.0),
+            "treatment": self._arm(mean_score=10.0, mean_total_input_tokens=3000.0),
+            "full_context": self._arm(mean_score=10.0, mean_total_input_tokens=11000.0),
+        }
+
+    def test_run_task_feeds_total_input_tokens_to_classify_bucket(self):
+        sandbox = self.tmp / "sandbox"
+        sandbox.mkdir()
+        task = {"id": "wiring-task", "kind": "uplift", "prompt": "Do X.",
+                "seed_learnings": [], "criteria": ["done"]}
+        with mock.patch("memory_eval.run_arms", return_value=self._efficiency_arms()):
+            rows = me.run_task(
+                task, backbones=["fixture-model"], runs=1, api_key="", claude_bin="claude",
+                max_budget_usd=0.1, timeout_s=5, judge_model="fixture-judge",
+                judge_system_prompt="unused", api_url="http://unused.invalid",
+                offline_all_scores=None, sandbox_root=sandbox,
+            )
+        self.assertEqual(len(rows), 1)
+        # high_value ONLY if the caller passed mean_total_input_tokens;
+        # mean_input_tokens (3000 vs 3000, ratio 1.0) classifies inconclusive.
+        self.assertEqual(rows[0]["bucket"], "high_value")
+
+    def test_run_dreamed_task_feeds_total_input_tokens_to_classify_bucket(self):
+        task = me.load_task(TASKS_DIR / "09-dreamed-pipeline-end-to-end.json")
+        offline_scores = me.load_offline_scores(OFFLINE_FIXTURES)
+        sandbox = self.tmp / "sandbox"
+        sandbox.mkdir()
+        # The real offline mine->analyze->apply machinery runs as in
+        # DreamedTaskOfflineNoiseFixtureTests; only run_arms is replaced, so
+        # the crafted differing-token arms reach classify_bucket unchanged.
+        with contextlib.redirect_stderr(io.StringIO()), \
+                mock.patch("memory_eval.run_arms", return_value=self._efficiency_arms()):
+            rows = me.run_dreamed_task(
+                task, backbones=["fixture-model"], runs=1, api_key="", claude_bin="claude",
+                max_budget_usd=0.1, timeout_s=5, judge_model="fixture-judge",
+                judge_system_prompt="unused", api_url="http://unused.invalid",
+                offline=True, offline_dir=OFFLINE_FIXTURES, offline_all_scores=offline_scores,
+                sandbox_root=sandbox,
+            )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["bucket"], "high_value")
+
+
+# ---------------------------------------------------------------------------
 # --runs validation (Stage-2 #771 Recommend): --runs 0 (or negative) used
 # to be silently accepted and produce a meaningless, plausible-looking
 # results file.
