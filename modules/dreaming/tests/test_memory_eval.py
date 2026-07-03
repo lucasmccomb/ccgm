@@ -293,6 +293,28 @@ class ClassifyBucketTests(unittest.TestCase):
         self.assertLessEqual(delta, me.REGRESSION_DELTA_THRESHOLD)
         self.assertEqual(bucket, "regression")
 
+    def test_789_efficiency_ratio_fires_on_total_tokens_not_marginal(self):
+        """#789 regression: the efficiency path must be fed the TRUE prompt
+        size (marginal + cached prefix) so the full-context arm's larger
+        context is visible to the ratio. On the total counts (treatment
+        3000 vs full-context 11000, ratio 0.27 <= 0.5) the efficiency path
+        fires; on the marginal-only counts the arms report an identical
+        ~3000 each -- ratio 1.0 -- and the path can never fire, which is
+        exactly the #788 root cause this change fixes."""
+        high_value, _delta, delta_sat = me.classify_bucket(
+            baseline_mean=0, treatment_mean=10, full_context_mean=10,
+            treatment_input_tokens=3000, full_context_input_tokens=11000,
+        )
+        self.assertEqual(delta_sat, 0.0)
+        self.assertEqual(high_value, "high_value")
+        # Same scores, but the marginal-only counts both arms saw (~3000
+        # each) leave the efficiency ratio at 1.0 -> no bucket matches.
+        inconclusive, _d, _s = me.classify_bucket(
+            baseline_mean=0, treatment_mean=10, full_context_mean=10,
+            treatment_input_tokens=3000, full_context_input_tokens=3000,
+        )
+        self.assertEqual(inconclusive, "inconclusive")
+
 
 # ---------------------------------------------------------------------------
 # Isolated config guard (adrev-003a).
@@ -723,7 +745,7 @@ class JudgeErrorPropagationTests(unittest.TestCase):
 class AggregateArmRunsJudgeErrorTests(unittest.TestCase):
     def _run(self, *, score=7.0, is_error=False, judge_error=None):
         return {
-            "score": score, "pass": score >= 6.0, "input_tokens": 100, "output_tokens": 20,
+            "score": score, "pass": score >= 6.0, "input_tokens": 100, "total_input_tokens": 100, "output_tokens": 20,
             "turns": 2, "run_cost_usd": 0.01, "judge_input_tokens": 10, "judge_output_tokens": 5,
             "is_error": is_error, "judge_error": judge_error,
         }
@@ -765,7 +787,7 @@ class AggregateArmRunsJudgeErrorTests(unittest.TestCase):
         judge_error key at all, e.g. an older row shape) must not be
         treated as judge-errored."""
         run_no_key = {
-            "score": 8.0, "pass": True, "input_tokens": 100, "output_tokens": 20,
+            "score": 8.0, "pass": True, "input_tokens": 100, "total_input_tokens": 100, "output_tokens": 20,
             "turns": 2, "run_cost_usd": 0.01, "judge_input_tokens": 10, "judge_output_tokens": 5,
             "is_error": False,
         }
@@ -906,7 +928,7 @@ class OfflineScoresTests(unittest.TestCase):
 class AggregateArmRunsTests(unittest.TestCase):
     def _run(self, *, score=7.0, is_error=False):
         return {
-            "score": score, "pass": score >= 6.0, "input_tokens": 100, "output_tokens": 20,
+            "score": score, "pass": score >= 6.0, "input_tokens": 100, "total_input_tokens": 100, "output_tokens": 20,
             "turns": 2, "run_cost_usd": 0.01, "judge_input_tokens": 10, "judge_output_tokens": 5,
             "is_error": is_error,
         }
@@ -925,6 +947,59 @@ class AggregateArmRunsTests(unittest.TestCase):
         self.assertEqual(agg["runs"], 0)
         self.assertEqual(agg["format_error_rate"], 0.0)
         self.assertEqual(agg["mean_score"], 0.0)
+
+
+# ---------------------------------------------------------------------------
+# #789: _run_one() must fold the CACHED prompt prefix (cache_read +
+# cache_creation input tokens) into a new total_input_tokens row field, so
+# the efficiency ratio sees the TRUE prompt size, not just the marginal
+# uncached remainder. input_tokens keeps its billable-marginal meaning, and
+# _aggregate_arm_runs() surfaces mean_total_input_tokens alongside it.
+# ---------------------------------------------------------------------------
+
+class TotalInputTokensCaptureTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+
+    def _run_one_row(self, usage):
+        """Drive the real _run_one() row-construction with run_claude_p and
+        judge_output mocked, so only the usage->row token capture is under
+        test (not the curl/agent subprocess plumbing)."""
+        sandbox = self.tmp / "sandbox"
+        sandbox.mkdir(exist_ok=True)
+        agent_result = {
+            "is_error": False, "result": "ok", "num_turns": 1,
+            "total_cost_usd": 0.0, "usage": usage,
+        }
+        judged = {"pass": True, "score": 8.0, "usage": {"input_tokens": 1, "output_tokens": 1}}
+        with mock.patch("memory_eval.run_claude_p", return_value=agent_result), \
+                mock.patch("memory_eval.judge_output", return_value=judged):
+            return me._run_one(  # noqa: SLF001
+                task_id="t", project_slug="proj", arm="treatment", run_index=0,
+                prompt="Do X.", fixture_files={}, learnings_dir=self.tmp / "learnings",
+                backbone="fixture-model", inject=True, api_key="sk-fixture",
+                claude_bin="claude", max_budget_usd=0.5, timeout_s=5,
+                judge_model="fixture-judge", judge_system_prompt="sys", criteria=["done"],
+                api_url="https://api.anthropic.com/v1/messages", offline_score=None,
+                sandbox_root=sandbox,
+            )
+
+    def test_cache_tokens_folded_into_total_input_tokens(self):
+        row = self._run_one_row(
+            {"input_tokens": 3000, "cache_read_input_tokens": 8000, "cache_creation_input_tokens": 0}
+        )
+        # total = 3000 marginal + 8000 cached-read + 0 cached-creation.
+        self.assertEqual(row["total_input_tokens"], 11000)
+        # input_tokens preserves its billable-marginal meaning, unchanged.
+        self.assertEqual(row["input_tokens"], 3000)
+
+    def test_aggregate_surfaces_mean_total_input_tokens(self):
+        row = self._run_one_row(
+            {"input_tokens": 3000, "cache_read_input_tokens": 8000, "cache_creation_input_tokens": 0}
+        )
+        agg = me._aggregate_arm_runs([row])  # noqa: SLF001
+        self.assertEqual(agg["mean_total_input_tokens"], 11000)
+        self.assertEqual(agg["mean_input_tokens"], 3000)
 
 
 # ---------------------------------------------------------------------------
@@ -1544,6 +1619,81 @@ class DreamedTaskOfflineNoiseFixtureTests(unittest.TestCase):
         self.assertEqual(mining["noise_proposals_written"], 0)
         self.assertFalse(mining["noise_high_value"])
         self.assertEqual(mining["signal_proposals_written"], 1)
+
+
+# ---------------------------------------------------------------------------
+# #789: pin the CALLER wiring. run_task() and run_dreamed_task() must feed
+# classify_bucket()'s efficiency args from mean_total_input_tokens, NOT
+# mean_input_tokens. With run_arms() mocked to return arms whose two token
+# means DIFFER (TOTAL 3000 vs 11000 across treatment/full_context, but
+# MARGINAL 3000 vs 3000 everywhere), the efficiency ratio only clears 0.5 on
+# the total counts -> bucket high_value. If either caller reverts to
+# mean_input_tokens the ratio is 1.0 and the bucket collapses to
+# inconclusive, failing these -- the mutation Stage-1 review found unpinned.
+# ---------------------------------------------------------------------------
+
+class CallerWiringToTotalInputTokensTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+
+    @staticmethod
+    def _arm(*, mean_score, mean_total_input_tokens, mean_input_tokens=3000.0):
+        """Mirror _aggregate_arm_runs()'s output shape (every key
+        _build_result_row and classify_bucket read). mean_input_tokens is
+        pinned at 3000 across ALL arms so the OLD (buggy) metric sees a 1.0
+        ratio; only mean_total_input_tokens carries the real spread."""
+        return {
+            "mean_score": mean_score, "pass_rate": 1.0 if mean_score >= 6.0 else 0.0,
+            "mean_input_tokens": mean_input_tokens, "mean_total_input_tokens": mean_total_input_tokens,
+            "mean_output_tokens": 10.0, "mean_turns": 1.0, "mean_cost_usd": 0.0,
+            "format_error_rate": 0.0, "judge_error_rate": 0.0, "runs": 1,
+        }
+
+    def _efficiency_arms(self):
+        # treatment MATCHES full_context on score (delta_sat 0) at far fewer
+        # TOTAL input tokens (3000 vs 11000, ratio 0.27 <= 0.5) -> Path B.
+        return {
+            "baseline": self._arm(mean_score=0.0, mean_total_input_tokens=3000.0),
+            "treatment": self._arm(mean_score=10.0, mean_total_input_tokens=3000.0),
+            "full_context": self._arm(mean_score=10.0, mean_total_input_tokens=11000.0),
+        }
+
+    def test_run_task_feeds_total_input_tokens_to_classify_bucket(self):
+        sandbox = self.tmp / "sandbox"
+        sandbox.mkdir()
+        task = {"id": "wiring-task", "kind": "uplift", "prompt": "Do X.",
+                "seed_learnings": [], "criteria": ["done"]}
+        with mock.patch("memory_eval.run_arms", return_value=self._efficiency_arms()):
+            rows = me.run_task(
+                task, backbones=["fixture-model"], runs=1, api_key="", claude_bin="claude",
+                max_budget_usd=0.1, timeout_s=5, judge_model="fixture-judge",
+                judge_system_prompt="unused", api_url="http://unused.invalid",
+                offline_all_scores=None, sandbox_root=sandbox,
+            )
+        self.assertEqual(len(rows), 1)
+        # high_value ONLY if the caller passed mean_total_input_tokens;
+        # mean_input_tokens (3000 vs 3000, ratio 1.0) classifies inconclusive.
+        self.assertEqual(rows[0]["bucket"], "high_value")
+
+    def test_run_dreamed_task_feeds_total_input_tokens_to_classify_bucket(self):
+        task = me.load_task(TASKS_DIR / "09-dreamed-pipeline-end-to-end.json")
+        offline_scores = me.load_offline_scores(OFFLINE_FIXTURES)
+        sandbox = self.tmp / "sandbox"
+        sandbox.mkdir()
+        # The real offline mine->analyze->apply machinery runs as in
+        # DreamedTaskOfflineNoiseFixtureTests; only run_arms is replaced, so
+        # the crafted differing-token arms reach classify_bucket unchanged.
+        with contextlib.redirect_stderr(io.StringIO()), \
+                mock.patch("memory_eval.run_arms", return_value=self._efficiency_arms()):
+            rows = me.run_dreamed_task(
+                task, backbones=["fixture-model"], runs=1, api_key="", claude_bin="claude",
+                max_budget_usd=0.1, timeout_s=5, judge_model="fixture-judge",
+                judge_system_prompt="unused", api_url="http://unused.invalid",
+                offline=True, offline_dir=OFFLINE_FIXTURES, offline_all_scores=offline_scores,
+                sandbox_root=sandbox,
+            )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["bucket"], "high_value")
 
 
 # ---------------------------------------------------------------------------

@@ -113,7 +113,7 @@ GAP_MEAN_THRESHOLD = 5.0
 # full-context dump's outcome at materially fewer input tokens is high_value
 # even when it does not BEAT the dump on score. Both bounds must hold.
 HIGH_VALUE_SAT_TOLERANCE = 0.5      # treatment may be at most 0.5 below full_context on score (must essentially MATCH, within noise)
-HIGH_VALUE_EFFICIENCY_RATIO = 0.5   # treatment mean_input_tokens must be <= 0.5 * full_context mean_input_tokens
+HIGH_VALUE_EFFICIENCY_RATIO = 0.5   # treatment mean_total_input_tokens must be <= 0.5 * full_context mean_total_input_tokens (#789: total incl. cached prompt tokens, not just marginal input_tokens)
 
 ARMS = ("baseline", "treatment", "full_context")
 
@@ -795,10 +795,23 @@ def _run_one(
     )
 
     usage = result.get("usage") or {}
+    # #789: Claude Code caches the static prompt prefix (system prompt,
+    # tools, and the large static facts block), so usage["input_tokens"]
+    # reports only the marginal UNCACHED remainder -- the cache_read/
+    # cache_creation counts carry the rest of the true prompt size. The
+    # efficiency ratio (classify_bucket Path B) must compare TOTAL input or
+    # the full-context arm's facts block is invisible to the metric. Keep
+    # input_tokens unchanged (its meaning for cost/reporting is the billable
+    # marginal count); the offline branch above has no cache fields, so
+    # total_input_tokens == input_tokens there.
+    input_tokens = int(usage.get("input_tokens", 0) or 0)
+    cache_read_input_tokens = int(usage.get("cache_read_input_tokens", 0) or 0)
+    cache_creation_input_tokens = int(usage.get("cache_creation_input_tokens", 0) or 0)
     row = {
         "score": judged["score"],
         "pass": judged["pass"],
-        "input_tokens": int(usage.get("input_tokens", 0) or 0),
+        "input_tokens": input_tokens,
+        "total_input_tokens": input_tokens + cache_read_input_tokens + cache_creation_input_tokens,
         "output_tokens": int(usage.get("output_tokens", 0) or 0),
         "turns": int(result.get("num_turns", 0) or 0),
         "run_cost_usd": float(result.get("total_cost_usd", 0.0) or 0.0),
@@ -818,7 +831,8 @@ def _run_one(
 def _aggregate_arm_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     if not runs:
         return {
-            "mean_score": 0.0, "pass_rate": 0.0, "mean_input_tokens": 0.0, "mean_output_tokens": 0.0,
+            "mean_score": 0.0, "pass_rate": 0.0, "mean_input_tokens": 0.0, "mean_total_input_tokens": 0.0,
+            "mean_output_tokens": 0.0,
             "mean_turns": 0.0, "mean_cost_usd": 0.0, "format_error_rate": 0.0, "judge_error_rate": 0.0, "runs": 0,
         }
     # Stage-2 #771 Blocking fix: a run whose judge call itself failed
@@ -837,6 +851,7 @@ def _aggregate_arm_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_score": statistics.fmean(r["score"] for r in scored_runs) if scored_runs else 0.0,
         "pass_rate": (sum(1 for r in scored_runs if r["pass"]) / len(scored_runs)) if scored_runs else 0.0,
         "mean_input_tokens": statistics.fmean(r["input_tokens"] for r in runs),
+        "mean_total_input_tokens": statistics.fmean(r["total_input_tokens"] for r in runs),
         "mean_output_tokens": statistics.fmean(r["output_tokens"] for r in runs),
         "mean_turns": statistics.fmean(r["turns"] for r in runs),
         "mean_cost_usd": statistics.fmean(r["run_cost_usd"] for r in runs),
@@ -1012,8 +1027,8 @@ def run_task(
         bucket, delta, delta_sat = classify_bucket(
             baseline_mean=arms["baseline"]["mean_score"], treatment_mean=arms["treatment"]["mean_score"],
             full_context_mean=arms["full_context"]["mean_score"],
-            treatment_input_tokens=arms["treatment"]["mean_input_tokens"],
-            full_context_input_tokens=arms["full_context"]["mean_input_tokens"],
+            treatment_input_tokens=arms["treatment"]["mean_total_input_tokens"],
+            full_context_input_tokens=arms["full_context"]["mean_total_input_tokens"],
         )
         rows.append(_build_result_row(
             task_id=task_id, kind=kind, backbone=backbone, runs=runs, offline=offline_all_scores is not None,
@@ -1282,8 +1297,8 @@ def run_dreamed_task(
         bucket, delta, delta_sat = classify_bucket(
             baseline_mean=arms["baseline"]["mean_score"], treatment_mean=arms["treatment"]["mean_score"],
             full_context_mean=arms["full_context"]["mean_score"],
-            treatment_input_tokens=arms["treatment"]["mean_input_tokens"],
-            full_context_input_tokens=arms["full_context"]["mean_input_tokens"],
+            treatment_input_tokens=arms["treatment"]["mean_total_input_tokens"],
+            full_context_input_tokens=arms["full_context"]["mean_total_input_tokens"],
         )
         rows.append(_build_result_row(
             task_id=task_id, kind="dreamed", backbone=backbone, runs=runs, offline=offline,
