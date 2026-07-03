@@ -237,6 +237,7 @@ def _aggregate_captured_reused(
     captures (add / legacy rows) and reuses (verify events)."""
     captured_by_type_project: dict[tuple[str, str], int] = defaultdict(int)
     captured_total = 0
+    refined_total = 0
     reused_events = 0
     reused_by_target: dict[str, int] = defaultdict(int)
 
@@ -250,6 +251,12 @@ def _aggregate_captured_reused(
                 type_ = ln.get("type") or "unknown"
                 captured_by_type_project[(type_, slug)] += 1
                 captured_total += 1
+            elif op == "supersede":
+                # A supersede is a REFINEMENT of an existing learning, not a
+                # new capture -- counted separately so a week of refinements
+                # is not invisible (it would read as 0 "new") while keeping
+                # "Captured" strictly add-only.
+                refined_total += 1
             elif op == "verify":
                 target = ln.get("target_id")
                 if target:
@@ -259,6 +266,7 @@ def _aggregate_captured_reused(
     return {
         "captured_total": captured_total,
         "captured_by_type_project": dict(captured_by_type_project),
+        "refined_total": refined_total,
         "reused_events": reused_events,
         "reused_learnings": len(reused_by_target),
         "reused_by_target": dict(reused_by_target),
@@ -491,8 +499,15 @@ def render(
     # --- 1. Captured -------------------------------------------------------
     out.append(f"## Captured — {cap['captured_total']} new learnings this window")
     out.append("")
+    if cap["refined_total"]:
+        # Refinements are real activity but not "new"; surface them so a week
+        # of supersede-only work does not read as an empty capture section.
+        out.append(f"_(+ {cap['refined_total']} refined via supersede)_")
+        out.append("")
     if not cap["captured_total"]:
-        out.append(_NO_DATA)
+        # Only "no data" when there is neither a new capture NOR a refinement.
+        if not cap["refined_total"]:
+            out.append(_NO_DATA)
     else:
         out.append("| type | project | new |")
         out.append("|------|---------|-----|")

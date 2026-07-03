@@ -9,9 +9,10 @@ structural counts. All fixture data is invented (no personal data): slugs like
 
 Determinism: render() takes the window bounds AND generated-at as arguments
 (no Date.now in the library), so every assertion here is pinned to a fixed
-2026-06-24 → 2026-07-01 window (week ending 2026-06-30). A record stamped
-exactly at the window end belongs to the next window and must be excluded --
-several fixtures probe that boundary.
+2026-06-24 → 2026-07-01 window (week ending 2026-06-30). The window is
+half-open [start, end): a timestamp exactly at `window_start` is INCLUDED, one
+exactly at `window_end` is EXCLUDED. `ScorecardWindowBoundaryTest` pins both
+edges directly.
 
 `learnings_store` is used by render() only as a pure projection engine
 (_project_lines + effective_confidence), so no CCGM_LEARNINGS_DIR redirection
@@ -192,6 +193,15 @@ class ScorecardRenderTest(unittest.TestCase):
         self.assertNotIn("6 new learnings", md)
         self.assertNotIn("7 new learnings", md)
 
+    def test_supersede_refinements_surface(self):
+        md = self._render()
+        # L5b supersedes L5 in-window: a REFINEMENT, not a new capture.
+        # It must count under refined, never inflate the "new" total (still 5).
+        self.assertIn("## Captured — 5 new learnings this window", md)
+        self.assertIn("_(+ 1 refined via supersede)_", md)
+        # The supersede must not appear as a new-capture table row.
+        self.assertNotIn("| tool | demo_app | 2 |", md)
+
     def test_injected_exact(self):
         md = self._render()
         self.assertIn("2 session(s) received injected memory (3 injection event(s))", md)
@@ -257,6 +267,46 @@ class ScorecardDegradeTest(unittest.TestCase):
         self.assertIn("## Store health — 0 active learnings", md)
         self.assertEqual(md.count(scorecard._NO_DATA), 4)  # captured/injected/reused/applied
         self.assertNotIn("Traceback", md)
+
+
+class ScorecardWindowBoundaryTest(unittest.TestCase):
+    """Pin the half-open [start, end) convention at BOTH edges: a timestamp
+    exactly at window_start is included; exactly at window_end is excluded."""
+
+    START = datetime(2026, 6, 24, tzinfo=UTC)
+    END = datetime(2026, 7, 1, tzinfo=UTC)
+
+    def _render_with(self, learnings_dir: Path) -> str:
+        empty = learnings_dir.parent / "empty"
+        return scorecard.render(
+            self.START, self.END,
+            learnings_dir=learnings_dir,
+            injection_log_dir=empty / "inj",
+            proposals_dir=empty / "prop",
+            apply_audit_path=empty / "audit.jsonl",
+            store_api=learnings_store,
+            generated_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+
+    def test_start_edge_included_end_edge_excluded(self):
+        root = Path(tempfile.mkdtemp(prefix="ccgm-scorecard-edge-"))
+        learnings_dir = root / "learnings"
+        _write_jsonl(learnings_dir / "edge_proj" / "agents" / "e.jsonl", [
+            # timestamp == window_start (00:00:00 on 2026-06-24) -> INCLUDED
+            {"id": "E_START", "op": "add", "target_id": None,
+             "timestamp": "2026-06-24T00:00:00.000Z", "type": "pattern",
+             "content": "exactly at window start", "confidence": 8, "project": "edge_proj"},
+            # timestamp == window_end (00:00:00 on 2026-07-01) -> EXCLUDED
+            {"id": "E_END", "op": "add", "target_id": None,
+             "timestamp": "2026-07-01T00:00:00.000Z", "type": "pattern",
+             "content": "exactly at window end", "confidence": 8, "project": "edge_proj"},
+        ])
+        md = self._render_with(learnings_dir)
+        # Only the start-edge add is captured; the end-edge add belongs to the
+        # next window.
+        self.assertIn("## Captured — 1 new learnings this window", md)
+        self.assertIn("| pattern | edge_proj | 1 |", md)
+        self.assertNotIn("2 new learnings", md)
 
 
 class ScorecardWrapperSmokeTest(unittest.TestCase):

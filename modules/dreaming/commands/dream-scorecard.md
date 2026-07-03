@@ -23,7 +23,8 @@ signals — the honest answer to "how do I know the memory system is working?"
 ## Sections
 
 - **Captured** — new learnings added in the window (store JSONL `add`/legacy
-  op-events), grouped by type + project.
+  op-events), grouped by type + project. In-window `supersede` refinements are
+  surfaced as a separate sub-line (they are refinements, not new captures).
 - **Injected** — sessions that received injected memory (#782 injection-log
   telemetry): session count, total learnings injected, top injected learnings.
 - **Reused** — `verify` op-events in the window. This is the key value signal:
