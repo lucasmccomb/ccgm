@@ -12,7 +12,10 @@ triggered it.
 Dispatch table (plan.md Section 5 Epic 6):
     learning_add        -> `ccgm-learnings-log add` (project != _global)
                             -> `learnings_store.promote_to_global()` (project == _global)
-    learning_verify      -> `ccgm-learnings-log verify <target_id>`
+    learning_verify      -> `ccgm-learnings-log verify <target_id>` (human accept)
+                            -> `... verify <target_id> --auto` (auto-apply; adrev-404:
+                               bumps uses but does NOT refresh last_verified, so a
+                               nightly unattended verify cannot pin decay/staleness)
     learning_contradict  -> `ccgm-learnings-log contradict <target_id>`
     learning_supersede    -> `ccgm-learnings-log supersede <target_id> --expected-sha <sha>`
     learning_deprecate    -> `ccgm-learnings-log deprecate <target_id> --expected-sha <sha>`
@@ -392,7 +395,9 @@ def _first_evidence_session(row: dict[str, Any]) -> str | None:
     return None
 
 
-def _apply_learning_add(row: dict[str, Any], *, reviewed_by: str) -> dict[str, Any]:
+def _apply_learning_add(
+    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept"
+) -> dict[str, Any]:
     if row.get("project") == GLOBAL_SLUG:
         return _apply_global_add(row, reviewed_by=reviewed_by)
 
@@ -468,8 +473,13 @@ def _looks_like_uncaught_exception(stderr: str) -> bool:
     return "Traceback (most recent call last):" in stderr
 
 
-def _apply_counter_op(row: dict[str, Any], op: str) -> dict[str, Any]:
+def _apply_counter_op(row: dict[str, Any], op: str, *, auto: bool = False) -> dict[str, Any]:
     args = [op, row["target_id"], "--project", row["project"]]
+    if auto:
+        # adrev-404: an unattended auto-apply verify must NOT refresh
+        # last_verified. `--auto` is a verify-only flag on ccgm-learnings-log;
+        # only _apply_learning_verify ever passes auto=True here.
+        args.append("--auto")
     session = _first_evidence_session(row)
     if session:
         args += ["--session", session]
@@ -483,11 +493,19 @@ def _apply_counter_op(row: dict[str, Any], op: str) -> dict[str, Any]:
     return {"outcome": "unexpected_exit_code", "detail": f"exit={proc.returncode}: {proc.stderr.strip()}"}
 
 
-def _apply_learning_verify(row: dict[str, Any], *, reviewed_by: str) -> dict[str, Any]:
-    return _apply_counter_op(row, "verify")
+def _apply_learning_verify(
+    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept"
+) -> dict[str, Any]:
+    # adrev-404: an unattended auto-apply (method == "auto_apply") issues an
+    # AUTO verify (bump uses, do NOT refresh last_verified). A human accept
+    # (method == "human_accept", the /dream-apply accept path) issues a normal
+    # verify that refreshes last_verified exactly as before.
+    return _apply_counter_op(row, "verify", auto=(method == "auto_apply"))
 
 
-def _apply_learning_contradict(row: dict[str, Any], *, reviewed_by: str) -> dict[str, Any]:
+def _apply_learning_contradict(
+    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept"
+) -> dict[str, Any]:
     return _apply_counter_op(row, "contradict")
 
 
@@ -556,7 +574,9 @@ def _apply_cas_op(row: dict[str, Any], *, build_argv: Callable[[str], list[str]]
     return {"outcome": "failed_cas", "detail": "CAS mismatch persisted after one retry", "cas_retries": 1}
 
 
-def _apply_learning_deprecate(row: dict[str, Any], *, reviewed_by: str) -> dict[str, Any]:
+def _apply_learning_deprecate(
+    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept"
+) -> dict[str, Any]:
     def build_argv(sha: str) -> list[str]:
         args = ["deprecate", row["target_id"], "--project", row["project"], "--expected-sha", sha]
         session = _first_evidence_session(row)
@@ -567,7 +587,9 @@ def _apply_learning_deprecate(row: dict[str, Any], *, reviewed_by: str) -> dict[
     return _apply_cas_op(row, build_argv=build_argv)
 
 
-def _apply_learning_supersede(row: dict[str, Any], *, reviewed_by: str) -> dict[str, Any]:
+def _apply_learning_supersede(
+    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept"
+) -> dict[str, Any]:
     def build_argv(sha: str) -> list[str]:
         args = [
             "supersede", row["target_id"],
@@ -656,7 +678,7 @@ def apply_proposal(proposal_id: str, *, method: str = "human_accept", reviewed_b
             return record
 
         try:
-            result = handler(row, reviewed_by=reviewed_by)
+            result = handler(row, reviewed_by=reviewed_by, method=method)
         except Exception:  # noqa: BLE001 -- deliberate: a handler crash must become
             # an audited outcome, never an uncaught exception (adrev-012/adrev-302
             # "never silent"; also what keeps run_auto_apply's batch loop alive).

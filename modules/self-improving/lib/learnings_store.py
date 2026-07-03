@@ -762,9 +762,18 @@ def _build_op_row(
     expected_sha256: str | None = None,
     supersede_reason: str | None = None,
     event_id: str | None = None,
+    auto: bool = False,
 ) -> dict[str, Any]:
-    """Build a canonical v2 op-event row (§3.3 schema). Does not write."""
-    return {
+    """Build a canonical v2 op-event row (§3.3 schema). Does not write.
+
+    `auto` (adrev-404) marks an UNATTENDED verify (dreaming auto-apply). It
+    is set ONLY on a `verify` op-row and ONLY when True; every other op, and
+    every human verify, omits the key entirely -- so the on-disk shape is
+    byte-identical to every op-event already written (absence == human,
+    backward-compatible). The projection reads it to skip the `last_verified`
+    refresh for auto-verifies; see `_apply_op`.
+    """
+    row: dict[str, Any] = {
         "id": event_id or uuid.uuid4().hex[:12],
         "op": op,
         "target_id": target_id,
@@ -785,6 +794,9 @@ def _build_op_row(
         "last_verified": timestamp,
         "deprecated": True if op == "deprecate" else (False if op == "add" else None),
     }
+    if auto and op == "verify":
+        row["auto"] = True
+    return row
 
 
 def append_entry(entry: dict[str, Any], slug: str | None = None) -> Path:
@@ -962,7 +974,16 @@ def _apply_op(heads: dict[str, dict[str, Any]], op: dict[str, Any], target: dict
     kind = op.get("op")
     if kind == "verify":
         target["uses"] = int(target.get("uses", 0)) + 1
-        target["last_verified"] = op.get("timestamp") or target.get("last_verified")
+        # adrev-404: an UNATTENDED auto-verify (op carries `auto: true`) bumps
+        # `uses` (bounded confidence reinforcement, capped at +2.0) but must
+        # NOT refresh `last_verified` -- that field anchors BOTH decay's time
+        # term (`effective_confidence`) and `is_stale`, so refreshing it on
+        # every nightly auto-apply would immortalize a wrong-but-plausible row
+        # against the automatic-forgetting safety mechanisms. A human verify
+        # (no `auto` key -- absence == human, backward-compatible) refreshes
+        # `last_verified` exactly as before.
+        if not op.get("auto"):
+            target["last_verified"] = op.get("timestamp") or target.get("last_verified")
     elif kind == "contradict":
         target["contradictions"] = int(target.get("contradictions", 0)) + 1
     elif kind == "deprecate":
@@ -1762,6 +1783,7 @@ def update_entry_by_id(
     deprecate: bool = False,
     expected_sha256: str | None = None,
     source_session: str | None = None,
+    auto: bool = False,
 ) -> bool:
     """
     Mutate a chain head by appending verify/contradict/deprecate op-event(s)
@@ -1770,6 +1792,13 @@ def update_entry_by_id(
     Returns True if `entry_id` currently resolves to a live head; False if
     not found (nothing is written). `deprecate` honors CAS when
     `expected_sha256` is given (raises CASConflictError on mismatch).
+
+    `auto=True` (adrev-404) marks an UNATTENDED verify: it still bumps `uses`
+    but the projection will NOT refresh `last_verified` for it (severing the
+    decay/staleness reset so a nightly auto-apply cannot immortalize a row).
+    It is meaningful ONLY for `verify`; `_build_op_row` ignores it for
+    contradict/deprecate. Human verify (the default, `auto=False`) is
+    unchanged.
 
     Raises GlobalPromotionError if the target's OWN `project` is `_global`
     and CCGM_LEARNINGS_ADMIN=1 is not set -- verify/contradict/deprecate
@@ -1811,10 +1840,15 @@ def update_entry_by_id(
     shard = agent_shard_path(target_proj, writer)
     for kind in kinds:
         ts = _next_writer_timestamp(shard)
+        # `auto` is threaded to every op-row, but _build_op_row only stamps it
+        # on a `verify` (adrev-404: meaningless for contradict/deprecate). The
+        # single-source-of-truth guard lives in _build_op_row, so a future
+        # caller cannot accidentally auto-flag a non-verify op.
         row = _build_op_row(
             op=kind, target_id=entry_id, project=target_proj, writer=writer, timestamp=ts,
             source_session=source_session,
             expected_sha256=expected_sha256 if kind == "deprecate" else None,
+            auto=auto,
         )
         file_locked_append(str(shard), json.dumps(row, sort_keys=True))
     _maybe_autocommit()

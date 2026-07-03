@@ -10,6 +10,7 @@ Run with: python3 modules/self-improving/tests/test_learnings_store.py
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -396,6 +397,170 @@ class UpdateTests(unittest.TestCase):
     def test_missing_id_returns_false(self):
         ok = ls.update_entry_by_id("nosuchid123")
         self.assertFalse(ok)
+
+
+def _load_sync_line_is_valid():
+    """Load `_line_is_valid` out of the ccgm-learnings-sync CLI (no .py
+    extension) -- the exact function the post-union-merge revalidation runs
+    on every newly-landed op-event line. Executing the module is side-effect
+    free (its CLI runs only under `if __name__ == '__main__'`); it reuses the
+    already-imported, tempdir-pointed `learnings_store`."""
+    from importlib.machinery import SourceFileLoader
+
+    sync_path = HERE.parent / "bin" / "ccgm-learnings-sync"
+    loader = SourceFileLoader("ccgm_learnings_sync_mod", str(sync_path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod._line_is_valid
+
+
+class AutoVerifyTests(unittest.TestCase):
+    """adrev-404: an unattended `auto` verify bumps `uses` but must NOT
+    refresh `last_verified` -- severing the decay/staleness reset so a
+    nightly auto-apply cannot immortalize a wrong-but-plausible row. Human
+    verify (auto=False) is unchanged."""
+
+    def setUp(self):
+        self.slug = f"autoverify-proj-{int(time.time()*1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
+        os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
+        e = ls.build_entry(type_="pattern", content="auto-verify target", confidence=5)
+        ls.append_entry(e)
+        self.id = e["id"]
+
+    def tearDown(self):
+        shutil.rmtree(ls.project_dir(self.slug), ignore_errors=True)
+        shutil.rmtree(ls._cache_dir(self.slug), ignore_errors=True)
+
+    def _head(self) -> dict:
+        heads = ls.load_all(self.slug)
+        self.assertEqual(len(heads), 1)
+        return heads[0]
+
+    # (i) auto-verify bumps uses, leaves last_verified untouched -----------
+    def test_auto_verify_bumps_uses_but_not_last_verified(self):
+        before = self._head()
+        orig_lv = before["last_verified"]
+        self.assertEqual(before["uses"], 0)
+
+        self.assertTrue(ls.update_entry_by_id(self.id, verify=True, auto=True))
+
+        after = self._head()
+        self.assertEqual(after["uses"], 1)
+        self.assertEqual(after["last_verified"], orig_lv)
+
+    # (ii) a NORMAL verify still refreshes last_verified -------------------
+    def test_normal_verify_refreshes_last_verified(self):
+        before = self._head()
+        orig_lv = before["last_verified"]
+
+        self.assertTrue(ls.update_entry_by_id(self.id, verify=True))  # auto defaults False
+
+        after = self._head()
+        self.assertEqual(after["uses"], 1)
+        self.assertGreater(ls._parse_iso(after["last_verified"]), ls._parse_iso(orig_lv))
+
+    # (iii) THE core adrev-404 assertion: N consecutive auto-verifies do not
+    #       pin staleness at zero; decay's time term keeps decaying; uses climbs.
+    def test_n_auto_verifies_do_not_immortalize_the_row(self):
+        orig_lv = self._head()["last_verified"]
+        orig_epoch = ls._parse_iso(orig_lv)
+
+        n = 6
+        for i in range(n):
+            self.assertTrue(ls.update_entry_by_id(self.id, verify=True, auto=True))
+            # uses climbs on every single auto-verify
+            self.assertEqual(self._head()["uses"], i + 1)
+
+        head = self._head()
+        # last_verified never moved across all N auto-verifies
+        self.assertEqual(head["last_verified"], orig_lv)
+
+        # staleness STILL fires past the window (anchored on the frozen lv) --
+        # the whole point: a nightly auto-verify cannot keep pinning it at zero.
+        far = orig_epoch + (ls.DEFAULT_STALE_DAYS + 1) * 86400
+        self.assertTrue(ls.is_stale(head, now=far))
+        # and the window still MEANS something (not stale immediately after)
+        self.assertFalse(ls.is_stale(head, now=orig_epoch + 1))
+
+        # decay's time term keeps decaying as wall-clock advances from the
+        # frozen last_verified (further out => strictly lower effective conf).
+        eff_near = ls.effective_confidence(head, now=orig_epoch + 10 * 86400)
+        eff_far = ls.effective_confidence(head, now=orig_epoch + 200 * 86400)
+        self.assertGreater(eff_near, 0.0)
+        self.assertLess(eff_far, eff_near)
+
+    def test_normal_verify_would_have_moved_the_anchor(self):
+        # Contrast to (iii): the same repetition via HUMAN verify keeps
+        # advancing last_verified, which is exactly the immortalization the
+        # auto path severs. Proves the two paths genuinely diverge.
+        first = self._head()["last_verified"]
+        self.assertTrue(ls.update_entry_by_id(self.id, verify=True))
+        second = self._head()["last_verified"]
+        self.assertTrue(ls.update_entry_by_id(self.id, verify=True))
+        third = self._head()["last_verified"]
+        self.assertGreater(ls._parse_iso(second), ls._parse_iso(first))
+        self.assertGreater(ls._parse_iso(third), ls._parse_iso(second))
+
+    # (iv) the `auto` field survives projection + union-merge revalidation +
+    #      quarantine validation (never rejected as malformed) --------------
+    def test_auto_field_survives_projection_and_quarantine(self):
+        self.assertTrue(ls.update_entry_by_id(self.id, verify=True, auto=True))
+
+        # (a) the op-row on disk carries `auto: true`
+        shard = ls.agent_shard_path(self.slug, ls.agent_id())
+        rows = [json.loads(ln) for ln in shard.read_text().splitlines() if ln.strip()]
+        verify_rows = [r for r in rows if r.get("op") == "verify"]
+        self.assertEqual(len(verify_rows), 1)
+        self.assertIs(verify_rows[0].get("auto"), True)
+
+        # (b) projection (which runs quarantine suppression on EVERY call)
+        #     still returns the head with the verify folded in -- the auto op
+        #     is not rejected, and the head is not quarantined.
+        head = self._head()
+        self.assertEqual(head["id"], self.id)
+        self.assertEqual(head["uses"], 1)
+        self.assertNotIn(self.id, ls._read_quarantined_ids(self.slug))
+
+        # (c) the post-union-merge counter-op validator (ccgm-learnings-sync)
+        #     accepts the auto-verify op-row, extra `auto` field and all.
+        line_is_valid = _load_sync_line_is_valid()
+        self.assertTrue(line_is_valid(verify_rows[0]))
+        # sanity: the validator is not just returning True for everything
+        self.assertFalse(line_is_valid({"op": "verify", "id": "x", "target_id": None}))
+
+    def _cli_env(self) -> dict:
+        env = os.environ.copy()
+        # Pin the store dir to this module's frozen LEARNINGS_ROOT, immune to
+        # another test module's import-time CCGM_LEARNINGS_DIR override in the
+        # same pytest run (same rationale as CLIExitCodeTests._env()).
+        env["CCGM_LEARNINGS_DIR"] = str(ls.LEARNINGS_ROOT)
+        env["CCGM_LEARNINGS_PROJECT"] = self.slug
+        return env
+
+    # CLI wiring: `verify --auto` behaves like the store's auto path --------
+    def test_cli_auto_flag_skips_last_verified_refresh(self):
+        orig_lv = self._head()["last_verified"]
+        proc = subprocess.run(
+            [sys.executable, str(CLI_PATH), "verify", self.id, "--auto"],
+            env=self._cli_env(), capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        after = self._head()
+        self.assertEqual(after["uses"], 1)
+        self.assertEqual(after["last_verified"], orig_lv)
+
+    def test_cli_bare_verify_refreshes_last_verified(self):
+        orig_lv = self._head()["last_verified"]
+        proc = subprocess.run(
+            [sys.executable, str(CLI_PATH), "verify", self.id],
+            env=self._cli_env(), capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        after = self._head()
+        self.assertEqual(after["uses"], 1)
+        self.assertGreater(ls._parse_iso(after["last_verified"]), ls._parse_iso(orig_lv))
 
 
 class SupersedeTests(unittest.TestCase):
@@ -1622,6 +1787,13 @@ class CLIExitCodeTests(unittest.TestCase):
 
     def _env(self, **extra):
         env = os.environ.copy()
+        # Pin the store dir to THIS module's frozen LEARNINGS_ROOT rather than
+        # trusting os.environ, which another test module's import-time override
+        # (e.g. modules/dreaming's suites, collected in the same pytest run)
+        # can have replaced with ITS tempdir before this subprocess runs --
+        # otherwise the CLI reads a different store than the in-process
+        # assertions wrote to. Runs alone: this is a no-op (already equal).
+        env["CCGM_LEARNINGS_DIR"] = str(ls.LEARNINGS_ROOT)
         env["CCGM_LEARNINGS_PROJECT"] = self.slug
         env.pop("CCGM_LEARNINGS_ADMIN", None)
         env.update(extra)
