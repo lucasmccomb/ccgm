@@ -293,6 +293,28 @@ class ClassifyBucketTests(unittest.TestCase):
         self.assertLessEqual(delta, me.REGRESSION_DELTA_THRESHOLD)
         self.assertEqual(bucket, "regression")
 
+    def test_789_efficiency_ratio_fires_on_total_tokens_not_marginal(self):
+        """#789 regression: the efficiency path must be fed the TRUE prompt
+        size (marginal + cached prefix) so the full-context arm's larger
+        context is visible to the ratio. On the total counts (treatment
+        3000 vs full-context 11000, ratio 0.27 <= 0.5) the efficiency path
+        fires; on the marginal-only counts the arms report an identical
+        ~3000 each -- ratio 1.0 -- and the path can never fire, which is
+        exactly the #788 root cause this change fixes."""
+        high_value, _delta, delta_sat = me.classify_bucket(
+            baseline_mean=0, treatment_mean=10, full_context_mean=10,
+            treatment_input_tokens=3000, full_context_input_tokens=11000,
+        )
+        self.assertEqual(delta_sat, 0.0)
+        self.assertEqual(high_value, "high_value")
+        # Same scores, but the marginal-only counts both arms saw (~3000
+        # each) leave the efficiency ratio at 1.0 -> no bucket matches.
+        inconclusive, _d, _s = me.classify_bucket(
+            baseline_mean=0, treatment_mean=10, full_context_mean=10,
+            treatment_input_tokens=3000, full_context_input_tokens=3000,
+        )
+        self.assertEqual(inconclusive, "inconclusive")
+
 
 # ---------------------------------------------------------------------------
 # Isolated config guard (adrev-003a).
@@ -723,7 +745,7 @@ class JudgeErrorPropagationTests(unittest.TestCase):
 class AggregateArmRunsJudgeErrorTests(unittest.TestCase):
     def _run(self, *, score=7.0, is_error=False, judge_error=None):
         return {
-            "score": score, "pass": score >= 6.0, "input_tokens": 100, "output_tokens": 20,
+            "score": score, "pass": score >= 6.0, "input_tokens": 100, "total_input_tokens": 100, "output_tokens": 20,
             "turns": 2, "run_cost_usd": 0.01, "judge_input_tokens": 10, "judge_output_tokens": 5,
             "is_error": is_error, "judge_error": judge_error,
         }
@@ -765,7 +787,7 @@ class AggregateArmRunsJudgeErrorTests(unittest.TestCase):
         judge_error key at all, e.g. an older row shape) must not be
         treated as judge-errored."""
         run_no_key = {
-            "score": 8.0, "pass": True, "input_tokens": 100, "output_tokens": 20,
+            "score": 8.0, "pass": True, "input_tokens": 100, "total_input_tokens": 100, "output_tokens": 20,
             "turns": 2, "run_cost_usd": 0.01, "judge_input_tokens": 10, "judge_output_tokens": 5,
             "is_error": False,
         }
@@ -906,7 +928,7 @@ class OfflineScoresTests(unittest.TestCase):
 class AggregateArmRunsTests(unittest.TestCase):
     def _run(self, *, score=7.0, is_error=False):
         return {
-            "score": score, "pass": score >= 6.0, "input_tokens": 100, "output_tokens": 20,
+            "score": score, "pass": score >= 6.0, "input_tokens": 100, "total_input_tokens": 100, "output_tokens": 20,
             "turns": 2, "run_cost_usd": 0.01, "judge_input_tokens": 10, "judge_output_tokens": 5,
             "is_error": is_error,
         }
@@ -925,6 +947,59 @@ class AggregateArmRunsTests(unittest.TestCase):
         self.assertEqual(agg["runs"], 0)
         self.assertEqual(agg["format_error_rate"], 0.0)
         self.assertEqual(agg["mean_score"], 0.0)
+
+
+# ---------------------------------------------------------------------------
+# #789: _run_one() must fold the CACHED prompt prefix (cache_read +
+# cache_creation input tokens) into a new total_input_tokens row field, so
+# the efficiency ratio sees the TRUE prompt size, not just the marginal
+# uncached remainder. input_tokens keeps its billable-marginal meaning, and
+# _aggregate_arm_runs() surfaces mean_total_input_tokens alongside it.
+# ---------------------------------------------------------------------------
+
+class TotalInputTokensCaptureTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+
+    def _run_one_row(self, usage):
+        """Drive the real _run_one() row-construction with run_claude_p and
+        judge_output mocked, so only the usage->row token capture is under
+        test (not the curl/agent subprocess plumbing)."""
+        sandbox = self.tmp / "sandbox"
+        sandbox.mkdir(exist_ok=True)
+        agent_result = {
+            "is_error": False, "result": "ok", "num_turns": 1,
+            "total_cost_usd": 0.0, "usage": usage,
+        }
+        judged = {"pass": True, "score": 8.0, "usage": {"input_tokens": 1, "output_tokens": 1}}
+        with mock.patch("memory_eval.run_claude_p", return_value=agent_result), \
+                mock.patch("memory_eval.judge_output", return_value=judged):
+            return me._run_one(  # noqa: SLF001
+                task_id="t", project_slug="proj", arm="treatment", run_index=0,
+                prompt="Do X.", fixture_files={}, learnings_dir=self.tmp / "learnings",
+                backbone="fixture-model", inject=True, api_key="sk-fixture",
+                claude_bin="claude", max_budget_usd=0.5, timeout_s=5,
+                judge_model="fixture-judge", judge_system_prompt="sys", criteria=["done"],
+                api_url="https://api.anthropic.com/v1/messages", offline_score=None,
+                sandbox_root=sandbox,
+            )
+
+    def test_cache_tokens_folded_into_total_input_tokens(self):
+        row = self._run_one_row(
+            {"input_tokens": 3000, "cache_read_input_tokens": 8000, "cache_creation_input_tokens": 0}
+        )
+        # total = 3000 marginal + 8000 cached-read + 0 cached-creation.
+        self.assertEqual(row["total_input_tokens"], 11000)
+        # input_tokens preserves its billable-marginal meaning, unchanged.
+        self.assertEqual(row["input_tokens"], 3000)
+
+    def test_aggregate_surfaces_mean_total_input_tokens(self):
+        row = self._run_one_row(
+            {"input_tokens": 3000, "cache_read_input_tokens": 8000, "cache_creation_input_tokens": 0}
+        )
+        agg = me._aggregate_arm_runs([row])  # noqa: SLF001
+        self.assertEqual(agg["mean_total_input_tokens"], 11000)
+        self.assertEqual(agg["mean_input_tokens"], 3000)
 
 
 # ---------------------------------------------------------------------------
