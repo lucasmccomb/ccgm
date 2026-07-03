@@ -143,6 +143,156 @@ class ClassifyBucketTests(unittest.TestCase):
         bucket, _delta, _ = me.classify_bucket(baseline_mean=5.5, treatment_mean=6.2, full_context_mean=6.0)
         self.assertEqual(bucket, "inconclusive")
 
+    # ---- #784: high_value Path B (efficiency win) ----------------------
+
+    def test_efficiency_path_fires_when_memory_matches_dump_at_far_fewer_tokens(self):
+        """#784 Path B: memory MATCHES the full-context dump on score
+        (delta_sat=0) but at materially fewer input tokens (3000 vs 20000)
+        -- high_value via the efficiency path even though it did not BEAT
+        the dump on outcome. This is the case the old delta_sat>0-only
+        definition made unreachable for a capable model."""
+        bucket, delta, delta_sat = me.classify_bucket(
+            baseline_mean=5.0, treatment_mean=8.0, full_context_mean=8.0,
+            treatment_input_tokens=3000, full_context_input_tokens=20000,
+        )
+        self.assertEqual(delta, 3.0)
+        self.assertEqual(delta_sat, 0.0)
+        self.assertEqual(bucket, "high_value")
+
+    def test_efficiency_path_inert_when_tokens_not_materially_fewer(self):
+        """#784 self-guard: same score shape (delta=+3, delta_sat=0) but
+        treatment's input tokens are ~the same as full_context's (3000 vs
+        3200, above the 0.5 ratio) -- Path B must NOT fire. This is the
+        shape of today's small fixtures, where the two arms' token counts
+        are comparable, so the efficiency path is provably inert on them."""
+        bucket, _delta, _ = me.classify_bucket(
+            baseline_mean=5.0, treatment_mean=8.0, full_context_mean=8.0,
+            treatment_input_tokens=3000, full_context_input_tokens=3200,
+        )
+        self.assertEqual(bucket, "inconclusive")
+
+    def test_efficiency_path_inert_when_treatment_uses_more_tokens_than_dump(self):
+        """#784 self-guard (the realistic small-fixture case): treatment
+        used MORE input tokens than the full dump (3200 vs 3000) -- memory
+        is not cheaper, so Path B stays inert despite the matching score."""
+        bucket, _delta, _ = me.classify_bucket(
+            baseline_mean=5.0, treatment_mean=8.0, full_context_mean=8.0,
+            treatment_input_tokens=3200, full_context_input_tokens=3000,
+        )
+        self.assertNotEqual(bucket, "high_value")
+
+    def test_efficiency_path_defaults_off_when_token_means_absent(self):
+        """#784 self-guard: with no token means supplied (both default to
+        0.0), the `full_context_input_tokens > 0` guard fails, so every
+        pre-#784 3-arg caller keeps its old classification -- the change
+        alone cannot open the gate without the paired realistic fixtures."""
+        bucket, _delta, delta_sat = me.classify_bucket(
+            baseline_mean=5.0, treatment_mean=8.0, full_context_mean=8.0,
+        )
+        self.assertEqual(delta_sat, 0.0)
+        self.assertNotEqual(bucket, "high_value")
+
+    def test_efficiency_path_inert_when_treatment_arm_has_zero_input_tokens(self):
+        """#784 defense-in-depth (Stage-2 Recommend): a degenerate treatment
+        arm that recorded ZERO input tokens (a total run failure) is
+        trivially <= any ratio of the full dump, and would otherwise
+        spuriously satisfy the efficiency condition. The symmetric
+        `treatment_input_tokens > 0` guard keeps Path B inert here even with
+        a huge full_context arm, a matching score (delta_sat=0), and
+        delta >= HIGH_VALUE_DELTA_THRESHOLD."""
+        bucket, delta, delta_sat = me.classify_bucket(
+            baseline_mean=5.0, treatment_mean=8.0, full_context_mean=8.0,
+            treatment_input_tokens=0, full_context_input_tokens=20000,
+        )
+        self.assertGreaterEqual(delta, me.HIGH_VALUE_DELTA_THRESHOLD)
+        self.assertEqual(delta_sat, 0.0)
+        self.assertEqual(bucket, "inconclusive")
+
+    def test_efficiency_path_inert_when_memory_loses_beyond_tolerance(self):
+        """#784: memory LOSES to the dump by more than the noise tolerance
+        (delta_sat=-2.0 < -0.5) -- not a match, so Path B must NOT fire even
+        at a huge token advantage (3000 vs 20000)."""
+        bucket, _delta, delta_sat = me.classify_bucket(
+            baseline_mean=5.0, treatment_mean=8.0, full_context_mean=10.0,
+            treatment_input_tokens=3000, full_context_input_tokens=20000,
+        )
+        self.assertEqual(delta_sat, -2.0)
+        self.assertNotEqual(bucket, "high_value")
+
+    def test_efficiency_path_sat_tolerance_boundary_inclusive(self):
+        """#784 boundary: delta_sat exactly -HIGH_VALUE_SAT_TOLERANCE
+        (-0.5) still counts as a match -- Path B fires at the boundary."""
+        bucket, _delta, delta_sat = me.classify_bucket(
+            baseline_mean=5.0, treatment_mean=8.0, full_context_mean=8.5,
+            treatment_input_tokens=3000, full_context_input_tokens=20000,
+        )
+        self.assertAlmostEqual(delta_sat, -0.5)
+        self.assertEqual(bucket, "high_value")
+
+    def test_efficiency_path_sat_tolerance_boundary_exclusive(self):
+        """#784 boundary: just past the tolerance (delta_sat=-0.6) is a
+        loss, not a match -- Path B does not fire."""
+        bucket, _delta, delta_sat = me.classify_bucket(
+            baseline_mean=5.0, treatment_mean=8.0, full_context_mean=8.6,
+            treatment_input_tokens=3000, full_context_input_tokens=20000,
+        )
+        self.assertAlmostEqual(delta_sat, -0.6)
+        self.assertNotEqual(bucket, "high_value")
+
+    def test_efficiency_path_ratio_boundary_inclusive(self):
+        """#784 boundary: treatment_input exactly at the ratio ceiling
+        (10000 == 0.5 * 20000) still fires (<=)."""
+        bucket, _delta, _ = me.classify_bucket(
+            baseline_mean=5.0, treatment_mean=8.0, full_context_mean=8.0,
+            treatment_input_tokens=10000, full_context_input_tokens=20000,
+        )
+        self.assertEqual(bucket, "high_value")
+
+    def test_efficiency_path_ratio_boundary_exclusive(self):
+        """#784 boundary: one token over the ratio ceiling (10001 > 0.5 *
+        20000) does not fire."""
+        bucket, _delta, _ = me.classify_bucket(
+            baseline_mean=5.0, treatment_mean=8.0, full_context_mean=8.0,
+            treatment_input_tokens=10001, full_context_input_tokens=20000,
+        )
+        self.assertNotEqual(bucket, "high_value")
+
+    def test_saturated_task_never_high_value_via_efficiency(self):
+        """#784 poisoning/canary safety (the critical property): a saturated
+        task with no uplift (baseline~10, delta~0) can NEVER reach
+        high_value via the efficiency path, even at an extreme token
+        advantage -- delta < HIGH_VALUE_DELTA_THRESHOLD keeps execution out
+        of the high_value block entirely. It classifies redundant."""
+        bucket, delta, _ = me.classify_bucket(
+            baseline_mean=10.0, treatment_mean=10.0, full_context_mean=10.0,
+            treatment_input_tokens=100, full_context_input_tokens=20000,
+        )
+        self.assertLess(delta, me.HIGH_VALUE_DELTA_THRESHOLD)
+        self.assertNotEqual(bucket, "high_value")
+        self.assertEqual(bucket, "redundant")
+
+    def test_outcome_path_a_fires_regardless_of_token_cost(self):
+        """#784: Path A (delta_sat>0, memory BEATS the dump) is independent
+        of tokens -- it fires even when treatment used MORE input tokens
+        than the full dump (20000 vs 3000)."""
+        bucket, _delta, delta_sat = me.classify_bucket(
+            baseline_mean=3.0, treatment_mean=8.5, full_context_mean=6.0,
+            treatment_input_tokens=20000, full_context_input_tokens=3000,
+        )
+        self.assertGreater(delta_sat, 0)
+        self.assertEqual(bucket, "high_value")
+
+    def test_regression_precedence_over_efficiency_path(self):
+        """#784: regression is still checked FIRST -- a delta <= -1.0 row
+        classifies regression even when its tokens look maximally efficient
+        (Path B must never rescue a regression)."""
+        bucket, delta, _ = me.classify_bucket(
+            baseline_mean=8.0, treatment_mean=6.0, full_context_mean=8.0,
+            treatment_input_tokens=100, full_context_input_tokens=20000,
+        )
+        self.assertLessEqual(delta, me.REGRESSION_DELTA_THRESHOLD)
+        self.assertEqual(bucket, "regression")
+
 
 # ---------------------------------------------------------------------------
 # Isolated config guard (adrev-003a).
@@ -1131,11 +1281,32 @@ class GateTests(unittest.TestCase):
         self.assertFalse(is_open)
         self.assertIn("live", reason)
 
-    def test_dreamed_row_with_non_positive_delta_sat_does_not_satisfy_gate(self):
+    def test_dreamed_high_value_via_efficiency_delta_sat_zero_opens_gate(self):
+        """#784: the gate no longer independently re-checks Δ_sat>0 -- that
+        is subsumed by classify_bucket()'s two-path high_value definition. A
+        live dreamed row the classifier deemed high_value via the EFFICIENCY
+        path (it matched the full-context dump within noise, so delta_sat can
+        be 0, at materially fewer input tokens) must now OPEN the gate.
+        Before #784 this exact row (bucket=high_value, delta_sat=0) was
+        force-closed by the gate's own Δ_sat>0 clause."""
         self._write_results(self._healthy_rows(dreamed_offline=False, dreamed_delta_sat=0.0))
         is_open, reason = me.gate_check()
+        self.assertTrue(is_open, reason)
+
+    def test_non_high_value_dreamed_row_does_not_satisfy_gate(self):
+        """#784: the replacement negative control for the removed Δ_sat>0
+        clause -- a live dreamed row that is NOT high_value (via either
+        path) still fails the dreamed condition, and the reason no longer
+        names Δ_sat (that check moved into the classifier)."""
+        rows = self._healthy_rows()
+        for r in rows:
+            if r["kind"] == "dreamed":
+                r["bucket"] = "inconclusive"
+        self._write_results(rows)
+        is_open, reason = me.gate_check()
         self.assertFalse(is_open)
-        self.assertIn("Δ_sat", reason)
+        self.assertIn("dreamed", reason)
+        self.assertNotIn("Δ_sat", reason)
 
     def test_noise_only_corpus_producing_high_value_proposal_closes_gate(self):
         """adrev-305's own Acceptance sentence: a live dreamed task

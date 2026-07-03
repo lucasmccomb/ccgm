@@ -27,7 +27,9 @@ recent results file exists, is fresh (newer than the configured freshness
 bound AND newer than the last CONTENT-SHAPING store mutation -- pure
 `verify` counter-ops are excluded from that bound, adrev-403), has zero
 `regression` rows, at least one `high_value` row, the live (non-offline)
-`kind:dreamed` row itself classifies `high_value` with Δ_sat>0 (adrev-305),
+`kind:dreamed` row itself classifies `high_value` (adrev-305; #784: via the
+outcome path Δ_sat>0 OR the efficiency path -- memory matching the dump at
+materially fewer input tokens -- both encoded by classify_bucket()),
 AND that same row's paired noise-only corpus produced NO high-value
 proposal (`mining.noise_high_value` is not true -- adrev-305's own
 Acceptance sentence: a pipeline that manufactures memories from noise must
@@ -55,7 +57,7 @@ mine->analyze step also runs offline in this mode (reusing dream_analyze.py
 via `--offline <dir>/../offline-responses-dreamed`, a sibling of the outer
 `--offline` directory) and is explicitly labeled `"offline": true` in its
 results row -- `--gate` never accepts an offline-labeled `dreamed` row as
-satisfying its live-Δ_sat requirement.
+satisfying its live-high_value requirement.
 """
 from __future__ import annotations
 
@@ -107,6 +109,11 @@ REGRESSION_DELTA_THRESHOLD = -1.0
 REDUNDANT_BASELINE_THRESHOLD = 8.5
 REDUNDANT_DELTA_ABS_THRESHOLD = 1.0
 GAP_MEAN_THRESHOLD = 5.0
+# high_value Path B, the efficiency win (#784): memory that MATCHES the
+# full-context dump's outcome at materially fewer input tokens is high_value
+# even when it does not BEAT the dump on score. Both bounds must hold.
+HIGH_VALUE_SAT_TOLERANCE = 0.5      # treatment may be at most 0.5 below full_context on score (must essentially MATCH, within noise)
+HIGH_VALUE_EFFICIENCY_RATIO = 0.5   # treatment mean_input_tokens must be <= 0.5 * full_context mean_input_tokens
 
 ARMS = ("baseline", "treatment", "full_context")
 
@@ -896,7 +903,8 @@ def run_arms(
 
 
 def classify_bucket(
-    *, baseline_mean: float, treatment_mean: float, full_context_mean: float
+    *, baseline_mean: float, treatment_mean: float, full_context_mean: float,
+    treatment_input_tokens: float = 0.0, full_context_input_tokens: float = 0.0,
 ) -> tuple[str, float, float]:
     """Returns (bucket, delta, delta_sat).
 
@@ -908,14 +916,46 @@ def classify_bucket(
     low; the two conditions can genuinely overlap, e.g. baseline=4.0,
     treatment=2.9): regression > high_value > redundant > gap >
     "inconclusive" (a task that clears none of the four named buckets).
+
+    high_value has TWO independent paths (#784), both gated behind
+    delta >= HIGH_VALUE_DELTA_THRESHOLD -- a task that does not clear
+    baseline over noise is never high_value by either path:
+      - Path A (outcome win): memory BEATS the full-context dump on score
+        (delta_sat > 0). Memory added value beyond a naive dump of the same
+        facts. Independent of token cost.
+      - Path B (efficiency win): memory MATCHES the dump's outcome within
+        noise (delta_sat >= -HIGH_VALUE_SAT_TOLERANCE) at materially fewer
+        input tokens (treatment_input_tokens <= HIGH_VALUE_EFFICIENCY_RATIO
+        * full_context_input_tokens). For a capable model that resolves even
+        a full dump on its own, matching the dump's result at a fraction of
+        the context cost IS memory's value. Self-guarding: Path B can only
+        fire when full_context_input_tokens is materially larger than
+        treatment's, so it stays inert on today's small fixtures (where the
+        two arms' token counts are comparable) and defaults OFF when the
+        token means are absent -- both params default to 0.0, which fails
+        the `full_context_input_tokens > 0` guard.
     """
     delta = treatment_mean - baseline_mean
     delta_sat = treatment_mean - full_context_mean
 
     if delta <= REGRESSION_DELTA_THRESHOLD:
         return "regression", delta, delta_sat
-    if delta >= HIGH_VALUE_DELTA_THRESHOLD and delta_sat > 0:
-        return "high_value", delta, delta_sat
+    if delta >= HIGH_VALUE_DELTA_THRESHOLD:
+        # Path A (outcome win): memory beats the full dump on score.
+        if delta_sat > 0:
+            return "high_value", delta, delta_sat
+        # Path B (efficiency win): memory MATCHES the dump's outcome (does
+        # not lose beyond noise) at materially fewer input tokens. BOTH
+        # token means must be positive -- a degenerate zero-input treatment
+        # arm (a total run failure) is trivially <= any ratio of the dump
+        # and must never spuriously satisfy the efficiency condition.
+        if (
+            delta_sat >= -HIGH_VALUE_SAT_TOLERANCE
+            and treatment_input_tokens > 0
+            and full_context_input_tokens > 0
+            and treatment_input_tokens <= HIGH_VALUE_EFFICIENCY_RATIO * full_context_input_tokens
+        ):
+            return "high_value", delta, delta_sat
     if baseline_mean >= REDUNDANT_BASELINE_THRESHOLD and abs(delta) < REDUNDANT_DELTA_ABS_THRESHOLD:
         return "redundant", delta, delta_sat
     if baseline_mean < GAP_MEAN_THRESHOLD and treatment_mean < GAP_MEAN_THRESHOLD:
@@ -972,6 +1012,8 @@ def run_task(
         bucket, delta, delta_sat = classify_bucket(
             baseline_mean=arms["baseline"]["mean_score"], treatment_mean=arms["treatment"]["mean_score"],
             full_context_mean=arms["full_context"]["mean_score"],
+            treatment_input_tokens=arms["treatment"]["mean_input_tokens"],
+            full_context_input_tokens=arms["full_context"]["mean_input_tokens"],
         )
         rows.append(_build_result_row(
             task_id=task_id, kind=kind, backbone=backbone, runs=runs, offline=offline_all_scores is not None,
@@ -1240,6 +1282,8 @@ def run_dreamed_task(
         bucket, delta, delta_sat = classify_bucket(
             baseline_mean=arms["baseline"]["mean_score"], treatment_mean=arms["treatment"]["mean_score"],
             full_context_mean=arms["full_context"]["mean_score"],
+            treatment_input_tokens=arms["treatment"]["mean_input_tokens"],
+            full_context_input_tokens=arms["full_context"]["mean_input_tokens"],
         )
         rows.append(_build_result_row(
             task_id=task_id, kind="dreamed", backbone=backbone, runs=runs, offline=offline,
@@ -1351,13 +1395,20 @@ def latest_content_shaping_mutation_epoch(learnings_root: Path) -> float | None:
 def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float | None = None) -> tuple[bool, str]:
     """Returns (open, reason). Fails closed on every branch: missing
     results, stale results (either bound), any regression row, no
-    high_value row, no LIVE dreamed row classifying high_value with
-    Δ_sat>0 (adrev-305), or that live dreamed row's paired noise-only
-    corpus itself yielding a high-value proposal (`mining.noise_high_value`
-    -- adrev-305's Acceptance sentence, the mining-side negative control
-    that must ALSO hold before auto-apply's gate can open) -- exactly one
-    reason string per failure mode, "stale" handled identically to
-    "missing"."""
+    high_value row, no LIVE dreamed row classifying high_value (adrev-305),
+    or that live dreamed row's paired noise-only corpus itself yielding a
+    high-value proposal (`mining.noise_high_value` -- adrev-305's Acceptance
+    sentence, the mining-side negative control that must ALSO hold before
+    auto-apply's gate can open) -- exactly one reason string per failure
+    mode, "stale" handled identically to "missing".
+
+    #784: the live-dreamed check no longer independently re-tests Δ_sat>0.
+    "high_value" now covers BOTH the outcome path (Δ_sat>0) and the
+    efficiency path (memory matches the full-context dump within noise at
+    materially fewer input tokens); the explicit Δ_sat>0 clause that used to
+    live here is subsumed by classify_bucket()'s two-path definition, so a
+    dreamed row that is high_value via efficiency (Δ_sat can be 0) now opens
+    the gate. The judge-error and noise-control guards below are unchanged."""
     now = now if now is not None else time.time()
 
     latest = _find_latest_results_file()
@@ -1386,10 +1437,10 @@ def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float 
 
     live_dreamed_high_value = [
         r for r in rows
-        if r.get("kind") == "dreamed" and not r.get("offline") and r.get("bucket") == "high_value" and r.get("delta_sat", -1) > 0
+        if r.get("kind") == "dreamed" and not r.get("offline") and r.get("bucket") == "high_value"
     ]
     if not live_dreamed_high_value:
-        return False, "kind:dreamed task has not classified high_value with Δ_sat>0 under a live (non-offline) run"
+        return False, "kind:dreamed task has not classified high_value under a live (non-offline) run"
 
     # Stage-2 #771 Blocking fix: classify_bucket() is a judge-error-unaware
     # pure function -- a judge-API transport/parse failure on one arm
