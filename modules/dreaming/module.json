@@ -58,6 +58,11 @@
       "type": "lib",
       "template": false
     },
+    "lib/scorecard.py": {
+      "target": "lib/scorecard.py",
+      "type": "lib",
+      "template": false
+    },
     "lib/com.__USERNAME__.ccgm.dreaming.daily.plist.template": {
       "target": "lib/com.__USERNAME__.ccgm.dreaming.daily.plist",
       "type": "lib",
@@ -93,6 +98,11 @@
       "type": "script",
       "template": false
     },
+    "bin/dream-scorecard.sh": {
+      "target": "bin/dream-scorecard.sh",
+      "type": "script",
+      "template": false
+    },
     "commands/dream.md": {
       "target": "commands/dream.md",
       "type": "command",
@@ -105,6 +115,11 @@
     },
     "commands/dream-apply.md": {
       "target": "commands/dream-apply.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/dream-scorecard.md": {
+      "target": "commands/dream-scorecard.md",
       "type": "command",
       "template": false
     },
