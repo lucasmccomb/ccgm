@@ -27,7 +27,9 @@ Run with: python3 -m pytest modules/self-improving/tests/test_learnings_inject.p
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -38,6 +40,7 @@ import unittest
 import uuid
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
@@ -743,6 +746,216 @@ class SlugAgreementTests(HermeticEnvTestCase):
         repo_detect = _load_module("repo_detect_fixture", REPO_DETECT_PATH)
         self.assertEqual(repo_detect.detect_repo(fixture_repo), "hello-world")
         self.assertNotEqual(repo_detect.detect_repo(fixture_repo), hook_slug)
+
+
+class InjectionTelemetryTests(HermeticEnvTestCase):
+    """#781: after emitting the injected block, the hook appends ONE
+    best-effort telemetry record (memory IDs + counts + a token estimate
+    ONLY, never memory content) to a per-machine JSONL under
+    CCGM_DREAMING_DIR. The write is a pure side-channel: it must never alter
+    the injected stdout bytes, never block injection, and never raise -- and
+    must write nothing when injection did not run.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.slug = f"inject-telem-{uuid.uuid4().hex[:10]}"
+        os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
+
+        # Isolate the telemetry log dir into a tempdir (restored after) so a
+        # test can never touch the real ~/.claude/dreaming/injection-log/.
+        self._dreaming_dir = tempfile.mkdtemp(prefix="ccgm-injection-log-test-")
+        saved_dreaming = os.environ.get("CCGM_DREAMING_DIR")
+        os.environ["CCGM_DREAMING_DIR"] = self._dreaming_dir
+        if saved_dreaming is None:
+            self.addCleanup(os.environ.pop, "CCGM_DREAMING_DIR", None)
+        else:
+            self.addCleanup(os.environ.__setitem__, "CCGM_DREAMING_DIR", saved_dreaming)
+        self.addCleanup(shutil.rmtree, self._dreaming_dir, ignore_errors=True)
+
+        # main()'s in-process path reads the flag from os.environ;
+        # HermeticEnvTestCase only saves PROJECT/DIR, so manage INJECT here.
+        saved_flag = os.environ.get("CCGM_LEARNINGS_INJECT")
+        if saved_flag is None:
+            self.addCleanup(os.environ.pop, "CCGM_LEARNINGS_INJECT", None)
+        else:
+            self.addCleanup(os.environ.__setitem__, "CCGM_LEARNINGS_INJECT", saved_flag)
+
+        self.n = 4
+        # DISTINCT confidences -> a TOTAL ranking order, so search()/selection
+        # is stable across the two separate builds a byte-stability/record test
+        # compares. Tied confidences expose a pre-existing store
+        # snapshot-cache read-order artifact (two builds straddling cache
+        # materialization can reorder tied heads) that has nothing to do with
+        # telemetry -- OrderingStabilityTests uses distinct confidences for
+        # exactly this reason.
+        for i in range(self.n):
+            ls.append_entry(ls.build_entry(
+                type_="pattern",
+                content=f"telemetry fixture learning number {i}",
+                confidence=9 - i,
+            ))
+
+    def tearDown(self):
+        shutil.rmtree(ls.project_dir(self.slug), ignore_errors=True)
+        shutil.rmtree(ls._cache_dir(self.slug), ignore_errors=True)
+        super().tearDown()
+
+    def _payload(self, **extra) -> dict:
+        p = {"source": "startup", "cwd": os.getcwd(), "session_id": "sess-telem-1"}
+        p.update(extra)
+        return p
+
+    def _run_main(self, payload: dict) -> str:
+        """Drive the real main() in-process: feed `payload` on stdin, capture
+        and return stdout. Used both for the happy path and (with the append
+        helper patched to raise) for the fail-safe path -- the only way to
+        force file_locked_append to raise is in-process."""
+        buf = io.StringIO()
+        saved_stdin = sys.stdin
+        sys.stdin = io.StringIO(json.dumps(payload))
+        try:
+            with contextlib.redirect_stdout(buf):
+                hook.main()
+        finally:
+            sys.stdin = saved_stdin
+        return buf.getvalue()
+
+    def _read_records(self) -> "list[dict]":
+        log_dir = Path(self._dreaming_dir) / "injection-log"
+        if not log_dir.is_dir():
+            return []
+        records: "list[dict]" = []
+        for f in sorted(log_dir.glob("*.jsonl")):  # glob avoids a midnight-UTC date assumption
+            for line in f.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    records.append(json.loads(line))
+        return records
+
+    # -- record shape / counts / ids / tokens ------------------------------
+
+    def test_injection_writes_exactly_one_record_with_correct_fields(self):
+        os.environ["CCGM_LEARNINGS_INJECT"] = "true"
+        payload = self._payload()
+
+        # The control build also tells us the exact selected set + token
+        # estimate the record must match (reused, never re-queried).
+        context, selected, slug = hook._build_injection(payload, env=os.environ)
+        self.assertIsNotNone(context)
+        self.assertEqual(len(selected), self.n)
+
+        self._run_main(payload)
+        records = self._read_records()
+        self.assertEqual(len(records), 1, "exactly one record per injection")
+
+        rec = records[0]
+        self.assertEqual(
+            set(rec.keys()),
+            {"timestamp", "session_id", "source", "project_slug",
+             "injected_count", "injected_ids", "approx_tokens"},
+        )
+        self.assertEqual(rec["session_id"], "sess-telem-1")
+        self.assertEqual(rec["source"], "startup")
+        self.assertEqual(rec["project_slug"], slug)
+        self.assertEqual(rec["injected_count"], self.n)
+        self.assertEqual(rec["injected_ids"], [e["id"] for e in selected])
+        self.assertEqual(len(rec["injected_ids"]), rec["injected_count"])
+        self.assertEqual(rec["approx_tokens"], len(context) // hook.CHARS_PER_TOKEN)
+
+    def test_record_never_contains_memory_content(self):
+        os.environ["CCGM_LEARNINGS_INJECT"] = "true"
+        payload = self._payload()
+        _context, selected, _slug = hook._build_injection(payload, env=os.environ)
+
+        self._run_main(payload)
+        log_dir = Path(self._dreaming_dir) / "injection-log"
+        raw = "\n".join(f.read_text(encoding="utf-8") for f in log_dir.glob("*.jsonl"))
+        self.assertTrue(raw.strip())
+        for e in selected:
+            self.assertNotIn(
+                e["content"], raw,
+                "memory content must NEVER be copied into the telemetry log (issue #781)",
+            )
+
+    def test_log_path_is_outside_the_synced_learnings_store(self):
+        path = str(hook._injection_log_path())
+        self.assertIn("injection-log", path)
+        # The synced store root must never contain the telemetry log.
+        self.assertNotIn(str(ls.LEARNINGS_ROOT), path)
+
+    def test_subprocess_end_to_end_writes_record(self):
+        env = os.environ.copy()
+        env["CCGM_LEARNINGS_PROJECT"] = self.slug
+        # See SearchCliSubprocessTests._env() for why DIR is pinned to the
+        # actually-bound ls.LEARNINGS_ROOT (issue #764 collection-order hazard).
+        env["CCGM_LEARNINGS_DIR"] = str(ls.LEARNINGS_ROOT)
+        env["CCGM_DREAMING_DIR"] = self._dreaming_dir
+        env["CCGM_LEARNINGS_INJECT"] = "true"
+        result = subprocess.run(
+            [sys.executable, str(INJECT_HOOK_PATH)],
+            input=json.dumps(self._payload()),
+            env=env, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ccgm-learnings-injection", result.stdout)
+        records = self._read_records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["injected_count"], self.n)
+        self.assertEqual(records[0]["session_id"], "sess-telem-1")
+
+    # -- fail-safe ---------------------------------------------------------
+
+    def test_forced_telemetry_failure_still_emits_and_never_raises(self):
+        os.environ["CCGM_LEARNINGS_INJECT"] = "true"
+        payload = self._payload()
+        control = hook.build_context(payload, env=os.environ)
+        self.assertIsNotNone(control)
+
+        with mock.patch.object(
+            hook.hook_utils, "file_locked_append",
+            side_effect=RuntimeError("disk on fire"),
+        ):
+            # Must NOT raise, and stdout must be byte-identical to the control.
+            out = self._run_main(payload)
+        self.assertEqual(out, control)
+        # And nothing was written (the append was forced to fail).
+        self.assertEqual(self._read_records(), [])
+
+    # -- inert -------------------------------------------------------------
+
+    def test_no_record_when_flag_unset(self):
+        os.environ.pop("CCGM_LEARNINGS_INJECT", None)
+        out = self._run_main(self._payload())
+        self.assertEqual(out, "")
+        self.assertEqual(self._read_records(), [])
+
+    def test_no_record_when_zero_memories_selected(self):
+        os.environ["CCGM_LEARNINGS_INJECT"] = "true"
+        # Point at an empty slug so selection yields nothing (inert path).
+        empty_slug = f"inject-telem-empty-{uuid.uuid4().hex[:10]}"
+        os.environ["CCGM_LEARNINGS_PROJECT"] = empty_slug
+        self.addCleanup(shutil.rmtree, ls.project_dir(empty_slug), ignore_errors=True)
+        self.addCleanup(shutil.rmtree, ls._cache_dir(empty_slug), ignore_errors=True)
+
+        out = self._run_main(self._payload())
+        self.assertEqual(out, "")
+        self.assertEqual(self._read_records(), [])
+
+    # -- byte-stability ----------------------------------------------------
+
+    def test_injected_stdout_bytes_identical_with_telemetry_vs_control(self):
+        os.environ["CCGM_LEARNINGS_INJECT"] = "true"
+        payload = self._payload()
+        # Control: the pure injected block (build_context never logs telemetry).
+        control = hook.build_context(payload, env=os.environ)
+        self.assertIsNotNone(control)
+        # Full main() path DOES write telemetry -- its stdout must still be
+        # byte-identical to the control.
+        out = self._run_main(payload)
+        self.assertEqual(out, control)
+        # Sanity: telemetry really did fire (otherwise this would vacuously
+        # compare two telemetry-free runs).
+        self.assertEqual(len(self._read_records()), 1)
 
 
 def _cleanup():

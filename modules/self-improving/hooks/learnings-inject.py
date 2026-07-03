@@ -74,6 +74,19 @@ SAFETY
 Never raises: any failure path (missing flag, unresolvable store, empty
 result set, malformed stdin) returns without emitting, so this can never
 crash or block a session.
+
+TELEMETRY (issue #781)
+----------------------
+After the injected block is written to stdout, the hook appends ONE
+best-effort telemetry record per surfacing so a future weekly scorecard can
+measure how often / which memories are actually surfaced. The record carries
+memory IDs + counts + a token estimate ONLY -- never any memory CONTENT (the
+content already lives in the store; copying it here would create a second PII
+surface). It lands in a per-machine JSONL under the dreaming module's
+CCGM_DREAMING_DIR root (~/.claude/dreaming/injection-log/<date>.jsonl),
+deliberately OUTSIDE the synced ~/.claude/learnings/ store. The whole write is
+wrapped so any failure is swallowed: it can never alter the injected bytes,
+block the injection, or raise. Nothing is written when injection did not run.
 """
 from __future__ import annotations
 
@@ -105,6 +118,17 @@ try:
     import learnings_store  # type: ignore
 except Exception:  # pragma: no cover - import guard; hook must never crash a session
     learnings_store = None
+
+# hook_utils (modules/hooks/lib/hook_utils.py, installed at
+# ~/.claude/lib/hook_utils.py) provides file_locked_append for the #781
+# injection-telemetry side-channel. The ~/.claude/lib path was already
+# inserted above; add the repo path too so it resolves from a plain checkout.
+# Guarded: its absence must never crash a session (telemetry is best-effort).
+sys.path.insert(0, str(_HERE.parent.parent / "hooks" / "lib"))
+try:
+    import hook_utils  # type: ignore
+except Exception:  # pragma: no cover - import guard; telemetry is best-effort
+    hook_utils = None
 
 
 def _truthy(val: "str | None") -> bool:
@@ -291,26 +315,31 @@ def _select_for_injection(
     return out
 
 
-def build_context(hook_input: dict, env: "dict[str, str] | None" = None) -> "str | None":
-    """Build the injected block, or None if there is nothing to emit.
+def _build_injection(
+    hook_input: dict, env: "dict[str, str] | None" = None
+) -> "tuple[str | None, list[dict], str]":
+    """Core selection+render shared by build_context() and main().
 
-    Depends only on hook_input + env + store state -- no caller-visible
-    side effects. Every "None" branch means the caller emits nothing and
-    session behavior is exactly what it was before this hook existed.
+    Returns (context, selected, slug):
 
-    NOTE: `env` only gates the CCGM_LEARNINGS_INJECT flag checked just
-    below -- project-slug resolution (resolve_slug() ->
-    learnings_store.detect_project_slug()) always reads the REAL process
-    os.environ, regardless of what is passed here. Harmless in production
-    (where `env` defaults to `os.environ` anyway); tests that need to
-    isolate slug resolution do so via CCGM_LEARNINGS_PROJECT/DIR, not via
-    this parameter.
+      - context: the rendered `<ccgm-learnings-injection>` block, or None when
+        nothing should be emitted -- byte-identical to what build_context()
+        has always returned (build_context() is now a thin wrapper over this,
+        so no existing caller ever sees a different string).
+      - selected: the EXACT list of store entries rendered into `context`
+        (empty when context is None). main() reuses this for the #781
+        telemetry side-channel -- the memory list is never re-queried.
+      - slug: the resolved project slug ("" when the flag gate short-circuits
+        before slug resolution).
+
+    See build_context()'s docstring for the `env` nuance (it gates only the
+    CCGM_LEARNINGS_INJECT flag; slug resolution always reads os.environ).
     """
     env = env if env is not None else os.environ
     if not _truthy(env.get(FLAG)):
-        return None
+        return None, [], ""
     if learnings_store is None:
-        return None
+        return None, [], ""
 
     cwd = hook_input.get("cwd") or os.getcwd()
     slug = resolve_slug(cwd)
@@ -334,14 +363,108 @@ def build_context(hook_input: dict, env: "dict[str, str] | None" = None) -> "str
         slug, max_results=max_results, token_budget=token_budget, repo_root=repo_root
     )
     if not selected:
-        return None
+        return None, [], slug
 
     header, footer = _envelope_lines(len(selected))
     lines = list(header)
     for e in selected:
         lines.extend(_render_entry_lines(e, repo_root=repo_root))
     lines.extend(footer)
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n", selected, slug
+
+
+def build_context(hook_input: dict, env: "dict[str, str] | None" = None) -> "str | None":
+    """Build the injected block, or None if there is nothing to emit.
+
+    Depends only on hook_input + env + store state -- no caller-visible
+    side effects. Every "None" branch means the caller emits nothing and
+    session behavior is exactly what it was before this hook existed.
+
+    NOTE: `env` only gates the CCGM_LEARNINGS_INJECT flag checked just
+    below -- project-slug resolution (resolve_slug() ->
+    learnings_store.detect_project_slug()) always reads the REAL process
+    os.environ, regardless of what is passed here. Harmless in production
+    (where `env` defaults to `os.environ` anyway); tests that need to
+    isolate slug resolution do so via CCGM_LEARNINGS_PROJECT/DIR, not via
+    this parameter.
+    """
+    context, _selected, _slug = _build_injection(hook_input, env)
+    return context
+
+
+# ---------------------------------------------------------------------------
+# Injection telemetry (issue #781) -- a per-machine, best-effort side-channel.
+#
+# After the injected block is written to stdout, main() appends ONE record per
+# surfacing so a future weekly scorecard can measure memory utilization. The
+# record carries memory IDs + counts + a token estimate ONLY -- never any
+# memory CONTENT: the content already lives in the store, and copying it here
+# would create a second PII surface (issue #781). The log lives OUTSIDE the
+# synced ~/.claude/learnings/ store (telemetry is per-machine, never
+# committed), under the dreaming module's own CCGM_DREAMING_DIR root so the
+# scorecard reads a consistent path.
+# ---------------------------------------------------------------------------
+
+def _utc_now_iso(now: "datetime | None" = None) -> str:
+    """ISO-8601 UTC, millisecond precision -- matches learnings_store's own
+    timestamp format. Inlined rather than imported from the store to keep this
+    side-channel self-contained (same independence rationale as
+    _verify_wrapper vs. the search CLI's copy)."""
+    dt = now if now is not None else datetime.now(timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S") + f".{dt.microsecond // 1000:03d}Z"
+
+
+def _injection_log_path(now: "datetime | None" = None) -> Path:
+    """Per-machine telemetry path:
+    <CCGM_DREAMING_DIR>/injection-log/<date>.jsonl (default root
+    ~/.claude/dreaming). Deliberately NOT under ~/.claude/learnings/ -- that
+    directory is a synced git repo and telemetry must never be committed to
+    it (issue #781)."""
+    root = Path(os.environ.get("CCGM_DREAMING_DIR", os.path.expanduser("~/.claude/dreaming")))
+    day = (now if now is not None else datetime.now(timezone.utc)).date().isoformat()
+    return root / "injection-log" / f"{day}.jsonl"
+
+
+def _telemetry_record(
+    hook_input: dict,
+    slug: str,
+    selected: "list[dict]",
+    context: str,
+    *,
+    now: "datetime | None" = None,
+) -> dict:
+    """One telemetry record for a single injection. IDs + counts + a token
+    estimate ONLY -- no memory content (issue #781). session_id/source come
+    from the hook's stdin input; approx_tokens is the injected block's own
+    size (len(context) // CHARS_PER_TOKEN), reusing the already-rendered
+    string rather than recomputing anything."""
+    return {
+        "timestamp": _utc_now_iso(now),
+        "session_id": str(hook_input.get("session_id", "")),
+        "source": str(hook_input.get("source", "")),
+        "project_slug": slug,
+        "injected_count": len(selected),
+        "injected_ids": [e.get("id") for e in selected],
+        "approx_tokens": len(context) // CHARS_PER_TOKEN,
+    }
+
+
+def _log_injection(hook_input: dict, slug: str, selected: "list[dict]", context: str) -> None:
+    """Best-effort append of one telemetry record. Wrapped so ANY failure
+    (hook_utils unavailable, unwritable dir, malformed input, the append
+    helper raising) is swallowed: telemetry must NEVER block the injected
+    context from reaching stdout or raise from the hook (issue #781). The
+    caller MUST have already written `context` to stdout before calling this.
+    """
+    try:
+        if hook_utils is None:
+            return
+        record = _telemetry_record(hook_input, slug, selected, context)
+        hook_utils.file_locked_append(
+            str(_injection_log_path()), json.dumps(record, ensure_ascii=False)
+        )
+    except Exception:
+        return
 
 
 def main() -> None:
@@ -356,17 +479,27 @@ def main() -> None:
     if hook_input.get("source", "") != "startup":
         return
 
-    # Defense-in-depth (Stage-2 review): build_context() should never raise,
-    # but a SessionStart hook must NEVER surface a traceback regardless of
-    # what upstream guard might have a gap -- any unexpected failure here is
+    # Defense-in-depth (Stage-2 review): _build_injection() should never
+    # raise, but a SessionStart hook must NEVER surface a traceback regardless
+    # of what upstream guard might have a gap -- any unexpected failure here is
     # a silent no-op, same as every other "nothing to inject" branch above.
     try:
-        context = build_context(hook_input)
+        context, selected, slug = _build_injection(hook_input)
     except Exception:
         return
 
-    if context:
-        sys.stdout.write(context)
+    if not context:
+        # Inert (flag off or zero memories selected): emit nothing and write
+        # NO telemetry record (issue #781).
+        return
+
+    # Byte-stability + fail-safe ordering (issue #781): write the injected
+    # context to stdout FIRST -- it is the load-bearing output and must be
+    # byte-identical to the pre-telemetry behavior -- THEN attempt the
+    # best-effort telemetry side-channel. _log_injection swallows every
+    # failure, so it can neither alter nor block what was just written.
+    sys.stdout.write(context)
+    _log_injection(hook_input, slug, selected, context)
 
 
 if __name__ == "__main__":
