@@ -360,6 +360,59 @@ class CallJudgeApiTransportTests(unittest.TestCase):
             "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
         })
 
+    def tearDown(self):
+        # The module-global temperature-support cache must not leak between
+        # tests (#779).
+        me._MODELS_WITHOUT_TEMPERATURE.clear()  # noqa: SLF001
+
+    def test_temperature_deprecated_400_retries_without_it_and_caches(self):
+        calls = []
+
+        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002
+            calls.append(json.loads(input))
+            if len(calls) == 1:
+                return self._fake_proc(
+                    body='{"type":"error","error":{"type":"invalid_request_error",'
+                         '"message":"`temperature` is deprecated for this model."}}',
+                    http_code="400",
+                )
+            return self._fake_proc(body=self._messages_api_body({"pass": True, "score": 9.0}))
+
+        model = "claude-temp-deprecated-fixture"
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
+            parsed, usage = me._call_judge_api(  # noqa: SLF001
+                model=model, system_prompt="sys", user_obj={"a": 1},
+                max_output_tokens=100, api_key="sk-test-fixture",
+                api_url="https://api.anthropic.com/v1/messages",
+            )
+
+        # First attempt carries temperature; the 400 triggers a retry WITHOUT
+        # it; the model is remembered as temperature-unsupported.
+        self.assertEqual(len(calls), 2)
+        self.assertIn("temperature", calls[0])
+        self.assertNotIn("temperature", calls[1])
+        self.assertEqual(parsed, {"pass": True, "score": 9.0})
+        self.assertEqual(usage, {"input_tokens": 42, "output_tokens": 7})
+        self.assertIn(model, me._MODELS_WITHOUT_TEMPERATURE)  # noqa: SLF001
+
+    def test_known_temperature_unsupported_model_omits_it_from_the_first_call(self):
+        me._MODELS_WITHOUT_TEMPERATURE.add("claude-known-bad-fixture")  # noqa: SLF001
+        captured = {}
+
+        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002
+            captured["body"] = json.loads(input)
+            return self._fake_proc(body=self._messages_api_body({"pass": True, "score": 7.0}))
+
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
+            parsed, _ = me._call_judge_api(  # noqa: SLF001
+                model="claude-known-bad-fixture", system_prompt="sys", user_obj={"a": 1},
+                max_output_tokens=100, api_key="sk-test-fixture",
+                api_url="https://api.anthropic.com/v1/messages",
+            )
+
+        self.assertNotIn("temperature", captured["body"])
+        self.assertEqual(parsed, {"pass": True, "score": 7.0})
+
     def test_request_carries_temperature_zero_model_system_and_messages(self):
         captured = {}
 

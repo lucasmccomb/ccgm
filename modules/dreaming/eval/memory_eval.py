@@ -552,29 +552,41 @@ def build_judge_payload(
     }
 
 
+# Judge models that returned HTTP 400 on `temperature` this run. Newer Claude
+# models (e.g. claude-opus-4-8) deprecated the parameter; once a model 400s on
+# it we stop sending it for the rest of the process (#779).
+_MODELS_WITHOUT_TEMPERATURE: set[str] = set()
+
+
 def _call_judge_api(
     *, model: str, system_prompt: str, user_obj: dict[str, Any], max_output_tokens: int, api_key: str, api_url: str,
 ) -> tuple[dict[str, Any] | None, dict[str, int]]:
-    """A judge-specific Messages API call with `temperature: 0`
-    (deterministic grading, as the spec requires for the judge
-    specifically). `da.get_model_response()` / `_call_curl_with_retry()`
+    """A judge-specific Messages API call with `temperature: 0` when the model
+    accepts it -- newer models (e.g. claude-opus-4-8) deprecated the parameter
+    and 400 on it, so such a model is recorded and retried without it (#779);
+    deterministic grading is preserved where the model still supports temp 0.
+    `da.get_model_response()` / `_call_curl_with_retry()`
     have no temperature dial and dream_analyze.py is never modified to add
     one (Epic 3's own map/reduce calls never needed it) -- this is a small,
     judge-specific sibling that mirrors da's retry/transport shape while
     reusing da's own (unmodified) response-parsing helpers, rather than an
     edit to that shared file. Never raises -- returns (None, zeroed usage)
     on any transport/parse failure."""
-    request_body = {
-        "model": model,
-        "max_tokens": max_output_tokens,
-        "temperature": 0,
-        "system": system_prompt,
-        "messages": [{"role": "user", "content": json.dumps(user_obj, ensure_ascii=False)}],
-    }
-    payload = json.dumps(request_body)
     zero_usage = {"input_tokens": 0, "output_tokens": 0}
 
     for attempt in range(da.MAX_429_RETRIES + 1):
+        # Rebuild each attempt so a model discovered mid-loop to reject
+        # `temperature` (newer models deprecated it) is retried without it,
+        # while models that accept it still get the spec's temperature:0 (#779).
+        request_body = {
+            "model": model,
+            "max_tokens": max_output_tokens,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": json.dumps(user_obj, ensure_ascii=False)}],
+        }
+        if model not in _MODELS_WITHOUT_TEMPERATURE:
+            request_body["temperature"] = 0
+        payload = json.dumps(request_body)
         try:
             proc = subprocess.run(
                 [
@@ -602,6 +614,19 @@ def _call_judge_api(
                 time.sleep(delay)
                 continue
             return None, zero_usage
+        if (
+            code == "400"
+            and model not in _MODELS_WITHOUT_TEMPERATURE
+            and "temperature" in body.lower()
+        ):
+            # Model rejects `temperature` (deprecated). Record + retry without
+            # it; this does not consume the transport failure budget (#779).
+            _MODELS_WITHOUT_TEMPERATURE.add(model)
+            print(
+                f"memory_eval: judge model {model} rejects temperature; retrying without it (#779)",
+                file=sys.stderr,
+            )
+            continue
         if code != "200":
             return None, zero_usage
 
