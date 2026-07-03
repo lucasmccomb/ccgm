@@ -113,7 +113,7 @@ GAP_MEAN_THRESHOLD = 5.0
 # full-context dump's outcome at materially fewer input tokens is high_value
 # even when it does not BEAT the dump on score. Both bounds must hold.
 HIGH_VALUE_SAT_TOLERANCE = 0.5      # treatment may be at most 0.5 below full_context on score (must essentially MATCH, within noise)
-HIGH_VALUE_EFFICIENCY_RATIO = 0.5   # treatment mean_input_tokens must be <= 0.5 * full_context mean_input_tokens
+HIGH_VALUE_EFFICIENCY_RATIO = 0.5   # treatment mean_total_input_tokens must be <= 0.5 * full_context mean_total_input_tokens (#789: total incl. cached prompt tokens, not just marginal input_tokens)
 
 ARMS = ("baseline", "treatment", "full_context")
 
