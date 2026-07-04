@@ -1574,6 +1574,19 @@ TMPL
   else
     echo "  ${step}. Re-run './start.sh' to apply future CCGM updates"
   fi
+
+  # --- Memory system activation hint (issue #796) ---
+  local _self_improving_installed=false
+  for mod in "${RESOLVED_MODULES[@]}"; do
+    [ "$mod" = "self-improving" ] && _self_improving_installed=true
+  done
+  if [ "$_self_improving_installed" = true ]; then
+    echo ""
+    ui_info "🧠 Memory system installed. Activate it with:"
+    echo "  bash ${global_dir}/bin/memory-setup.sh"
+    echo "  Then read docs/memory-system.md for the full guide."
+  fi
+
   echo ""
   ui_info "Useful commands:"
   if [ "$alias_ccgm_installed" = true ]; then
