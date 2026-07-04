@@ -110,9 +110,10 @@ find_sync() {
 # ---------------------------------------------------------------------------
 
 # Echo the current CCGM_LEARNINGS_INJECT value: "true", "unset", or "invalid"
-# (settings.json present but unparseable).
+# (settings.json present but unparseable). A missing OR zero-byte file is
+# "unset" — an empty file is not an error, it just has nothing set yet.
 current_inject_flag() {
-    if [ ! -f "$SETTINGS" ]; then
+    if [ ! -s "$SETTINGS" ]; then
         printf 'unset\n'
         return
     fi
@@ -120,25 +121,51 @@ current_inject_flag() {
 }
 
 # Deep-merge CCGM_LEARNINGS_INJECT=true into ~/.claude/settings.json, preserving
-# every existing env key (and every other top-level key). Never clobbers on a
-# jq failure.
+# every existing env key (and every other top-level key). A missing or zero-byte
+# settings.json is treated as {} so the merge always yields valid JSON instead of
+# jq's empty output. The write is VERIFIED by reading the flag back out of the
+# file afterward: the success line is printed ONLY if settings.json now actually
+# contains CCGM_LEARNINGS_INJECT=true. Any silent failure (unwritable target, jq
+# error, empty output) prints a warning and returns non-zero — never a false
+# "enabled".
 write_inject_flag() {
-    mkdir -p "$CLAUDE_DIR"
-    if [ -f "$SETTINGS" ]; then
-        local tmp
-        tmp="$(mktemp)"
-        if jq '.env.CCGM_LEARNINGS_INJECT = "true"' "$SETTINGS" >"$tmp" 2>/dev/null; then
-            mv "$tmp" "$SETTINGS"
-            ok "Set CCGM_LEARNINGS_INJECT=true in ${SETTINGS} (existing env keys preserved)."
-        else
-            rm -f "$tmp"
-            warn "Could not merge into ${SETTINGS}; left untouched. Fix its JSON and re-run."
-            return 1
-        fi
+    mkdir -p "$CLAUDE_DIR" 2>/dev/null || true
+
+    local tmp
+    tmp="$(mktemp)" || {
+        warn "Could not enable — failed to create a temp file; ${SETTINGS} unchanged."
+        return 1
+    }
+
+    # Merge base: the existing file when it has content, otherwise {} (guards the
+    # zero-byte case, which would otherwise make jq emit nothing and overwrite
+    # settings.json with an empty, invalid file).
+    if [ -s "$SETTINGS" ]; then
+        jq '.env.CCGM_LEARNINGS_INJECT = "true"' "$SETTINGS" >"$tmp" 2>/dev/null
     else
-        printf '{\n  "env": {\n    "CCGM_LEARNINGS_INJECT": "true"\n  }\n}\n' >"$SETTINGS"
-        ok "Created ${SETTINGS} with CCGM_LEARNINGS_INJECT=true."
+        printf '{}\n' | jq '.env.CCGM_LEARNINGS_INJECT = "true"' >"$tmp" 2>/dev/null
     fi
+
+    if [ ! -s "$tmp" ]; then
+        rm -f "$tmp"
+        warn "Could not enable — jq merge produced no output; ${SETTINGS} unchanged."
+        return 1
+    fi
+
+    if ! mv "$tmp" "$SETTINGS" 2>/dev/null; then
+        rm -f "$tmp"
+        warn "Could not enable — ${SETTINGS} is not writable; left unchanged."
+        return 1
+    fi
+
+    # Read-back verification — the ONLY thing that authorizes the success line.
+    if [ "$(jq -r '.env.CCGM_LEARNINGS_INJECT // "unset"' "$SETTINGS" 2>/dev/null)" = "true" ]; then
+        ok "Read path enabled — CCGM_LEARNINGS_INJECT=true verified in ${SETTINGS} (existing env keys preserved)."
+        return 0
+    fi
+
+    warn "Could not enable — write did not take effect; verify ${SETTINGS} by hand."
+    return 1
 }
 
 # Ensure the learnings store is a git repo for durability.
@@ -186,10 +213,12 @@ enable_read_path() {
         true)
             ok "Injection already enabled (CCGM_LEARNINGS_INJECT=true) — no change."
             sync_init_if_needed ask
+            return 0
             ;;
         invalid)
-            warn "${SETTINGS} is not valid JSON; leaving it untouched."
+            warn "Could not enable — ${SETTINGS} is not valid JSON; left untouched."
             warn "Fix the file, then re-run to enable injection."
+            return 1
             ;;
         *)
             say "Enabling makes two writes:"
@@ -199,10 +228,12 @@ enable_read_path() {
             if confirm "Enable the read path now?"; then
                 if write_inject_flag; then
                     sync_init_if_needed auto
+                    return 0
                 fi
-            else
-                skip "Left the read path disabled. Re-run any time to enable it."
+                return 1
             fi
+            skip "Left the read path disabled. Re-run any time to enable it."
+            return 0
             ;;
     esac
 }
@@ -305,11 +336,16 @@ main() {
     say "=============================="
     say "Interactive and idempotent — nothing is written without a confirmation."
 
-    enable_read_path
+    # The exit code reflects the read path: non-zero if the user asked to enable
+    # it but the write could not be verified (honest failure, never a false OK).
+    # Declining, or an already-enabled store, is success.
+    local rc=0
+    enable_read_path || rc=1
     offer_dreaming
 
     say ""
     say "Done. Full guide: docs/memory-system.md"
+    return "$rc"
 }
 
 main "$@"
