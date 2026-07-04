@@ -655,7 +655,7 @@ SSH access to a configured remote server.
 
 Meta-learning system with automated reflection triggers, commands, and hooks, backed by a schema-validated JSONL learnings store.
 
-**Installs**: `rules/self-improving.md`, `rules/learnings-store.md`, `commands/reflect.md`, `commands/consolidate.md`, `commands/retro.md`, `hooks/reflection-trigger.py`, `hooks/precompact-reflection.py`, `hooks/learnings-inject.py`, `lib/learnings_store.py`, `bin/ccgm-learnings-log`, `bin/ccgm-learnings-search`, `bin/ccgm-learnings-sync`, `settings.partial.json`
+**Installs**: `rules/self-improving.md`, `rules/learnings-store.md`, `commands/reflect.md`, `commands/consolidate.md`, `commands/retro.md`, `hooks/reflection-trigger.py`, `hooks/precompact-reflection.py`, `hooks/learnings-inject.py`, `lib/learnings_store.py`, `bin/ccgm-learnings-log`, `bin/ccgm-learnings-search`, `bin/ccgm-learnings-sync`, `bin/memory-setup.sh`, `settings.partial.json`
 
 **What it does**: Combines rules, commands, hooks, and a durable store to create an active self-improvement loop:
 
