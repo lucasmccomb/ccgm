@@ -14,6 +14,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 - [Install](#install)
 - [Module Catalog](#module-catalog)
   - [Companion module: /deepresearch](#companion-module-deepresearch)
+- [Memory System](#memory-system)
 - [Customization](#customization)
 - [Manual Installation](#manual-installation)
 - [Utilities](#utilities)
@@ -253,6 +254,18 @@ cd lem-deepresearch
 
 The installer sets up SearXNG, Ollama, the Python environment, and copies the command files into `~/.claude/`. See the [lem-deepresearch README](https://github.com/lucasmccomb/lem-deepresearch) for manual setup and troubleshooting.
 
+## Memory System
+
+CCGM has a durable, cross-session memory system in two halves: a **read path** (the `self-improving` learnings store, which surfaces what you've learned at the start of each new session) and an opt-in **write path** (the `dreaming` module, which mines your session transcripts nightly and proposes new learnings behind a human gate). The read path is local and free; `dreaming` is opt-in and spends Anthropic API tokens. Auto-apply is off by default — every proposal is human-reviewed via `/dream-apply`.
+
+Activate it with:
+
+```bash
+bash ~/.claude/bin/memory-setup.sh
+```
+
+The setup script enables session-start injection, initializes the learnings git store, and (if `dreaming` is installed) offers to configure the nightly analyzer. Injection applies to new sessions only. See **[Memory System](docs/memory-system.md)** for the full guide.
+
 ## Customization
 
 | What | How |
@@ -348,6 +361,7 @@ The `docs/` directory contains comprehensive documentation:
 | [Configuration](docs/configuration.md) | Customization, template variables, settings overrides |
 | [Multi-Agent System](docs/multi-agent.md) | Parallel agent coordination, port allocation, issue tracking |
 | [Session Memory](docs/session-memory.md) | Native JSONL transcripts, `/recall`, `CLAUDE.md`/`MEMORY.md`, retired agent-log-repo |
+| [Memory System](docs/memory-system.md) | Durable cross-session memory: read path (learnings store + injection) and opt-in `dreaming` write path, activation, safety posture, troubleshooting |
 
 ## Contributing
 
