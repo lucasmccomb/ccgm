@@ -125,14 +125,16 @@ run_step() {
 # ---------------------------------------------------------------------
 # Shared config gate: is optimistic auto-integration active?
 #
-# True iff EITHER `optimistic_integration.enabled` (the real, post-Epic-3
-# flag) OR the legacy `auto_apply_counters` (pre-Epic-3, still read by
-# Epic 8's not-yet-landed migration) is true. Epic 8 will formally migrate
-# a `true` `auto_apply_counters` into `optimistic_integration.enabled` on
-# first read; until that lands, this OR keeps existing
-# `auto_apply_counters:true` configurations (and the fail-closed behavior
-# they depend on) working exactly as before, rather than silently going
-# inert the moment the retired verify-only auto-apply step stops running.
+# True iff ONLY `optimistic_integration.enabled` is true -- enabled-only,
+# no legacy bridge (review fix for #801, PR #810). The legacy
+# `auto_apply_counters` flag is intentionally NOT read here: migrating a
+# `true` legacy flag into `optimistic_integration.enabled` is Epic 8's job
+# (memory-setup.sh offers optimistic mode as an explicit, logged opt-in
+# prompt, plan.md §3.5), not an implicit OR-bridge in this gate. Bridging
+# the two would let the new engine -- and its ~$2/night eval-refresh API
+# spend -- silently activate on a machine that only ever opted into the
+# OLD verify-only auto-apply step, without the operator ever seeing or
+# confirming the migration.
 # Both new steps below (eval-refresh, optimistic-integrate) share this one
 # gate so they turn on and off together.
 # ---------------------------------------------------------------------
@@ -155,8 +157,7 @@ if not isinstance(cfg, dict):
     sys.exit(0)
 opt = cfg.get('optimistic_integration')
 enabled = isinstance(opt, dict) and bool(opt.get('enabled', False))
-legacy = bool(cfg.get('auto_apply_counters', False))
-print('true' if (enabled or legacy) else 'false')
+print('true' if enabled else 'false')
 " "${cfg}" 2>/dev/null || echo false
 }
 
@@ -211,6 +212,15 @@ run_eval_refresh_step() {
 # here -- this function's job is only the two gates above, then a single
 # CLI invocation for the day.
 #
+# Red-gate-as-anomaly (review fix for #801, PR #810): plan.md §3.5 says the
+# breaker trips on "batch-anomaly fire OR red eval gate" -- but a red
+# `--gate` result short-circuits BEFORE `apply_dream_proposal.py
+# optimistic-integrate` is ever invoked, so the breaker's own anomaly_log
+# previously had zero memory of a red-gate streak. When gate (b) fails,
+# this function now ALSO calls `apply_dream_proposal.py record-anomaly
+# --reason red_eval_gate` before returning -- still fail-closed (no
+# integration on a red gate; only the anomaly itself is recorded).
+#
 # Always returns 0: a stand-down (disabled, gate missing, gate red) is a
 # successful, expected outcome, never a chain failure (mirrors
 # autoheal-auto-apply.sh's own "Exit codes: 0 always" contract).
@@ -238,6 +248,11 @@ run_optimistic_integrate_step() {
     gate_rc=$?
     if [ "${gate_rc}" -ne 0 ]; then
         log "optimistic-integrate: dream-eval.sh --gate exit=${gate_rc}; failing closed (${gate_out})"
+        local anomaly_out anomaly_rc
+        anomaly_out="$(python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" record-anomaly --reason red_eval_gate 2>&1)"
+        anomaly_rc=$?
+        printf '%s\n' "${anomaly_out}" >>"${DAILY_LOG}"
+        log "optimistic-integrate: recorded red_eval_gate anomaly (exit=${anomaly_rc})"
         return 0
     fi
 

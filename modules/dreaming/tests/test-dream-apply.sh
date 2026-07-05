@@ -567,7 +567,7 @@ done
 # ---------------------------------------------------------------------
 
 cat >"${DREAMING_DIR}/config.json" <<'EOF'
-{"auto_apply_counters": true}
+{"optimistic_integration": {"enabled": true}}
 EOF
 
 EMPTY_PROJECTS_ROOT="${SANDBOX}/empty-claude-projects"

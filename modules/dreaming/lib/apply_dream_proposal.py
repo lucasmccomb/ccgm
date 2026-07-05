@@ -107,6 +107,17 @@ commit (after the loop) each acquire the lock in their OWN, non-nested
 critical section. `fcntl.flock` is non-reentrant; nesting a batch-wide lock
 around per-proposal `apply_proposal()` calls would self-deadlock on the
 very first row.
+
+Red-gate-as-anomaly (review fix for #801, PR #810): plan.md §3.5 says the
+breaker trips on "batch-anomaly fire OR red eval gate", but a red
+`dream-eval.sh --gate` result short-circuits `dream-daily.sh` BEFORE the
+`optimistic-integrate` CLI subcommand (and therefore `run_optimistic_
+integrate()`) is ever invoked, so a red-gate streak previously left zero
+trace in `anomaly_log`. `record_anomaly()` (the `record-anomaly` CLI
+subcommand) closes that gap: it records one anomaly directly into
+`state/optimistic.json` and evaluates the SAME windowed breaker via the
+shared `_evaluate_breaker_trip()` helper, independent of any proposal
+batch.
 """
 from __future__ import annotations
 
@@ -1139,13 +1150,19 @@ def _maybe_auto_resume(state: dict[str, Any], cfg: dict[str, Any], batch_id: str
     transition. Returns the (possibly updated) state. Caller MUST already
     hold `_apply_lock()`.
 
-    "Quiet" needs no separate tracking: while suspended, the engine applies
-    nothing (see run_optimistic_integrate's early return below), so no NEW
-    anomaly can be recorded during the suspension window -- the mere
-    passage of `circuit_breaker_auto_resume_nights` is sufficient. An
-    ambiguous state (suspended but no parseable `suspended_at`, e.g. a
-    hand-edited file) never auto-resumes -- fails closed, requires a
-    manual `optimistic-resume`.
+    "Quiet" needs no separate tracking: while suspended, run_optimistic_
+    integrate() itself applies nothing (see its early return below), so no
+    NEW batch-anomaly/rolling-rate anomaly can be recorded during the
+    suspension window from THAT path -- the mere passage of
+    `circuit_breaker_auto_resume_nights` is sufficient. `record_anomaly()`
+    (review fix for #801, PR #810 -- a red eval gate never reaches
+    run_optimistic_integrate() at all) is an INDEPENDENT path that CAN
+    still append to `anomaly_log` while suspended; that does not change
+    this function's own check, which only ever looks at wall-clock time
+    since `suspended_at`, never at `anomaly_log` contents. An ambiguous
+    state (suspended but no parseable `suspended_at`, e.g. a hand-edited
+    file) never auto-resumes -- fails closed, requires a manual
+    `optimistic-resume`.
     """
     if not state.get("suspended"):
         return state
@@ -1183,6 +1200,107 @@ def optimistic_resume() -> dict[str, Any]:
     record = {"outcome": "circuit_breaker_manual_resume", "was_suspended": was_suspended, "ok": True}
     _write_audit(record)
     return record
+
+
+def _evaluate_breaker_trip(state: dict[str, Any], cfg: dict[str, Any], *, batch_id: str) -> bool:
+    """Shared windowed-breaker evaluation (plan.md §3.5: "the breaker trips
+    on batch-anomaly fire OR red eval gate").
+
+    Given `state` whose `anomaly_log` already reflects every anomaly this
+    caller wants considered (including any just appended for this call),
+    checks whether `circuit_breaker_max_anomalies` anomalies fall within
+    the trailing `circuit_breaker_window_nights` window and, if so and the
+    breaker is not already suspended, trips it -- mutating
+    `state["suspended"]`/`state["suspended_at"]` IN PLACE -- and writes the
+    `circuit_breaker_tripped` audit record. Returns True iff THIS call is
+    what tripped it (already-suspended is a no-op, matching the previous
+    inline behavior in `run_optimistic_integrate()`).
+
+    Extracted (review fix for #801, PR #810) so `run_optimistic_
+    integrate()`'s end-of-batch breaker check and `record_anomaly()`'s
+    standalone (non-batch) breaker check -- e.g. a red eval gate, which
+    never reaches `run_optimistic_integrate()` at all since dream-daily.sh's
+    gate check happens BEFORE the `optimistic-integrate` CLI subcommand is
+    ever invoked -- share the exact same windowed-threshold math rather
+    than reimplementing it.
+
+    Caller MUST already hold `_apply_lock()` and remains responsible for
+    persisting `state` via `_write_optimistic_state_atomic()` afterward --
+    this function only mutates the in-memory dict and writes the audit
+    record.
+    """
+    window_nights = int(cfg.get("circuit_breaker_window_nights", 7))
+    window_start = time.time() - (window_nights * 86400.0)
+    recent = [
+        t for t in state.get("anomaly_log", [])
+        if learnings_store._parse_iso(t) >= window_start  # noqa: SLF001 -- see _rolling_auto_add_supersede_count
+    ]
+    max_anomalies = int(cfg.get("circuit_breaker_max_anomalies", 2))
+    if len(recent) >= max_anomalies and not state.get("suspended"):
+        state["suspended"] = True
+        state["suspended_at"] = _utc_now_iso()
+        _write_audit({
+            "outcome": "circuit_breaker_tripped", "batch_id": batch_id,
+            "detail": f"{len(recent)} anomalies within {window_nights} night window "
+                      f"(threshold {max_anomalies})",
+        })
+        return True
+    return False
+
+
+def record_anomaly(reason: str) -> dict[str, Any]:
+    """Records ONE anomaly -- independent of any proposal batch -- into
+    `state/optimistic.json` and evaluates the windowed circuit breaker
+    (plan.md §3.5: "the breaker trips on batch-anomaly fire OR red eval
+    gate"). This is the `record-anomaly` CLI subcommand's entry point
+    (review fix for #801, PR #810).
+
+    dream-daily.sh's `run_optimistic_integrate_step()` calls this directly
+    when `dream-eval.sh --gate` itself reports red: that fail-closed branch
+    returns BEFORE ever invoking the `optimistic-integrate` CLI subcommand
+    (and therefore before `run_optimistic_integrate()` -- and the breaker
+    logic it drives -- ever runs), so without this function a red-gate
+    streak left ZERO trace in `anomaly_log`; the breaker had no memory of
+    it.
+
+    REUSES `_read_optimistic_state()` / `_write_optimistic_state_atomic()`
+    / the same windowed-breaker evaluation `run_optimistic_integrate()`
+    uses (via `_evaluate_breaker_trip()`) rather than re-deriving any of
+    that logic.
+
+    Always audited: one `anomaly_recorded` record unconditionally, plus a
+    `circuit_breaker_tripped` record (written by `_evaluate_breaker_trip`,
+    inside the SAME lock) if this is the anomaly that trips it -- matching
+    every other breaker-state transition in this module (never silent).
+    Still records the anomaly (for history) even if the breaker is ALREADY
+    suspended -- `_evaluate_breaker_trip`'s own `not state.get("suspended")`
+    guard simply makes that case a no-op for the "tripped" audit/return,
+    exactly as an already-suspended breaker is a no-op in
+    `run_optimistic_integrate()` today.
+
+    Returns a `batch_id` (a fresh, uniquely-generated `anomaly_<uuid>` id,
+    distinct from `run_optimistic_integrate()`'s `optbatch_<uuid>` batch
+    ids) so a caller -- or a test -- can correlate this exact call with its
+    own audit record(s) in the shared, cumulative apply-audit log.
+    """
+    cfg = da.load_config().get("optimistic_integration") or {}
+    context_id = f"anomaly_{uuid.uuid4().hex[:12]}"
+
+    with _apply_lock():
+        state = _read_optimistic_state()
+        state.setdefault("anomaly_log", [])
+        state["anomaly_log"].append(_utc_now_iso())
+
+        tripped = _evaluate_breaker_trip(state, cfg, batch_id=context_id)
+        _write_optimistic_state_atomic(state)
+        suspended_after = bool(state.get("suspended"))
+
+    _write_audit({"outcome": "anomaly_recorded", "batch_id": context_id, "reason": reason})
+
+    return {
+        "outcome": "anomaly_recorded", "reason": reason, "ok": True, "batch_id": context_id,
+        "circuit_breaker": "tripped" if tripped else ("suspended" if suspended_after else None),
+    }
 
 
 def _process_one_proposal(
@@ -1429,22 +1547,8 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
         state["anomaly_log"].extend(run_anomaly_timestamps)
         state["last_run"] = _utc_now_iso()
 
-        window_nights = int(cfg.get("circuit_breaker_window_nights", 7))
-        window_start = time.time() - (window_nights * 86400.0)
-        recent = [
-            t for t in state["anomaly_log"]
-            if learnings_store._parse_iso(t) >= window_start  # noqa: SLF001 -- see _rolling_auto_add_supersede_count
-        ]
-        max_anomalies = int(cfg.get("circuit_breaker_max_anomalies", 2))
-        if len(recent) >= max_anomalies and not state.get("suspended"):
-            state["suspended"] = True
-            state["suspended_at"] = _utc_now_iso()
+        if _evaluate_breaker_trip(state, cfg, batch_id=batch_id):
             summary["circuit_breaker"] = "tripped"
-            _write_audit({
-                "outcome": "circuit_breaker_tripped", "batch_id": batch_id,
-                "detail": f"{len(recent)} anomalies within {window_nights} night window "
-                          f"(threshold {max_anomalies})",
-            })
 
         _write_optimistic_state_atomic(state)
 
@@ -1660,6 +1764,12 @@ def _cmd_optimistic_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_record_anomaly(args: argparse.Namespace) -> int:
+    result = record_anomaly(args.reason)
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
 def _cmd_eval_refresh(args: argparse.Namespace) -> int:
     day = args.day or today_iso()
     summary = run_eval_refresh(day)
@@ -1707,6 +1817,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "optimistic-resume", help="force-clear a tripped optimistic-integration circuit breaker immediately",
     )
     resume_p.set_defaults(func=_cmd_optimistic_resume)
+
+    record_anomaly_p = sub.add_parser(
+        "record-anomaly",
+        help="record a single anomaly (e.g. a red eval gate) into state/optimistic.json and evaluate "
+             "the windowed circuit breaker, independent of any proposal batch (optimistic-memory "
+             "plan.md §3.5: the breaker trips on batch-anomaly fire OR a red eval gate)",
+    )
+    record_anomaly_p.add_argument("--reason", required=True, help="short machine-readable reason, e.g. red_eval_gate")
+    record_anomaly_p.set_defaults(func=_cmd_record_anomaly)
 
     refresh_p = sub.add_parser(
         "eval-refresh",

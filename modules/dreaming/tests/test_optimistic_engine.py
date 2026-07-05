@@ -599,6 +599,120 @@ class CircuitBreakerTests(OptimisticEngineTestBase):
 
 
 # ---------------------------------------------------------------------------
+# `record-anomaly` (review fix for #801, PR #810): plan.md §3.5 says the
+# breaker trips on "batch-anomaly fire OR red eval gate" -- but a red
+# `dream-eval.sh --gate` result short-circuits dream-daily.sh BEFORE
+# run_optimistic_integrate() is ever invoked, so a red-gate streak
+# previously left zero trace in anomaly_log. record_anomaly() closes that
+# gap: it records one anomaly directly into state/optimistic.json and
+# evaluates the SAME windowed breaker via the shared _evaluate_breaker_trip()
+# helper -- these tests exercise record_anomaly() directly (the Python
+# path); the bash-side wiring (dream-daily.sh calling the `record-anomaly`
+# CLI on a red gate) is covered by GatingTests below.
+# ---------------------------------------------------------------------------
+
+
+class RecordAnomalyTests(OptimisticEngineTestBase):
+    """apply-audit.jsonl is a single, cumulative, never-reset file shared
+    by every test in this module (mirrors CircuitBreakerTests, which for
+    the same reason only ever asserts existence via `any(...)`, never an
+    exact count or an absence, against the whole file). `record_anomaly()`
+    returns a fresh, unique `batch_id` per call precisely so these tests
+    (and any real caller) can scope their audit assertions to THEIR OWN
+    call's records instead of the whole shared log.
+    """
+
+    def _audit_for(self, batch_id: str) -> list[dict]:
+        return [a for a in self._read_audit() if a.get("batch_id") == batch_id]
+
+    def test_single_anomaly_recorded_does_not_trip_below_threshold(self):
+        self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
+        result = adp.record_anomaly("red_eval_gate")
+        self.assertTrue(result["ok"], result)
+        self.assertIsNone(result.get("circuit_breaker"))
+
+        state = self._read_optimistic_state_file()
+        self.assertFalse(state["suspended"])
+        self.assertEqual(len(state["anomaly_log"]), 1)
+
+        own_audit = self._audit_for(result["batch_id"])
+        self.assertEqual(len(own_audit), 1, own_audit)
+        self.assertEqual(own_audit[0]["outcome"], "anomaly_recorded")
+        self.assertEqual(own_audit[0]["reason"], "red_eval_gate")
+
+    def test_two_red_gate_anomalies_within_window_trip_the_breaker(self):
+        self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
+        first = adp.record_anomaly("red_eval_gate")
+        self.assertIsNone(first.get("circuit_breaker"), first)
+        second = adp.record_anomaly("red_eval_gate")
+        self.assertEqual(second.get("circuit_breaker"), "tripped", second)
+
+        state = self._read_optimistic_state_file()
+        self.assertTrue(state["suspended"])
+        self.assertIsNotNone(state["suspended_at"])
+        self.assertEqual(len(state["anomaly_log"]), 2)
+
+        first_audit = self._audit_for(first["batch_id"])
+        self.assertEqual(len(first_audit), 1, first_audit)
+        self.assertEqual(first_audit[0]["outcome"], "anomaly_recorded")
+
+        second_audit = self._audit_for(second["batch_id"])
+        # The SECOND call is the one that trips the breaker: its own
+        # anomaly_recorded record plus the circuit_breaker_tripped record
+        # (written under the same batch_id via _evaluate_breaker_trip).
+        self.assertEqual(len(second_audit), 2, second_audit)
+        outcomes = {a["outcome"] for a in second_audit}
+        self.assertEqual(outcomes, {"anomaly_recorded", "circuit_breaker_tripped"})
+
+    def test_anomaly_outside_window_does_not_contribute_to_trip(self):
+        self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
+        now = time.time()
+        self._write_optimistic_state({
+            "suspended": False, "suspended_at": None,
+            "anomaly_log": [self._iso(now - 20 * 86400)],  # 20 days ago -- outside a 7-night window
+            "last_run": None,
+        })
+        result = adp.record_anomaly("red_eval_gate")
+        self.assertIsNone(result.get("circuit_breaker"), result)
+        state = self._read_optimistic_state_file()
+        self.assertFalse(state["suspended"])
+        self.assertEqual(len(state["anomaly_log"]), 2)  # old + new, but only 1 "recent"
+
+    def test_record_anomaly_while_already_suspended_does_not_refire_trip_audit(self):
+        # Idempotency: a red-gate night that happens while the breaker is
+        # ALREADY suspended still records the anomaly (for history), but
+        # must never double-fire a SECOND circuit_breaker_tripped record
+        # for a breaker that is already tripped (mirrors the same
+        # not-already-suspended guard run_optimistic_integrate's own
+        # breaker check applies).
+        self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
+        now = time.time()
+        self._write_optimistic_state({
+            "suspended": True, "suspended_at": self._iso(now),
+            "anomaly_log": [self._iso(now), self._iso(now)],
+            "last_run": None,
+        })
+        result = adp.record_anomaly("red_eval_gate")
+        self.assertEqual(result.get("circuit_breaker"), "suspended", result)
+
+        own_audit = self._audit_for(result["batch_id"])
+        self.assertEqual(len(own_audit), 1, own_audit)  # anomaly_recorded ONLY -- no re-trip
+        self.assertEqual(own_audit[0]["outcome"], "anomaly_recorded")
+
+        state = self._read_optimistic_state_file()
+        self.assertEqual(len(state["anomaly_log"]), 3)  # still appended, even while suspended
+
+    def test_state_write_is_atomic_after_record_anomaly(self):
+        adp.record_anomaly("red_eval_gate")
+        path = adp.optimistic_state_path()
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        self.assertFalse(tmp_path.exists(), "temp file should never survive an atomic write")
+        self.assertTrue(path.is_file())
+        on_disk = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(len(on_disk["anomaly_log"]), 1)
+
+
+# ---------------------------------------------------------------------------
 # Cross-night accumulation signal (plan.md §3.8).
 # ---------------------------------------------------------------------------
 
@@ -924,6 +1038,119 @@ class EvalRefreshTests(OptimisticEngineTestBase):
         self.assertFalse(summary["ran"])
         self.assertIn("ANTHROPIC_API_KEY", summary["reason"])
         self.assertNotIn("exit_code", summary)
+
+
+# ---------------------------------------------------------------------------
+# Enabled-only gating (review fix for #801, PR #810): dream-daily.sh's
+# `_optimistic_integration_active()` must activate ONLY on
+# `optimistic_integration.enabled` -- the legacy `auto_apply_counters` flag
+# alone must NOT activate the new engine (that migration is Epic 8's job, a
+# deliberate/logged opt-in via memory-setup.sh, not an implicit OR-bridge
+# in dream-daily.sh).
+#
+# `_optimistic_integration_active()` is a bash-only function embedded in
+# dream-daily.sh -- not an importable Python symbol -- so it is exercised
+# here by invoking the REAL script end to end against a fully isolated
+# sandbox and asserting on its own log output, exactly like
+# test-dream-apply.sh's existing fail-closed scenarios do, rather than
+# re-deriving the gating logic in Python and asserting against a second,
+# possibly-drifted copy.
+# ---------------------------------------------------------------------------
+
+
+class GatingTests(OptimisticEngineTestBase):
+    def setUp(self) -> None:
+        super().setUp()
+        fresh_dreaming = tempfile.mkdtemp(prefix="ccgm-dreaming-test-optengine-gating-")
+        self._pin_env("CCGM_DREAMING_DIR", fresh_dreaming)
+        self._dreaming_dir = Path(fresh_dreaming)
+        (self._dreaming_dir / "proposals").mkdir(parents=True, exist_ok=True)
+
+    def _run_dream_daily(self, day: str, *, eval_script: Path | None = None) -> tuple[int, str]:
+        """Invokes the REAL dream-daily.sh end to end against an isolated,
+        offline sandbox (mirrors test-dream-apply.sh's fail-closed
+        scenarios: an empty --projects-root with no ANTHROPIC_API_KEY/
+        --offline so dream-analyze.sh's own "nothing to do" short-circuit
+        fires before ever touching a proposals file). Returns
+        (exit_code, daily_log_body).
+        """
+        sandbox = Path(tempfile.mkdtemp(prefix="ccgm-dreaming-test-optengine-gating-run-"))
+        logs_dir = sandbox / "logs"
+        empty_projects_root = sandbox / "empty-claude-projects"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        empty_projects_root.mkdir(parents=True, exist_ok=True)
+        script = HERE.parent / "bin" / "dream-daily.sh"
+
+        eval_script_path = eval_script if eval_script is not None else (
+            sandbox / "definitely-does-not-exist" / "dream-eval.sh"
+        )
+
+        env = dict(os.environ)
+        env["CCGM_DREAMING_LOGS_DIR"] = str(logs_dir)
+        env["CCGM_DREAMING_EVAL_SCRIPT"] = str(eval_script_path)
+        env.pop("ANTHROPIC_API_KEY", None)  # keep this test fully offline/deterministic
+
+        proc = subprocess.run(
+            ["bash", str(script), "--force-day", day, "--projects-root", str(empty_projects_root)],
+            capture_output=True, text=True, env=env,
+        )
+        log_path = logs_dir / f"dreaming-daily-{day}.log"
+        log_body = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
+        return proc.returncode, log_body
+
+    def test_legacy_flag_alone_does_not_activate_optimistic_integration(self):
+        (self._dreaming_dir / "config.json").write_text(
+            json.dumps({"auto_apply_counters": True}), encoding="utf-8",
+        )
+        rc, log_body = self._run_dream_daily(_unique_day())
+        self.assertEqual(rc, 0, log_body)
+        self.assertIn("optimistic_integration.enabled=false (default off); skipping", log_body)
+        self.assertIn("eval-refresh: optimistic integration inactive; skipping", log_body)
+        # Never even reaches the eval-gate/script-presence check for either step.
+        self.assertNotIn("missing (Epic 7 not yet installed)", log_body)
+        self.assertNotIn("eval-refresh: running apply_dream_proposal.py eval-refresh", log_body)
+
+    def test_enabled_flag_alone_activates_optimistic_integration(self):
+        (self._dreaming_dir / "config.json").write_text(
+            json.dumps({"optimistic_integration": {"enabled": True}}), encoding="utf-8",
+        )
+        rc, log_body = self._run_dream_daily(_unique_day())
+        self.assertEqual(rc, 0, log_body)
+        self.assertNotIn("optimistic_integration.enabled=false (default off); skipping", log_body)
+        self.assertNotIn("eval-refresh: optimistic integration inactive; skipping", log_body)
+        # Both steps get PAST the config gate -- optimistic-integrate then
+        # fails closed on the (deliberately) missing eval script, and
+        # eval-refresh actually starts (its own preconditions handle the
+        # no-API-key stand-down separately, already covered by
+        # EvalRefreshTests above).
+        self.assertIn("missing (Epic 7 not yet installed); failing closed", log_body)
+        self.assertIn("eval-refresh: running apply_dream_proposal.py eval-refresh", log_body)
+
+    def test_red_eval_gate_records_anomaly_via_record_anomaly_cli(self):
+        (self._dreaming_dir / "config.json").write_text(
+            json.dumps({"optimistic_integration": {"enabled": True}}), encoding="utf-8",
+        )
+        script_dir = Path(tempfile.mkdtemp(prefix="ccgm-fake-red-eval-gate-"))
+        fake_red_eval = script_dir / "fake-dream-eval-red.sh"
+        fake_red_eval.write_text(
+            "#!/usr/bin/env bash\necho 'fake gate: no results (simulated red)' >&2\nexit 1\n",
+            encoding="utf-8",
+        )
+        fake_red_eval.chmod(0o755)
+
+        rc, log_body = self._run_dream_daily(_unique_day(), eval_script=fake_red_eval)
+        self.assertEqual(rc, 0, log_body)
+        self.assertIn("dream-eval.sh --gate exit=1; failing closed", log_body)
+        self.assertIn("recorded red_eval_gate anomaly", log_body)
+
+        state = self._read_optimistic_state_file()
+        self.assertEqual(len(state.get("anomaly_log", [])), 1, state)
+        self.assertFalse(state.get("suspended"), state)  # 1 anomaly, below the default threshold of 2
+
+        audit = self._read_audit()
+        self.assertTrue(any(
+            a.get("outcome") == "anomaly_recorded" and a.get("reason") == "red_eval_gate" for a in audit
+        ), audit)
 
 
 if __name__ == "__main__":
