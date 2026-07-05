@@ -203,6 +203,51 @@ class IsDwellingTests(unittest.TestCase):
         self.assertTrue(ls.is_dwelling({"dwell_until": dwell}, now=parsed - 10))
         self.assertFalse(ls.is_dwelling({"dwell_until": dwell}, now=parsed + 10))
 
+    def test_false_for_non_string_truthy_types_does_not_raise(self):
+        # A non-string truthy `dwell_until` (a raw epoch int/float from a
+        # caller that bypassed `dwell_until_from_hours()`, a corrupted
+        # merge artifact, or a hand-edited shard) must fail open to "not
+        # dwelling" rather than raise a TypeError out of `_parse_iso`'s
+        # `datetime.strptime` call (Stage-1 review finding: an uncaught
+        # TypeError here crashes `search()` for the whole project slug).
+        for bad_value in (12345, 12345.6, True, [1, 2, 3]):
+            with self.subTest(bad_value=bad_value):
+                self.assertFalse(ls.is_dwelling({"dwell_until": bad_value}))
+
+
+class MalformedDwellUntilFailOpenTests(unittest.TestCase):
+    """End-to-end reproduction of the Stage-1 review finding: a non-string
+    `dwell_until` on ONE row (a future caller bypassing
+    `dwell_until_from_hours()`, a corrupted merge artifact, or a hand-edited
+    shard) must never crash `search()` for the entire project slug -- it
+    must fail open and the rest of the pool must still surface normally."""
+
+    def setUp(self):
+        self.slug = f"dwell-malformed-{int(time.time() * 1e6)}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
+        os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
+
+    def tearDown(self):
+        shutil.rmtree(ls.project_dir(self.slug), ignore_errors=True)
+        shutil.rmtree(ls._cache_dir(self.slug), ignore_errors=True)
+
+    def test_search_survives_a_non_string_dwell_until_row_on_disk(self):
+        healthy = ls.build_entry(type_="pattern", content="healthy dwell fail-open target",
+                                  confidence=7)
+        ls.append_entry(healthy)
+
+        # dwell_until=12345 is not a schema violation (validate_entry()
+        # does not type-check this field) -- exactly how a raw epoch int
+        # would land on disk from a caller that skipped
+        # dwell_until_from_hours()'s string formatting.
+        malformed = ls.build_entry(type_="pattern", content="malformed dwell fail-open target",
+                                    confidence=7, dwell_until=12345)
+        ls.append_entry(malformed)
+
+        results = ls.search(slug=self.slug, query="")
+        ids = [r["id"] for r in results]
+        self.assertIn(healthy["id"], ids)
+
 
 class DwellInvariantTests(unittest.TestCase):
     """The 'only extends, never shortens' invariant, enforced at the fold
@@ -248,6 +293,25 @@ class DwellInvariantTests(unittest.TestCase):
         heads = {h["id"]: h for h in ls.load_all(self.slug)}
         new_head = heads[new_entry["id"]]
         self.assertEqual(new_head["dwell_until"], longer_dwell)
+
+    def test_supersede_return_value_threads_the_requested_dwell_floor(self):
+        # Stage-1 review finding: build_entry(...) inside supersede_entry()
+        # omitted dwell_until=dwell_until, so the RETURNED dict always
+        # reported dwell_until=None even though the op-row and the
+        # projected head correctly persisted the floor. On a target with
+        # no prior dwell (the common case), the returned entry's
+        # dwell_until must match the requested floor.
+        e = ls.build_entry(type_="pattern", content="supersede return value target",
+                            confidence=8)
+        ls.append_entry(e)
+        sha = ls.content_sha256(e["content"])
+
+        floor = ls.dwell_until_from_hours(5)
+        new_entry = ls.supersede_entry(
+            e["id"], content="revised content for return value check",
+            expected_sha256=sha, dwell_until=floor,
+        )
+        self.assertEqual(new_entry["dwell_until"], floor)
 
     def test_verify_dwell_hours_cannot_shorten_targets_dwell(self):
         long_dwell = ls.dwell_until_from_hours(10)
@@ -340,6 +404,14 @@ class MaxDwellHelperTests(unittest.TestCase):
     def test_malformed_new_does_not_override_valid_existing(self):
         existing = ls.dwell_until_from_hours(1)
         self.assertEqual(ls._max_dwell(existing, "not-a-date"), existing)
+
+    def test_non_string_existing_loses_to_valid_new_without_raising(self):
+        new = ls.dwell_until_from_hours(1)
+        self.assertEqual(ls._max_dwell(12345, new), new)
+
+    def test_non_string_new_does_not_override_valid_existing_without_raising(self):
+        existing = ls.dwell_until_from_hours(1)
+        self.assertEqual(ls._max_dwell(existing, 12345), existing)
 
 
 # ---------------------------------------------------------------------------

@@ -368,6 +368,17 @@ def _iso_from_epoch(epoch: float) -> str:
 def _parse_iso(s: str) -> float:
     """Parse ISO 8601 UTC string to epoch seconds. 0.0 on failure.
     Accepts both second- and millisecond-precision forms (trailing Z).
+
+    Catches (TypeError, ValueError) -- not just ValueError -- so a
+    non-string truthy `s` (a raw epoch int/float from a caller that
+    bypassed `dwell_until_from_hours()`, a corrupted merge artifact, or a
+    hand-edited shard) fails closed to the 0.0 sentinel instead of raising
+    out of `datetime.strptime`. Every caller here (`is_stale`,
+    `is_dwelling`, `_max_dwell`, `_fold_sort_key`) documents fail-open
+    behavior on a malformed value; a TypeError escaping this function
+    would crash `search()` for an entire project slug on one bad row
+    (matches the established idiom in learnings-inject.py's config-cast
+    guards).
     """
     if not s:
         return 0.0
@@ -375,7 +386,7 @@ def _parse_iso(s: str) -> float:
         try:
             dt = datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
             return dt.timestamp()
-        except ValueError:
+        except (TypeError, ValueError):
             continue
     return 0.0
 
@@ -2025,7 +2036,7 @@ def supersede_entry(
     new_entry = build_entry(
         type_=inherited_type, content=content, source=source, confidence=inherited_conf,
         tags=inherited_tags, files=inherited_files, project=target_proj,
-        supersedes=old_id, supersede_reason=reason,
+        supersedes=old_id, supersede_reason=reason, dwell_until=dwell_until,
     )
 
     # A tier-raising supersede is a transcript-verified, structurally
