@@ -5,7 +5,8 @@ ccgm-learnings-search — rank + filter + token-cap learnings for injection.
 Usage:
     ccgm-learnings-search [--query "..."] [--tag foo --tag bar] [--type pattern ...]
                           [--cross-project] [--max N] [--budget TOKENS]
-                          [--format jsonl|markdown|preamble] [--include-stale]
+                          [--format jsonl|markdown|preamble]
+                          [--include-stale] [--include-superseded] [--include-dwelling]
                           [--project SLUG]
 
 Examples:
@@ -19,8 +20,12 @@ Examples:
     ccgm-learnings-search --query auth --format jsonl
 
 The search path applies time-based confidence decay, dedupes by (key, type),
-drops deprecated or stale-below-threshold entries, and caps output by the
-configured token budget (chars/4 approximation).
+drops deprecated, stale-below-threshold, or (optimistic-memory §3.2) still-
+dwelling entries, and caps output by the configured token budget (chars/4
+approximation). `--include-dwelling` surfaces a row still inside its
+dwell window -- one committed but not yet read-eligible -- the same way
+`--include-stale`/`--include-superseded` surface their respective
+otherwise-hidden rows.
 
 Every preamble/markdown entry is wrapped with a verification reminder --
 `[age: {N}d · last_verified: {date} · verify files[] anchors before
@@ -176,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--include-stale", action="store_true")
     p.add_argument("--include-superseded", action="store_true",
                    help="surface entries that have been replaced via supersede")
+    p.add_argument("--include-dwelling", action="store_true",
+                   help="surface entries still inside their dwell window (optimistic-memory §3.2)")
     p.add_argument("--format", choices=["jsonl", "markdown", "preamble"], default="preamble")
     p.add_argument("--list-projects", action="store_true")
     args = p.parse_args(argv)
@@ -195,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         token_budget=args.token_budget,
         include_stale=args.include_stale,
         include_superseded=args.include_superseded,
+        include_dwelling=args.include_dwelling,
     )
 
     if args.format == "jsonl":
