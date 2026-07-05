@@ -31,6 +31,21 @@ signals — the honest answer to "how do I know the memory system is working?"
   a reuse means a stored learning paid off across sessions.
 - **Applied** — proposals applied to the store in the window (apply-audit +
   proposals-dir funnel), by kind.
+- **Optimistic integration** — the optimistic-memory model's own safety
+  signals, so "is it working AND is it safe" is answerable at a glance:
+  - **auto-integrated** — proposals the optimistic engine itself applied this
+    window (apply-audit `method: "auto_apply"`), grouped by posture
+    (`optimistic-immediate` / `optimistic-dwell` / `dwell-quarantine`).
+  - **mid-dwell** — learnings currently inside their dwell window (written,
+    but not yet read-eligible) — a live snapshot as of report generation, not
+    window-scoped, mirroring Store health's own always-current framing.
+  - **reverted after review** — rows vetoed or batch-reverted this window
+    (apply-audit `outcome: "reverted"`). This is a convention `/dream-review`
+    (#804) is expected to write when it ships; until then this reads 0.
+  - **circuit-breaker trips** — how many times the windowed anomaly breaker
+    tripped this window (apply-audit `outcome: "circuit_breaker_tripped"`),
+    plus whether the breaker is currently suspended
+    (`state/optimistic.json`).
 - **Store health** — total active learnings, effective-confidence bands, and
   deprecated/superseded counts.
 
@@ -51,8 +66,11 @@ signals — the honest answer to "how do I know the memory system is working?"
 
 ## How it interacts with state
 
-Strictly **read-only** over the learnings store, proposals, apply-audit, and
-injection-log. The one write is the rendered markdown at
+Strictly **read-only** over the learnings store, proposals, apply-audit,
+injection-log, and `state/optimistic.json` (the circuit-breaker state file —
+read for the "currently suspended" line; a sibling of apply-audit.jsonl under
+`state/`, so no new path is threaded through the `.sh` wrapper). The one
+write is the rendered markdown at
 `~/.claude/dreaming/scorecards/{week-ending}.md`. All counting lives in
 `lib/scorecard.py` (deterministic, unit-tested); the `.sh` only resolves the
 window + wall clock. The library never reads the wall clock itself.

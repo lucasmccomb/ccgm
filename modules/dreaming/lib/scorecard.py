@@ -39,9 +39,32 @@ Data sources (all read-only):
     which carries the authoritative applied-at `ts`) cross-referenced with the
     proposals dir (~/.claude/dreaming/proposals/*.jsonl) for the
     generated->applied funnel.
+  - Optimistic integration (optimistic-memory plan.md Epic 7): auto-integrated
+    counts and circuit-breaker trips are read from the SAME apply-audit rows
+    Applied already loads (`method == "auto_apply"` and `outcome ==
+    "circuit_breaker_tripped"` respectively -- both already written today by
+    Epic 3's run_optimistic_integrate()/record_anomaly()). Mid-dwell is read
+    from the SAME projected heads Store health already computes
+    (`store_api.is_dwelling(head, now=...)`). "Currently suspended" is read
+    from ~/.claude/dreaming/state/optimistic.json -- a SIBLING of
+    apply-audit.jsonl under the same `state/` dir in every real deployment, so
+    its path is derived from `apply_audit_path` rather than threaded through
+    as a new `render()` parameter (keeps the `.sh` wrapper's call site
+    unchanged). "reverted-after-review" reads an `outcome == "reverted"`
+    apply-audit record -- a convention this Epic establishes for Epic 6
+    (`/dream-review` veto/revert, #804, not yet built as of this Epic) to
+    write, mirroring every other state-changing action in
+    apply_dream_proposal.py (exactly one `_write_audit()` call per action)
+    rather than inferring a revert after the fact from op-event archaeology.
+    Until Epic 6 ships that write, this legitimately reads 0 -- an accurate
+    "nothing reverted yet" answer, not a broken counter.
 
 Every section degrades gracefully: a missing/empty source prints
-"_no data this window._" and never raises.
+"_no data this window._" and never raises. The optimistic-integration
+section is the one exception to the "_no data_" fallback (matching Store
+health's own convention): it always renders concrete counts, including 0,
+since a missing apply-audit/state file is a fully-determined "zero activity"
+answer here, not an "unknown" one.
 """
 from __future__ import annotations
 
@@ -172,6 +195,21 @@ def _load_jsonl_dir(directory: Path) -> list[dict[str, Any]]:
     except OSError:
         return rows
     return rows
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    """Parse one JSON-object file (e.g. state/optimistic.json -- a single
+    object, NOT one-per-line JSONL). Missing file, unreadable file, or
+    non-object JSON -> {} (never raises), mirroring the JSONL loaders'
+    defensive philosophy above. Read-only: never creates or touches the
+    file when it is missing."""
+    try:
+        if not path.is_file():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _dedupe_by_id(lines: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -337,6 +375,60 @@ def _aggregate_applied(
     }
 
 
+def _aggregate_optimistic(
+    audit_rows: list[dict[str, Any]],
+    start: float,
+    end: float,
+) -> dict[str, Any]:
+    """Window-scoped optimistic-integration signals (optimistic-memory
+    plan.md Epic 7) -- read from the SAME apply-audit rows
+    `_aggregate_applied` already loads; no new data source.
+
+    auto-integrated: records the optimistic engine itself wrote
+    (`method == "auto_apply"`, `outcome == "applied"` --
+    `run_optimistic_integrate()`/`_process_one_proposal()` in
+    apply_dream_proposal.py), grouped by the `posture` string already
+    recorded on the same record (`resolve_posture()`'s
+    optimistic-immediate/optimistic-dwell/dwell-quarantine/gated).
+
+    reverted-after-review ("rows vetoed / reverts in the window"): see the
+    module docstring's "Optimistic integration" paragraph for why this counts
+    `outcome == "reverted"` -- a convention this Epic establishes for Epic 6
+    (#804, not yet built) to write, rather than inferring a revert from
+    op-event archaeology. Reads 0 until Epic 6 ships that write.
+
+    circuit-breaker trips: `outcome == "circuit_breaker_tripped"` records
+    already written today by `_evaluate_breaker_trip()`, from BOTH the
+    end-of-batch check in `run_optimistic_integrate()` and the standalone
+    `record_anomaly()` path (a red eval-gate night that never reaches
+    `run_optimistic_integrate()` at all) -- counting this outcome value
+    catches both sources of a trip.
+    """
+    auto_integrated_total = 0
+    auto_integrated_by_posture: Counter[str] = Counter()
+    reverted_total = 0
+    breaker_trips = 0
+
+    for r in audit_rows:
+        if not _in_window(_parse_ts(r.get("ts", "")), start, end):
+            continue
+        outcome = r.get("outcome")
+        if outcome == "applied" and r.get("method") == "auto_apply":
+            auto_integrated_total += 1
+            auto_integrated_by_posture[str(r.get("posture") or "unknown")] += 1
+        elif outcome == "reverted":
+            reverted_total += 1
+        elif outcome == "circuit_breaker_tripped":
+            breaker_trips += 1
+
+    return {
+        "auto_integrated_total": auto_integrated_total,
+        "auto_integrated_by_posture": dict(auto_integrated_by_posture),
+        "reverted_total": reverted_total,
+        "breaker_trips": breaker_trips,
+    }
+
+
 def _aggregate_health(
     slug_lines: dict[str, list[dict[str, Any]]],
     store_api: Any,
@@ -348,7 +440,7 @@ def _aggregate_health(
     (_project_lines + effective_confidence) -- no disk writes, no snapshot
     cache, no global-path coupling."""
     high = medium = low = 0
-    active = deprecated = superseded = 0
+    active = deprecated = superseded = dwelling = 0
     for lines in slug_lines.values():
         try:
             heads = store_api._project_lines(lines).get("heads", [])
@@ -373,6 +465,15 @@ def _aggregate_health(
                 medium += 1
             else:
                 low += 1
+            # optimistic-memory plan.md Epic 7: a still-dwelling row is real,
+            # active store content (only deprecated/superseded rows are
+            # excluded from "active" above) -- it is additionally flagged
+            # here as not-yet-read-eligible so the scorecard can surface it.
+            try:
+                if store_api.is_dwelling(head, now=now_epoch):
+                    dwelling += 1
+            except Exception:
+                pass
     return {
         "active": active,
         "high": high,
@@ -380,6 +481,7 @@ def _aggregate_health(
         "low": low,
         "deprecated": deprecated,
         "superseded": superseded,
+        "dwelling": dwelling,
     }
 
 
@@ -429,8 +531,8 @@ def render(
         proposals_dir: ~/.claude/dreaming/proposals.
         apply_audit_path: ~/.claude/dreaming/state/apply-audit.jsonl.
         store_api: the learnings_store module (used only for the pure
-            functions _project_lines + effective_confidence + optional
-            sanitize_content).
+            functions _project_lines + effective_confidence + is_dwelling +
+            optional sanitize_content).
         generated_at: report generation time, PASSED IN (no Date.now here).
         now: decay anchor for effective_confidence; defaults to window_end.
 
@@ -440,6 +542,11 @@ def render(
     injection_log_dir = Path(injection_log_dir)
     proposals_dir = Path(proposals_dir)
     apply_audit_path = Path(apply_audit_path)
+    # state/optimistic.json is a SIBLING of apply-audit.jsonl under state/ in
+    # every real deployment (both dream_analyze.state_dir()-rooted) -- derived
+    # here rather than threaded as a new render() parameter so the .sh
+    # wrapper's call site needs no change (plan.md Epic 7).
+    optimistic_state_path = apply_audit_path.parent / "optimistic.json"
 
     start = _to_epoch(window_start)
     end = _to_epoch(window_end)
@@ -452,11 +559,13 @@ def render(
     injection_rows = _load_jsonl_dir(injection_log_dir)
     proposal_rows = _load_jsonl_dir(proposals_dir)
     audit_rows = _load_jsonl(apply_audit_path)
+    optimistic_state = _load_json_object(optimistic_state_path)
 
     # --- Aggregate ---------------------------------------------------------
     cap = _aggregate_captured_reused(slug_lines, start, end)
     inj = _aggregate_injected(injection_rows, start, end)
     app = _aggregate_applied(audit_rows, proposal_rows, start, end)
+    opt = _aggregate_optimistic(audit_rows, start, end)
     health = _aggregate_health(slug_lines, store_api, now_epoch)
 
     # Build an id -> content map only from the reused targets, so the reused
@@ -569,6 +678,33 @@ def render(
         if app["applied_by_kind"]:
             for kind, n in sorted(app["applied_by_kind"].items(), key=lambda kv: (-kv[1], kv[0])):
                 out.append(f"  - {kind}: {n}")
+    out.append("")
+
+    # --- 4b. Optimistic integration (plan.md Epic 7) ------------------------
+    # Unlike every section above, this one never falls back to _NO_DATA: a
+    # missing apply-audit/state file is a fully-determined "zero activity"
+    # answer here (matching Store health's own always-numeric convention),
+    # not an "unknown" one.
+    out.append(
+        f"## Optimistic integration — {opt['auto_integrated_total']} auto-integrated · "
+        f"{health['dwelling']} mid-dwell · {opt['reverted_total']} reverted · "
+        f"{opt['breaker_trips']} breaker trips"
+    )
+    out.append("")
+    out.append(f"- auto-integrated this window: {opt['auto_integrated_total']}")
+    if opt["auto_integrated_by_posture"]:
+        for posture, n in sorted(
+            opt["auto_integrated_by_posture"].items(), key=lambda kv: (-kv[1], kv[0])
+        ):
+            out.append(f"  - {posture}: {n}")
+    out.append(f"- mid-dwell (currently, all projects): {health['dwelling']}")
+    out.append(f"- reverted after review (veto/batch-revert) this window: {opt['reverted_total']}")
+    out.append(f"- circuit-breaker trips this window: {opt['breaker_trips']}")
+    if optimistic_state.get("suspended"):
+        since = optimistic_state.get("suspended_at") or "unknown time"
+        out.append(f"- currently suspended: yes (since {since})")
+    else:
+        out.append("- currently suspended: no")
     out.append("")
 
     # --- 5. Store health ---------------------------------------------------

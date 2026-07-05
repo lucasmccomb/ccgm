@@ -65,6 +65,13 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
             fh.write(json.dumps(r) + "\n")
 
 
+def _write_json(path: Path, obj: dict) -> None:
+    """Write ONE JSON object (not JSONL) -- for state/optimistic.json
+    fixtures, which are a single object, never one-per-line."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj), encoding="utf-8")
+
+
 class ScorecardRenderTest(unittest.TestCase):
     # Week ending 2026-06-30 -> window [2026-06-24 00:00Z, 2026-07-01 00:00Z).
     WINDOW_START = datetime(2026, 6, 24, tzinfo=UTC)
@@ -338,6 +345,207 @@ class ScorecardWrapperSmokeTest(unittest.TestCase):
         body = out_file.read_text(encoding="utf-8")
         self.assertIn("# Dreaming scorecard — week ending 2026-06-30", body)
         self.assertIn("## Store health — 1 active learnings", body)
+
+
+class ScorecardOptimisticTest(unittest.TestCase):
+    """Epic 7 (optimistic-memory plan.md, #805): auto-integrated (by
+    posture), mid-dwell, reverted-after-review, circuit-breaker-trips.
+
+    Independent fixtures/tmpdir from ScorecardRenderTest (own apply-audit
+    file, own learnings dir): ScorecardRenderTest's `_audit()` builder always
+    stamps `method: "human_accept"`, so adding `method: "auto_apply"` rows to
+    that SHARED fixture file would inflate `_aggregate_applied`'s existing
+    "Applied" counts too (that aggregator counts ANY ok/outcome=="applied"
+    row regardless of method) -- pinned by `test_applied_exact` above, which
+    this class must not perturb.
+
+    Primary scenario matches plan.md Epic 7's test spec: 3 auto-applied
+    adds, 1 dwelling row, 1 revert, 1 breaker trip.
+    """
+
+    WINDOW_START = datetime(2026, 6, 24, tzinfo=UTC)
+    WINDOW_END = datetime(2026, 7, 1, tzinfo=UTC)
+    GENERATED_AT = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="ccgm-scorecard-opt-test-"))
+        self.learnings_dir = self.root / "learnings"
+        self.injection_dir = self.root / "dreaming" / "injection-log"
+        self.proposals_dir = self.root / "dreaming" / "proposals"
+        self.audit_path = self.root / "dreaming" / "state" / "apply-audit.jsonl"
+        # optimistic.json is a SIBLING of apply-audit.jsonl under state/ --
+        # render() derives this path itself; no new render() kwarg needed.
+        self.state_path = self.audit_path.parent / "optimistic.json"
+
+        # One head with a future dwell_until (mid-dwell as of window_end, the
+        # `now` anchor render() defaults to) + one whose dwell already
+        # elapsed (must NOT count as dwelling).
+        _write_jsonl(self.learnings_dir / "acme_widget" / "agents" / "agent-a.jsonl", [
+            self._add("OA1", _ts(25), "auto-integrated add, still dwelling",
+                       "2026-07-05T00:00:00.000Z"),
+            self._add("OA2", _ts(26), "auto-integrated add, dwell already elapsed",
+                       "2026-06-25T00:00:00.000Z"),
+        ])
+
+        # 3 auto-applied adds (posture optimistic-dwell) + 1 reverted-after-
+        # review + 1 circuit-breaker trip, all in-window; 1 auto-applied add
+        # BEFORE the window (must not inflate the count). The "reverted" and
+        # "circuit_breaker_tripped" rows deliberately carry NO `ok` field
+        # (matching the on-disk shape of every other non-apply audit outcome,
+        # e.g. circuit_breaker_tripped/anomaly_recorded in
+        # apply_dream_proposal.py) -- `_aggregate_applied`'s existing
+        # predicate (`ok is True or outcome == "applied"`) would otherwise
+        # double-count a "reverted" row into the Applied section too.
+        _write_jsonl(self.audit_path, [
+            self._auto_applied(_ts(25, 10), "opt1"),
+            self._auto_applied(_ts(26, 10), "opt1"),
+            self._auto_applied(_ts(27, 10), "opt1"),
+            {"id": "audit_revert_1", "ts": _ts(28, 9), "outcome": "reverted",
+             "target_id": "OA2", "method": "human_veto"},
+            {"id": "audit_trip_1", "ts": _ts(28, 11), "outcome": "circuit_breaker_tripped",
+             "batch_id": "opt1", "detail": "2 anomalies within 7 night window (threshold 2)"},
+            self._auto_applied(_ts(20, 10), "opt0"),  # before window -> excluded
+        ])
+
+    @staticmethod
+    def _add(id_, ts, content, dwell_until):
+        return {"id": id_, "op": "add", "target_id": None, "timestamp": ts, "type": "pattern",
+                "content": content, "confidence": 8, "project": "acme_widget",
+                "dwell_until": dwell_until}
+
+    @staticmethod
+    def _auto_applied(ts, batch_id):
+        return {"id": f"audit_add_{ts}", "ts": ts, "kind": "learning_add", "outcome": "applied",
+                "ok": True, "method": "auto_apply", "posture": "optimistic-dwell",
+                "batch_id": batch_id, "proposal_id": f"prop-{ts}"}
+
+    def _render(self) -> str:
+        return scorecard.render(
+            self.WINDOW_START,
+            self.WINDOW_END,
+            learnings_dir=self.learnings_dir,
+            injection_log_dir=self.injection_dir,
+            proposals_dir=self.proposals_dir,
+            apply_audit_path=self.audit_path,
+            store_api=learnings_store,
+            generated_at=self.GENERATED_AT,
+        )
+
+    def test_auto_integrated_exact(self):
+        md = self._render()
+        self.assertIn("auto-integrated this window: 3", md)
+        self.assertIn("optimistic-dwell: 3", md)
+        # Out-of-window auto-applied row (opt0) must not inflate the count.
+        self.assertNotIn("4 auto-integrated", md)
+        self.assertNotIn("auto-integrated this window: 4", md)
+
+    def test_dwell_pending_exact(self):
+        md = self._render()
+        self.assertIn("mid-dwell (currently, all projects): 1", md)
+
+    def test_reverted_exact(self):
+        md = self._render()
+        self.assertIn("reverted after review (veto/batch-revert) this window: 1", md)
+
+    def test_breaker_trips_exact(self):
+        md = self._render()
+        self.assertIn("circuit-breaker trips this window: 1", md)
+
+    def test_reverted_and_trip_not_double_counted_as_applied(self):
+        # The pre-existing Applied-section predicate is `ok is True or
+        # outcome == "applied"`. The "reverted"/"circuit_breaker_tripped"
+        # rows carry no `ok` field and neither outcome is "applied", so only
+        # the 3 genuine auto-applied adds should land in "Applied".
+        md = self._render()
+        self.assertIn("## Applied — 3 proposals applied this window", md)
+        self.assertIn("applied this window: 3", md)
+
+    def test_header_line_exact(self):
+        md = self._render()
+        self.assertIn(
+            "## Optimistic integration — 3 auto-integrated · 1 mid-dwell · "
+            "1 reverted · 1 breaker trips",
+            md,
+        )
+
+    def test_deterministic_same_fixtures_same_window(self):
+        self.assertEqual(self._render(), self._render())
+
+    def test_currently_suspended_reads_state_file(self):
+        _write_json(self.state_path, {
+            "suspended": True, "suspended_at": "2026-06-28T11:05:00.000Z",
+            "anomaly_log": [], "last_run": "2026-06-28T11:05:00.000Z",
+        })
+        md = self._render()
+        self.assertIn("currently suspended: yes (since 2026-06-28T11:05:00.000Z)", md)
+
+    def test_currently_suspended_false_when_state_file_missing(self):
+        md = self._render()
+        self.assertNotIn("currently suspended: yes", md)
+        self.assertIn("currently suspended: no", md)
+
+    def test_read_only_no_writes(self):
+        audit_before = self.audit_path.read_bytes()
+        state_existed_before = self.state_path.is_file()
+        self._render()
+        self.assertEqual(self.audit_path.read_bytes(), audit_before)
+        # _load_json_object must never CREATE optimistic.json as a side
+        # effect of reading a missing one.
+        self.assertEqual(self.state_path.is_file(), state_existed_before)
+
+    def test_returns_str_no_traceback(self):
+        md = self._render()
+        self.assertIsInstance(md, str)
+        self.assertNotIn("Traceback", md)
+
+
+class ScorecardOptimisticPostureMixTest(unittest.TestCase):
+    """Separate, minimal fixture proving auto-integrated actually GROUPS by
+    posture (Epic 7 Outputs: "by posture") rather than summing everything
+    into one bucket -- ScorecardOptimisticTest's single-posture scenario
+    cannot distinguish correct grouping from no grouping at all."""
+
+    WINDOW_START = datetime(2026, 6, 24, tzinfo=UTC)
+    WINDOW_END = datetime(2026, 7, 1, tzinfo=UTC)
+
+    def test_groups_by_posture(self):
+        root = Path(tempfile.mkdtemp(prefix="ccgm-scorecard-opt-posture-"))
+        audit_path = root / "dreaming" / "state" / "apply-audit.jsonl"
+        empty = root / "empty"
+        _write_jsonl(audit_path, [
+            {"id": "a1", "ts": _ts(25, 10), "kind": "learning_add", "outcome": "applied",
+             "ok": True, "method": "auto_apply", "posture": "optimistic-dwell", "batch_id": "b1"},
+            {"id": "a2", "ts": _ts(26, 10), "kind": "learning_verify", "outcome": "applied",
+             "ok": True, "method": "auto_apply", "posture": "optimistic-immediate", "batch_id": "b1"},
+            {"id": "a3", "ts": _ts(27, 10), "kind": "learning_verify", "outcome": "applied",
+             "ok": True, "method": "auto_apply", "posture": "optimistic-immediate", "batch_id": "b1"},
+            {"id": "a4", "ts": _ts(28, 10), "kind": "learning_contradict", "outcome": "applied",
+             "ok": True, "method": "auto_apply", "posture": "dwell-quarantine", "batch_id": "b1"},
+            # A human-accepted (non-auto) apply must NOT be counted here.
+            {"id": "a5", "ts": _ts(28, 11), "kind": "learning_add", "outcome": "applied",
+             "ok": True, "method": "human_accept", "proposal_id": "p-human"},
+        ])
+        md = scorecard.render(
+            self.WINDOW_START, self.WINDOW_END,
+            learnings_dir=empty / "learnings",
+            injection_log_dir=empty / "inj",
+            proposals_dir=empty / "prop",
+            apply_audit_path=audit_path,
+            store_api=learnings_store,
+            generated_at=self.WINDOW_END,
+        )
+        self.assertIn("auto-integrated this window: 4", md)
+        self.assertIn("optimistic-immediate: 2", md)
+        self.assertIn("optimistic-dwell: 1", md)
+        self.assertIn("dwell-quarantine: 1", md)
+        # Sorted by -count then posture name ASC: immediate(2) first, then
+        # the count=1 tie broken alphabetically ("dwell-quarantine" <
+        # "optimistic-dwell").
+        idx_immediate = md.index("optimistic-immediate: 2")
+        idx_quarantine = md.index("dwell-quarantine: 1")
+        idx_dwell = md.index("optimistic-dwell: 1")
+        self.assertLess(idx_immediate, idx_quarantine)
+        self.assertLess(idx_quarantine, idx_dwell)
 
 
 if __name__ == "__main__":
