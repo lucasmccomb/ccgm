@@ -82,6 +82,31 @@ concurrent invocations of the same id -- same process or two separate OS
 processes (e.g. the nightly auto-apply LaunchAgent racing a human's
 `/dream-apply accept`) -- can never both observe `pending` and both mutate
 the store.
+
+Optimistic auto-integration engine (optimistic-memory plan.md Epic 3):
+`run_optimistic_integrate()` supersedes `run_auto_apply()`'s narrow
+verify-only predicate with a full per-op-kind posture engine
+(`dream_analyze.resolve_posture()`), per-slug blast-radius caps, a batch
+eviction-concentration anomaly check, a cross-night accumulation signal,
+and a windowed circuit breaker (`state/optimistic.json`). `run_auto_apply()`
+itself is left UNCHANGED (still reachable via the `auto-apply` CLI
+subcommand) for backward compatibility with its existing callers/tests;
+`dream-daily.sh`'s nightly chain now calls `optimistic-integrate` instead.
+Every proposal this engine applies goes through the SAME `apply_proposal()`
+this module already uses for human accepts, so the existing human-race
+lock (adrev-013, above) and per-outcome audit trail cover the new path for
+free -- the engine adds three NEW optional `apply_proposal()` parameters
+(`dwell_hours`, `batch_id`, `posture`) that are no-ops (None) for every
+existing caller.
+
+Lock topology (adrev-opt-011): the engine NEVER holds `_apply_lock()` across
+the batch -- each proposal is applied through `apply_proposal()`, which
+takes/releases the lock per call exactly as it does today. The breaker
+state read (before the loop) and the breaker state write + single batch
+commit (after the loop) each acquire the lock in their OWN, non-nested
+critical section. `fcntl.flock` is non-reentrant; nesting a batch-wide lock
+around per-proposal `apply_proposal()` calls would self-deadlock on the
+very first row.
 """
 from __future__ import annotations
 
@@ -93,6 +118,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import traceback
 import uuid
 from pathlib import Path
@@ -166,7 +192,37 @@ def _run_learnings_log(args: list[str]) -> subprocess.CompletedProcess:
     )
 
 
-def _run_sync_commit() -> dict[str, Any]:
+_AUTOCOMMIT_ENV_KEY = "CCGM_LEARNINGS_AUTOCOMMIT"
+
+
+@contextlib.contextmanager
+def _suppressed_autocommit():
+    """Force `CCGM_LEARNINGS_AUTOCOMMIT=false` for every `ccgm-learnings-log`
+    subprocess spawned while this context is active (adrev-opt-013).
+
+    `subprocess.run(..., env=None)` inherits the CURRENT `os.environ` at
+    call time, so mutating `os.environ` itself for the duration of a batch
+    is sufficient -- no need to thread an `env=` override through
+    `_run_learnings_log()`. The optimistic engine commits the WHOLE batch
+    exactly once at the end (`_run_sync_commit()`); if the operator's
+    ambient environment has per-write autocommit enabled, it must not fire
+    mid-batch and turn an N-write batch into up to N separate commits
+    (which would make Epic 5's single-SHA "revert this batch" UX revert
+    only one of the N writes). Restores whatever value (or absence) the key
+    had on entry, even if the body raises.
+    """
+    previous = os.environ.get(_AUTOCOMMIT_ENV_KEY)
+    os.environ[_AUTOCOMMIT_ENV_KEY] = "false"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(_AUTOCOMMIT_ENV_KEY, None)
+        else:
+            os.environ[_AUTOCOMMIT_ENV_KEY] = previous
+
+
+def _run_sync_commit(message: str | None = None) -> dict[str, Any]:
     """Blocking `ccgm-learnings-sync commit` -- the spec's "runs
     ccgm-learnings-sync commit after a batch" requirement. Called once per
     CLI invocation (a single accept/reject IS a batch of one; auto-apply
@@ -178,14 +234,23 @@ def _run_sync_commit() -> dict[str, Any]:
     boolean"). Never raises: a sync failure (no git repo yet, no remote,
     binary missing) must not crash the apply CLI -- the store write itself
     already landed regardless of whether this commit succeeds.
+
+    `message`, if given, is passed as `-m <message>` (adrev-opt-013): the
+    optimistic engine tags its one-commit-per-batch with the `batch_id` so
+    a human reading `git log` in the learnings store can identify -- and
+    revert -- one night's whole batch by its commit message. `None` (every
+    existing caller) preserves the CLI's own default message.
     """
     try:
         binpath = _resolve_sibling_bin("ccgm-learnings-sync")
     except FileNotFoundError as exc:
         return {"ok": False, "reason": str(exc)}
+    argv = [sys.executable, binpath, "commit"]
+    if message:
+        argv += ["-m", message]
     try:
         proc = subprocess.run(
-            [sys.executable, binpath, "commit"],
+            argv,
             capture_output=True, text=True, check=False,
         )
     except OSError as exc:
@@ -304,8 +369,11 @@ def _apply_lock():
         os.close(fd)
 
 
-def _rewrite_status_locked(path: Path, proposal_id: str, new_status: str) -> dict[str, Any] | None:
-    """Read-modify-write of exactly the `status` field on one row.
+def _rewrite_status_locked(
+    path: Path, proposal_id: str, new_status: str, *, extra_fields: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Read-modify-write of exactly the `status` field (plus, optionally,
+    `extra_fields`) on one row.
 
     Callers MUST already hold `_apply_lock()` -- this function never
     acquires it itself (acquiring the same fcntl.flock a second time via a
@@ -314,9 +382,16 @@ def _rewrite_status_locked(path: Path, proposal_id: str, new_status: str) -> dic
     now holds the lock across its whole critical section and calls this
     directly instead of the locking `_rewrite_status()` wrapper below).
 
+    `extra_fields` (optimistic-memory plan.md §3.4): the optimistic engine
+    additionally records `batch_id`, `posture`, and (for dwell postures)
+    `dwell_until` onto a proposal it auto-applies, so Epic 5's report can
+    group tonight's batch and Epic 6's rollback can filter by `batch_id`.
+    `None` (every pre-Epic-3 caller) writes only `status`, unchanged from
+    before this parameter existed.
+
     Every parseable row is re-serialized (not hand-patched as a text diff),
     so the frozen proposal-schema.json shape Epic 3 owns is round-tripped
-    exactly as dream_analyze.py wrote it, plus the one field this module is
+    exactly as dream_analyze.py wrote it, plus the field(s) this module is
     licensed to touch. A line that fails to parse as a JSON object (a
     corrupt or torn write from an unrelated, sibling proposal) is preserved
     VERBATIM rather than crashing the rewrite -- mirrors `_read_jsonl()`'s
@@ -349,6 +424,8 @@ def _rewrite_status_locked(path: Path, proposal_id: str, new_status: str) -> dic
             continue
         if row.get("id") == proposal_id:
             row["status"] = new_status
+            if extra_fields:
+                row.update(extra_fields)
             updated = row
         out_lines.append(json.dumps(row, sort_keys=True))
     if updated is None:
@@ -396,7 +473,8 @@ def _first_evidence_session(row: dict[str, Any]) -> str | None:
 
 
 def _apply_learning_add(
-    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept"
+    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept",
+    dwell_hours: float | None = None,
 ) -> dict[str, Any]:
     if row.get("project") == GLOBAL_SLUG:
         return _apply_global_add(row, reviewed_by=reviewed_by)
@@ -408,6 +486,18 @@ def _apply_learning_add(
         "--source", DEFAULT_MINED_SOURCE,
         "--project", row["project"],
     ]
+    if method == "auto_apply":
+        # adrev-opt-008: tag the engine's own optimistic writes `auto: true`
+        # so memory_eval.py's freshness clock (Epic 4) can skip them --
+        # only reachable because Epic 1 extended `--auto` to every
+        # ccgm-learnings-log subcommand, not just verify.
+        args.append("--auto")
+    if dwell_hours is not None:
+        # optimistic-memory §3.2: needs_dwell postures (add/supersede/
+        # contradict/deprecate) thread the engine's configured dwell_hours
+        # as a FLOOR -- the store applies max(existing, new) at the fold
+        # layer, so this can only extend, never shorten, a target's dwell.
+        args += ["--dwell-hours", str(int(dwell_hours))]
     session = _first_evidence_session(row)
     if session:
         args += ["--session", session]
@@ -473,13 +563,23 @@ def _looks_like_uncaught_exception(stderr: str) -> bool:
     return "Traceback (most recent call last):" in stderr
 
 
-def _apply_counter_op(row: dict[str, Any], op: str, *, auto: bool = False) -> dict[str, Any]:
+def _apply_counter_op(
+    row: dict[str, Any], op: str, *, auto: bool = False, dwell_hours: float | None = None,
+) -> dict[str, Any]:
     args = [op, row["target_id"], "--project", row["project"]]
     if auto:
         # adrev-404: an unattended auto-apply verify must NOT refresh
-        # last_verified. `--auto` is a verify-only flag on ccgm-learnings-log;
-        # only _apply_learning_verify ever passes auto=True here.
+        # last_verified. For verify specifically, `--auto` means "bump uses
+        # only" (VF6). For contradict (the other _apply_counter_op caller,
+        # optimistic-memory Epic 3), `--auto` just tags the write as
+        # unattended for audit/reporting -- adrev-opt-008 extended `--auto`
+        # to every subcommand in Epic 1, it is no longer verify-only.
         args.append("--auto")
+    if dwell_hours is not None:
+        # optimistic-memory §3.2: contradict is `dwell-quarantine` --
+        # dwell is MANDATORY for this kind. Floor semantics (max-with-
+        # existing) are enforced at the store's fold layer, not here.
+        args += ["--dwell-hours", str(int(dwell_hours))]
     session = _first_evidence_session(row)
     if session:
         args += ["--session", session]
@@ -494,19 +594,32 @@ def _apply_counter_op(row: dict[str, Any], op: str, *, auto: bool = False) -> di
 
 
 def _apply_learning_verify(
-    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept"
+    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept",
+    dwell_hours: float | None = None,
 ) -> dict[str, Any]:
     # adrev-404: an unattended auto-apply (method == "auto_apply") issues an
     # AUTO verify (bump uses, do NOT refresh last_verified). A human accept
     # (method == "human_accept", the /dream-apply accept path) issues a normal
-    # verify that refreshes last_verified exactly as before.
-    return _apply_counter_op(row, "verify", auto=(method == "auto_apply"))
+    # verify that refreshes last_verified exactly as before. `verify`'s
+    # posture is `optimistic-immediate` (needs_dwell=False, plan.md §3.3),
+    # so the optimistic engine never passes a real dwell_hours here -- this
+    # parameter exists only for signature parity with the other handlers in
+    # `_HANDLERS` (apply_proposal() calls every handler uniformly) and so a
+    # human accept could, in principle, extend a target's existing dwell
+    # floor via the same `--dwell-hours` flag ccgm-learnings-log already
+    # exposes on `verify`.
+    return _apply_counter_op(row, "verify", auto=(method == "auto_apply"), dwell_hours=dwell_hours)
 
 
 def _apply_learning_contradict(
-    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept"
+    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept",
+    dwell_hours: float | None = None,
 ) -> dict[str, Any]:
-    return _apply_counter_op(row, "contradict")
+    # optimistic-memory §3.3: contradict is `dwell-quarantine` -- the
+    # optimistic engine (method == "auto_apply") tags the write `auto` and
+    # supplies a mandatory dwell_hours; a human accept (the existing
+    # /dream-apply path) passes neither, identical to pre-Epic-3 behavior.
+    return _apply_counter_op(row, "contradict", auto=(method == "auto_apply"), dwell_hours=dwell_hours)
 
 
 def _current_content_sha_if_live(project: str, target_id: str) -> tuple[str, None] | tuple[None, str]:
@@ -575,10 +688,19 @@ def _apply_cas_op(row: dict[str, Any], *, build_argv: Callable[[str], list[str]]
 
 
 def _apply_learning_deprecate(
-    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept"
+    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept",
+    dwell_hours: float | None = None,
 ) -> dict[str, Any]:
+    # optimistic-memory §3.3: deprecate is `dwell-quarantine`, same shape as
+    # contradict but blunter (hard-excludes vs. soft confidence cut).
+    auto = method == "auto_apply"
+
     def build_argv(sha: str) -> list[str]:
         args = ["deprecate", row["target_id"], "--project", row["project"], "--expected-sha", sha]
+        if auto:
+            args.append("--auto")
+        if dwell_hours is not None:
+            args += ["--dwell-hours", str(int(dwell_hours))]
         session = _first_evidence_session(row)
         if session:
             args += ["--session", session]
@@ -588,8 +710,16 @@ def _apply_learning_deprecate(
 
 
 def _apply_learning_supersede(
-    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept"
+    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept",
+    dwell_hours: float | None = None,
 ) -> dict[str, Any]:
+    # optimistic-memory §3.3: supersede is `optimistic-dwell`, the same
+    # posture as add -- the surgical-rewrite-of-a-trusted-row attack the
+    # compaction guard (compact_preserves_facts, checked upstream in
+    # dream_analyze.py before this proposal was even written) already
+    # defends against.
+    auto = method == "auto_apply"
+
     def build_argv(sha: str) -> list[str]:
         args = [
             "supersede", row["target_id"],
@@ -601,6 +731,10 @@ def _apply_learning_supersede(
         ]
         if row.get("justification"):
             args += ["--reason", row["justification"]]
+        if auto:
+            args.append("--auto")
+        if dwell_hours is not None:
+            args += ["--dwell-hours", str(int(dwell_hours))]
         session = _first_evidence_session(row)
         if session:
             args += ["--session", session]
@@ -623,7 +757,10 @@ _HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
 # ---------------------------------------------------------------------------
 
 
-def apply_proposal(proposal_id: str, *, method: str = "human_accept", reviewed_by: str | None = None) -> dict[str, Any]:
+def apply_proposal(
+    proposal_id: str, *, method: str = "human_accept", reviewed_by: str | None = None,
+    dwell_hours: float | None = None, batch_id: str | None = None, posture: str | None = None,
+) -> dict[str, Any]:
     """The single write entry point for accepting a pending proposal.
 
     Refuses (adrev-013) any proposal whose status is not 'pending' rather
@@ -633,6 +770,17 @@ def apply_proposal(proposal_id: str, *, method: str = "human_accept", reviewed_b
     states this path is licensed to write. Every OTHER outcome leaves the
     row 'pending' (schema-safe, retry-visible). Always writes exactly one
     audit record, whatever the outcome (adrev-012/adrev-302: never silent).
+
+    `dwell_hours`/`batch_id`/`posture` (optimistic-memory plan.md §3.2/§3.4,
+    Epic 3): optional, `None` for every pre-Epic-3 caller (human accept via
+    `/dream-apply`, `run_auto_apply()`'s verify-only path). `dwell_hours` is
+    threaded into the handler so a `needs_dwell` posture's
+    `ccgm-learnings-log` invocation carries `--dwell-hours` (the store
+    applies it as a FLOOR, never a shortening, at the fold layer --
+    learnings_store.py's `_max_dwell`). `batch_id`/`posture` are recorded
+    onto the proposal row itself (not threaded into the handler -- they do
+    not affect the store write) so Epic 5's report can group tonight's
+    batch and Epic 6's rollback can filter by `batch_id`.
 
     The ENTIRE read -> not-pending-check -> handler-dispatch -> status-
     rewrite sequence runs under a single `_apply_lock()` acquisition, so two
@@ -644,9 +792,15 @@ def apply_proposal(proposal_id: str, *, method: str = "human_accept", reviewed_b
     itself is never allowed to raise past this function: an unexpected
     exception (a malformed/schema-drifted proposal row, for example) is
     caught and turned into an audited `internal_error` outcome rather than
-    crashing the process -- which matters doubly for `run_auto_apply()`,
-    whose per-row loop calls this function and depends on one bad row never
-    aborting evaluation of the rest of the batch.
+    crashing the process -- which matters doubly for `run_auto_apply()` and
+    `run_optimistic_integrate()`, whose per-row loops call this function and
+    depend on one bad row never aborting evaluation of the rest of the batch.
+
+    Lock topology note (adrev-opt-011): this function's own `_apply_lock()`
+    acquisition is per-proposal, exactly as before Epic 3. The optimistic
+    engine calls this function once per proposal inside its loop -- it never
+    wraps a whole batch of these calls in an OUTER `_apply_lock()`, which
+    would self-deadlock (flock is non-reentrant).
     """
     reviewed_by = reviewed_by or os.environ.get("USER") or os.environ.get("LOGNAME") or "human"
 
@@ -678,7 +832,7 @@ def apply_proposal(proposal_id: str, *, method: str = "human_accept", reviewed_b
             return record
 
         try:
-            result = handler(row, reviewed_by=reviewed_by, method=method)
+            result = handler(row, reviewed_by=reviewed_by, method=method, dwell_hours=dwell_hours)
         except Exception:  # noqa: BLE001 -- deliberate: a handler crash must become
             # an audited outcome, never an uncaught exception (adrev-012/adrev-302
             # "never silent"; also what keeps run_auto_apply's batch loop alive).
@@ -688,13 +842,24 @@ def apply_proposal(proposal_id: str, *, method: str = "human_accept", reviewed_b
 
         if ok:
             new_status = "auto_applied" if method == "auto_apply" else "accepted"
-            _rewrite_status_locked(path, proposal_id, new_status)
+            extra_fields: dict[str, Any] = {}
+            if batch_id is not None:
+                extra_fields["batch_id"] = batch_id
+            if posture is not None:
+                extra_fields["posture"] = posture
+            if dwell_hours is not None:
+                extra_fields["dwell_until"] = learnings_store.dwell_until_from_hours(dwell_hours)
+            _rewrite_status_locked(path, proposal_id, new_status, extra_fields=extra_fields or None)
 
         record = {
             "proposal_id": proposal_id, "kind": kind, "project": row.get("project"),
             "target_id": row.get("target_id"), "method": method, "reviewed_by": reviewed_by,
             "ok": ok, **result,
         }
+        if batch_id is not None:
+            record["batch_id"] = batch_id
+        if posture is not None:
+            record["posture"] = posture
         _write_audit(record)
         return record
 
@@ -746,6 +911,12 @@ def run_auto_apply(day: str) -> dict[str, Any]:
     handled the same as any other failed_promotion, not special-cased,
     since the store's own guard is the real backstop, not this predicate.
     Never raises; a single proposal's failure does not abort the batch.
+
+    RETAINED for backward compatibility (its own CLI subcommand and test
+    coverage predate Epic 3) but no longer called by dream-daily.sh's
+    nightly chain -- `run_optimistic_integrate()` below supersedes it
+    there, applying `learning_verify` through the SAME posture engine
+    (`optimistic-immediate`, no dwell) as every other op-kind.
     """
     path = proposals_dir() / f"{day}.jsonl"
     summary: dict[str, Any] = {
@@ -769,6 +940,668 @@ def run_auto_apply(day: str) -> dict[str, Any]:
             summary["applied"] += 1
         else:
             summary["failed"] += 1
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Optimistic auto-integration engine (optimistic-memory plan.md Epic 3).
+#
+# run_optimistic_integrate() supersedes run_auto_apply()'s narrow verify-
+# only predicate with the full per-op-kind posture engine
+# (dream_analyze.resolve_posture()), per-slug blast-radius caps, a batch
+# eviction-concentration anomaly check, a cross-night accumulation signal,
+# and a windowed circuit breaker. Config/eval-gate checking lives in
+# dream-daily.sh (bash), exactly as it did for the retired
+# run_auto_apply_step -- this module's job is the structural per-proposal
+# predicate plus the actual apply loop.
+# ---------------------------------------------------------------------------
+
+OPTIMISTIC_STATE_FILENAME = "optimistic.json"
+
+# An eviction batch of size 1 cannot be "concentrated" -- every possible
+# grouping of a single item is trivially 100% of that item, which would
+# make every lone quarantine proposal a false anomaly. The batch-anomaly
+# check (plan.md §3.3) requires at least this many contradict/deprecate
+# candidates in a slug's pending batch before the configured fraction
+# threshold is even meaningful.
+MIN_EVICTION_BATCH_FOR_ANOMALY_CHECK = 2
+
+# Ledger `model` field value the eval-refresh step tags its own cost.log
+# rows with (see run_eval_refresh below) -- distinguishes its spend from
+# the nightly analyzer's map_model/reduce_model rows in the SAME shared
+# ledger file (adrev-opt-010).
+EVAL_REFRESH_COST_LABEL = "eval-refresh"
+
+
+def optimistic_state_path() -> Path:
+    return state_dir() / OPTIMISTIC_STATE_FILENAME
+
+
+def _default_optimistic_state() -> dict[str, Any]:
+    return {"suspended": False, "suspended_at": None, "anomaly_log": [], "last_run": None}
+
+
+def _read_optimistic_state() -> dict[str, Any]:
+    """Fail-CLOSED on any parse problem (adrev-opt-014): a corrupt or
+    unreadable state file must never silently un-suspend the breaker -- it
+    is treated as an immediate, freshly-timestamped suspension instead. A
+    missing file (never tripped, or first run ever) is the one case that
+    legitimately means "not suspended"; that is `_default_optimistic_state()`
+    verbatim, not a parse failure.
+    """
+    path = optimistic_state_path()
+    if not path.is_file():
+        return _default_optimistic_state()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {**_default_optimistic_state(), "suspended": True, "suspended_at": _utc_now_iso()}
+    if not isinstance(data, dict):
+        return {**_default_optimistic_state(), "suspended": True, "suspended_at": _utc_now_iso()}
+    merged = _default_optimistic_state()
+    merged.update(data)
+    if not isinstance(merged.get("anomaly_log"), list):
+        # A valid-JSON-but-wrong-shape anomaly_log (e.g. hand-edited) must
+        # not crash the rolling-window computation below -- coerce to an
+        # empty list rather than fail the whole read (the top-level parse
+        # guard above already covers the "file is garbage" case).
+        merged["anomaly_log"] = []
+    return merged
+
+
+def _write_optimistic_state_atomic(state: dict[str, Any]) -> None:
+    """Temp-file + `Path.replace()` (an atomic rename on POSIX) -- adrev-
+    opt-014: never an in-place partial write. Mirrors dream_analyze.py's
+    `_write_json_atomic()` (same three-line pattern, reimplemented here
+    rather than imported since this module does not otherwise depend on
+    that helper)."""
+    path = optimistic_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(state, sort_keys=True, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _live_head_count(slug: str) -> int:
+    """Count of `slug`'s currently-live heads: not deprecated, not already
+    superseded (mirrors search()'s own superseded-exclusion and
+    effective_confidence()'s deprecated -> 0.0 treatment -- "real,
+    currently relevant store content"). A still-dwelling row counts as live
+    (it IS real store content, just not yet read-eligible) -- only
+    deprecated/superseded rows are excluded.
+
+    This is the eviction cap's denominator (plan.md §3.3:
+    min(max_eviction_absolute, max_eviction_fraction_per_run x
+    live_head_count(slug))) and MUST be computed once per slug, before ANY
+    write in the whole batch (P2, security review) -- see
+    run_optimistic_integrate(), which computes this for every slug up
+    front, before the apply loop begins.
+    """
+    heads = learnings_store.load_all(slug)
+    return sum(1 for h in heads if not h.get("deprecated") and not h.get("superseded_by"))
+
+
+def _raw_op_events(slug: str) -> list[dict[str, Any]]:
+    """Union of every raw JSONL row for `slug`: the legacy file + every
+    agent shard, UNFOLDED (not projected through the fold/quarantine
+    layer). Used only for read-only signals that must be derived from
+    committed op-events on disk rather than a mutable in-memory/JSON
+    counter (adrev-opt-014's crash-consistency requirement for the
+    cross-night accumulation signal, §3.8) -- never for anything that needs
+    the deduped/folded head view (use learnings_store.load_all() for that).
+    Mirrors memory_eval.py's own `latest_content_shaping_mutation_epoch()`,
+    which walks the same two file classes directly for the same reason.
+    """
+    rows = _read_jsonl(learnings_store.project_jsonl(slug))
+    for shard in learnings_store.list_agent_shards(slug):
+        rows.extend(_read_jsonl(shard))
+    return rows
+
+
+def _batch_anomaly_fires(
+    eviction_rows: list[dict[str, Any]], heads_by_id: dict[str, dict[str, Any]], cfg: dict[str, Any],
+) -> bool:
+    """Batch-anomaly check (plan.md §3.3), scoped to EVICTION CONCENTRATION
+    only -- never add-tag overlap (adrev-opt-006/007: a same-tag `add`
+    fraction check false-positives on a solo dev's legitimate focused
+    single-project night and, per SMSR, is trivially bypassed by fluent
+    poisoning; dropped from v1 entirely, not merely de-scoped here).
+
+    Fires when `eviction_rows` (a slug's pending learning_contradict +
+    learning_deprecate proposals) concentrate on ONE target row, or on rows
+    sharing ONE tag -- tags are resolved from the TARGET's current head via
+    `heads_by_id`, since contradict/deprecate proposals carry no tags of
+    their own (proposal-schema.json) -- above
+    `batch_anomaly_max_same_tag_fraction`.
+
+    Requires at least `MIN_EVICTION_BATCH_FOR_ANOMALY_CHECK` candidates.
+    """
+    total = len(eviction_rows)
+    if total < MIN_EVICTION_BATCH_FOR_ANOMALY_CHECK:
+        return False
+    threshold = float(cfg.get("batch_anomaly_max_same_tag_fraction", 0.6))
+
+    target_counts: dict[Any, int] = {}
+    for row in eviction_rows:
+        tid = row.get("target_id")
+        target_counts[tid] = target_counts.get(tid, 0) + 1
+    if target_counts and (max(target_counts.values()) / total) >= threshold:
+        return True
+
+    tag_counts: dict[str, int] = {}
+    for row in eviction_rows:
+        head = heads_by_id.get(row.get("target_id")) or {}
+        for tag in set(head.get("tags") or []):
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+    if tag_counts and (max(tag_counts.values()) / total) >= threshold:
+        return True
+
+    return False
+
+
+def _rolling_auto_add_supersede_count(slug: str, *, window_nights: int, now: float | None = None) -> int:
+    """Count of `auto: true` add/supersede op-events for `slug` committed
+    within the last `window_nights` days -- derived FRESH from committed
+    op-events on disk every call (adrev-opt-014: NOT a mutable counter, so
+    a mid-batch crash can never desync it; a re-run simply re-derives the
+    same answer from whatever is actually on disk)."""
+    now_ts = now if now is not None else time.time()
+    cutoff = now_ts - (window_nights * 86400.0)
+    count = 0
+    for raw in _raw_op_events(slug):
+        if raw.get("op") not in ("add", "supersede"):
+            continue
+        if raw.get("auto") is not True:
+            continue
+        ts = learnings_store._parse_iso(raw.get("timestamp") or "")  # noqa: SLF001 -- cross-module reuse of self-improving's ISO parser, mirroring memory_eval.py's own precedent for the same private helper
+        if ts and ts >= cutoff:
+            count += 1
+    return count
+
+
+def _rolling_rate_exceeded(slug: str, cfg: dict[str, Any], *, now: float | None = None) -> bool:
+    """§3.8 cross-night accumulation signal: the patient-drip-attacker
+    residual. A single per-run cap cannot see a slow trickle spread across
+    many nights; this signal looks back `rolling_add_rate_window_nights`
+    and treats exceeding `rolling_add_rate_max` as an anomaly feeding the
+    circuit breaker. Bounded, not eliminated -- a plausible, prevalence-
+    backed drip that stays under this threshold still gets through; the
+    risk register names this honestly rather than claiming a guarantee.
+    """
+    window = int(cfg.get("rolling_add_rate_window_nights", 14))
+    max_rate = int(cfg.get("rolling_add_rate_max", 40))
+    return _rolling_auto_add_supersede_count(slug, window_nights=window, now=now) > max_rate
+
+
+def _maybe_auto_resume(state: dict[str, Any], cfg: dict[str, Any], batch_id: str) -> dict[str, Any]:
+    """If `state['suspended']` and enough quiet time has elapsed since
+    `suspended_at`, clears the suspension, persists it, and audits the
+    transition. Returns the (possibly updated) state. Caller MUST already
+    hold `_apply_lock()`.
+
+    "Quiet" needs no separate tracking: while suspended, the engine applies
+    nothing (see run_optimistic_integrate's early return below), so no NEW
+    anomaly can be recorded during the suspension window -- the mere
+    passage of `circuit_breaker_auto_resume_nights` is sufficient. An
+    ambiguous state (suspended but no parseable `suspended_at`, e.g. a
+    hand-edited file) never auto-resumes -- fails closed, requires a
+    manual `optimistic-resume`.
+    """
+    if not state.get("suspended"):
+        return state
+    suspended_at = state.get("suspended_at")
+    if not suspended_at:
+        return state
+    ts = learnings_store._parse_iso(suspended_at)  # noqa: SLF001 -- see _rolling_auto_add_supersede_count
+    if ts <= 0:
+        return state
+    resume_after_s = float(cfg.get("circuit_breaker_auto_resume_nights", 7)) * 86400.0
+    if (time.time() - ts) < resume_after_s:
+        return state
+    state = dict(state)
+    state["suspended"] = False
+    state["suspended_at"] = None
+    _write_optimistic_state_atomic(state)
+    _write_audit({
+        "outcome": "circuit_breaker_auto_resumed", "batch_id": batch_id,
+        "detail": f"quiet for >= {cfg.get('circuit_breaker_auto_resume_nights', 7)} night(s) since suspension",
+    })
+    return state
+
+
+def optimistic_resume() -> dict[str, Any]:
+    """Manual, immediate re-enable (plan.md §3.5) -- the
+    `apply_dream_proposal.py optimistic-resume` CLI subcommand. Always
+    audited (never a silent un-suspend, matching every other breaker-state
+    transition)."""
+    with _apply_lock():
+        state = _read_optimistic_state()
+        was_suspended = bool(state.get("suspended"))
+        state["suspended"] = False
+        state["suspended_at"] = None
+        _write_optimistic_state_atomic(state)
+    record = {"outcome": "circuit_breaker_manual_resume", "was_suspended": was_suspended, "ok": True}
+    _write_audit(record)
+    return record
+
+
+def _process_one_proposal(
+    row: dict[str, Any], *, slug: str, cfg: dict[str, Any], live_count: int,
+    anomaly_slugs: set[str], add_supersede_counts: dict[str, int],
+    eviction_counts: dict[str, int], batch_id: str,
+) -> dict[str, Any]:
+    """Per-proposal posture/floor/cap/anomaly gate, then apply via the SAME
+    `apply_proposal()` human accepts use (so the human-race lock and
+    per-outcome audit trail cover this path for free).
+
+    Returns a result dict `run_optimistic_integrate()` tallies via:
+      - `applied: True`   -- apply_proposal() succeeded.
+      - `attempted: True` (applied absent) -- apply_proposal() was CALLED
+        but did not succeed (a real failure: CAS mismatch, target gone,
+        etc.) -- distinct from a proposal this function decided NOT to
+        attempt at all (gated/floor/prevalence/compaction-guard/cap/
+        anomaly), which sets neither key.
+
+    Never raises: every branch is inside a try/except so one malformed row
+    (an unhashable `kind`, a non-dict `prevalence`, etc.) can never abort
+    the rest of the batch -- mirrors apply_proposal()'s own handler-crash
+    guard, one layer up.
+    """
+    proposal_id = row.get("id")
+    try:
+        kind = row.get("kind")
+        project = row.get("project")
+
+        posture = da.resolve_posture(kind, project)
+        if posture["posture"] == "gated":
+            _write_audit({
+                "outcome": "skipped_gated", "batch_id": batch_id, "proposal_id": proposal_id,
+                "kind": kind, "project": project,
+            })
+            return {"outcome": "skipped_gated", "proposal_id": proposal_id}
+
+        floor_key = posture.get("confidence_floor")
+        floor = int(cfg.get(floor_key, 0)) if floor_key else 0
+        conf = _confidence_of(row)
+        if conf < floor:
+            _write_audit({
+                "outcome": "skipped_floor", "batch_id": batch_id, "proposal_id": proposal_id,
+                "kind": kind, "project": project, "detail": f"confidence {conf} < floor {floor}",
+            })
+            return {"outcome": "skipped_floor", "proposal_id": proposal_id}
+
+        if kind == "learning_add":
+            prevalence = row.get("prevalence") or {}
+            sessions = prevalence.get("sessions") if isinstance(prevalence, dict) else None
+            min_sessions = int(cfg.get("add_min_sessions", 2))
+            if not isinstance(sessions, int) or isinstance(sessions, bool) or sessions < min_sessions:
+                _write_audit({
+                    "outcome": "skipped_prevalence", "batch_id": batch_id, "proposal_id": proposal_id,
+                    "kind": kind, "project": project, "detail": f"sessions={sessions!r} < {min_sessions}",
+                })
+                return {"outcome": "skipped_prevalence", "proposal_id": proposal_id}
+
+        if kind == "learning_supersede" and row.get("compaction_guard_failed"):
+            _write_audit({
+                "outcome": "skipped_compaction_guard", "batch_id": batch_id, "proposal_id": proposal_id,
+                "kind": kind, "project": project,
+            })
+            return {"outcome": "skipped_compaction_guard", "proposal_id": proposal_id}
+
+        per_run_cap = posture.get("per_run_cap")
+        is_eviction = isinstance(per_run_cap, tuple)
+        if is_eviction:
+            if slug in anomaly_slugs:
+                _write_audit({
+                    "outcome": "skipped_anomaly", "batch_id": batch_id, "proposal_id": proposal_id,
+                    "kind": kind, "project": project,
+                })
+                return {"outcome": "skipped_anomaly", "proposal_id": proposal_id}
+            abs_key, frac_key = per_run_cap
+            cap = min(float(cfg.get(abs_key, 0)), float(cfg.get(frac_key, 0)) * live_count)
+            if eviction_counts[slug] >= cap:
+                _write_audit({
+                    "outcome": "skipped_over_cap", "batch_id": batch_id, "proposal_id": proposal_id,
+                    "kind": kind, "project": project, "detail": f"eviction cap {cap} reached for {slug!r}",
+                })
+                return {"outcome": "skipped_over_cap", "proposal_id": proposal_id}
+        elif isinstance(per_run_cap, str):
+            cap = float(cfg.get(per_run_cap, 0))
+            if add_supersede_counts[slug] >= cap:
+                _write_audit({
+                    "outcome": "skipped_over_cap", "batch_id": batch_id, "proposal_id": proposal_id,
+                    "kind": kind, "project": project, "detail": f"add/supersede cap {cap} reached for {slug!r}",
+                })
+                return {"outcome": "skipped_over_cap", "proposal_id": proposal_id}
+
+        dwell_hours = float(cfg.get("dwell_hours", 24)) if posture.get("needs_dwell") else None
+
+        result = apply_proposal(
+            proposal_id, method="auto_apply", reviewed_by="optimistic-integrate",
+            dwell_hours=dwell_hours, batch_id=batch_id, posture=posture["posture"],
+        )
+        if result.get("ok"):
+            if is_eviction:
+                eviction_counts[slug] += 1
+            elif isinstance(per_run_cap, str):
+                add_supersede_counts[slug] += 1
+            return {"outcome": result.get("outcome"), "proposal_id": proposal_id, "applied": True}
+        return {
+            "outcome": result.get("outcome"), "proposal_id": proposal_id, "attempted": True,
+            "detail": result.get("detail"),
+        }
+    except Exception:  # noqa: BLE001 -- deliberate: a malformed row's gating logic must never
+        # abort the rest of the batch (mirrors apply_proposal()'s own handler-crash guard).
+        detail = traceback.format_exc()
+        _write_audit({
+            "outcome": "internal_error", "batch_id": batch_id, "proposal_id": proposal_id, "detail": detail,
+        })
+        return {"outcome": "internal_error", "proposal_id": proposal_id, "detail": detail}
+
+
+def run_optimistic_integrate(day: str) -> dict[str, Any]:
+    """The optimistic auto-integration engine (plan.md §5 Epic 3).
+
+    Lock topology (adrev-opt-011): this function NEVER holds `_apply_lock()`
+    across the batch. Each proposal is applied through `apply_proposal()`,
+    which takes/releases the lock per call. The breaker-state read (before
+    the loop) and the breaker-state write + single batch commit (after the
+    loop) each acquire the lock in their OWN, non-nested critical section.
+
+    Transaction model (adrev-opt-012/013): the whole batch runs with
+    per-write autocommit suppressed (`_suppressed_autocommit()`) and makes
+    at most ONE `ccgm-learnings-sync commit` at the end, tagged with
+    `batch_id` in the commit message. Only `pending` proposals are ever
+    considered (read once, at the top) -- an already-`auto_applied` row
+    from an earlier run is never re-evaluated, so a `--force-day` re-run of
+    a fully-integrated night applies nothing and adds no commit.
+
+    Never raises; a single proposal's failure (or malformation) does not
+    abort the batch -- see `_process_one_proposal()`.
+    """
+    path = proposals_dir() / f"{day}.jsonl"
+    summary: dict[str, Any] = {
+        "day": day, "batch_id": None, "evaluated": 0, "applied": 0, "skipped": 0,
+        "failed": 0, "results": [], "anomalies": [], "circuit_breaker": None,
+    }
+    if not path.is_file():
+        return summary
+
+    rows = _read_jsonl(path)
+    summary["evaluated"] = len(rows)
+    pending = [r for r in rows if r.get("status") == "pending"]
+    if not pending:
+        return summary
+
+    cfg = da.load_config().get("optimistic_integration") or {}
+
+    batch_id = f"optbatch_{uuid.uuid4().hex[:12]}"
+
+    # Circuit-breaker check: OWN, non-nested critical section (adrev-opt-011).
+    with _apply_lock():
+        state = _read_optimistic_state()
+        was_suspended_before = bool(state.get("suspended"))
+        state = _maybe_auto_resume(state, cfg, batch_id)
+    if state.get("suspended"):
+        summary["circuit_breaker"] = "suspended"
+        return summary
+    if was_suspended_before:
+        summary["circuit_breaker"] = "auto_resumed"
+
+    by_slug: dict[str, list[dict[str, Any]]] = {}
+    for row in pending:
+        project = row.get("project")
+        if not isinstance(project, str) or not project:
+            # Defensive (never expected from a schema-valid proposal row,
+            # but a malformed/hand-edited row must not crash the whole
+            # batch's slug-keyed bookkeeping below): treat like any other
+            # proposal this engine declines to touch.
+            _write_audit({
+                "outcome": "skipped_malformed", "batch_id": batch_id, "proposal_id": row.get("id"),
+                "kind": row.get("kind"), "detail": f"invalid project field: {project!r}",
+            })
+            summary["skipped"] += 1
+            summary["results"].append({"outcome": "skipped_malformed", "proposal_id": row.get("id")})
+            continue
+        by_slug.setdefault(project, []).append(row)
+
+    if not by_slug:
+        return summary
+
+    summary["batch_id"] = batch_id
+
+    # P2 (security review): live_head_count is the eviction cap's
+    # denominator -- computed for EVERY slug in the batch ONCE, before any
+    # write, so same-run adds cannot inflate it.
+    live_counts: dict[str, int] = {slug: _live_head_count(slug) for slug in by_slug}
+    heads_by_slug: dict[str, dict[str, dict[str, Any]]] = {
+        slug: {h["id"]: h for h in learnings_store.load_all(slug)} for slug in by_slug
+    }
+
+    # Batch-anomaly check (pre-apply, per slug, eviction-concentration only).
+    anomaly_slugs: set[str] = set()
+    run_anomaly_timestamps: list[str] = []
+    for slug, slug_rows in by_slug.items():
+        eviction_rows = [r for r in slug_rows if r.get("kind") in ("learning_contradict", "learning_deprecate")]
+        if _batch_anomaly_fires(eviction_rows, heads_by_slug[slug], cfg):
+            anomaly_slugs.add(slug)
+            run_anomaly_timestamps.append(_utc_now_iso())
+            summary["anomalies"].append({"slug": slug, "kind": "batch_eviction_concentration"})
+            _write_audit({
+                "outcome": "batch_anomaly_eviction_concentration", "batch_id": batch_id,
+                "project": slug, "detail": f"{len(eviction_rows)} eviction proposal(s) concentrated",
+            })
+
+    add_supersede_counts: dict[str, int] = {slug: 0 for slug in by_slug}
+    eviction_counts: dict[str, int] = {slug: 0 for slug in by_slug}
+
+    with _suppressed_autocommit():  # adrev-opt-013: one commit for the whole batch, not one per write
+        for slug, slug_rows in by_slug.items():
+            for row in slug_rows:
+                outcome = _process_one_proposal(
+                    row, slug=slug, cfg=cfg, live_count=live_counts[slug],
+                    anomaly_slugs=anomaly_slugs, add_supersede_counts=add_supersede_counts,
+                    eviction_counts=eviction_counts, batch_id=batch_id,
+                )
+                summary["results"].append(outcome)
+                if outcome.get("applied"):
+                    summary["applied"] += 1
+                elif outcome.get("attempted"):
+                    summary["failed"] += 1
+                else:
+                    summary["skipped"] += 1
+
+    # Cross-night accumulation signal (§3.8) -- derived AFTER applying, so
+    # it reflects tonight's own contribution too. Feeds the breaker for
+    # FUTURE nights; never retroactively undoes tonight's writes.
+    for slug in by_slug:
+        if _rolling_rate_exceeded(slug, cfg):
+            run_anomaly_timestamps.append(_utc_now_iso())
+            summary["anomalies"].append({"slug": slug, "kind": "rolling_add_rate_exceeded"})
+            _write_audit({"outcome": "rolling_add_rate_exceeded", "batch_id": batch_id, "project": slug})
+
+    # Breaker-state write + single batch commit: ONE non-nested critical
+    # section (adrev-opt-011), acquired AFTER every per-proposal
+    # apply_proposal() call above has already released the lock.
+    with _apply_lock():
+        state = _read_optimistic_state()
+        state.setdefault("anomaly_log", [])
+        state["anomaly_log"].extend(run_anomaly_timestamps)
+        state["last_run"] = _utc_now_iso()
+
+        window_nights = int(cfg.get("circuit_breaker_window_nights", 7))
+        window_start = time.time() - (window_nights * 86400.0)
+        recent = [
+            t for t in state["anomaly_log"]
+            if learnings_store._parse_iso(t) >= window_start  # noqa: SLF001 -- see _rolling_auto_add_supersede_count
+        ]
+        max_anomalies = int(cfg.get("circuit_breaker_max_anomalies", 2))
+        if len(recent) >= max_anomalies and not state.get("suspended"):
+            state["suspended"] = True
+            state["suspended_at"] = _utc_now_iso()
+            summary["circuit_breaker"] = "tripped"
+            _write_audit({
+                "outcome": "circuit_breaker_tripped", "batch_id": batch_id,
+                "detail": f"{len(recent)} anomalies within {window_nights} night window "
+                          f"(threshold {max_anomalies})",
+            })
+
+        _write_optimistic_state_atomic(state)
+
+        if summary["applied"] > 0:
+            commit_result = _run_sync_commit(
+                message=f"dreaming: optimistic-integrate batch {batch_id} ({day})"
+            )
+            summary["commit"] = commit_result
+
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Weekly, cost-capped eval refresh (optimistic-memory plan.md Epic 3, "fix
+# (b) for adrev-opt-001"): keeps dream-eval.sh --gate's 14-day freshness
+# bound met without manual intervention, without competing with the
+# nightly analyzer for the SAME daily_cost_cap_usd (adrev-opt-010).
+# ---------------------------------------------------------------------------
+
+
+def _eval_script_path() -> Path:
+    """`modules/dreaming/eval/memory_eval.py`, resolved relative to this
+    file (lib/ and eval/ are sibling directories WITHIN the same module --
+    always installed/checked-out together, unlike the self-improving
+    cross-module resolution `_resolve_sibling_bin()` handles above, so no
+    installed-vs-repo-relative fallback dance is needed here).
+    `CCGM_DREAMING_EVAL_REFRESH_SCRIPT` lets tests substitute a fixture
+    script that mimics memory_eval.py's `--date`/results-file contract
+    without ever invoking the real live A/B harness -- mirrors dream-
+    daily.sh's own `CCGM_DREAMING_EVAL_SCRIPT` override for the --gate
+    script.
+    """
+    override = os.environ.get("CCGM_DREAMING_EVAL_REFRESH_SCRIPT")
+    if override:
+        return Path(override)
+    return _HERE.parent / "eval" / "memory_eval.py"
+
+
+def _latest_eval_results_age_days(*, now: float | None = None) -> float | None:
+    """Age in days of the most recently-modified eval results file under
+    dreaming's evals/ dir, or None if none exists yet (treated by the
+    caller as "infinitely stale" -- always eligible to refresh)."""
+    evals_dir = dreaming_dir() / "evals"
+    if not evals_dir.is_dir():
+        return None
+    files = sorted(evals_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not files:
+        return None
+    now_ts = now if now is not None else time.time()
+    return (now_ts - files[0].stat().st_mtime) / 86400.0
+
+
+def _read_cost_spent_today_by_label(path: Path, today: str, label: str) -> float:
+    """Like `dream_analyze._read_cost_spent_today()`, but scoped to ledger
+    rows whose `model` field equals `label` exactly. Lets the eval-refresh
+    step check its OWN spend against its OWN `eval_refresh_cost_cap_usd`
+    without being confused by the analyzer's spend on the SAME shared
+    `cost.log` file (adrev-opt-010: the two must never silently compete
+    for one cap, but they DO share one ledger so total daily spend stays
+    visible in one place)."""
+    if not path.is_file():
+        return 0.0
+    total = 0.0
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 5 and parts[0] == today and parts[4] == label:
+                try:
+                    total += float(parts[3])
+                except ValueError:
+                    continue
+    return total
+
+
+def _eval_refresh_preconditions(day: str, cfg: dict[str, Any]) -> tuple[bool, str]:
+    """Pure(-ish) precondition gate for `run_eval_refresh()`: no
+    subprocess, no network -- only an mtime check, an env var read, and a
+    ledger read. Split out from `run_eval_refresh()` specifically so this
+    gating logic (the part that matters for cost safety) is unit-testable
+    without ever invoking the live eval harness. Returns (should_run,
+    reason).
+    """
+    opt_cfg = cfg.get("optimistic_integration") or {}
+    min_age_days = float(opt_cfg.get("eval_refresh_min_age_days", 7))
+    cost_cap = float(opt_cfg.get("eval_refresh_cost_cap_usd", 2.0))
+
+    age_days = _latest_eval_results_age_days()
+    if age_days is not None and age_days < min_age_days:
+        return False, f"latest eval results are {age_days:.1f}d old (< {min_age_days}d min); skipping"
+
+    da.load_env()  # dreaming's own .env, falling back to autoheal's (mirrors memory_eval.main())
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return False, "no ANTHROPIC_API_KEY configured; skipping"
+
+    spent = _read_cost_spent_today_by_label(da.cost_log_path(), day, EVAL_REFRESH_COST_LABEL)
+    if spent >= cost_cap:
+        return False, f"eval_refresh_cost_cap_usd exhausted (spent ${spent:.4f} of ${cost_cap:.4f})"
+
+    return True, "ok"
+
+
+def run_eval_refresh(day: str) -> dict[str, Any]:
+    """Fix (b) for adrev-opt-001: runs the full live A/B eval
+    (memory_eval.py, no --offline) to keep dream-eval.sh --gate's 14-day
+    freshness bound met -- but ONLY when `_eval_refresh_preconditions()`
+    passes. If not eligible, logs the reason and returns without touching
+    anything (the 14-day bound then eventually fails the gate closed on
+    its own -- a surfaced, safe degradation, never a silent one;
+    adrev-opt-009's named, accepted drift window).
+
+    Honest limitation: `_eval_refresh_preconditions()`'s cost-cap check is
+    a START gate (refuses to begin if the ledger already shows the cap
+    spent today), not a HARD mid-run stop -- memory_eval.py has no
+    cumulative total-run cost limiter today (only a PER-CALL
+    `--max-budget-usd`, a different knob), and adding one is out of this
+    function's file-touch scope (memory_eval.py is not modified here). A
+    single refresh run can therefore spend somewhat more than
+    `eval_refresh_cost_cap_usd` before the NEXT day's precondition check
+    sees the overage and refuses to run again. Actual spend is always
+    recorded to the shared ledger regardless of whether it overshot, so
+    the overage is visible, not hidden.
+    """
+    cfg = da.load_config()
+    summary: dict[str, Any] = {"day": day, "ran": False, "reason": None}
+
+    should_run, reason = _eval_refresh_preconditions(day, cfg)
+    if not should_run:
+        summary["reason"] = reason
+        return summary
+
+    script = _eval_script_path()
+    if not script.is_file():
+        summary["reason"] = f"eval refresh script not found at {script}"
+        return summary
+
+    proc = subprocess.run(
+        [sys.executable, str(script), "--date", day],
+        capture_output=True, text=True, check=False,
+    )
+    summary["exit_code"] = proc.returncode
+    if proc.stderr:
+        summary["stderr_tail"] = proc.stderr[-2000:]
+
+    results_path = dreaming_dir() / "evals" / f"{day}.jsonl"
+    if results_path.is_file():
+        result_rows = _read_jsonl(results_path)
+        total_cost = sum(float(r.get("cost_usd") or 0.0) for r in result_rows)
+        if total_cost > 0:
+            da._append_cost(  # noqa: SLF001 -- cross-module reuse of the analyzer's own shared cost-ledger writer
+                da.cost_log_path(), day, 0, 0, total_cost, EVAL_REFRESH_COST_LABEL,
+            )
+        summary["cost_usd"] = round(total_cost, 6)
+        summary["rows_written"] = len(result_rows)
+
+    summary["ran"] = proc.returncode == 0
+    if not summary["ran"] and not summary.get("reason"):
+        summary["reason"] = f"memory_eval.py exited {proc.returncode}"
     return summary
 
 
@@ -809,6 +1642,31 @@ def _cmd_auto_apply(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_optimistic_integrate(args: argparse.Namespace) -> int:
+    # No _run_sync_commit() call here -- run_optimistic_integrate() already
+    # makes its own single batch commit internally (adrev-opt-013), under
+    # the same critical section as the breaker-state write. Calling it
+    # again here would either no-op (clean tree) or, worse, fold any
+    # unrelated dirty state into a second, unlabeled commit.
+    day = args.day or today_iso()
+    summary = run_optimistic_integrate(day)
+    print(json.dumps(summary, sort_keys=True))
+    return 0
+
+
+def _cmd_optimistic_resume(args: argparse.Namespace) -> int:
+    result = optimistic_resume()
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+def _cmd_eval_refresh(args: argparse.Namespace) -> int:
+    day = args.day or today_iso()
+    summary = run_eval_refresh(day)
+    print(json.dumps(summary, sort_keys=True))
+    return 0
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="CCGM dreaming: human-gated apply path (Epic 6).")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -829,10 +1687,34 @@ def build_arg_parser() -> argparse.ArgumentParser:
     auto_p = sub.add_parser(
         "auto-apply",
         help="batch-apply qualifying learning_verify rows for one day "
-             "(config/eval-gating is dream-daily.sh's job, not this CLI's)",
+             "(config/eval-gating is dream-daily.sh's job, not this CLI's; retained for "
+             "backward compatibility -- dream-daily.sh's nightly chain now calls "
+             "optimistic-integrate instead)",
     )
     auto_p.add_argument("--day", help="defaults to today (UTC, or CCGM_DREAMING_TODAY)")
     auto_p.set_defaults(func=_cmd_auto_apply)
+
+    opt_p = sub.add_parser(
+        "optimistic-integrate",
+        help="run the full per-op-kind posture engine over one day's pending proposals "
+             "(config/eval-gating is dream-daily.sh's job, not this CLI's; optimistic-memory "
+             "plan.md Epic 3)",
+    )
+    opt_p.add_argument("--day", help="defaults to today (UTC, or CCGM_DREAMING_TODAY)")
+    opt_p.set_defaults(func=_cmd_optimistic_integrate)
+
+    resume_p = sub.add_parser(
+        "optimistic-resume", help="force-clear a tripped optimistic-integration circuit breaker immediately",
+    )
+    resume_p.set_defaults(func=_cmd_optimistic_resume)
+
+    refresh_p = sub.add_parser(
+        "eval-refresh",
+        help="weekly, cost-capped live eval refresh so dream-eval.sh --gate's 14-day freshness "
+             "bound stays met without manual intervention (fix (b) for adrev-opt-001)",
+    )
+    refresh_p.add_argument("--day", help="defaults to today (UTC, or CCGM_DREAMING_TODAY)")
+    refresh_p.set_defaults(func=_cmd_eval_refresh)
 
     return p
 
