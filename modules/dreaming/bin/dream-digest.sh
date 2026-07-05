@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
-# CCGM dreaming — digest renderer (Epic 3).
+# CCGM dreaming — digest renderer (Epic 3; "Applied this run (auto)" section
+# added by optimistic-memory plan.md Epic 5).
 #
 # Renders a markdown digest for one day to
 # ~/.claude/dreaming/digests/{date}.md, combining:
+#   - "Applied this run (auto)" (Epic 5): TODAY's own optimistic-integration
+#     batch(es) -- rows Epic 3's engine auto-applied (status: auto_applied)
+#     carrying a batch_id, posture, and (for dwell postures) dwell_until.
+#     The nightly chain now runs optimistic-integrate BEFORE this digest
+#     (dream-daily.sh), so this always reports a batch whose dwell window
+#     is still entirely ahead of it. Grouped by project/kind; action items
+#     (rows still mid-dwell, any anomaly-skipped slug, a tripped breaker
+#     banner) render before routine confirmations; every row carries a
+#     one-line undo command. Silent when nothing NEW was auto-applied --
+#     no heading at all in that case (a digest that fires on empty nights
+#     trains the reader to ignore it). A per-batch "already surfaced"
+#     marker (~/.claude/dreaming/state/surfaced/<batch_id>.json) means a
+#     batch is shown exactly once, ever, in the report for its own day --
+#     re-rendering the same day (or, defensively, a batch_id that resurfaces
+#     in a later day's file) is a no-op once shown.
 #   - that day's proposals (~/.claude/dreaming/proposals/{date}.jsonl),
 #     grouped by project/kind, with evidence excerpts, prevalence, and
 #     confidence; needs_manual_promotion / compaction_guard_failed flags
@@ -75,11 +91,16 @@ OUTPUT="$(
     CCGM_DIGEST_YESTERDAY_PROPOSALS_FILE="${PROPOSALS_DIR}/${YESTERDAY}.jsonl" \
     CCGM_DIGEST_RUN_SUMMARY_FILE="${STATE_DIR}/runs/${TARGET_DATE}.json" \
     CCGM_DIGEST_CANARY_FILE="${STATE_DIR}/canary.json" \
+    CCGM_DIGEST_APPLY_AUDIT_FILE="${STATE_DIR}/apply-audit.jsonl" \
+    CCGM_DIGEST_SURFACED_DIR="${STATE_DIR}/surfaced" \
     CCGM_DIGEST_MODULE_ROOT="${MODULE_ROOT}" \
     python3 - <<'PYEOF'
+import datetime as _dt
 import json
 import os
+import subprocess
 import sys
+from pathlib import Path
 
 # Render-time defense-in-depth for evidence excerpts (#769 Stage-2 P1 #2):
 # reuse the SAME sanitizer the write path already applies, via the
@@ -194,6 +215,213 @@ if run_summary is not None:
 else:
     out.append("_No analysis run recorded for this date._")
     out.append("")
+
+# --- Applied this run (auto) -- optimistic-memory plan.md Section 5 Epic 5.
+#
+# Epic 3's optimistic-integration engine writes status: "auto_applied" +
+# batch_id + posture + (for dwell postures) dwell_until directly onto a
+# proposal row (apply_dream_proposal.py's apply_proposal()). The nightly
+# chain runs optimistic-integrate BEFORE this digest (dream-daily.sh), so
+# TODAY's own proposals file always carries the batch this section
+# reports, with its dwell window still entirely ahead of it.
+#
+# "Already surfaced" dedup (plan.md: "the report shows a batch once, in
+# the report for its own day"): a marker file per batch_id
+# (state/surfaced/<batch_id>.json) is checked before rendering and written
+# after. This is the ONLY dedup mechanism -- there is no separate
+# same-day-vs-later-day special case: re-rendering the SAME day's digest a
+# second time (nothing new happened) and a batch_id that (defensively)
+# resurfaces in a LATER day's file are handled identically -- once a batch
+# has been shown, it is never shown again.
+#
+# Silent when nothing (new) was auto-applied (research: a digest that
+# fires on empty nights trains the reader to ignore it) -- the `if
+# applied_rows:` guard below means no heading is emitted at all in that case.
+
+ANOMALY_OUTCOMES = {"batch_anomaly_eviction_concentration", "rolling_add_rate_exceeded"}
+BREAKER_TRIP_OUTCOME = "circuit_breaker_tripped"
+
+surfaced_dir_env = os.environ.get("CCGM_DIGEST_SURFACED_DIR")
+surfaced_dir = Path(surfaced_dir_env) if surfaced_dir_env else None
+
+
+def already_surfaced(batch_id):
+    if surfaced_dir is None or not batch_id:
+        return False
+    return (surfaced_dir / f"{batch_id}.json").is_file()
+
+
+def mark_surfaced(batch_id, row_count):
+    if surfaced_dir is None or not batch_id:
+        return
+    marker = surfaced_dir / f"{batch_id}.json"
+    if marker.is_file():
+        return
+    surfaced_dir.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps({
+        "batch_id": batch_id,
+        "surfaced_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "date": target_date,
+        "row_count": row_count,
+    }, sort_keys=True), encoding="utf-8")
+
+
+applied_all = [p for p in proposals if p.get("status") == "auto_applied" and p.get("batch_id")]
+new_batch_ids = sorted({p["batch_id"] for p in applied_all if not already_surfaced(p["batch_id"])})
+applied_rows = [p for p in applied_all if p.get("batch_id") in new_batch_ids]
+
+if applied_rows:
+    audit_records = load_jsonl(os.environ.get("CCGM_DIGEST_APPLY_AUDIT_FILE", ""))
+    # Last write wins -- apply-audit.jsonl is append-only/chronological and
+    # (per apply_proposal()'s adrev-013 "refuse non-pending" rule) a given
+    # proposal_id is applied at most once, so in practice there is exactly
+    # one matching record; this is a defensive tie-break, not a correctness
+    # requirement.
+    audit_by_proposal = {}
+    for rec in audit_records:
+        pid = rec.get("proposal_id")
+        if pid:
+            audit_by_proposal[pid] = rec
+
+    def resolve_new_entry_id(proposal_id):
+        rec = audit_by_proposal.get(proposal_id)
+        return rec.get("new_entry_id") if rec else None
+
+    def current_sha(project, entry_id):
+        if not entry_id:
+            return None
+        try:
+            heads = {h["id"]: h for h in learnings_store.load_all(project)}
+        except Exception:
+            return None
+        head = heads.get(entry_id)
+        if head is None:
+            return None
+        return learnings_store.content_sha256(head.get("content"))
+
+    def row_target_id(p):
+        # The learnings-store id "its" undo command below actually names --
+        # for add/supersede this is the NEW entry the proposal created
+        # (never recorded on the proposal row itself, only in the audit
+        # trail); for contradict/deprecate it is the row's own target_id.
+        if p.get("kind") in ("learning_add", "learning_supersede"):
+            return resolve_new_entry_id(p.get("id"))
+        return p.get("target_id")
+
+    def undo_command(p):
+        kind = p.get("kind")
+        project = p.get("project", "")
+        if kind in ("learning_add", "learning_supersede"):
+            entry_id = resolve_new_entry_id(p.get("id"))
+            if not entry_id:
+                return (f"(undo unavailable -- no `new_entry_id` recorded in apply-audit.jsonl "
+                        f"for proposal `{p.get('id')}`; inspect the store manually)")
+            sha = current_sha(project, entry_id)
+            if not sha:
+                return (f"`ccgm-learnings-log deprecate {entry_id} --project {project}` "
+                        "(could not auto-resolve --expected-sha -- confirm the current sha with "
+                        "`ccgm-learnings-search` before running)")
+            return f"`ccgm-learnings-log deprecate {entry_id} --project {project} --expected-sha {sha}`"
+        if kind in ("learning_contradict", "learning_deprecate"):
+            target_id = p.get("target_id")
+            if not target_id:
+                return "(undo unavailable -- proposal carries no target_id)"
+            return f"`ccgm-learnings-log verify {target_id} --project {project}`"
+        return "(no reverse-op for this kind -- verify only reinforces usage; no undo needed)"
+
+    mid_dwell = [p for p in applied_rows if learnings_store.is_dwelling(p)]
+    live = [p for p in applied_rows if not learnings_store.is_dwelling(p)]
+
+    anomaly_hits = [
+        rec for rec in audit_records
+        if rec.get("batch_id") in new_batch_ids and rec.get("outcome") in ANOMALY_OUTCOMES
+    ]
+    tripped_batches = sorted({
+        rec.get("batch_id") for rec in audit_records
+        if rec.get("batch_id") in new_batch_ids and rec.get("outcome") == BREAKER_TRIP_OUTCOME
+    })
+    flagged_count = len(anomaly_hits) + len(tripped_batches)
+
+    def group_applied(rows):
+        grouped = {}
+        for p in rows:
+            key = (p.get("project", "(unknown)"), p.get("kind", "(no-kind)"))
+            grouped.setdefault(key, []).append(p)
+        return grouped
+
+    def render_applied_rows(rows):
+        lines = []
+        grouped = group_applied(rows)
+        for project, kind in sorted(grouped):
+            lines.append(f"#### {project} — {kind}")
+            lines.append("")
+            for p in sorted(grouped[(project, kind)], key=lambda p: p.get("id", "")):
+                lines.append(f"##### `{p.get('id')}`")
+                lines.append("")
+                lines.append(f"- **target**: `{row_target_id(p) or '(unknown)'}`")
+                lines.append(f"- **posture**: {p.get('posture', '?')}")
+                if p.get("dwell_until"):
+                    lines.append(f"- **dwell_until**: {p['dwell_until']}")
+                lines.append(f"- **Undo**: {undo_command(p)}")
+                lines.append("")
+        return lines
+
+    out.append("## Applied this run (auto)")
+    out.append("")
+    out.append(f"**{len(applied_rows)} auto-integrated, {len(mid_dwell)} mid-dwell, {flagged_count} flagged**")
+    out.append("")
+
+    if mid_dwell or anomaly_hits or tripped_batches:
+        out.append("### Action items")
+        out.append("")
+        for batch_id in tripped_batches:
+            out.append(f"- ⚠️ **circuit breaker tripped** during batch `{batch_id}` -- optimistic "
+                       "auto-integration is now suspended; see `/dream` status.")
+        for rec in anomaly_hits:
+            out.append(f"- ⚠️ **{rec.get('outcome')}** on `{rec.get('project', '?')}` "
+                       f"(batch `{rec.get('batch_id')}`) -- eviction proposals for this project were "
+                       "skipped this run and remain `pending` for manual review.")
+        if tripped_batches or anomaly_hits:
+            out.append("")
+        out.extend(render_applied_rows(mid_dwell))
+
+    if live:
+        out.append("### Routine confirmations")
+        out.append("")
+        out.extend(render_applied_rows(live))
+
+    # Batch-revert (blunt option): resolvable via the commit message
+    # run_optimistic_integrate() tags with the batch_id (adrev-opt-013 --
+    # the engine guarantees exactly ONE commit per batch via its own
+    # _suppressed_autocommit(), so no autocommit-detection is needed here;
+    # the per-row Undo commands above remain the PREFERRED, single-row
+    # rollback regardless of the ambient CCGM_LEARNINGS_AUTOCOMMIT setting).
+    for batch_id in new_batch_ids:
+        sha = None
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(learnings_store.LEARNINGS_ROOT), "log",
+                 f"--grep=batch {batch_id} ", "--format=%H", "-n", "1"],
+                capture_output=True, text=True, timeout=5, check=False,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                sha = proc.stdout.strip().splitlines()[0]
+        except (OSError, subprocess.SubprocessError):
+            sha = None
+        if sha:
+            out.append(
+                f"- **Batch `{batch_id}` revert (blunt -- reverts EVERY row in this batch; prefer "
+                f"the per-row Undo commands above)**: `git -C {learnings_store.LEARNINGS_ROOT} revert {sha}`"
+            )
+        else:
+            out.append(
+                f"- **Batch `{batch_id}` revert (blunt)**: commit not auto-resolved -- find it with "
+                f"`git -C {learnings_store.LEARNINGS_ROOT} log --grep=\"batch {batch_id}\"`"
+            )
+    out.append("")
+
+    for batch_id in new_batch_ids:
+        mark_surfaced(batch_id, sum(1 for p in applied_rows if p.get("batch_id") == batch_id))
 
 
 def render_evidence(evidence):
