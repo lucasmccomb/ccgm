@@ -207,23 +207,31 @@ class TwoAddsAndMidDwellContradictTest(DailyReportTestBase):
         sha1 = _content_sha256(add1_content)
         sha2 = _content_sha256(add2_content)
 
-        dwell_until = _in_hours(24)  # clearly mid-dwell for the lifetime of this test
+        # Mixed batch: the 2 adds already graduated past their dwell window
+        # (dwell_until in the past -> learnings_store.is_dwelling() == False,
+        # i.e. "live") while the contradict is still inside its dwell window
+        # (dwell_until in the future -> still "mid-dwell"). This is what
+        # exercises BOTH "### Action items" (mid-dwell contradict) and
+        # "### Routine confirmations" (live adds) in a single render --
+        # plan.md Epic 5 test bullet 1's actual mixed-bucket intent.
+        dwell_elapsed = _in_hours(-1)  # adds: dwell window already closed
+        dwell_pending = _in_hours(24)  # contradict: clearly mid-dwell for the lifetime of this test
 
         proposals = [
             _proposal_row(
                 pid="prop-add-1", kind="learning_add", project=project,
                 content=add1_content, type_="pattern", status="auto_applied",
-                batch_id=batch_id, posture="optimistic-dwell", dwell_until=dwell_until,
+                batch_id=batch_id, posture="optimistic-dwell", dwell_until=dwell_elapsed,
             ),
             _proposal_row(
                 pid="prop-add-2", kind="learning_add", project=project,
                 content=add2_content, type_="pattern", status="auto_applied",
-                batch_id=batch_id, posture="optimistic-dwell", dwell_until=dwell_until,
+                batch_id=batch_id, posture="optimistic-dwell", dwell_until=dwell_elapsed,
             ),
             _proposal_row(
                 pid="prop-contradict-1", kind="learning_contradict", project=project,
                 target_id=contradict_target_id, status="auto_applied",
-                batch_id=batch_id, posture="dwell-quarantine", dwell_until=dwell_until,
+                batch_id=batch_id, posture="dwell-quarantine", dwell_until=dwell_pending,
             ),
         ]
         _write_jsonl(self.dreaming_dir / "proposals" / f"{date}.jsonl", proposals)
@@ -264,10 +272,19 @@ class TwoAddsAndMidDwellContradictTest(DailyReportTestBase):
         body = self._digest_path(date).read_text(encoding="utf-8")
 
         self.assertIn("## Applied this run (auto)", body)
-        self.assertIn("**3 auto-integrated, 3 mid-dwell, 0 flagged**", body)
+        # Only the contradict is still mid-dwell (the 2 adds already
+        # graduated), so the headline's mid-dwell count is 1, not 3.
+        self.assertIn("**3 auto-integrated, 1 mid-dwell, 0 flagged**", body)
         self.assertIn("### Action items", body)
-        # All 3 rows are mid-dwell -> nothing left for "Routine confirmations".
-        self.assertNotIn("### Routine confirmations", body)
+        self.assertIn("### Routine confirmations", body)
+        # Action items (mid-dwell contradict) must render before Routine
+        # confirmations (live adds) -- the ordering plan.md Epic 5 bullet 1
+        # exists to prove.
+        self.assertLess(
+            body.index("### Action items"),
+            body.index("### Routine confirmations"),
+            "Action items must render before Routine confirmations",
+        )
 
         # Per-row undo commands, each containing the correct learnings-store id.
         self.assertIn(
