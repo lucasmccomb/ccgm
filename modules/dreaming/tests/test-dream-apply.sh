@@ -896,7 +896,7 @@ invocations = {"n": 0}
 counter_lock = threading.Lock()
 
 
-def slow_apply_counter_op(row, op):
+def slow_apply_counter_op(row, op, *, auto=False, dwell_hours=None):
     with counter_lock:
         invocations["n"] += 1
     time.sleep(0.4)  # simulate real subprocess latency, widen the race window
