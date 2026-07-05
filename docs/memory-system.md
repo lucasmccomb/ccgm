@@ -23,7 +23,12 @@ The read path is the valuable, always-safe half and works on its own. The write 
 
 **Write path (dreaming, automated capture):**
 
-Nightly, the analyzer mines the day's session transcripts into a redacted evidence bundle → proposes per-change deltas against the same learnings store → writes them to `~/.claude/dreaming/proposals/{date}.jsonl` → you review the digest and accept/reject with `/dream-apply`. Accepted proposals feed the same read path above.
+Nightly, the analyzer mines the day's session transcripts into a redacted evidence bundle → proposes per-change deltas against the same learnings store → writes them to `~/.claude/dreaming/proposals/{date}.jsonl`. From there, one of two things happens:
+
+- **Human-gated (default)** — you review the digest and accept/reject with `/dream-apply`. Nothing reaches the store until you do.
+- **Optimistic auto-integration (opt-in)** — a per-op-kind engine writes the change immediately, holds it behind a dwell window before it can reach agent context, and reports it in the next digest for a post-hoc `/dream-review` or one-command rollback. See "Safety posture" below.
+
+Either way, the change feeds the same read path above once it's live.
 
 ## Components
 
@@ -34,10 +39,12 @@ Nightly, the analyzer mines the day's session transcripts into a redacted eviden
 | Reflection | `/reflect`, `/consolidate`, `/retro` | Capture and maintain learnings |
 | Injection hook | `learnings-inject.py` (SessionStart) | Gated on `CCGM_LEARNINGS_INJECT` **and** `source == "startup"`; emits one `<ccgm-learnings-injection>` block of top-ranked learnings for the current project |
 | Nightly analyzer | `dreaming` LaunchAgent | Mines transcripts → evidence → proposals (direct Anthropic API, no nested agent) |
-| Digest | `/dream-digest` | Renders the day's proposals for human review |
-| Apply | `/dream-apply` | The only human-gated write path from a proposal into the store |
-| Eval gate | `dream-eval.sh --gate` | With/without-memory A/B regression gate that auto-apply must pass |
-| Scorecard | `/dream-scorecard` | Weekly, read-only observability: captured / injected / reused / applied counts + store health |
+| Digest | `/dream-digest` | Renders the day's proposals, plus tonight's auto-integrated batch, for human review |
+| Apply | `/dream-apply` | The always-available, human-gated write path from a proposal into the store |
+| Optimistic engine | `optimistic_integration.enabled` (opt-in) | Per-op-kind posture engine: writes immediately behind a dwell window, bounded by per-slug caps, a batch-anomaly check, and a circuit breaker |
+| Post-hoc review | `/dream-review` | Surfaces auto-integrated and still-dwelling rows for a veto; `ccgm-learnings-sync revert <sha>` rolls back a bad batch |
+| Eval gate | `dream-eval.sh --gate` | With/without-memory A/B regression gate that optimistic auto-integration must pass every night |
+| Scorecard | `/dream-scorecard` | Weekly, read-only observability: captured / injected / reused / applied, plus auto-integrated / mid-dwell / reverted / breaker-trips + store health |
 
 The read path uses only the first four rows. The rest ship with `dreaming`.
 
@@ -58,20 +65,28 @@ It confirms before every write and:
    bash start.sh --add dreaming
    ```
 
-The read path alone is a complete, useful configuration. Add `dreaming` only when you want automated nightly capture and accept the token cost.
+3. **Optimistic mode** — if `dreaming` is installed, it also asks directly: "enable auto-integration with a 24h dwell window + daily report?" On yes it sets `optimistic_integration.enabled = true` in `~/.claude/dreaming/config.json` — the only way this ever turns on; there is no separate manual JSON edit required, and the shipped default stays `false` until you say yes. Re-run the script any time to change your answer; an already-`true` config reports as such and makes no change.
 
-## Safety posture: auto-apply is OFF by default
+The read path alone is a complete, useful configuration. Add `dreaming` only when you want automated nightly capture and accept the token cost; add optimistic mode only when you want that capture to reach the store without running `/dream-apply` yourself.
 
-Nothing a model proposes reaches your store automatically. Every dreaming proposal is **human-gated** — it stays `pending` until you run `/dream-apply` and accept it.
+## Safety posture: optimistic, dwell-bounded, and reversible
 
-There is one optional automated write path, `auto_apply_counters` in `~/.claude/dreaming/config.json`, and it is **`false` by default**. Even when enabled it is deliberately narrow:
+By default, nothing a model proposes reaches your store automatically. Every dreaming proposal is **human-gated** — it stays `pending` until you run `/dream-apply` and accept it. This is still true today and remains available regardless of anything below.
 
-- It must clear the eval/regression gate (`dream-eval.sh --gate`) — missing or red fails closed.
-- It only ever applies `verify` counter-ops — **never** add / supersede / deprecate / contradict (a model-proposed contradict is a silent memory-eviction vector, so it is never automated at any confidence).
-- The proposal must be `confidence ≥ 9` and still `pending`.
-- It commits to a feature branch and **never pushes**.
+`optimistic_integration.enabled` in `~/.claude/dreaming/config.json` is an opt-in second path, **`false` by default** (the shipped-module posture — a public module must not silently start auto-writing on install). Turning it on is a deliberate choice, never a buried JSON edit: `memory-setup.sh` asks directly — "enable auto-integration with a 24h dwell window + daily report?" — and only a `y` flips the flag (see "Enabling it" above). A config that already had the OLD verify-only `auto_apply_counters` flag set `true` is migrated automatically (the same conservative defaults apply) so a prior opt-in survives the rename, without you having to re-consent by hand.
 
-Honest current state: the eval gate is the safety mechanism, and it stays closed by design. The harness has not yet demonstrated that auto-apply is trustworthy for capable models, so **auto-apply does not run today** — treat `/dream-apply` (human review) as the real write path. Do not enable `auto_apply_counters` without first running a live `dream-eval.sh` pass and confirming zero regressions.
+When it's on, a per-op-kind **posture** decides what happens to each proposal instead of a single blanket rule:
+
+- **`learning_verify`** integrates immediately — no dwell. It is purely additive (confidence rises, capped) and reversible by a later contradict, so there is nothing to hold back.
+- **`learning_add` / `learning_supersede`** integrate behind a **24h dwell window** (configurable): written to the store right away, but excluded from search/injection until the window elapses.
+- **`learning_contradict` / `learning_deprecate`** — the eviction-shaped ops — get the same dwell treatment, capped tighter per run, since these are the ops most worth a second look before they suppress something.
+- Any change to the shared `_global` store stays **fully human-gated**, unchanged — the optimistic engine never touches it.
+
+Every run is bounded whether or not you ever read the report: a per-slug cap on how many adds/supersedes/evictions can land in one night, a batch-anomaly check that flags eviction concentration, a cross-night signal that catches a slow drip an attacker might use to stay under any single night's cap, and a windowed circuit breaker that trips on repeated anomalies (and later resumes on its own once things are quiet again). The nightly eval/regression gate (`dream-eval.sh --gate`) must also pass — missing or red fails closed, no integration that night, full stop.
+
+**Why this is safe even if you never read the report.** Prevention (the caps, the anomaly check, the eval gate, confidence floors, decay) and exposure-bounding (the dwell window) both work with zero human reads — nothing above depends on you looking at anything. Only *correction* needs a read, and only for timeliness: the daily report, `/dream-review`, and `ccgm-learnings-sync revert <sha>` let you catch and undo a bad integration. If you never read the report, nothing worse happens than what the caps already bounded — the row just decays on its usual schedule or gets caught by a later eval run.
+
+**The honest residual.** The dwell window shrinks the *pre-exposure* blind spot to zero — a bad row cannot reach a live agent session before the window elapses. It does **not** shrink the *post-exposure* one: once the window has passed and a session has already read a row into its frozen SessionStart context (see "Injection applies to new sessions only" below), that session keeps it for its own lifetime. A revert or `/dream-review` veto stops *future* sessions from seeing it; an already-running session must be restarted to actually drop it. Nothing shortens this except a shorter dwell window (more report lead time) and ordinary confidence decay.
 
 ## Injection applies to new sessions only
 
@@ -116,5 +131,5 @@ The injection telemetry is written by the read-path hook itself, so it accrues e
 The rule files below are the authoritative, agent-facing specs this guide distills:
 
 - [`self-improving.md`](../modules/self-improving/rules/self-improving.md) — the reflection loop and capture triggers
-- [`learnings-store.md`](../modules/self-improving/rules/learnings-store.md) — store schema, confidence decay, supersede chains, git sync
-- [`dreaming.md`](../modules/dreaming/rules/dreaming.md) — the nightly pipeline and the proposal / evidence / gate contract
+- [`learnings-store.md`](../modules/self-improving/rules/learnings-store.md) — store schema, confidence decay, supersede chains, the dwell window, git sync, and rollback
+- [`dreaming.md`](../modules/dreaming/rules/dreaming.md) — the nightly pipeline, the proposal / evidence / gate contract, and the optimistic auto-integration engine
