@@ -107,6 +107,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 import time
 import uuid
@@ -1249,6 +1250,25 @@ def _read_snapshot_heads(slug: str) -> list[dict[str, Any]] | None:
         return None
 
 
+def invalidate_cache(slug: str) -> None:
+    """Drop the read-time snapshot cache (snapshot.jsonl + watermark.json)
+    for `slug`, forcing the next projection to do a full, from-scratch
+    replay of the shard(s).
+
+    Called after any operation that SHRINKS a shard rather than appending to
+    it -- specifically `ccgm-learnings-sync revert`. The incremental fast
+    path (`_try_incremental_projection`) is built on the invariant that
+    shards only ever grow; a revert violates that, so a stale snapshot would
+    otherwise keep returning the reverted row AND -- because its recorded
+    line watermark now overshoots the shrunken file -- go blind to rows
+    appended after the revert. Removing the cache is the direct fix; the
+    projection ALSO detects the shrink itself and rebuilds
+    (`_try_incremental_projection`), so the two together are defense in
+    depth. Safe no-op when no cache exists for `slug`.
+    """
+    shutil.rmtree(_cache_dir(slug), ignore_errors=True)
+
+
 def _try_incremental_projection(slug: str) -> dict[str, Any] | None:
     """
     Fast path (arch-2): if a valid, orphan-free snapshot exists and every
@@ -1284,8 +1304,25 @@ def _try_incremental_projection(slug: str) -> dict[str, Any] | None:
             cur_size = path.stat().st_size
         except OSError:
             cur_size = 0
+        # A shard that SHRANK since the watermark breaks the grow-only
+        # invariant this fast path depends on (e.g. ccgm-learnings-sync
+        # revert removed lines): prev_lines now overshoots the file, so
+        # _read_new_lines() below would skip PAST every surviving/newly-
+        # appended line and the stale cached heads -- still carrying the
+        # reverted row -- would be returned unchanged. Bail to a full,
+        # always-correct rebuild in project_slug(). Only a genuine shrink
+        # trips this; a brand-new source (prev_size == -1) still reads as a
+        # grow and is folded normally below.
+        if prev_size >= 0 and cur_size < prev_size:
+            return None
         if cur_size == prev_size:
             continue
+        if prev_lines > 0 and _line_count(path) < prev_lines:
+            # Byte size grew but line count fell -- a revert that removed
+            # several short lines while a longer line was appended. Same
+            # overshoot hazard the size check above catches for the common
+            # case; rebuild.
+            return None
         new_lines.extend(_read_new_lines(path, prev_lines))
 
     if not new_lines:

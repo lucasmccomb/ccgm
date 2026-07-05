@@ -73,14 +73,20 @@ lock as commit/pull/push, and refuses (not attempted) on a dirty working
 tree or an already in-progress git operation, exactly like the other write
 verbs.
 
-Known residual (documented, not fixed here -- would require touching
+Known residual (documented, not fully fixed here -- would require touching
 Epic 1's frozen learnings_store.py write path, out of this file's scope):
 ordinary learnings_store.py writes (ccgm-learnings-log add/verify/
 supersede/...) do NOT themselves take this sync lock, only the sync verbs
-in this file do. A write that lands in the sub-second window while `pull`
-is actively applying a merge to that same shard file is not structurally
-protected against the merge's own file write. See rules/learnings-store.md
-"Versioning & sync" for the full writeup.
+in this file do. Two sync verbs rewrite shard files in place: `pull` (git
+merge) and `revert` (line-set-difference). A write that lands in the
+sub-second window while `pull` is actively applying a merge to that same
+shard file is not structurally protected against the merge's own file
+write -- that window is the residual. `revert` closes the equivalent
+window for itself: its per-shard read-through-write critical section takes
+an exclusive fcntl.flock on the SAME shard file file_locked_append locks
+(see `_shard_flock`), so a concurrent append serializes against revert's
+rewrite instead of being lost between revert's read and its write. See
+rules/learnings-store.md "Versioning & sync" for the full writeup.
 
 Post-merge validation (sec-2 / adrev-307): after a clean merge, every
 NEWLY-landed op-event line (an id not present locally before the merge) is
@@ -641,6 +647,44 @@ def cmd_push(args: argparse.Namespace) -> int:
 # against a `merge=union` shard file). Used only by cmd_revert() below.
 # ---------------------------------------------------------------------------
 
+@contextlib.contextmanager
+def _shard_flock(full_path: Path):
+    """Exclusive fcntl.flock on a single shard file for revert's
+    read-through-write critical section (fix 3). Matches
+    hook_utils.file_locked_append's LOCK_EX on the SAME file, so an
+    ordinary concurrent learnings write -- which takes only that per-file
+    lock, never the store-wide sync lock (the documented residual) --
+    serializes against revert's rewrite instead of landing between revert's
+    read and its write and being lost. Held across BOTH the read_text() and
+    write_text() the caller performs on `full_path`. Opened O_RDONLY purely
+    to hold the lock; flock is inode-scoped, so the actual read/write via
+    separate Path fds are still covered."""
+    fd = os.open(str(full_path), os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def _restore_after_failed_revert(originals: dict[str, str]) -> None:
+    """Undo _revert_commit's in-place shard rewrites after a git add/commit
+    failure (fix 4), so a failed revert leaves a CLEAN working tree rather
+    than a half-mutated shard staged for the next command. Restores each
+    file's captured pre-write bytes AND resets the index for those paths (a
+    prior `git add` may already have staged the mutation)."""
+    for path, text in originals.items():
+        try:
+            (ls.LEARNINGS_ROOT / path).write_text(text, encoding="utf-8")
+        except OSError:
+            pass
+    if originals:
+        _run_git(["reset", "-q", "--", *originals.keys()])
+
+
 def _changed_paths(sha: str) -> list[str] | None:
     """Paths touched by `sha` relative to its first parent. `None` on a git
     failure (e.g. `sha` does not resolve); an empty list is a real,
@@ -740,28 +784,46 @@ def _revert_commit(sha: str) -> dict[str, Any]:
         added_by_path[path] = added
 
     touched: list[str] = []
+    originals: dict[str, str] = {}
     for path, added_lines in added_by_path.items():
         full_path = ls.LEARNINGS_ROOT / path
         if not full_path.is_file():
             continue  # already gone entirely -- nothing to remove
-        current = full_path.read_text(encoding="utf-8").splitlines()
-        new_lines, removed_count = _remove_multiset(current, added_lines)
-        if removed_count == 0:
-            continue  # this file's addition is already absent
-        new_text = ("\n".join(new_lines) + "\n") if new_lines else ""
-        full_path.write_text(new_text, encoding="utf-8")
-        touched.append(path)
+        # Hold an exclusive flock on THIS shard across the read+write so a
+        # concurrent ordinary append (file_locked_append -- same per-file
+        # lock, but no store-wide sync lock) cannot land between the read
+        # and the write and be lost to the rewrite (fix 3).
+        with _shard_flock(full_path):
+            original_text = full_path.read_text(encoding="utf-8")
+            new_lines, removed_count = _remove_multiset(original_text.splitlines(), added_lines)
+            if removed_count == 0:
+                continue  # this file's addition is already absent
+            new_text = ("\n".join(new_lines) + "\n") if new_lines else ""
+            originals[path] = original_text  # captured for rollback (fix 4)
+            full_path.write_text(new_text, encoding="utf-8")
+            touched.append(path)
 
     if not touched:
         return {"ok": True, "action": "noop", "reason": "commit's writes are already absent from the working tree"}
 
     rc, _, err = _run_git(["add", "--", *touched])
     if rc != 0:
+        # Roll the in-place mutations back so a failed revert never leaves a
+        # dirty, half-mutated working tree (fix 4).
+        _restore_after_failed_revert(originals)
         return {"ok": False, "action": "failed", "reason": f"git add failed: {err.strip()}"}
     message = f"Revert {sha}\n\nRemoves the lines {sha} added, via ccgm-learnings-sync revert."
     rc, _, err = _run_git(["commit", "-m", message])
     if rc != 0:
+        _restore_after_failed_revert(originals)
         return {"ok": False, "action": "failed", "reason": f"git commit failed: {err.strip()}"}
+
+    # The revert SHRANK these shards; the read-time snapshot cache assumes
+    # shards only grow, so drop it for every touched slug (fix 1a). Slug is
+    # the first path component under LEARNINGS_ROOT.
+    for slug in {Path(p).parts[0] for p in touched}:
+        ls.invalidate_cache(slug)
+
     rc, out, _ = _run_git(["rev-parse", "--short", "HEAD"])
     return {
         "ok": True, "action": "reverted",

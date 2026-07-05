@@ -149,7 +149,19 @@ list above renders), not a proposal id.
    exit 3 (CAS mismatch — the row changed since you last read it; re-review
    before trying again, never blindly retry with a stale sha) or exit 1
    (id not found). Never retry automatically.
-4. **`learning_verify` note:** a bad auto-verify only bumped a bounded
+4. **On a successful (exit 0) veto, record the reversal.** The reverse-op
+   above writes to the learnings store but NOT to the apply-audit log, so
+   without this step Epic 7's scorecard "reverted-after-review" metric
+   (`scorecard.py`'s `_aggregate_optimistic`, which counts `outcome ==
+   "reverted"` audit rows) would read 0 forever. Append the audit record:
+   ```bash
+   python3 modules/dreaming/lib/apply_dream_proposal.py record-revert --kind veto --target-id <id>
+   ```
+   This is audit-only (the record carries no `ok` field, so it is never
+   miscounted as an apply). Do it ONLY after the reverse-op itself exited 0
+   — never on a CAS mismatch (exit 3), a not-found (exit 1), or the
+   `learning_verify` case below (which performs no reverse-op at all).
+5. **`learning_verify` note:** a bad auto-verify only bumped a bounded
    reuse counter (`uses`, capped contribution +2.0) and possibly refreshed
    `last_verified` — there is nothing this command auto-reverses for it. If
    the underlying learning is now believed wrong, the human's available
@@ -197,7 +209,16 @@ retired in place as its predecessor.
   ccgm-learnings-sync revert <resolved-sha>
   ```
   and relay the JSON result's `action` field plainly:
-  - `reverted` — success. Report `touched_files` and the new `sha`.
+  - `reverted` — success. Report `touched_files` and the new `sha`, then
+    record the reversal so Epic 7's scorecard counts it under
+    "reverted-after-review" (same audit-write rationale as `veto` step 4;
+    the revert path otherwise leaves no apply-audit record):
+    ```bash
+    python3 modules/dreaming/lib/apply_dream_proposal.py record-revert --kind revert --batch-id <batch_id-or-resolved-sha>
+    ```
+    Pass the `optbatch_...` id if the argument was a batch id; otherwise the
+    resolved commit sha. Record ONLY on `action == reverted` — a `noop`
+    reverted nothing and gets no record.
   - `noop` — the commit's writes were already absent from the working
     tree; nothing to do.
   - `blocked` — another git operation is mid-flight in the learnings
@@ -253,7 +274,9 @@ is sound precisely because of this store's append-only write invariant.
 - `/dream-scorecard [week]` — read-only weekly aggregate figures, if you
   want counts/trends rather than a row-level list.
 - Library: `modules/dreaming/lib/apply_dream_proposal.py`
-  (`run_optimistic_integrate`, `apply_proposal`, `apply_audit_path`),
+  (`run_optimistic_integrate`, `apply_proposal`, `apply_audit_path`,
+  `record_review_reversal` — the `record-revert` CLI that logs the
+  reverted-after-review audit record Epic 7's scorecard reads),
   `modules/dreaming/lib/dream_analyze.py` (`OPTIMISTIC_POSTURE`,
   `resolve_posture`), `modules/self-improving/lib/learnings_store.py`
   (`load_all`, `is_dwelling`, `content_sha256`, `supersede_entry`).

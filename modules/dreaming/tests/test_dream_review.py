@@ -354,6 +354,15 @@ class SyncRevertTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.store_dir, ignore_errors=True)
         self.env = os.environ.copy()
         self.env["CCGM_LEARNINGS_DIR"] = str(self.store_dir)
+        # Pin the writer id so shard writes land in solo.jsonl, which
+        # _shard_ids reads by default. os.environ.copy() alone leaves
+        # agent_id() to resolve via the ambient .env.clone of whatever clone
+        # this test runs in (e.g. agent-w0-c0), writing to that shard and
+        # making _shard_ids find an empty set -- the same hermetic-writer
+        # convention TrustedWriterOriginBindingTests follows (never depend on
+        # the host cwd/.env.clone). Proves these tests pass with NO external
+        # CCGM_AGENT_ID set.
+        self.env["CCGM_AGENT_ID"] = "solo"
         self.env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         self.env["GIT_AUTHOR_NAME"] = "ccgm-test"
         self.env["GIT_AUTHOR_EMAIL"] = "ccgm-test@example.com"
@@ -546,6 +555,41 @@ class SyncRevertTests(unittest.TestCase):
         status_out, _ = self._sync("status")
         self.assertEqual(status_out["dirty_files"], 0, "a refused revert must never leave a partial mutation")
 
+    def test_revert_rolls_back_and_stays_clean_when_commit_fails(self):
+        # Fix 4: force `git commit` to fail AFTER the shard was already
+        # mutated + staged (a pre-commit hook that always rejects), and
+        # assert the revert restored the shard byte-for-byte AND left a CLEAN
+        # tree -- not a dirty, half-mutated, still-staged shard.
+        self._sync("init")
+        slug = _unique_slug("revert-rollback")
+        self._log("--type", "pattern", "--content", "rollback seed", project=slug)
+        self._sync("commit", "-m", "seed")
+        add = self._log("--type", "pattern", "--content", "row reverted then rolled back", project=slug)
+        id_a = json.loads(add.stdout)["id"]
+        out_commit, _ = self._sync("commit", "-m", "commit A")
+        sha = out_commit["sha"]
+
+        shard = self.store_dir / slug / "agents" / "solo.jsonl"
+        before = shard.read_text(encoding="utf-8")
+
+        # Installed AFTER the seed/A commits: `git add` still succeeds, so the
+        # revert reaches write_text()+add before the commit is rejected.
+        hooks = self.store_dir / ".git" / "hooks"
+        hooks.mkdir(parents=True, exist_ok=True)
+        hook = hooks / "pre-commit"
+        hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        hook.chmod(0o755)
+
+        out, proc = self._sync("revert", sha)
+        self.assertEqual(proc.returncode, 1)
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["action"], "failed")
+
+        self.assertEqual(shard.read_text(encoding="utf-8"), before, "shard must be byte-restored on rollback")
+        self.assertIn(id_a, self._shard_ids(slug), "the row must survive a rolled-back revert")
+        status_out, _ = self._sync("status")
+        self.assertEqual(status_out["dirty_files"], 0, "a failed revert must leave a clean tree (fix 4)")
+
     def test_revert_refuses_on_a_dirty_working_tree(self):
         self._sync("init")
         slug = _unique_slug("revert-dirty")
@@ -609,6 +653,124 @@ class SyncRevertTests(unittest.TestCase):
         result = json.loads(last_line)
         self.assertTrue(result["ok"])
         self.assertEqual(result["action"], "reverted")
+
+
+class RevertCacheInvalidationTests(unittest.TestCase):
+    """Fix 1 (BLOCKING): a revert SHRINKS a shard, but the read-time cache's
+    incremental fast path assumed shards only grow -- so after a revert
+    load_all() kept returning the reverted row AND went blind to rows added
+    afterward (live-reproduced). Reproduces the exact live scenario end-to-
+    end: warm the read cache with the row present, revert its commit via the
+    CLI, then assert load_all() (a) no longer returns the reverted row and
+    (b) sees a row added AFTER the revert.
+
+    Defense in depth: EITHER the invalidate_cache() call OR the projection's
+    shrink detection is independently sufficient, so this end-to-end test
+    passes with either -- it fails only if BOTH are missing (i.e. without
+    fix 1 at all). test_learnings_store.py's
+    IncrementalProjectionShrinkTests isolates the projection layer on its
+    own (no invalidate_cache), pinning that backstop independently.
+
+    Reads load_all() in a FRESH subprocess pointed at this test's scratch
+    store (same idiom SyncRevertTests uses for _shard_ids -- never the
+    module-level ls.LEARNINGS_ROOT frozen at import for the other classes).
+    The read-time snapshot cache is on-disk, so it persists across the
+    separate warm/revert/read process invocations exactly as it would in
+    real use."""
+
+    def setUp(self) -> None:
+        self.store_dir = Path(tempfile.mkdtemp(prefix="ccgm-dream-review-revcache-"))
+        self.addCleanup(shutil.rmtree, self.store_dir, ignore_errors=True)
+        # The read-cache is a sibling dir of the store (LEARNINGS_CACHE_ROOT);
+        # clean it up too so a leaked snapshot never outlives the test.
+        self.addCleanup(
+            shutil.rmtree,
+            self.store_dir.parent / (self.store_dir.name + "-cache"),
+            ignore_errors=True,
+        )
+        self.env = os.environ.copy()
+        self.env["CCGM_LEARNINGS_DIR"] = str(self.store_dir)
+        self.env["CCGM_AGENT_ID"] = "solo"
+        self.env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        self.env["GIT_AUTHOR_NAME"] = "ccgm-test"
+        self.env["GIT_AUTHOR_EMAIL"] = "ccgm-test@example.com"
+        self.env["GIT_COMMITTER_NAME"] = "ccgm-test"
+        self.env["GIT_COMMITTER_EMAIL"] = "ccgm-test@example.com"
+
+    def _sync(self, *args: str) -> tuple[dict, subprocess.CompletedProcess]:
+        proc = subprocess.run(
+            [sys.executable, str(SYNC_CLI), *args],
+            env=self.env, capture_output=True, text=True,
+        )
+        last_line = next((ln for ln in reversed(proc.stdout.splitlines()) if ln.strip()), "{}")
+        return json.loads(last_line), proc
+
+    def _log(self, *args: str, project: str) -> subprocess.CompletedProcess:
+        env = dict(self.env)
+        env["CCGM_LEARNINGS_PROJECT"] = project
+        return subprocess.run(
+            [sys.executable, str(LOG_CLI), *args],
+            env=env, capture_output=True, text=True,
+        )
+
+    def _load_all_ids(self, slug: str) -> set[str]:
+        """load_all() in a FRESH subprocess pointed (via CCGM_LEARNINGS_DIR
+        in self.env) at this test's scratch store + its sibling on-disk
+        cache -- the same store the sync/log CLIs mutate. This both WARMS
+        (first call) and READS the persistent snapshot cache the revert CLI
+        invalidates, without repointing this process's frozen
+        ls.LEARNINGS_ROOT."""
+        code = (
+            "import json, learnings_store as ls;"
+            f"print(json.dumps([e['id'] for e in ls.load_all({slug!r})]))"
+        )
+        env = dict(self.env)
+        env["PYTHONPATH"] = str(SELF_IMPROVING_LIB)
+        proc = subprocess.run(
+            [sys.executable, "-c", code], env=env, capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return set(json.loads(proc.stdout.strip().splitlines()[-1]))
+
+    def test_revert_drops_reverted_row_and_projection_sees_post_revert_row(self):
+        self._sync("init")
+        slug = _unique_slug("revcache")
+
+        seed = self._log("--type", "pattern", "--content", "seed entry", project=slug)
+        self.assertEqual(seed.returncode, 0, seed.stderr)
+        self._sync("commit", "-m", "seed")
+
+        add_a = self._log("--type", "pattern", "--content", "row A to revert", project=slug)
+        self.assertEqual(add_a.returncode, 0, add_a.stderr)
+        id_a = json.loads(add_a.stdout)["id"]
+        out_a, _ = self._sync("commit", "-m", "commit A")
+        self.assertEqual(out_a["action"], "committed")
+        sha_a = out_a["sha"]
+
+        # WARM the on-disk read-time snapshot cache with A present.
+        self.assertIn(id_a, self._load_all_ids(slug))
+
+        # Revert A's commit -- SHRINKS the shard.
+        revert_out, revert_proc = self._sync("revert", sha_a)
+        self.assertEqual(revert_proc.returncode, 0, revert_out)
+        self.assertEqual(revert_out["action"], "reverted")
+
+        # (a) The reverted row is gone. WITHOUT fix 1 the stale grow-only
+        # cache would still return it.
+        self.assertNotIn(
+            id_a, self._load_all_ids(slug), "reverted row must be gone from load_all()"
+        )
+
+        # (b) A row added AFTER the revert is visible. WITHOUT fix 1 the
+        # cache's overshot line watermark would skip past it.
+        add_c = self._log("--type", "pattern", "--content", "row C after revert", project=slug)
+        self.assertEqual(add_c.returncode, 0, add_c.stderr)
+        id_c = json.loads(add_c.stdout)["id"]
+        self._sync("commit", "-m", "commit C")
+
+        ids_final = self._load_all_ids(slug)
+        self.assertIn(id_c, ids_final, "row added after revert must be visible")
+        self.assertNotIn(id_a, ids_final)
 
 
 if __name__ == "__main__":

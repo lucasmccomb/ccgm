@@ -1346,6 +1346,39 @@ def record_anomaly(reason: str) -> dict[str, Any]:
     }
 
 
+def record_review_reversal(
+    *,
+    kind: str,
+    target_id: str | None = None,
+    batch_id: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Append ONE apply-audit record marking a /dream-review reversal -- the
+    write Epic 7's scorecard reads to count "reverted-after-review"
+    (scorecard.py's `_aggregate_optimistic` counts `outcome == "reverted"`
+    audit rows in-window). Epic 6's veto/revert previously wrote NO
+    apply-audit record, so that metric read 0 forever; this closes the
+    plan's intended Epic 6 -> Epic 7 wiring (optimistic-memory plan.md; #804).
+
+    `kind` is "veto" (a single-row reverse-op) or "revert" (a whole-batch or
+    single-commit revert). Deliberately writes NO `ok` field -- matching the
+    no-`ok` on-disk shape of `circuit_breaker_tripped`/`anomaly_recorded`,
+    AND because `_aggregate_applied()` counts any audit row with `ok is True`
+    (or `outcome == "applied"`) as an APPLY; a reversal must never be
+    miscounted as an application. `_write_audit()` stamps `id` + `ts` (the
+    field the scorecard windows on).
+    """
+    record: dict[str, Any] = {"outcome": "reverted", "kind": kind}
+    if target_id is not None:
+        record["target_id"] = target_id
+    if batch_id is not None:
+        record["batch_id"] = batch_id
+    if reason is not None:
+        record["reason"] = reason
+    _write_audit(record)
+    return record
+
+
 def _process_one_proposal(
     row: dict[str, Any], *, slug: str, cfg: dict[str, Any], live_count: int,
     anomaly_slugs: set[str], add_supersede_counts: dict[str, int],
@@ -1829,6 +1862,17 @@ def _cmd_record_anomaly(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_record_revert(args: argparse.Namespace) -> int:
+    result = record_review_reversal(
+        kind=args.kind,
+        target_id=args.target_id,
+        batch_id=args.batch_id,
+        reason=args.reason,
+    )
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
 def _cmd_eval_refresh(args: argparse.Namespace) -> int:
     day = args.day or today_iso()
     summary = run_eval_refresh(day)
@@ -1885,6 +1929,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     record_anomaly_p.add_argument("--reason", required=True, help="short machine-readable reason, e.g. red_eval_gate")
     record_anomaly_p.set_defaults(func=_cmd_record_anomaly)
+
+    record_revert_p = sub.add_parser(
+        "record-revert",
+        help="append the apply-audit record marking a /dream-review veto or revert "
+             "(outcome=reverted, no `ok` field) so Epic 7's scorecard counts it as "
+             "reverted-after-review -- the Epic 6 -> Epic 7 audit-write wiring (#804)",
+    )
+    record_revert_p.add_argument("--kind", required=True, choices=["veto", "revert"],
+                                 help="veto (single-row reverse-op) or revert (whole-batch/commit)")
+    record_revert_p.add_argument("--target-id", help="the reversed learning row id (for a veto)")
+    record_revert_p.add_argument("--batch-id", help="the reverted batch/commit id (for a revert)")
+    record_revert_p.add_argument("--reason", help="short machine-readable reason (optional)")
+    record_revert_p.set_defaults(func=_cmd_record_revert)
 
     refresh_p = sub.add_parser(
         "eval-refresh",
