@@ -527,13 +527,15 @@ Deep research, planning, and execution framework for complex projects.
 - **Phase 1.5** - Research review with business viability assessment; confirm to proceed
 - **Phase 2** - Naming ideation (optional)
 - **Phase 2.5/2.6/2.7** - Tech stack sign-off, scope sign-off, multi-agent setup review
-- **Phase 3** - Plan creation with parallelized epics and dependency waves
+- **Phase 3** - Plan creation with parallelized epics and dependency waves. Every plan builds a **comprehensive autonomous E2E test suite** (Phase 3.3.5): new projects get a Wave-1 test-harness epic and per-epic E2E coverage; existing repos get a coverage-gap audit and optimistic gap-fill for touched areas. The suite is wired into CI as a blocking merge gate so it, not the user, is the ready-to-merge oracle.
 - **Phase 4** - Constructive peer review by security, architecture, and business logic agents (review stage 1 of 2)
-- **Phase 5 (+5.6)** - Write plan.md, then a self-review loop for placeholders and identifier drift
-- **Phase 5.7** - Adversarial review sequence (stage 2 of 2): 3 sequential `adrev-reviewer` passes on Opus 4.8 (max effort), each attacking the plan after the prior pass's fixes are incorporated
+- **Phase 5 (+5.6)** - Write plan.md, then a self-review loop for placeholders, identifier drift, and autonomous-execution readiness
+- **Phase 5.7** - Adversarial review sequence (stage 2 of 2): 3 sequential `adrev-reviewer` passes on Opus 4.8 (max effort), each attacking the plan after the prior pass's fixes are incorporated, and enforcing the four plan-execution tenets (minimal/edge-bucketed human work, follow-up completion, autonomous decision context, comprehensive autonomous E2E coverage)
 - **Phase 6** - Web review + final confirmation gate
-- **Phase 7** - Execute via parallel agents in separate clones
+- **Phase 7** - Execute via parallel agents in separate clones; waves and completion gate on a green E2E suite and completion of all in-scope follow-up work
 - **Phase 8** - Verification, audit, and retrospective
+
+Every plan is engineered to execute with minimal human involvement: human work is bucketed to the start or end (never mid-run), unplanned follow-on work is completed before the run is reported done, and the autonomous E2E suite certifies the result so the user does not test manually.
 
 Use `--light` to skip the interview phases and use a traditional walkthrough instead.
 
@@ -821,7 +823,7 @@ One hostile lens against a plan or any entity, with automatic plan incorporation
 
 **Installs**: `skills/adrev/`, `agents/adrev-reviewer.md`
 
-**What it does**: `/adrev` resolves a target (plan, doc, PR, issue, code directory, or stated concept) and dispatches a fresh-context adrev-reviewer agent that attacks premises, hunts failure modes, steelmans the strongest opposing case, and checks falsifiability and reversal costs. When the target is a plan, the reviewing agent incorporates its findings into the plan automatically - high-confidence findings revise sections directly, judgment calls land in `## Risks & Open Questions`, and the full review is written to the plan's `reviews/` directory - unless invoked with `--no-apply`. Non-plan targets are never modified. The single-lens, any-entity counterpart to document-review's 7-lens doc gate.
+**What it does**: `/adrev` resolves a target (plan, doc, PR, issue, code directory, or stated concept) and dispatches a fresh-context adrev-reviewer agent that attacks premises, hunts failure modes, steelmans the strongest opposing case, and checks falsifiability and reversal costs. When the target is a plan, the reviewing agent incorporates its findings into the plan automatically - high-confidence findings revise sections directly, judgment calls land in `## Risks & Open Questions`, and the full review is written to the plan's `reviews/` directory - unless invoked with `--no-apply`. Plan targets also get four **autonomous-execution tenets** enforced (not just noted - the reviewer expands the plan to satisfy them): T1 human work minimized and bucketed to the edges, T2 a follow-up-completion contract, T3 enough decision context to direct unplanned work without a human, T4 a comprehensive autonomous E2E test suite over every testable surface. Non-plan targets are never modified. The single-lens, any-entity counterpart to document-review's 7-lens doc gate.
 
 **Dependencies**: subagent-patterns
 
