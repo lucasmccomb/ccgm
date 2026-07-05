@@ -380,6 +380,16 @@ def _parse_iso(s: str) -> float:
     return 0.0
 
 
+def dwell_until_from_hours(hours: float, *, now: float | None = None) -> str:
+    """Compute an ISO-8601 UTC `dwell_until` stamp `hours` from now
+    (optimistic-memory §3.2). Centralized here so every `--dwell-hours`
+    CLI flag (add/verify/contradict/deprecate/supersede) computes the
+    stamp identically, the same way `_utc_now_iso`/`_iso_from_epoch`
+    already centralize the rest of this module's timestamp formatting."""
+    base = now if now is not None else time.time()
+    return _iso_from_epoch(base + hours * 3600.0)
+
+
 # ---------------------------------------------------------------------------
 # Agent identity
 # ---------------------------------------------------------------------------
@@ -658,12 +668,17 @@ def build_entry(
     supersede_reason: str | None = None,
     source_session: str | None = None,
     evidence_sessions: list[str] | None = None,
+    dwell_until: str | None = None,
 ) -> dict[str, Any]:
     """
     Build a schema-valid, sanitized entry. Does NOT write.
 
     sanitize_content() is applied to BOTH `content` and `supersede_reason`
     (sec-4: every model-influenceable free-text field, not just content).
+
+    `dwell_until` (optimistic-memory §3.2), if given, is carried on the
+    returned dict and threaded into the `add` op-event by `append_entry()` --
+    absent means "live immediately" (backward-compatible default).
     """
     sanitized = sanitize_content(content)
     sanitized_reason = sanitize_content(supersede_reason) if supersede_reason else None
@@ -687,6 +702,7 @@ def build_entry(
         "supersede_reason": sanitized_reason,
         "source_session": source_session,
         "evidence_sessions": list(evidence_sessions) if evidence_sessions else [],
+        "dwell_until": dwell_until,
     }
     validate_entry(entry)
     return entry
@@ -763,15 +779,26 @@ def _build_op_row(
     supersede_reason: str | None = None,
     event_id: str | None = None,
     auto: bool = False,
+    dwell_until: str | None = None,
 ) -> dict[str, Any]:
     """Build a canonical v2 op-event row (§3.3 schema). Does not write.
 
-    `auto` (adrev-404) marks an UNATTENDED verify (dreaming auto-apply). It
-    is set ONLY on a `verify` op-row and ONLY when True; every other op, and
-    every human verify, omits the key entirely -- so the on-disk shape is
-    byte-identical to every op-event already written (absence == human,
-    backward-compatible). The projection reads it to skip the `last_verified`
-    refresh for auto-verifies; see `_apply_op`.
+    `auto` (adrev-404, widened by adrev-opt-008) marks an UNATTENDED write
+    (dreaming auto-apply/auto-integration). It is set on ANY op-row when
+    True; every op omits the key entirely when False -- so the on-disk
+    shape is byte-identical to every op-event already written for a human
+    write (absence == human, backward-compatible). Only the `verify` fold
+    path (`_apply_op`) currently reads it to skip the `last_verified`
+    refresh for auto-verifies; every other op carries it purely for
+    audit/reporting.
+
+    `dwell_until` (optimistic-memory §3.2) marks a row WRITTEN but not yet
+    read-eligible: an ISO-8601 UTC string, or None (immediately live --
+    absence means "live", same convention as `auto`). Written only when
+    non-None. This builder only stamps the op-event; the fold layer
+    (`_seed_head_from_add_event`, `_seed_head_from_supersede_event`,
+    `_apply_op`) is what propagates it to the projected head and enforces
+    the "only extends, never shortens" invariant.
     """
     row: dict[str, Any] = {
         "id": event_id or uuid.uuid4().hex[:12],
@@ -794,12 +821,14 @@ def _build_op_row(
         "last_verified": timestamp,
         "deprecated": True if op == "deprecate" else (False if op == "add" else None),
     }
-    if auto and op == "verify":
+    if auto:
         row["auto"] = True
+    if dwell_until is not None:
+        row["dwell_until"] = dwell_until
     return row
 
 
-def append_entry(entry: dict[str, Any], slug: str | None = None) -> Path:
+def append_entry(entry: dict[str, Any], slug: str | None = None, *, auto: bool = False) -> Path:
     """
     Append a pre-validated entry as a v2 `add` op-event to the writer's own
     shard (§3.3 -- ALL new writes land in agents/<agent_id>.jsonl; the
@@ -809,6 +838,11 @@ def append_entry(entry: dict[str, Any], slug: str | None = None) -> Path:
     Raises GlobalPromotionError if `slug` (or `entry["project"]`) resolves
     to `_global` and CCGM_LEARNINGS_ADMIN=1 is not set -- the general write
     path never lands `_global` content otherwise; see `promote_to_global()`.
+
+    `auto` (adrev-opt-008) marks this `add` as unattended (dreaming
+    auto-integration) for audit/reporting -- see `_build_op_row`.
+    `dwell_until`, if present on `entry` (via `build_entry(dwell_until=...)`),
+    is threaded to the op-event unchanged (optimistic-memory §3.2).
     """
     validate_entry(entry)
     target_slug = slug or entry.get("project") or detect_project_slug()
@@ -825,7 +859,7 @@ def append_entry(entry: dict[str, Any], slug: str | None = None) -> Path:
         type_=entry["type"], source=entry.get("source", "observed"), content=entry["content"],
         confidence=entry["confidence"], tags=entry.get("tags", []), files=entry.get("files", []),
         key=entry.get("key"), source_session=entry.get("source_session"),
-        event_id=entry["id"],
+        event_id=entry["id"], auto=auto, dwell_until=entry.get("dwell_until"),
     )
     if entry.get("evidence_sessions"):
         row["evidence_sessions"] = list(entry["evidence_sessions"])
@@ -912,6 +946,22 @@ def _fold_sort_key(line: dict[str, Any]) -> tuple[float, str]:
     return (_parse_iso(line.get("timestamp", "")), line.get("id") or "")
 
 
+def _max_dwell(existing: str | None, new: str | None) -> str | None:
+    """Combine two `dwell_until` ISO strings, keeping whichever is LATER
+    (optimistic-memory §3.2: a row's dwell only ever extends, never
+    shortens). `None` is the absence of a floor -- a missing `new` keeps
+    `existing` unchanged; a missing `existing` adopts `new` outright.
+    Comparison goes through `_parse_iso` (not raw string ordering) so a
+    malformed value always loses to a valid one instead of potentially
+    winning by lexicographic accident; this is what makes the invariant
+    hold at the FOLD layer regardless of what a caller supplies."""
+    if not new:
+        return existing
+    if not existing:
+        return new
+    return new if _parse_iso(new) > _parse_iso(existing) else existing
+
+
 def _seed_head_from_add_event(event: dict[str, Any]) -> dict[str, Any]:
     """Phase A: materialize a fresh head from a v2 `add` op-event (adrev-007:
     v2 adds seed EMPTY counters, unlike legacy rows which seed verbatim)."""
@@ -937,12 +987,21 @@ def _seed_head_from_add_event(event: dict[str, Any]) -> dict[str, Any]:
         "supersede_reason": None,
         "writer": event.get("writer"),
         "source_session": event.get("source_session"),
+        "dwell_until": event.get("dwell_until"),
     }
 
 
 def _seed_head_from_supersede_event(event: dict[str, Any], old_head: dict[str, Any]) -> dict[str, Any]:
     """Phase B: a `supersede` op-event both mutates its target AND seeds a
-    brand-new head -- it is the one non-`add` op that introduces a fresh id."""
+    brand-new head -- it is the one non-`add` op that introduces a fresh id.
+
+    The new head's `dwell_until` is `max(old_head.dwell_until,
+    event.dwell_until)` (optimistic-memory §3.2 P0 security invariant): a
+    supersede can extend a target's dwell but never shorten it, which is
+    what stops "chain a cheap supersede to release a quarantined row early"
+    from working -- enforced here, at the fold layer, not trusted from a
+    caller-supplied flag.
+    """
     content = event.get("content") or ""
     type_ = event.get("type") or old_head.get("type")
     return {
@@ -966,6 +1025,7 @@ def _seed_head_from_supersede_event(event: dict[str, Any], old_head: dict[str, A
         "supersede_reason": event.get("supersede_reason"),
         "writer": event.get("writer"),
         "source_session": event.get("source_session"),
+        "dwell_until": _max_dwell(old_head.get("dwell_until"), event.get("dwell_until")),
     }
 
 
@@ -984,10 +1044,15 @@ def _apply_op(heads: dict[str, dict[str, Any]], op: dict[str, Any], target: dict
         # `last_verified` exactly as before.
         if not op.get("auto"):
             target["last_verified"] = op.get("timestamp") or target.get("last_verified")
+        # optimistic-memory §3.2: a `--dwell-hours` floor on a verify can only
+        # extend the target's existing dwell, never shorten it (_max_dwell).
+        target["dwell_until"] = _max_dwell(target.get("dwell_until"), op.get("dwell_until"))
     elif kind == "contradict":
         target["contradictions"] = int(target.get("contradictions", 0)) + 1
+        target["dwell_until"] = _max_dwell(target.get("dwell_until"), op.get("dwell_until"))
     elif kind == "deprecate":
         target["deprecated"] = True
+        target["dwell_until"] = _max_dwell(target.get("dwell_until"), op.get("dwell_until"))
     elif kind == "supersede":
         new_id = op["id"]
         prior = target.get("superseded_by")
@@ -1484,6 +1549,28 @@ def is_stale(
     return (now_ts - ts) / 86400.0 > stale_days
 
 
+def is_dwelling(
+    entry: dict[str, Any],
+    *,
+    now: float | None = None,
+) -> bool:
+    """
+    True iff `entry["dwell_until"]` parses to a time strictly after `now`
+    (optimistic-memory §3.2): the row was committed but has not yet reached
+    its read-eligibility window. Absent or malformed `dwell_until` -> False
+    (fail-open to "live" -- a parse bug must never trap a row in permanent
+    dwell). Mirrors `is_stale()`'s `now: float | None = None` override shape.
+    """
+    dwell_until = entry.get("dwell_until")
+    if not dwell_until:
+        return False
+    ts = _parse_iso(dwell_until)
+    if ts <= 0:
+        return False
+    now_ts = now if now is not None else time.time()
+    return ts > now_ts
+
+
 def has_stale_file_refs(entry: dict[str, Any], repo_root: Path | None = None) -> bool:
     """
     If entry lists files and a repo_root is provided, return True when any
@@ -1581,14 +1668,19 @@ def search(
     token_budget: int | None = None,
     include_stale: bool = False,
     include_superseded: bool = False,
+    include_dwelling: bool = False,
     config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Return a ranked, filtered, token-capped list of learnings.
 
     The caller is expected to inject this into a command preamble or skill
-    context. Results are already sanitized; deprecated, superseded, and
-    stale-below-threshold entries are excluded by default.
+    context. Results are already sanitized; deprecated, superseded,
+    stale-below-threshold, and (optimistic-memory §3.2) dwelling entries are
+    excluded by default. A dwelling row is still resolvable via `load_all()`
+    and by id (`update_entry_by_id`/`supersede_entry`) -- only this ranked,
+    injectable result set hides it, mirroring `include_stale`/
+    `include_superseded`.
     """
     cfg = config or load_config()
     half_life = float(cfg.get("half_life_days", DEFAULT_HALF_LIFE_DAYS))
@@ -1631,6 +1723,10 @@ def search(
         if eff < threshold:
             continue
         if not include_stale and is_stale(e, stale_days=stale_days, now=now):
+            continue
+        # optimistic-memory §3.2: exclude a row still inside its dwell_until
+        # window by default -- mirrors the include_stale guard immediately above.
+        if not include_dwelling and is_dwelling(e, now=now):
             continue
         rel = score_relevance(e, query, tags)
         # Rank: effective confidence (0-10) weighted with relevance (0-1)
@@ -1784,6 +1880,7 @@ def update_entry_by_id(
     expected_sha256: str | None = None,
     source_session: str | None = None,
     auto: bool = False,
+    dwell_until: str | None = None,
 ) -> bool:
     """
     Mutate a chain head by appending verify/contradict/deprecate op-event(s)
@@ -1796,9 +1893,15 @@ def update_entry_by_id(
     `auto=True` (adrev-404) marks an UNATTENDED verify: it still bumps `uses`
     but the projection will NOT refresh `last_verified` for it (severing the
     decay/staleness reset so a nightly auto-apply cannot immortalize a row).
-    It is meaningful ONLY for `verify`; `_build_op_row` ignores it for
-    contradict/deprecate. Human verify (the default, `auto=False`) is
-    unchanged.
+    That specific `last_verified`-skip semantic is meaningful ONLY for
+    `verify`; the `auto` flag itself (adrev-opt-008) is now also accepted --
+    and stamped on disk -- for contradict/deprecate, purely for audit/
+    reporting. Human writes (the default, `auto=False`) are unchanged.
+
+    `dwell_until` (optimistic-memory §3.2), if given, is passed as a FLOOR
+    to every op-event emitted by this call; the fold layer (`_apply_op`)
+    applies `max(existing_target_dwell, new)`, so this can only extend --
+    never shorten -- the target's dwell.
 
     Raises GlobalPromotionError if the target's OWN `project` is `_global`
     and CCGM_LEARNINGS_ADMIN=1 is not set -- verify/contradict/deprecate
@@ -1840,15 +1943,11 @@ def update_entry_by_id(
     shard = agent_shard_path(target_proj, writer)
     for kind in kinds:
         ts = _next_writer_timestamp(shard)
-        # `auto` is threaded to every op-row, but _build_op_row only stamps it
-        # on a `verify` (adrev-404: meaningless for contradict/deprecate). The
-        # single-source-of-truth guard lives in _build_op_row, so a future
-        # caller cannot accidentally auto-flag a non-verify op.
         row = _build_op_row(
             op=kind, target_id=entry_id, project=target_proj, writer=writer, timestamp=ts,
             source_session=source_session,
             expected_sha256=expected_sha256 if kind == "deprecate" else None,
-            auto=auto,
+            auto=auto, dwell_until=dwell_until,
         )
         file_locked_append(str(shard), json.dumps(row, sort_keys=True))
     _maybe_autocommit()
@@ -1872,6 +1971,8 @@ def supersede_entry(
     reason: str | None = None,
     expected_sha256: str | None = None,
     source_session: str | None = None,
+    auto: bool = False,
+    dwell_until: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Atomically replace one entry with a new one by appending a single
@@ -1887,6 +1988,13 @@ def supersede_entry(
     OriginBindingError if `source` would raise the tier without a fresh,
     transcript-verified `source_session`, §3.3). Returns the new entry
     dict, or None if `old_id` was not found.
+
+    `auto=True` (adrev-opt-008) marks this supersede as unattended (dreaming
+    auto-integration) for audit/reporting. `dwell_until` (optimistic-memory
+    §3.2), if given, is a FLOOR on the NEW head's dwell -- the fold layer
+    (`_seed_head_from_supersede_event`) takes `max(old_head.dwell_until,
+    dwell_until)`, so a supersede can never shorten the target's existing
+    dwell, only extend it.
     """
     target_slug = slug or detect_project_slug()
     heads = load_all(target_slug)
@@ -1936,6 +2044,7 @@ def supersede_entry(
         confidence=new_entry["confidence"], tags=new_entry["tags"], files=new_entry["files"],
         key=new_entry["key"], source_session=source_session,
         supersede_reason=new_entry["supersede_reason"], event_id=new_entry["id"],
+        auto=auto, dwell_until=dwell_until,
     )
     file_locked_append(str(shard), json.dumps(row, sort_keys=True))
 

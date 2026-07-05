@@ -26,6 +26,14 @@ Fields:
     --evidence-session   repeatable; session uuid(s) cited as promotion evidence
     --expected-sha       CAS (supersede/deprecate): sha256 of the target's current
                          content, as last read. Mismatch exits 3 with the current sha.
+    --auto              mark this write as unattended (dreaming auto-integration), for
+                         audit/reporting -- available on every subcommand (add/verify/
+                         contradict/deprecate/supersede)
+    --dwell-hours <N>   stamp dwell_until = utcnow() + N hours (optimistic-memory §3.2):
+                         the row is written but excluded from search()/injection until
+                         the window closes. On verify/contradict/deprecate/supersede this
+                         is a FLOOR only -- the store applies max(existing, new), so it
+                         can extend but never shorten a target's existing dwell.
 
 Writes to:
     ~/.claude/learnings/{project-slug}/agents/{agent-id}.jsonl
@@ -82,6 +90,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
             "evidence_sessions": args.evidence_session or [],
         }
 
+    dwell_until = ls.dwell_until_from_hours(args.dwell_hours) if args.dwell_hours is not None else None
+
     try:
         entry = ls.build_entry(
             type_=payload["type"],
@@ -94,13 +104,14 @@ def _cmd_log(args: argparse.Namespace) -> int:
             key=payload.get("key"),
             source_session=payload.get("source_session"),
             evidence_sessions=payload.get("evidence_sessions") or [],
+            dwell_until=dwell_until,
         )
     except ls.ValidationError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
     try:
-        path = ls.append_entry(entry)
+        path = ls.append_entry(entry, auto=args.auto)
     except ls.GlobalPromotionError as e:
         print(f"error: {e}", file=sys.stderr)
         return 4
@@ -110,10 +121,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
+    dwell_until = ls.dwell_until_from_hours(args.dwell_hours) if args.dwell_hours is not None else None
     try:
         ok = ls.update_entry_by_id(
             args.id, slug=args.project, verify=True, source_session=args.session,
-            auto=args.auto,
+            auto=args.auto, dwell_until=dwell_until,
         )
     except ls.GlobalPromotionError as e:
         print(f"error: {e}", file=sys.stderr)
@@ -122,8 +134,12 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def _cmd_contradict(args: argparse.Namespace) -> int:
+    dwell_until = ls.dwell_until_from_hours(args.dwell_hours) if args.dwell_hours is not None else None
     try:
-        ok = ls.update_entry_by_id(args.id, slug=args.project, contradict=True, source_session=args.session)
+        ok = ls.update_entry_by_id(
+            args.id, slug=args.project, contradict=True, source_session=args.session,
+            auto=args.auto, dwell_until=dwell_until,
+        )
     except ls.GlobalPromotionError as e:
         print(f"error: {e}", file=sys.stderr)
         return 4
@@ -131,10 +147,12 @@ def _cmd_contradict(args: argparse.Namespace) -> int:
 
 
 def _cmd_deprecate(args: argparse.Namespace) -> int:
+    dwell_until = ls.dwell_until_from_hours(args.dwell_hours) if args.dwell_hours is not None else None
     try:
         ok = ls.update_entry_by_id(
             args.id, slug=args.project, deprecate=True,
             expected_sha256=args.expected_sha, source_session=args.session,
+            auto=args.auto, dwell_until=dwell_until,
         )
     except ls.GlobalPromotionError as e:
         print(f"error: {e}", file=sys.stderr)
@@ -146,6 +164,7 @@ def _cmd_deprecate(args: argparse.Namespace) -> int:
 
 
 def _cmd_supersede(args: argparse.Namespace) -> int:
+    dwell_until = ls.dwell_until_from_hours(args.dwell_hours) if args.dwell_hours is not None else None
     try:
         new_entry = ls.supersede_entry(
             args.old_id,
@@ -159,6 +178,8 @@ def _cmd_supersede(args: argparse.Namespace) -> int:
             reason=args.reason,
             expected_sha256=args.expected_sha,
             source_session=args.session,
+            auto=args.auto,
+            dwell_until=dwell_until,
         )
     except ls.ValidationError as e:
         print(f"error: {e}", file=sys.stderr)
@@ -214,6 +235,15 @@ def build_parser() -> argparse.ArgumentParser:
                     help="repeatable; session uuid(s) cited as promotion evidence")
     p.add_argument("--from-json", help="raw JSON payload instead of flags")
     p.add_argument("--stdin", action="store_true", help="read JSON payload from stdin")
+    p.add_argument(
+        "--auto", action="store_true",
+        help="unattended write (dreaming auto-integration), for audit/reporting (adrev-opt-008)",
+    )
+    p.add_argument(
+        "--dwell-hours", type=int,
+        help="stamp dwell_until = utcnow() + N hours (optimistic-memory §3.2): row is "
+             "written but excluded from search()/injection until the window closes",
+    )
 
     verify = sub.add_parser("verify", help="record a successful reuse of a learning")
     verify.add_argument("id")
@@ -224,12 +254,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="unattended verify (dreaming auto-apply): bump uses WITHOUT refreshing "
              "last_verified, so decay/staleness are not reset (adrev-404). Default off = human semantics.",
     )
+    verify.add_argument(
+        "--dwell-hours", type=int,
+        help="floor: dwell_until = utcnow() + N hours, applied as max(existing, new) -- "
+             "can only extend, never shorten, the target's existing dwell",
+    )
     verify.set_defaults(func=_cmd_verify)
 
     contra = sub.add_parser("contradict", help="record a contradiction against a learning")
     contra.add_argument("id")
     contra.add_argument("--project")
     contra.add_argument("--session")
+    contra.add_argument(
+        "--auto", action="store_true",
+        help="unattended contradict (dreaming auto-integration), for audit/reporting (adrev-opt-008)",
+    )
+    contra.add_argument(
+        "--dwell-hours", type=int,
+        help="floor: dwell_until = utcnow() + N hours, applied as max(existing, new) -- "
+             "can only extend, never shorten, the target's existing dwell",
+    )
     contra.set_defaults(func=_cmd_contradict)
 
     dep = sub.add_parser("deprecate", help="mark a learning as deprecated (excluded from reads)")
@@ -238,6 +282,15 @@ def build_parser() -> argparse.ArgumentParser:
     dep.add_argument("--session")
     dep.add_argument("--expected-sha", required=True,
                       help="CAS: sha256 of the target's current content, as last read")
+    dep.add_argument(
+        "--auto", action="store_true",
+        help="unattended deprecate (dreaming auto-integration), for audit/reporting (adrev-opt-008)",
+    )
+    dep.add_argument(
+        "--dwell-hours", type=int,
+        help="floor: dwell_until = utcnow() + N hours, applied as max(existing, new) -- "
+             "can only extend, never shorten, the target's existing dwell",
+    )
     dep.set_defaults(func=_cmd_deprecate)
 
     sup = sub.add_parser(
@@ -259,6 +312,16 @@ def build_parser() -> argparse.ArgumentParser:
     sup.add_argument("--session", help="claude session uuid (required to raise the source tier)")
     sup.add_argument("--expected-sha", required=True,
                       help="CAS: sha256 of the target's current content, as last read")
+    sup.add_argument(
+        "--auto", action="store_true",
+        help="unattended supersede (dreaming auto-integration), for audit/reporting (adrev-opt-008)",
+    )
+    sup.add_argument(
+        "--dwell-hours", type=int,
+        help="floor on the NEW head's dwell: dwell_until = utcnow() + N hours, applied as "
+             "max(old_head's existing dwell, new) -- can only extend, never shorten, the "
+             "target's existing dwell",
+    )
     sup.set_defaults(func=_cmd_supersede)
 
     cfg_sub = sub.add_parser("config", help="adjust learnings-store config")
