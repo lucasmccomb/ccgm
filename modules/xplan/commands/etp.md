@@ -285,7 +285,9 @@ Merge a PR only when: it passed review (both stages, or Stage 1 under `--light-r
 
 ### 4.5 Bring-up & integration verification (when applicable)
 
-If the work specifies bring-up (migrations, dependency installs, type regen, env/secret sets, dev-server/worker restarts, deploys), execute it and verify every layer is actually live - DB migrated, backend responding, frontend loading, workers running, deploy current - then run a smoke test against the running system, not just CI. A single issue usually has no bring-up; confirm that is true rather than assuming. A plan wave does not advance against a degraded system.
+If the work specifies bring-up (migrations, dependency installs, type regen, env/secret sets, dev-server/worker restarts, deploys), execute it and verify every layer is actually live - DB migrated, backend responding, frontend loading, workers running, deploy current - then run the **autonomous E2E suite against the running system**, not just CI. For a plan, that is its Section 8 suite; for an issue, the E2E tests covering the changed surface. The E2E suite (not a bare smoke test) is the certainty gate: green ⇒ clean / mergeable, red ⇒ broken. A single issue usually has no bring-up; confirm that is true rather than assuming. A plan wave does not advance against a degraded system or a red suite.
+
+**If the touched surface has no E2E coverage**, adding it is an in-scope follow-up (Phase 5), not an optional extra — the standing assumption is that more autonomous E2E coverage is always wanted, so the changed behavior gets a real end-to-end test before the work is called complete. This is the executor's side of the plan's E2E mandate (adrev tenet T4).
 
 ### 4.6 Checkpoint
 
@@ -329,7 +331,7 @@ Loop Phases 4-6 until every condition holds:
 - All PRs merged (or frozen-and-recorded as blocked); all target issues closed by their merged PRs.
 - Every merged PR reached CI-green via the bounded loop (4.35); any PR that could not be driven green within the bound is among the frozen-and-recorded blockers, not silently merged.
 - CI green, no uncommitted changes in any clone, no unexpected open PRs.
-- All layers confirmed live (where the work has runtime impact); smoke test passes.
+- All layers confirmed live (where the work has runtime impact); the **autonomous E2E suite is green** against the running system (the plan's §8 suite, or the E2E tests covering a changed issue surface) — the certainty oracle, not a bare smoke test. Any surface a plan's §8.5 names as not-certified is the only acceptable manual residue.
 
 "Don't stop until everything is complete" means: do not stop while completable work remains. Blocked units are set aside with a clear notification; they do not end the run. The run ends when the only thing left is genuinely human-blocked, and the user has been told exactly what each blocker needs.
 
@@ -347,7 +349,7 @@ gh issue list --state open
 
 ### 8.2 Report to the user
 
-- **Completed**: units finished, PRs merged, issues closed - with evidence (test output, smoke-test result, live URLs).
+- **Completed**: units finished, PRs merged, issues closed - with evidence (test output, **autonomous E2E suite result (green)**, live URLs).
 - **Blocked**: each blocker, why, and the exact human action that unblocks it.
 - **Deferred**: out-of-scope follow-ups logged but intentionally not done.
 - **Live state**: the verification that the system actually runs end-to-end (where applicable).
@@ -371,6 +373,8 @@ A plan run: mark the progress file `COMPLETE`, or `BLOCKED - WAITING ON HUMAN` w
 **Notify-and-continue.** Absolute blockers are reported the moment they are found and never halt non-blocked work. The run degrades gracefully around blockers; it does not stop dead.
 
 **Human work at the edges.** The user is not a step inside the run. Anything an agent can do via CLI/API is done, not asked. Genuine human-only work is surfaced up front (front-loaded, Phase 1.4) or queued for the end (deferred), never left to stall the run mid-stream. In-scope follow-on work is reasoned through against the decision context (Phase 1.5), not bounced to the user — only genuinely human-blocked items remain open at completion, each surfaced with its exact ask.
+
+**The E2E suite is the completion oracle — no manual testing bounced to the user.** "Done" means the autonomous end-to-end suite is green against the running system, not "I believe it works" or "the user can check." Provision whatever the suite needs — testing agents for flows that can't be asserted programmatically, third-party compute (RunPod, cloud Mac, real devices) as a front-loaded prerequisite; there is no resource constraint on testing. A changed surface without an E2E test gets one before completion (adrev tenet T4 / plan §8). The only manual residue permitted is a surface a plan's §8.5 explicitly names as not-certified.
 
 **Safety on irreversible / outward actions.** Even in autonomous mode, anything destructive or externally-visible that the work did not clearly authorize - production deploys, resource deletion, force-pushing shared branches, sending external communications - requires notifying the user first. The work authorizes its own scope; it does not authorize off-scope irreversible acts.
 
