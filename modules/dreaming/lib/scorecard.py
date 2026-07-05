@@ -178,7 +178,7 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
                     continue
                 if isinstance(obj, dict):
                     rows.append(obj)
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return rows
     return rows
 
@@ -207,7 +207,7 @@ def _load_json_object(path: Path) -> dict[str, Any]:
         if not path.is_file():
             return {}
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
 

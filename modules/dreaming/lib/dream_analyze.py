@@ -418,7 +418,7 @@ def _load_env_file(path: Path) -> None:
         return
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return
     for line in text.splitlines():
         line = line.strip()

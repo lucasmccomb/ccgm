@@ -1020,7 +1020,7 @@ def _read_optimistic_state() -> dict[str, Any]:
         return _default_optimistic_state()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return {**_default_optimistic_state(), "suspended": True, "suspended_at": _utc_now_iso()}
     if not isinstance(data, dict):
         return {**_default_optimistic_state(), "suspended": True, "suspended_at": _utc_now_iso()}
