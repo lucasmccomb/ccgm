@@ -118,6 +118,11 @@
       "type": "command",
       "template": false
     },
+    "commands/dream-review.md": {
+      "target": "commands/dream-review.md",
+      "type": "command",
+      "template": false
+    },
     "commands/dream-scorecard.md": {
       "target": "commands/dream-scorecard.md",
       "type": "command",

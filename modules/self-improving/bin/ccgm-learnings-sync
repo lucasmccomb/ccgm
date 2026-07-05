@@ -12,6 +12,7 @@ Usage:
     ccgm-learnings-sync commit [-m MSG]      # stage + commit if dirty
     ccgm-learnings-sync pull                 # fetch + merge --no-edit -- NEVER rebase (adrev-401)
     ccgm-learnings-sync push                 # push to the configured remote
+    ccgm-learnings-sync revert <sha>         # undo one commit's added lines + commit; same lock as commit/pull/push
     ccgm-learnings-sync status               # porcelain + ahead/behind + in-progress + quarantine
 
 Every subcommand's LAST stdout line is a single machine-parseable JSON
@@ -31,6 +32,46 @@ through THIS file's `commit` subcommand, so its "stand down while a
 merge/rebase is in progress" behavior is a property of `commit` itself --
 identical whether commit is invoked by autocommit or by a human (arch-6:
 sync orchestration lives here, not inside the store's write path).
+
+revert (optimistic-memory plan.md Epic 6) does NOT shell out to
+`git revert` -- an EMPIRICAL finding (git 2.50.1, scratch repos, the same
+rigor as adrev-401) during this feature's own build found that `git revert`
+is unsound against this store's shard files specifically BECAUSE of the
+`*.jsonl merge=union` gitattribute every shard file already carries (the
+attribute that makes `pull` safe -- see GITATTRIBUTES_LINES above). Once a
+project's shard file has had even ONE write since the commit being
+reverted (the realistic case: `/dream-review` targets a batch from days
+ago, and later nights or human accepts have almost certainly written to
+the same file), a plain `git revert --no-edit <sha>` invokes the union
+merge driver for that path's 3-way merge -- and the union driver's whole
+job is "never let a line disappear", so it SILENTLY re-adds the very
+content the revert was trying to remove: `git revert` reports "nothing to
+commit, working tree clean" and exits nonzero, having made no change at
+all. Forcing the ordinary text merge for just this operation (a
+`.git/info/attributes` override) does not fix it either -- it converts the
+silent no-op into a real, adjacent-hunk merge CONFLICT requiring manual
+resolution for the same common case, which still fails the "the store is
+clean afterward" bar.
+
+Instead, `revert` computes the exact set of lines commit `<sha>` ADDED
+(`git diff --unified=0 <sha>~1 <sha>`, so only genuinely-changed lines are
+present, never surrounding context) and removes that exact multiset of
+lines from each touched file's CURRENT content directly -- a plain content
+transformation that never invokes git's merge/attribute machinery at all,
+so the union driver never gets a vote. This is sound BECAUSE of (not
+despite) this store's own append-only invariant (self-improving/
+learnings_store.py: every write is a new appended line; existing lines are
+never rewritten in place) -- reverting a commit therefore always reduces
+to "remove the lines it added", regardless of what else has been appended
+to the same file since, in what order, or whether the commit created the
+file fresh. If ANY file in the commit's diff also shows REMOVED or
+modified lines (this store should never produce that shape from its own
+write path; a hand-edited shard or an unrelated manual commit could), the
+whole revert is refused BEFORE any file is touched -- `action: unsupported`,
+nothing mutated, resolve manually. Guarded by the same store-wide sync
+lock as commit/pull/push, and refuses (not attempted) on a dirty working
+tree or an already in-progress git operation, exactly like the other write
+verbs.
 
 Known residual (documented, not fixed here -- would require touching
 Epic 1's frozen learnings_store.py write path, out of this file's scope):
@@ -72,6 +113,7 @@ import json
 import os
 import subprocess
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -593,6 +635,179 @@ def cmd_push(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Revert: line-set-difference, bypasses merge attributes entirely (see the
+# module docstring's `revert` section for why `git revert` itself is unsound
+# against a `merge=union` shard file). Used only by cmd_revert() below.
+# ---------------------------------------------------------------------------
+
+def _changed_paths(sha: str) -> list[str] | None:
+    """Paths touched by `sha` relative to its first parent. `None` on a git
+    failure (e.g. `sha` does not resolve); an empty list is a real,
+    structurally-odd "commit touches nothing" result, handled by the
+    caller."""
+    rc, out, _ = _run_git(["diff", "--name-only", f"{sha}~1", sha])
+    if rc != 0:
+        return None
+    return [ln for ln in out.splitlines() if ln.strip()]
+
+
+def _diff_added_removed(sha: str, path: str) -> tuple[list[str], list[str]] | None:
+    """Added/removed lines for `path` in `sha`, via a ZERO-context unified
+    diff (`--unified=0`) so the only lines present are ones this commit
+    actually changed -- never surrounding context, which is what makes the
+    multiset removal in `_revert_commit()` exact regardless of how much
+    unrelated content now surrounds the original change. `None` on a git
+    failure."""
+    rc, out, _ = _run_git(["diff", "--unified=0", "--no-color", f"{sha}~1", sha, "--", path])
+    if rc != 0:
+        return None
+    added: list[str] = []
+    removed: list[str] = []
+    for line in out.splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            continue  # file-header lines, not content
+        if line.startswith("+"):
+            added.append(line[1:])
+        elif line.startswith("-"):
+            removed.append(line[1:])
+    return added, removed
+
+
+def _remove_multiset(current_lines: list[str], to_remove: list[str]) -> tuple[list[str], int]:
+    """Remove up to `to_remove.count(line)` occurrences of each line from
+    `current_lines`, preserving order of what remains. A Counter-based
+    multiset difference (not a set difference) so a line that legitimately
+    appears more than once is not over-removed. Returns
+    (new_lines, actually_removed_count) -- the count lets the caller tell
+    "already reverted" (0 removed) apart from a real change."""
+    remaining = Counter(to_remove)
+    out: list[str] = []
+    removed_count = 0
+    for line in current_lines:
+        if remaining.get(line, 0) > 0:
+            remaining[line] -= 1
+            removed_count += 1
+            continue
+        out.append(line)
+    return out, removed_count
+
+
+def _revert_commit(sha: str) -> dict[str, Any]:
+    """The actual revert, as a pure result dict -- caller (`cmd_revert`)
+    owns the sync lock, the dirty/in-progress pre-checks, and `_emit()`.
+
+    Validates every touched file BEFORE mutating any of them, so a refusal
+    (bad sha, merge commit, a file with non-addition changes) never leaves
+    a partially-reverted working tree -- all-or-nothing, matching the
+    all-or-nothing nature of the batch commit this is meant to undo.
+    """
+    rc, _, err = _run_git(["rev-parse", "--verify", f"{sha}^{{commit}}"])
+    if rc != 0:
+        return {"ok": False, "action": "failed", "reason": f"not a valid commit: {err.strip()}"}
+    rc, _, err = _run_git(["rev-parse", "--verify", f"{sha}~1"])
+    if rc != 0:
+        return {
+            "ok": False, "action": "failed",
+            "reason": f"commit has no parent (cannot revert the initial commit): {err.strip()}",
+        }
+    rc2, _, _ = _run_git(["rev-parse", "--verify", f"{sha}^2"])
+    if rc2 == 0:
+        return {"ok": False, "action": "unsupported", "reason": "merge commits are not supported"}
+
+    paths = _changed_paths(sha)
+    if paths is None:
+        return {"ok": False, "action": "failed", "reason": "could not compute changed files for this commit"}
+    if not paths:
+        return {"ok": False, "action": "failed", "reason": "commit touches no files"}
+
+    added_by_path: dict[str, list[str]] = {}
+    for path in paths:
+        result = _diff_added_removed(sha, path)
+        if result is None:
+            return {"ok": False, "action": "failed", "reason": f"could not diff {path!r}"}
+        added, removed = result
+        if removed:
+            # Never seen from this store's own write path (append-only);
+            # a hand-edited shard or an unrelated manual commit could shape
+            # one this way. Refuse before touching anything -- resolve
+            # manually (raw git revert/checkout), never guess.
+            return {
+                "ok": False, "action": "unsupported",
+                "reason": f"{path!r} was modified (not purely appended to) by this commit; "
+                          "cannot auto-revert -- resolve manually",
+            }
+        added_by_path[path] = added
+
+    touched: list[str] = []
+    for path, added_lines in added_by_path.items():
+        full_path = ls.LEARNINGS_ROOT / path
+        if not full_path.is_file():
+            continue  # already gone entirely -- nothing to remove
+        current = full_path.read_text(encoding="utf-8").splitlines()
+        new_lines, removed_count = _remove_multiset(current, added_lines)
+        if removed_count == 0:
+            continue  # this file's addition is already absent
+        new_text = ("\n".join(new_lines) + "\n") if new_lines else ""
+        full_path.write_text(new_text, encoding="utf-8")
+        touched.append(path)
+
+    if not touched:
+        return {"ok": True, "action": "noop", "reason": "commit's writes are already absent from the working tree"}
+
+    rc, _, err = _run_git(["add", "--", *touched])
+    if rc != 0:
+        return {"ok": False, "action": "failed", "reason": f"git add failed: {err.strip()}"}
+    message = f"Revert {sha}\n\nRemoves the lines {sha} added, via ccgm-learnings-sync revert."
+    rc, _, err = _run_git(["commit", "-m", message])
+    if rc != 0:
+        return {"ok": False, "action": "failed", "reason": f"git commit failed: {err.strip()}"}
+    rc, out, _ = _run_git(["rev-parse", "--short", "HEAD"])
+    return {
+        "ok": True, "action": "reverted",
+        "sha": out.strip() if rc == 0 and out.strip() else None,
+        "touched_files": touched,
+    }
+
+
+def cmd_revert(args: argparse.Namespace) -> int:
+    """Revert one commit's writes (optimistic-memory plan.md Epic 6),
+    taking the SAME store-wide sync lock as commit/pull/push (adrev-401's
+    discipline extended to a fourth write verb). See `_revert_commit()` and
+    the module docstring's `revert` section for the actual mechanism and
+    why it does not shell out to `git revert`.
+
+    Refuses cleanly (no file touched) on a dirty working tree or an
+    already in-progress git operation -- mirrors cmd_pull's own guards: a
+    clean starting point is what makes reading "current content" in
+    `_revert_commit()` trustworthy, and stacking this on top of an
+    unresolved git operation is never safe to attempt automatically.
+    """
+    if not _git_dir_exists():
+        _emit({"ok": False, "reason": "not a git repo; run 'ccgm-learnings-sync init' first"})
+        return 1
+    if _is_dirty():
+        _emit({"ok": False, "reason": "dirty working tree; commit first"})
+        return 1
+
+    with _sync_lock():
+        markers = _in_progress()
+        if markers:
+            _emit({
+                "ok": False,
+                "action": "blocked",
+                "reason": "another git operation already in progress; resolve manually (see status)",
+                "markers": markers,
+            })
+            return 1
+
+        result = _revert_commit(args.sha)
+
+    result.setdefault("reverted_sha", args.sha)
+    _emit(result)
+    return 0 if result["ok"] else 1
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     if not _git_dir_exists():
         _emit({"ok": True, "initialized": False})
@@ -667,6 +882,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     push_p = sub.add_parser("push", help="push to the configured remote (refuses if none configured)")
     push_p.set_defaults(func=cmd_push)
+
+    revert_p = sub.add_parser(
+        "revert",
+        help="remove the lines <sha> added + commit, under the same sync lock (not git revert -- see docstring)",
+    )
+    revert_p.add_argument("sha", help="the commit sha to revert (short or full)")
+    revert_p.set_defaults(func=cmd_revert)
 
     status_p = sub.add_parser(
         "status", help="porcelain + ahead/behind + in-progress state + quarantine counts"
