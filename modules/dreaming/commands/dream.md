@@ -27,6 +27,22 @@ command modifies no files. Use the listed subcommands for stateful actions.
    treatment (adrev-014: this must stay visible even if a human skipped the
    day it first appeared).
 7. Whether the LaunchAgent is loaded: `launchctl list | grep ccgm.dreaming`.
+8. **Optimistic auto-integration state** (optimistic-memory plan.md §3.5,
+   Epic 6): a one-line summary —
+   - `enabled` — `config.json`'s `optimistic_integration.enabled` (a
+     DIFFERENT, more specific flag than the top-level `enabled` in item 2,
+     which gates the mining/analyze pipeline, not auto-integration).
+   - `suspended` — `~/.claude/dreaming/state/optimistic.json`'s
+     `suspended` field (the windowed circuit breaker). Absent file means
+     `false` (never tripped).
+   - **N dwelling** — count of rows currently inside their `dwell_until`
+     window, summed across every project slug. Use the SAME recipe
+     `/dream-review` documents (`{e for e in load_all(slug) if
+     is_dwelling(e)}` per slug, via `learnings_store.list_project_slugs()`
+     for the slug list) — never `search(include_dwelling=True)`, which
+     token/max-results-caps its output and would under-count.
+   - **N auto-applied last night** — the same today's `auto_applied` count
+     item 5 already computes, restated here as the headline figure.
 
 ## How it works
 
@@ -45,7 +61,14 @@ This command is a thin Claude reader, not a shell script. The agent:
    it already applies the correct 8-day review window and pending filter.
 4. Runs `launchctl list | grep ccgm.dreaming` to check LaunchAgent load
    state (non-zero grep exit just means "not loaded" — not an error).
-5. Prints the rendered status table and the command surface.
+5. Reads `optimistic_integration` out of the same `config.json` (item 2)
+   for `enabled`, and `~/.claude/dreaming/state/optimistic.json` for
+   `suspended` (treat a missing file as `suspended: false`, matching
+   `apply_dream_proposal._default_optimistic_state()`). Computes the
+   dwelling count via `learnings_store.list_project_slugs()` +
+   `load_all(slug)` + `is_dwelling(e)` per slug (never `search()` — see
+   item 8 and `/dream-review`'s own docstring for why).
+6. Prints the rendered status table and the command surface.
 
 ## Command surface
 
@@ -53,7 +76,8 @@ This command is a thin Claude reader, not a shell script. The agent:
 |---|---|
 | `/dream` | This overview. |
 | `/dream-digest [date]` | Render today's or a specific date's digest. |
-| `/dream-apply [id\|list]` | List pending proposals, or apply/reject one by id. |
+| `/dream-review [veto\|revert]` | Review auto-integrated + dwelling rows; veto a row or revert a batch. |
+| `/dream-apply [id\|list]` | Back-compat: list pending proposals, or apply/reject one by id (the `gated`/`_global` path). |
 
 ## Config flags
 
@@ -68,15 +92,26 @@ schema. Defaults: `enabled: true`, `auto_apply_counters: false`,
 (unlike autoheal's `/autoheal-toggle`); flipping it is a manual config edit,
 by design, so it is never accidentally enabled.
 
+`optimistic_integration.enabled` (a nested, more specific flag — see item 8
+above) is SEPARATELY `false` by default too (`DEFAULT_OPTIMISTIC_INTEGRATION`
+in `dream_analyze.py`). Epic 8 (not yet landed as of this command's own
+Epic 6) is what wires a surfaced activation prompt into `memory-setup.sh`;
+until then, flipping it is also a manual `config.json` edit.
+
 ## When NOT to invoke
 
 - This is a status read-out, not an apply path. To act on a specific
-  proposal, use `/dream-apply <id>` after reading it via `/dream-apply list`.
+  auto-integrated or dwelling row, use `/dream-review`. To act on an
+  older-style pending (`gated`/`_global`) proposal, use `/dream-apply <id>`.
 - To read a rendered digest body, use `/dream-digest [date]`.
 
 ## Cross-references
 
+- `/dream-review [veto|revert]` — the optimistic model's post-hoc review
+  and rollback surface (Epic 6).
 - Rule: `modules/dreaming/rules/dreaming.md` (Epic 8; not yet present in
   this branch — see `modules/self-improving/rules/learnings-store.md` for
   the store side of this system in the meantime).
-- Plan: `~/code/plans/ccgm-durable-memory-system/plan.md` §5 Epic 6.
+- Plan: `~/code/plans/ccgm-optimistic-memory/plan.md` §5 Epic 6 (this
+  command's own update); `~/code/plans/ccgm-durable-memory-system/plan.md`
+  §5 Epic 6 (the original `/dream`/`/dream-apply` this command predates).

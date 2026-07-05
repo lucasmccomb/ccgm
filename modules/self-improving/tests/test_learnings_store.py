@@ -1902,6 +1902,69 @@ class CLIExitCodeTests(unittest.TestCase):
         self.assertIn("legacy-only", result.stdout)
 
 
+# ---------------------------------------------------------------------------
+# Fix 1b (BLOCKING backstop, #804): _try_incremental_projection assumed
+# shards only GROW. When a shard SHRINKS (a ccgm-learnings-sync revert
+# removed a line) the grow-only fast path returned the STALE cached heads --
+# still carrying the removed row -- and, because its recorded line watermark
+# now overshot the shrunken file, went blind to rows appended afterward.
+# These tests ISOLATE the projection layer: they shrink the shard DIRECTLY,
+# never through the revert CLI, so invalidate_cache() (fix 1a) is NOT
+# involved -- only the shrink detection inside _try_incremental_projection
+# can make them pass. (test_dream_review.py's RevertCacheInvalidationTests
+# covers the end-to-end revert path with both layers.)
+# ---------------------------------------------------------------------------
+
+class IncrementalProjectionShrinkTests(unittest.TestCase):
+    def setUp(self):
+        self.slug = f"proj-shrink-{uuid.uuid4().hex[:8]}"
+        _isolate_env(self, "CCGM_LEARNINGS_PROJECT")
+        os.environ["CCGM_LEARNINGS_PROJECT"] = self.slug
+
+    def tearDown(self):
+        shutil.rmtree(ls.project_dir(self.slug), ignore_errors=True)
+        shutil.rmtree(ls._cache_dir(self.slug), ignore_errors=True)  # noqa: SLF001
+
+    def _head_ids(self) -> set[str]:
+        return {h["id"] for h in ls.load_all(self.slug)}
+
+    def test_shrunk_shard_forces_rebuild_not_stale_cached_heads(self):
+        entry_a = ls.build_entry(type_="pattern", content="row A to be removed", confidence=7)
+        shard = ls.append_entry(entry_a, self.slug)
+        entry_b = ls.build_entry(type_="pattern", content="row B survives", confidence=7)
+        ls.append_entry(entry_b, self.slug)
+
+        # WARM the snapshot cache with both present (persists snapshot.jsonl +
+        # a watermark recording this shard's lines=2 / size=S2).
+        self.assertEqual(self._head_ids(), {entry_a["id"], entry_b["id"]})
+
+        # SHRINK the shard directly: drop A's line, keep B's byte-identical --
+        # exactly the transformation ccgm-learnings-sync revert performs, but
+        # WITHOUT its invalidate_cache() call, so only fix 1b can save this
+        # read. Surviving line stays byte-for-byte identical + in order
+        # (the append-only invariant revert preserves).
+        lines = shard.read_text(encoding="utf-8").splitlines()
+        kept = [ln for ln in lines if json.loads(ln)["id"] != entry_a["id"]]
+        self.assertEqual(len(kept), len(lines) - 1, "exactly A's line removed")
+        shard.write_text(("\n".join(kept) + "\n") if kept else "", encoding="utf-8")
+
+        # WITHOUT fix 1b: the grow-only fast path reads no "new" lines
+        # (prev_lines overshoots the shrunken file) and returns the stale
+        # cached heads {A, B}. WITH fix 1b: cur_size < prev_size -> None ->
+        # full rebuild in project_slug() -> {B}.
+        after_shrink = self._head_ids()
+        self.assertNotIn(entry_a["id"], after_shrink, "removed row must be gone from load_all()")
+        self.assertIn(entry_b["id"], after_shrink)
+
+        # The "goes blind to later rows" half of the bug: a row appended
+        # AFTER the shrink must be visible too.
+        entry_c = ls.build_entry(type_="pattern", content="row C after shrink", confidence=7)
+        ls.append_entry(entry_c, self.slug)
+        final = self._head_ids()
+        self.assertIn(entry_c["id"], final)
+        self.assertNotIn(entry_a["id"], final)
+
+
 def _cleanup():
     shutil.rmtree(_TMP, ignore_errors=True)
     shutil.rmtree(ls.LEARNINGS_CACHE_ROOT, ignore_errors=True)

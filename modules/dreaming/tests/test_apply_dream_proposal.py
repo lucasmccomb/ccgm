@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -202,6 +203,79 @@ class AutoApplyVerifyThreadsAutoFlag(unittest.TestCase):
 
         _, row = adp.find_proposal("humanverify01")
         self.assertEqual(row["status"], "accepted")
+
+
+class RecordReviewReversalTests(unittest.TestCase):
+    """Fix 5 (#804): /dream-review's veto/revert must leave an apply-audit
+    record (`outcome == "reverted"`, NO `ok`) so Epic 7's scorecard counts
+    it under reverted-after-review. Pins BOTH halves of the E6->E7 wiring:
+    the on-disk record shape, and that scorecard._aggregate_optimistic()
+    actually counts the exact record record_review_reversal() writes."""
+
+    def setUp(self):
+        # Fresh CCGM_DREAMING_DIR per test so apply_audit_path() (derived from
+        # it) points at a clean, isolated audit log -- the log is cumulative.
+        self._dreaming = tempfile.mkdtemp(prefix="ccgm-dreaming-recordrevert-")
+        self.addCleanup(shutil.rmtree, self._dreaming, ignore_errors=True)
+        self._pin_env("CCGM_DREAMING_DIR", self._dreaming)
+
+    def _pin_env(self, key: str, value: str) -> None:
+        had = key in os.environ
+        prior = os.environ.get(key)
+        os.environ[key] = value
+
+        def _restore():
+            if had:
+                os.environ[key] = prior
+            else:
+                os.environ.pop(key, None)
+
+        self.addCleanup(_restore)
+
+    def _audit_rows(self) -> list[dict]:
+        path = adp.apply_audit_path()
+        if not path.is_file():
+            return []
+        return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
+
+    def test_veto_reversal_record_shape(self):
+        rec = adp.record_review_reversal(kind="veto", target_id="rowX", reason="wrongly auto-added")
+        self.assertEqual(rec["outcome"], "reverted")
+        self.assertEqual(rec["kind"], "veto")
+        self.assertEqual(rec["target_id"], "rowX")
+        self.assertEqual(rec["reason"], "wrongly auto-added")
+        # No `ok` field: _aggregate_applied() counts any `ok is True` row as an
+        # apply, so a reversal carrying `ok` would be double-counted.
+        self.assertNotIn("ok", rec)
+        self.assertIn("id", rec)   # stamped by _write_audit
+        self.assertIn("ts", rec)   # the field the scorecard windows on
+
+        rows = self._audit_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0], rec, "the on-disk record must be exactly what the function returned")
+
+    def test_revert_reversal_via_cli_writes_record(self):
+        rc = adp.main(["record-revert", "--kind", "revert", "--batch-id", "optbatch_abc123"])
+        self.assertEqual(rc, 0)
+        rows = self._audit_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["outcome"], "reverted")
+        self.assertEqual(rows[0]["kind"], "revert")
+        self.assertEqual(rows[0]["batch_id"], "optbatch_abc123")
+        self.assertNotIn("target_id", rows[0], "no --target-id given -> field omitted")
+        self.assertNotIn("ok", rows[0])
+
+    def test_scorecard_aggregate_counts_the_reversal_record(self):
+        # The load-bearing E6->E7 assertion: the EXACT record E6 writes is the
+        # record E7's aggregator counts as reverted-after-review.
+        import scorecard  # same lib dir as apply_dream_proposal (sys.path set above)
+
+        rec = adp.record_review_reversal(kind="veto", target_id="rowY")
+        now = time.time()
+        opt = scorecard._aggregate_optimistic([rec], now - 3600, now + 3600)  # noqa: SLF001
+        self.assertEqual(opt["reverted_total"], 1)
+        # ...and it is NOT miscounted as an auto-integrated apply.
+        self.assertEqual(opt["auto_integrated_total"], 0)
 
 
 if __name__ == "__main__":
