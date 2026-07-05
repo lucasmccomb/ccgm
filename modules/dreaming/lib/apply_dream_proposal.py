@@ -880,7 +880,19 @@ def apply_proposal(
 
 def reject_proposal(proposal_id: str, *, method: str = "human_reject") -> dict[str, Any]:
     """Mark a pending proposal 'rejected'. No store write of any kind --
-    a rejection is purely a bookkeeping decision."""
+    a rejection is purely a bookkeeping decision.
+
+    The success record deliberately carries NO `ok` field (#822) -- matching
+    the no-`ok` on-disk shape of `circuit_breaker_tripped`/`anomaly_recorded`/
+    `record_review_reversal`'s "reverted" record. This previously wrote
+    `ok: True`, and `scorecard.py`'s `_aggregate_applied()` treated ANY
+    `ok is True` row as an apply (in addition to `outcome == "applied"`), so
+    every rejection silently inflated the scorecard's "Applied" total by one.
+    That aggregator now keys on `outcome == "applied"` only (see its own
+    docstring) -- this omission is the paired half of the fix, keeping `ok`
+    meaning one thing everywhere it appears in this audit log: "an
+    apply_proposal() handler actually mutated the store."
+    """
     path, row = find_proposal(proposal_id)
     if row is None or path is None:
         record = {"proposal_id": proposal_id, "method": method, "outcome": "not_found", "ok": False}
@@ -897,7 +909,7 @@ def reject_proposal(proposal_id: str, *, method: str = "human_reject") -> dict[s
     _rewrite_status(path, proposal_id, "rejected")
     record = {
         "proposal_id": proposal_id, "kind": row.get("kind"), "project": row.get("project"),
-        "target_id": row.get("target_id"), "method": method, "outcome": "rejected", "ok": True,
+        "target_id": row.get("target_id"), "method": method, "outcome": "rejected",
     }
     _write_audit(record)
     return record

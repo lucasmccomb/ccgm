@@ -278,5 +278,85 @@ class RecordReviewReversalTests(unittest.TestCase):
         self.assertEqual(opt["auto_integrated_total"], 0)
 
 
+class RejectProposalTests(unittest.TestCase):
+    """#822: reject_proposal()'s success record previously carried
+    `outcome: "rejected", ok: True`. scorecard.py's _aggregate_applied()
+    counted ANY `ok is True` row as an apply (in addition to
+    `outcome == "applied"`), so every manually-rejected proposal silently
+    inflated the scorecard's "Applied" total by one. Pins BOTH halves of
+    the fix: the on-disk record shape (no `ok` field, matching
+    `record_review_reversal()`'s "reverted" record), and that
+    scorecard._aggregate_applied() does not count the exact record
+    reject_proposal() writes."""
+
+    def setUp(self):
+        # Fresh CCGM_DREAMING_DIR per test so proposals_dir()/apply_audit_path()
+        # (both derived from it) are clean and isolated -- mirrors
+        # RecordReviewReversalTests; reject_proposal() never touches the
+        # learnings store or spawns a subprocess either.
+        self._dreaming = tempfile.mkdtemp(prefix="ccgm-dreaming-reject-")
+        self.addCleanup(shutil.rmtree, self._dreaming, ignore_errors=True)
+        self._pin_env("CCGM_DREAMING_DIR", self._dreaming)
+        adp.proposals_dir().mkdir(parents=True, exist_ok=True)
+
+    def _pin_env(self, key: str, value: str) -> None:
+        had = key in os.environ
+        prior = os.environ.get(key)
+        os.environ[key] = value
+
+        def _restore():
+            if had:
+                os.environ[key] = prior
+            else:
+                os.environ.pop(key, None)
+
+        self.addCleanup(_restore)
+
+    def _write_day(self, day: str, row: dict) -> None:
+        (adp.proposals_dir() / f"{day}.jsonl").write_text(
+            json.dumps(row, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+    def _audit_rows(self) -> list[dict]:
+        path = adp.apply_audit_path()
+        if not path.is_file():
+            return []
+        return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
+
+    def test_reject_record_shape_has_no_ok_field(self):
+        self._write_day("2026-03-01", _proposal_row(
+            pid="rejectme01", slug="reject-fixture-slug", target_id="L-target", confidence=5,
+        ))
+
+        rec = adp.reject_proposal("rejectme01")
+        self.assertEqual(rec["outcome"], "rejected")
+        # No `ok` field: _aggregate_applied() counted any `ok is True` row as
+        # an apply, so a rejection carrying `ok: True` was silently
+        # double-counted as an "Applied" proposal (#822).
+        self.assertNotIn("ok", rec)
+
+        _, row = adp.find_proposal("rejectme01")
+        self.assertEqual(row["status"], "rejected")
+
+        rows = self._audit_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0], rec, "the on-disk record must be exactly what the function returned")
+
+    def test_rejected_proposal_not_counted_as_applied_by_scorecard(self):
+        # The load-bearing #822 assertion: the EXACT record reject_proposal()
+        # writes must not be counted by scorecard._aggregate_applied() as an
+        # apply.
+        import scorecard  # same lib dir as apply_dream_proposal (sys.path set above)
+
+        self._write_day("2026-03-02", _proposal_row(
+            pid="rejectme02", slug="reject-fixture-slug", target_id="L-target", confidence=5,
+        ))
+        rec = adp.reject_proposal("rejectme02")
+
+        now = time.time()
+        agg = scorecard._aggregate_applied([rec], [], now - 3600, now + 3600)  # noqa: SLF001
+        self.assertEqual(agg["applied_total"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

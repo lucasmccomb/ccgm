@@ -548,5 +548,58 @@ class ScorecardOptimisticPostureMixTest(unittest.TestCase):
         self.assertLess(idx_quarantine, idx_dwell)
 
 
+class ScorecardRejectedNotAppliedTest(unittest.TestCase):
+    """#822: a rejected proposal's apply-audit record must never be counted
+    as an "Applied" proposal -- neither the pre-fix `ok: True` shape (a real
+    on-disk record written before this fix, which a scorecard run may still
+    read for some time) nor a future regression that reintroduces it.
+    `_aggregate_applied()` now keys strictly on `outcome == "applied"`."""
+
+    WINDOW_START = datetime(2026, 6, 24, tzinfo=UTC)
+    WINDOW_END = datetime(2026, 7, 1, tzinfo=UTC)
+
+    def test_aggregate_applied_excludes_rejected_rows(self):
+        rows = [
+            # One genuine apply.
+            {"id": "a1", "ts": _ts(25, 10), "kind": "learning_add", "outcome": "applied",
+             "ok": True, "method": "human_accept", "proposal_id": "p-applied"},
+            # Pre-#822 on-disk shape: a rejection that still carries
+            # `ok: True`. Must NOT be counted even though `ok is True`.
+            {"id": "a2", "ts": _ts(26, 10), "kind": "learning_verify", "outcome": "rejected",
+             "ok": True, "method": "human_reject", "proposal_id": "p-rejected"},
+            # Current (post-#822) shape: no `ok` field at all.
+            {"id": "a3", "ts": _ts(27, 10), "kind": "learning_verify", "outcome": "rejected",
+             "method": "human_reject", "proposal_id": "p-rejected-2"},
+        ]
+        start = scorecard._to_epoch(self.WINDOW_START)  # noqa: SLF001
+        end = scorecard._to_epoch(self.WINDOW_END)  # noqa: SLF001
+        agg = scorecard._aggregate_applied(rows, [], start, end)  # noqa: SLF001
+        self.assertEqual(agg["applied_total"], 1)
+        self.assertEqual(agg["applied_by_kind"], {"learning_add": 1})
+
+    def test_rendered_applied_section_excludes_rejected_rows(self):
+        root = Path(tempfile.mkdtemp(prefix="ccgm-scorecard-reject-"))
+        audit_path = root / "dreaming" / "state" / "apply-audit.jsonl"
+        empty = root / "empty"
+        _write_jsonl(audit_path, [
+            {"id": "a1", "ts": _ts(25, 10), "kind": "learning_add", "outcome": "applied",
+             "ok": True, "method": "human_accept", "proposal_id": "p-applied"},
+            {"id": "a2", "ts": _ts(26, 10), "kind": "learning_verify", "outcome": "rejected",
+             "ok": True, "method": "human_reject", "proposal_id": "p-rejected"},
+        ])
+        md = scorecard.render(
+            self.WINDOW_START, self.WINDOW_END,
+            learnings_dir=empty / "learnings",
+            injection_log_dir=empty / "inj",
+            proposals_dir=empty / "prop",
+            apply_audit_path=audit_path,
+            store_api=learnings_store,
+            generated_at=self.WINDOW_END,
+        )
+        self.assertIn("## Applied — 1 proposals applied this window", md)
+        self.assertIn("applied this window: 1", md)
+        self.assertNotIn("applied this window: 2", md)
+
+
 if __name__ == "__main__":
     unittest.main()
