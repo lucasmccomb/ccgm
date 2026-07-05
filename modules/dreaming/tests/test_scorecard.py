@@ -276,6 +276,47 @@ class ScorecardDegradeTest(unittest.TestCase):
         self.assertNotIn("Traceback", md)
 
 
+class ScorecardUnicodeDecodeErrorTest(unittest.TestCase):
+    """#821: a file with invalid UTF-8 bytes must be skipped like a malformed
+    JSON line, not crash the loader with an uncaught UnicodeDecodeError."""
+
+    INVALID_UTF8 = b"\xff\xfe not json\n"
+
+    def test_load_jsonl_skips_invalid_utf8_file(self):
+        root = Path(tempfile.mkdtemp(prefix="ccgm-scorecard-badutf8-"))
+        path = root / "bad.jsonl"
+        path.write_bytes(self.INVALID_UTF8)
+        self.assertEqual(scorecard._load_jsonl(path), [])  # noqa: SLF001
+
+    def test_load_json_object_returns_empty_on_invalid_utf8(self):
+        root = Path(tempfile.mkdtemp(prefix="ccgm-scorecard-badutf8-"))
+        path = root / "bad.json"
+        path.write_bytes(self.INVALID_UTF8)
+        self.assertEqual(scorecard._load_json_object(path), {})  # noqa: SLF001
+
+    def test_render_survives_corrupt_optimistic_state_file(self):
+        # Mirrors the issue's own severity note: a corrupt state/optimistic.json
+        # must not crash the whole scorecard render.
+        root = Path(tempfile.mkdtemp(prefix="ccgm-scorecard-badutf8-render-"))
+        audit_path = root / "dreaming" / "state" / "apply-audit.jsonl"
+        state_path = audit_path.parent / "optimistic.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_bytes(self.INVALID_UTF8)
+        md = scorecard.render(
+            datetime(2026, 6, 24, tzinfo=UTC),
+            datetime(2026, 7, 1, tzinfo=UTC),
+            learnings_dir=root / "nope-learnings",
+            injection_log_dir=root / "nope-injection",
+            proposals_dir=root / "nope-proposals",
+            apply_audit_path=audit_path,
+            store_api=learnings_store,
+            generated_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+        self.assertIsInstance(md, str)
+        self.assertNotIn("Traceback", md)
+        self.assertIn("currently suspended: no", md)
+
+
 class ScorecardWindowBoundaryTest(unittest.TestCase):
     """Pin the half-open [start, end) convention at BOTH edges: a timestamp
     exactly at window_start is included; exactly at window_end is excluded."""

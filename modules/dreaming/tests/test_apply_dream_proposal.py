@@ -358,5 +358,40 @@ class RejectProposalTests(unittest.TestCase):
         self.assertEqual(agg["applied_total"], 0)
 
 
+class ReadOptimisticStateUnicodeDecodeErrorTests(unittest.TestCase):
+    """#821: a state/optimistic.json containing invalid UTF-8 bytes must be
+    handled with the SAME fail-CLOSED behavior as a malformed-JSON file
+    (adrev-opt-014), not escape as an uncaught UnicodeDecodeError."""
+
+    def setUp(self):
+        self._dreaming = tempfile.mkdtemp(prefix="ccgm-dreaming-badutf8-optstate-")
+        self.addCleanup(shutil.rmtree, self._dreaming, ignore_errors=True)
+        self._pin_env("CCGM_DREAMING_DIR", self._dreaming)
+
+    def _pin_env(self, key: str, value: str) -> None:
+        had = key in os.environ
+        prior = os.environ.get(key)
+        os.environ[key] = value
+
+        def _restore():
+            if had:
+                os.environ[key] = prior
+            else:
+                os.environ.pop(key, None)
+
+        self.addCleanup(_restore)
+
+    def test_invalid_utf8_state_file_fails_closed_not_raises(self):
+        path = adp.optimistic_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\xff\xfe not json\n")
+
+        state = adp._read_optimistic_state()  # noqa: SLF001
+
+        self.assertTrue(state["suspended"])
+        self.assertIsNotNone(state["suspended_at"])
+        self.assertEqual(state["anomaly_log"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

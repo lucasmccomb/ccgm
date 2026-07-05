@@ -535,6 +535,14 @@ class EnvLoadingTests(unittest.TestCase):
         da._load_env_file(self.tmp / "does-not-exist.env")  # noqa: SLF001
         self.assertNotIn("ANTHROPIC_API_KEY", os.environ)
 
+    def test_load_env_file_invalid_utf8_is_a_noop(self):
+        # #821: invalid UTF-8 bytes must be handled the same graceful way as
+        # a missing file, not escape as an uncaught UnicodeDecodeError.
+        env_path = self.tmp / "bad.env"
+        env_path.write_bytes(b"\xff\xfe not env\n")
+        da._load_env_file(env_path)  # noqa: SLF001
+        self.assertNotIn("ANTHROPIC_API_KEY", os.environ)
+
 
 # ---------------------------------------------------------------------------
 # existing_fingerprints() + write_proposals(): dedup bookkeeping.
