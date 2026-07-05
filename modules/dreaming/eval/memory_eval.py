@@ -417,7 +417,16 @@ def seed_temp_store(seed_learnings: list[dict[str, Any]], *, learnings_dir: Path
     carrying `"supersedes_previous": true` supersedes the id of the
     IMMEDIATELY PRECEDING entry instead of adding fresh -- this is how the
     `kind: contradiction` task builds a real old-row/current-head chain
-    (the store's own supersede-filtering is what the task exercises)."""
+    (the store's own supersede-filtering is what the task exercises).
+
+    An entry carrying `"dwell_hours": N` (Epic 4, dwell-leak assertion)
+    stamps `dwell_until = utcnow() + N hours` via the store's own
+    `dwell_until_from_hours()` -- the exact posture Epic 3's optimistic
+    engine gives a fresh `learning_add`/`learning_supersede` (optimistic-
+    memory §3.2) -- so a task can declare a seeded row that is written but
+    not yet read-eligible. Absent/None (the overwhelmingly common case,
+    every one of the 9 real eval tasks today) seeds an immediately-live
+    row, unchanged from before this key existed."""
     if not seed_learnings:
         return
     with _learnings_store_pointed_at(learnings_dir):
@@ -427,6 +436,11 @@ def seed_temp_store(seed_learnings: list[dict[str, Any]], *, learnings_dir: Path
             type_ = spec.get("type", "pattern")
             confidence = spec.get("confidence", learnings_store.DEFAULT_CONFIDENCE)
             tags = spec.get("tags") or []
+            dwell_until = (
+                learnings_store.dwell_until_from_hours(spec["dwell_hours"])
+                if spec.get("dwell_hours") is not None
+                else None
+            )
             if spec.get("supersedes_previous"):
                 if prev_id is None:
                     raise ValueError("seed_learnings: supersedes_previous set with no preceding entry to supersede")
@@ -438,6 +452,7 @@ def seed_temp_store(seed_learnings: list[dict[str, Any]], *, learnings_dir: Path
                     tags=tags,
                     slug=project_slug,
                     reason=spec.get("supersede_reason"),
+                    dwell_until=dwell_until,
                 )
                 if new_entry is None:
                     raise ValueError(f"seed_temp_store: supersede target {prev_id!r} not found")
@@ -445,6 +460,7 @@ def seed_temp_store(seed_learnings: list[dict[str, Any]], *, learnings_dir: Path
             else:
                 entry = learnings_store.build_entry(
                     type_=type_, content=content, confidence=confidence, tags=tags, project=project_slug,
+                    dwell_until=dwell_until,
                 )
                 learnings_store.append_entry(entry, slug=project_slug)
                 prev_id = entry["id"]
@@ -1368,7 +1384,22 @@ def latest_content_shaping_mutation_epoch(learnings_root: Path) -> float | None:
     equivalent) in the store. Pure `verify` counter-ops are excluded
     (adrev-403) -- the only op auto-apply itself can ever write, so
     including it would make the gate self-close after every routine
-    reinforcement instead of only after a real content change."""
+    reinforcement instead of only after a real content change.
+
+    Resolution of adrev-opt-001 (P0): op-events carrying `auto: true` are
+    ALSO excluded here. Epic 3's optimistic engine tags every one of its
+    own content-shaping writes `auto: true` (extending the pre-existing
+    verify-only `auto` marker -- learnings_store.py `_build_op_row`,
+    adrev-opt-008); without this skip, the freshness bound below would
+    self-close the very gate that authorized last night's auto-integration
+    the moment that write landed -- a circular self-suspend that would trip
+    on the second productive night, every night thereafter. A NON-auto
+    (human/external) content-shaping op-event still counts and still forces
+    the gate stale, preserving adrev-403's original intent: the eval must
+    re-run after a REAL, human/external store change, just not after the
+    engine's own already-gated writes. Legacy v1 rows (no `op` field, and
+    therefore never an `auto` key either) are unaffected -- they always
+    count, exactly as before."""
     if not learnings_root.is_dir():
         return None
     latest: float | None = None
@@ -1398,6 +1429,9 @@ def latest_content_shaping_mutation_epoch(learnings_root: Path) -> float | None:
                 op = obj.get("op")
                 if op is not None and op not in CONTENT_SHAPING_OPS:
                     continue  # verify/other non-content-shaping op -- excluded
+                if obj.get("auto"):
+                    continue  # adrev-opt-001: the engine's OWN auto-integrated
+                              # write must not reset the clock that authorized it
                 ts = obj.get("timestamp")
                 if not ts:
                     continue
