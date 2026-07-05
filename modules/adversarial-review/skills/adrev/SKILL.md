@@ -60,17 +60,18 @@ For a `concept` target, include the full concept text in the prompt (it has no p
 
 The agent runs the full attack battery (premises, falsification, failure modes, strongest opposing case, reversal cost, second-order effects) and - when `apply` - incorporates findings into the plan per its apply protocol, returning a ledger of what changed.
 
-**For `plan` targets, the agent additionally enforces three plan-execution tenets** (requirements, not judgment calls — it adds or expands sections when the plan is missing them):
+**For `plan` targets, the agent additionally enforces four plan-execution tenets** (requirements, not judgment calls — it adds or expands sections when the plan is missing them):
 
 1. **Human interaction is minimized and bucketed to the edges** — no human step an agent could do via CLI/API; any unavoidable human work is front-loaded before execution or deferred to the end, never mid-run.
 2. **A follow-up-completion contract is present** — the plan requires that any follow-on work discovered during execution is completed before execution is reported complete; only genuinely human-blocked work may remain open.
 3. **Enough decision context to direct unplanned work without a human** — the plan carries the software's mission, the codebase's governing conventions, and its own decision principles, so an agent can deduce how to handle unplanned follow-on work. If that context is missing, the agent expands the plan to add it.
+4. **A comprehensive autonomous E2E test suite** — every testable surface maps to a real end-to-end test, wired into CI as a blocking merge gate, so the user never tests manually. For existing repos, coverage gaps in touched areas are filled optimistically (the user always wants more coverage). If coverage is thin, the agent expands the plan's Section 8 to close it.
 
 ## Phase 3: Verify and Report
 
 The agent's DONE is a claim, not evidence:
 
-- **Applied (plan)**: run `git diff` on the plan (or re-read the edited sections if untracked). Confirm the review artifact exists and every `incorporated` ledger entry corresponds to a real edit. Confirm the three plan-execution tenets are satisfied in the edited plan — human work is minimized and bucketed to the edges, the follow-up-completion contract is present and clearly located, and the mission / codebase-context / decision-principles content is concrete enough to direct unplanned work. If the reviewer parked a tenet in the Risk Register instead of fixing it, verify it named a genuine reason (a decision only the author can make). Then present: findings table (id, test, severity, confidence, one-line what), the ledger (incorporated / deferred-to-risks / artifact-only), what the target survived, and the artifact path.
+- **Applied (plan)**: run `git diff` on the plan (or re-read the edited sections if untracked). Confirm the review artifact exists and every `incorporated` ledger entry corresponds to a real edit. Confirm the four plan-execution tenets are satisfied in the edited plan — human work is minimized and bucketed to the edges, the follow-up-completion contract is present and clearly located, the mission / codebase-context / decision-principles content is concrete enough to direct unplanned work, and the autonomous E2E suite (Section 8) covers every testable surface with a CI-blocking merge gate. If the reviewer parked a tenet in the Risk Register instead of fixing it, verify it named a genuine reason (a decision only the author can make). Then present: findings table (id, test, severity, confidence, one-line what), the ledger (incorporated / deferred-to-risks / artifact-only), what the target survived, and the artifact path.
 - **Report-only**: present the findings table and survived list. For an `issue` or `pr` target, offer - do not auto-post - `gh issue comment` / `gh pr review --comment` with the findings.
 - **BLOCKED / NEEDS_CONTEXT**: relay the missing piece verbatim and stop. Do not invent a target or substitute your own review in the main context - that breaks the separation that makes the review trustworthy.
 

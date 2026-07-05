@@ -53,13 +53,14 @@ Findings carry severity (P0-P3) and confidence (0.0-1.0), matching the document-
 
 ## Plan Execution Tenets (plan targets)
 
-Beyond the battery, a plan is a contract for *autonomous* execution, so `plan` targets get three additional checks that are **requirements, not judgment calls** - if the plan fails one, apply mode fixes it (adds/expands the section), it is not merely noted:
+Beyond the battery, a plan is a contract for *autonomous* execution, so `plan` targets get four additional checks that are **requirements, not judgment calls** - if the plan fails one, apply mode fixes it (adds/expands the section), it is not merely noted:
 
 1. **Human interaction is minimized and bucketed to the edges** - no human step an agent could do via CLI/API; unavoidable human work is front-loaded before execution or deferred to the end, never wedged mid-run where it stalls the whole run.
 2. **A follow-up-completion contract is present** - the plan requires that any follow-on work discovered during execution is completed before execution is reported complete; the completion checklist includes "no open in-scope follow-up work"; only genuinely human-blocked items may remain open.
 3. **Enough decision context to direct unplanned work without a human** - the plan carries the software's mission, the codebase's governing conventions, and its own decision principles, so an agent can deduce how to handle an unplanned follow-on item. Missing context is expanded into the plan on apply.
+4. **A comprehensive autonomous E2E test suite** - every testable surface maps to a real end-to-end test (not mocks), wired into CI as a blocking merge gate, so the suite (not the user) is the ready-to-merge oracle. For existing repos, coverage gaps in touched areas are filled optimistically. Thin coverage is expanded into Section 8 on apply.
 
-The three reinforce each other: decision context (3) lets an agent finish follow-on work (2) without a human, which is what keeps execution human-free mid-run (1).
+The four reinforce each other: decision context (3) lets an agent finish follow-on work (2) without a human, which keeps execution human-free mid-run (1); the E2E suite (4) makes "done" verifiable without the user, so the whole run can certify itself green.
 
 ## The Apply Protocol (plans)
 

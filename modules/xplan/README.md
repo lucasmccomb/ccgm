@@ -35,11 +35,12 @@ Reviews run in two stages: Phase 4 standard peer review against the draft, then 
 
 ### Autonomous-Execution Tenets
 
-Every plan carries three requirements that let it execute with minimal human involvement — written during planning (Phase 3), verified by the self-review (Phase 5.6), and enforced by the adversarial reviewer (Phase 5.7 / `adrev-reviewer` tenets T1–T3), which expands the plan when any is thin:
+Every plan carries four requirements that let it execute with minimal human involvement and self-certify — written during planning (Phase 3), verified by the self-review (Phase 5.6), and enforced by the adversarial reviewer (Phase 5.7 / `adrev-reviewer` tenets T1–T4), which expands the plan when any is thin:
 
 1. **Human work at the edges** (T1) — human involvement is minimized (anything an agent can do via CLI/API is not human work) and what remains is bucketed to the start (front-loaded prerequisites) or the end (deferred steps), never mid-run. Once execution starts, it does not pause for a person.
 2. **Follow-up-completion contract** (T2, plan §9.5) — any follow-on work discovered during execution is tracked, triaged, and — if in-scope — completed before execution is reported complete. Only genuinely human-blocked work may remain open. Phase 7 gates completion on it.
 3. **Autonomous decision context** (T3, plan §1.4) — the plan carries the software's mission, the codebase's governing conventions, and its decision principles, so an execution agent directs unplanned follow-on work itself instead of stopping to ask. `/etp` reads this context (its Phase 1.5) to triage and reason.
+4. **Comprehensive autonomous E2E testing** (T4, plan §8) — every plan ships a full autonomous E2E suite over all testable surfaces, wired into CI as a blocking merge gate, so the suite (not the user) is the ready-to-merge oracle and no manual testing is required. New projects build it in from the ground up (a Wave-1 harness epic); existing repos get optimistic gap-fill for any touched area lacking coverage. The plan provisions whatever infra certainty needs (testing agents, RunPod, cloud Mac, real devices) — no resource constraint on testing. Phase 7 and `/etp` gate completion on a green suite.
 
 **`--light`**: fast path. Reduced depth, minimal interaction. Skips Phases 0.5, 1.5, 2.5, 2.6, and 2.7. Traditional section-by-section walkthrough at the end.
 

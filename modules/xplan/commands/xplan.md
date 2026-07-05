@@ -226,7 +226,8 @@ Reading **from `$WORKTREE` (the anchor), not the original clone**:
 2. Map its architecture, tech stack, and current state
 3. Check `gh issue list` and `gh pr list` for open work (these query the remote, so they are already current)
 4. Read recent agent logs from the log repo for the project
-5. This context feeds into Phase 1 research and Phase 0.5 interview
+5. **Inventory the existing autonomous test coverage** — the E2E harness/runner in use (Playwright, XCUITest, a CLI harness, etc.), which surfaces have end-to-end tests, whether they run in CI, and — critically — whether the **areas this plan will touch are covered by E2E tests**. Record the coverage gaps in the touched areas: they become optimistic E2E-coverage work in Phase 3.3.5 (the assumption is the user always wants more E2E coverage). If the repo has *no* autonomous E2E suite at all, that is itself a gap to close for everything this plan touches.
+6. This context feeds into Phase 1 research and Phase 0.5 interview
 
 Every load-bearing fact pulled from the repo in this phase is anchored to `{file}:{line}` as read at `$WORKTREE`. Do not assert a repo fact from memory or from a stale working-tree Read.
 
@@ -702,6 +703,7 @@ Present a full tech stack proposal with justifications. Apply these defaults unl
 - **Validation**: zod
 - **Monorepo**: pnpm workspaces (if multiple apps/packages)
 - **AI integration**: Provider SDKs directly (`@anthropic-ai/sdk`, `openai`, `@google/generative-ai`)
+- **E2E test infrastructure**: Playwright (web/browser); XCUITest + a cloud Mac or the paired real device for macOS & iOS; a stdin/stdout harness for CLIs & daemons. Add third-party compute whenever the surface needs it — RunPod (GPU / heavy E2E), cloud Mac instances, or a device/browser matrix. There is **no resource constraint on test infrastructure**: provision whatever gives high-certainty end-to-end coverage so the user never has to test manually.
 
 **Banned** (never suggest, no exceptions):
 - Anything from Vercel's ecosystem: `ai`, `@ai-sdk/*`, `next`, `@next/*`, `@vercel/*`, `v0`, `turbo`, `turborepo`, `swr`
@@ -924,16 +926,35 @@ Do NOT split just because work is large. A 3-hour focused epic is better than th
 
 Rules:
 - Each epic results in **working, tested code** (unit + integration tests included)
+- Each epic **contributes autonomous end-to-end coverage** for the surface it adds or changes — not just unit + integration. A feature epic is not "done" until an E2E test exercises its real behavior through the running system (real API, real DB, real UI/CLI). Its acceptance criteria include the E2E test(s) it adds to the suite (§8 / Phase 3.3.5).
 - Define clear **inputs** (what must exist) and **outputs** (what results)
 - Identify **dependency order** - parallel vs. sequential
 - Define **bring-up steps** - the concrete actions required to get the app (local and/or production) into a testable state once this epic merges: migrations to run, dev servers to restart, deploys to trigger, env vars/secrets to set, caches to invalidate, seed data to load. "Code merged" is not "change testable"; the plan must close that gap explicitly.
 
 Epic categories:
-- **Foundation epics**: Repo setup, CI/CD, shared types, config - run first
+- **Foundation epics**: Repo setup, CI/CD, shared types, config - run first. **For a new project, the autonomous E2E test harness is a foundation epic** (Wave 1): the runner, the CI wiring that runs it on every PR, and any test infrastructure (ephemeral env, seeded DB, third-party compute) the surface needs. Feature epics build on it from the first wave.
 - **Parallel epics**: Independent feature work running simultaneously
 - **Integration epics**: Connecting parallel streams - run after dependencies
-- **Testing epics**: E2E test suites, load testing
+- **Testing epics**: The autonomous E2E suite and its infrastructure — the harness, cross-cutting user-journey tests, coverage gap-fill for existing surfaces (Phase 3.3.5), load/soak tests, and any agent-driven exploratory testing. The suite is the certainty oracle (green = ready-to-merge / clean; red = broken), so these are first-class epics, never optional add-ons.
 - **Human-epics**: Work requiring human intervention
+
+### 3.3.5 Autonomous E2E Test Strategy (MANDATORY)
+
+Every plan builds a **comprehensive, autonomous end-to-end test suite** covering all testable surfaces of what it touches. This is not optional and does not scale down with project size — it exists so the suite, not the user, is the oracle for "broken" vs. "clean and ready to merge." **The user does not do manual testing.** If certainty requires spinning up testing agents or third-party infrastructure, the plan provisions it — there is no resource constraint on testing.
+
+Design the suite now; it becomes plan.md Section 8 and is enforced by the execution gates (Phase 7), the self-review (5.6.3), and the adversarial review (5.7 tenet T4).
+
+**1. Coverage target — every testable surface.** Enumerate the surfaces this plan adds or changes and the end-to-end journey through each: HTTP endpoints (real request → real DB → real response), UI flows (real browser, real backend), CLI invocations (real args → real stdout/exit code), background jobs/queues, auth flows, webhooks, and any cross-surface user journey. Each becomes an E2E test that runs against the *running system*, not mocks. Mocked tests prove internal consistency; they say nothing about whether the real system works.
+
+**2. New project — build it in from the ground up.** The E2E harness is a Wave-1 foundation epic (Phase 3.3): the runner, CI wiring that runs the suite on every PR, and a reproducible test environment (ephemeral deploy or local stack, seeded DB, test credentials). Every feature epic thereafter adds its E2E tests to that harness from the first wave — the suite grows with the code, never bolted on at the end.
+
+**3. Existing project — audit and optimistically fill gaps.** Using the Phase 0.4.1 coverage inventory, for every area this plan touches that lacks E2E coverage, **add E2E-coverage work into the plan by default — assume the user signs off.** The standing assumption is that the user always wants more autonomous E2E coverage, so gap-fill is opt-out (surfaced in the walkthrough and decisions.md), never a mid-flow yes/no question. If the repo has no E2E suite at all, the plan stands one up for the touched surfaces (and wires it into CI) as part of the work. Record each added E2E-coverage epic/task in decisions.md under "Optimistic E2E coverage additions" so the user can veto specific ones at the final gate.
+
+**4. Platform-appropriate execution + infrastructure.** Match the harness to the surface and provision whatever infra gives high certainty (Phase 2.5.2): Playwright for web; XCUITest on a **cloud Mac instance or the paired real device** for macOS/iOS; a stdin/stdout harness for CLIs/daemons; **RunPod or equivalent** for GPU/heavy compute E2E; a device/browser matrix where it matters. Where a flow genuinely cannot be asserted programmatically, **dispatch a testing agent to drive it and report** (browser automation, device automation) rather than handing the user a manual checklist — an agent doing exploratory/manual-substitute testing is still autonomous.
+
+**5. SDLC integration — the suite is a merge gate.** The suite runs in CI on every PR and is a **required, blocking check**: a PR does not merge until its E2E tests (and the existing suite) are green. Post-wave bring-up and final bring-up (Section 9) run the full suite against the reactivated system. "High degree of certainty" means: green suite ⇒ safe to merge / clean; red suite ⇒ broken, do not proceed.
+
+**6. Certainty, not coverage theater.** Prefer a smaller set of tests that exercise real end-to-end behavior over a large set of shallow mocked ones. The bar is: if the suite is green, the user can ship without opening the app. State explicitly in Section 8 what the suite does and does not certify, so any residual manual check is named rather than silently assumed.
 
 ### 3.4 Define Human-Epics
 
@@ -980,8 +1001,8 @@ Define:
 - **Wave 2+**: Parallel epic groups with dependency constraints
 - **Agent allocation**: How many agents per wave (based on Phase 2.7 decision)
 - **Integration points**: Where parallel streams merge
-- **Verification gates**: Checkpoints before proceeding
-- **Post-wave bring-up**: Aggregate the bring-up steps from every epic in the wave into a single ordered runbook. Include: migrations (with correct order if multiple), which services to restart (local dev servers, workers, background jobs), which deploys to trigger and verify, env vars/secrets to set, and the smoke-test command(s) that prove all layers are live. This runbook executes between waves - agents do not advance to the next wave until the previous wave's app state is reactivated and verified working.
+- **Verification gates**: Checkpoints before proceeding. **The autonomous E2E suite (§8) is the gate**: no PR merges until its E2E tests are green in CI, and no wave advances until the full suite passes against the reactivated system. Green suite ⇒ proceed; red ⇒ stop and fix.
+- **Post-wave bring-up**: Aggregate the bring-up steps from every epic in the wave into a single ordered runbook. Include: migrations (with correct order if multiple), which services to restart (local dev servers, workers, background jobs), which deploys to trigger and verify, env vars/secrets to set, and the command that runs the **full autonomous E2E suite** against the reactivated system (superseding a bare smoke test). This runbook executes between waves - agents do not advance to the next wave until the previous wave's app state is reactivated and the E2E suite is green.
 
 ### 3.7 Create decisions.md
 
@@ -1144,10 +1165,31 @@ This section is what makes the Section 9.5 follow-up contract executable autonom
 ### 7.5 Verification Gates
 
 ## 8. Testing Strategy
+
+[From Phase 3.3.5. This section specifies the **comprehensive autonomous E2E suite** that lets the user ship without manual testing. It is the certainty oracle: green ⇒ clean / ready-to-merge, red ⇒ broken.]
+
 ### 8.1 Unit Tests (per epic)
+[Per-epic unit coverage — the fast inner loop.]
+
 ### 8.2 Integration Tests
-### 8.3 E2E Tests (Playwright)
-### 8.4 Test Coverage Targets
+[Cross-module/service integration — real collaborators where practical.]
+
+### 8.3 Autonomous End-to-End Suite (the certainty oracle)
+- **Surfaces covered**: [every testable surface this plan touches — HTTP endpoints, UI flows, CLI invocations, background jobs/queues, auth, webhooks, cross-surface journeys. Each row: surface → the real end-to-end journey the test drives.]
+- **Harness & environment**: [runner (Playwright / XCUITest / CLI harness / …), the reproducible test environment (ephemeral deploy or local stack, seeded DB, test credentials), and how it is torn up/down.]
+- **Test infrastructure**: [any third-party compute the surface requires — cloud Mac instance, RunPod, real device (the paired iPhone), device/browser matrix. "None beyond CI" only if genuinely none.]
+- **Agent-driven testing** (if any): [flows that cannot be asserted purely programmatically and are driven by a testing agent (browser/device automation) that reports pass/fail — never handed to the user as a manual checklist.]
+- **Existing-repo gap-fill** (if `--repo`): [E2E coverage added optimistically for touched areas that lacked it — see decisions.md "Optimistic E2E coverage additions".]
+
+### 8.4 CI Integration & Merge Gate
+- The suite runs on **every PR** as a **required, blocking check**; a PR does not merge while it is red.
+- Post-wave and final bring-up (Section 9) run the **full** suite against the reactivated system.
+- [exact commands to run the suite locally and in CI.]
+
+### 8.5 Coverage Targets & What the Suite Certifies
+- [coverage targets per layer.]
+- **Certifies**: [what a green suite guarantees — the flows the user can trust without opening the app.]
+- **Does NOT certify**: [any residual surface not covered and why — named explicitly, never silently assumed. The goal is zero residual manual testing; any exception is justified here.]
 
 ## 9. Post-Implementation Integration
 
@@ -1168,7 +1210,7 @@ Wave N Bring-Up:
 7. Trigger/verify production deploys: `{commands or dashboard links}`
 8. Invalidate caches if needed: `{exact commands}`
 9. Load/update seed data if needed: `{exact commands}`
-10. Smoke test: `{exact command or manual steps that prove all layers are live}`
+10. Run the full autonomous E2E suite (Section 8): `{exact command}` — must be green before the next wave. This is the certainty gate; it supersedes a bare smoke test and proves all layers are live end-to-end.
 ```
 
 Every step has an exact command or link. Vague instructions like "restart the server" do not belong here.
@@ -1183,7 +1225,7 @@ For each wave's bring-up, specify the rollback: how to revert migrations, redepl
 
 ### 9.4 Final Bring-Up (end of execution)
 
-The last-wave bring-up runbook that takes the fully-merged project to a confirmed-live state. This is the single source of truth for "app is ready to test". Anything that was deferred or flagged during waves gets resolved here.
+The last-wave bring-up runbook that takes the fully-merged project to a confirmed-live state, ending with a **full run of the autonomous E2E suite (Section 8) that must be green**. This is the single source of truth for "app is ready" — because the suite is green, "ready to test" means the user can use it, not that they still need to test it. Anything that was deferred or flagged during waves gets resolved here.
 
 ### 9.5 Follow-Up Work Completion Contract
 
@@ -1220,6 +1262,9 @@ The agent decides the triage itself using §1.4 — it does not stop to ask the 
 ## 13. Post-Execution Verification Checklist
 - [ ] All agent-epics completed and merged
 - [ ] All tests passing (unit, integration, e2e)
+- [ ] **Full autonomous E2E suite (Section 8) green against the running system — every covered surface passes; this is the ready-to-merge / clean oracle, not a smoke test**
+- [ ] **E2E suite is a required, blocking CI check on every PR**
+- [ ] **Every E2E coverage gap for touched surfaces filled (optimistic additions per §3.3.5) or explicitly listed in §8.5 as not-certified with justification**
 - [ ] No open PRs (except human-blocked)
 - [ ] No uncommitted changes in any clone
 - [ ] No open issues (except human-agent/human-epic)
@@ -1358,8 +1403,9 @@ If any epic fails these checks, rewrite it until it passes. An epic that cannot 
 - **§1.4 Mission & Guiding Decision Principles is present and concrete** - the mission, codebase governing context, and decision principles are all filled in, not placeholders. The test: could a fresh agent, reading only plan.md, triage a plausible unplanned follow-on item the way the author would? If not, expand §1.4 until it can.
 - **§9.5 Follow-Up Work Completion Contract is present** - the plan states that in-scope follow-on work discovered during execution is completed before the run is reported complete, and Section 13's checklist includes "no open in-scope follow-up work."
 - **Human work is bucketed to the edges** - every human-epic is scheduled front-loaded (before Wave 1) or deferred (after all agent work), or carries an explicit justification for why it must sit mid-run. No agent-doable step is labeled human work.
+- **§8 specifies a comprehensive autonomous E2E suite** - every testable surface this plan touches maps to an E2E test against the running system; the suite is wired into CI as a blocking merge gate; for `--repo`, coverage gaps in touched areas are filled (optimistic additions) or explicitly listed in §8.5 as not-certified with justification. The test: could the user ship on a green suite without opening the app? If not, expand §8 until they can. No surface is left to manual testing without a named §8.5 exception.
 
-These are the same three tenets the Phase 5.7 adversarial reviewer enforces (T1–T3); satisfying them here means the adversarial pass confirms rather than reworks them.
+These map to the four tenets the Phase 5.7 adversarial reviewer enforces (T1–T4); satisfying them here means the adversarial pass confirms rather than reworks them.
 
 #### 5.6.4 Loop Until Clean
 
@@ -1420,7 +1466,7 @@ Each pass runs the full attack battery. Give each a **distinct lead lens** via `
 | Pass | Lead lens (`focus`) |
 |------|---------------------|
 | **1 — premises** | "The plan's load-bearing *unstated* premises, the falsifiability of its claims, and the strongest opposing case including do-nothing. What does this assume about users, scale, data shape, ordering, and the behavior of other systems that nobody examined?" |
-| **2 — execution & failure modes** | "How execution breaks: which step fails first when an assumption is wrong and whether the plan notices or plows on; partial failure mid-wave; concurrency and merge conflicts across parallel agent-epics; retries and idempotency; the gap between 'PR merged' and 'app live' in the bring-up runbook. Press tenets T1 and T2: is human work minimized and bucketed to the edges (plan §6 Human-Epics) rather than wedged mid-run, and is the follow-up-completion contract (§9.5) present, clearly defined, and gated by the Section 13 checklist? Also check whether Pass 1's revisions introduced any new weakness." |
+| **2 — execution & failure modes** | "How execution breaks: which step fails first when an assumption is wrong and whether the plan notices or plows on; partial failure mid-wave; concurrency and merge conflicts across parallel agent-epics; retries and idempotency; the gap between 'PR merged' and 'app live' in the bring-up runbook. Press tenets T1, T2, and T4: is human work minimized and bucketed to the edges (plan §6 Human-Epics) rather than wedged mid-run (T1); is the follow-up-completion contract (§9.5) present, clearly defined, and gated by the Section 13 checklist (T2); and does §8 specify a comprehensive autonomous E2E suite covering every testable surface, wired into CI as a blocking merge gate, with existing-repo gaps filled — such that the user need never test manually (T4)? Attack the testing claim hardest: which surface has no real end-to-end test, which 'test' only exercises mocks, where would a green suite still let a broken build merge? Also check whether Pass 1's revisions introduced any new weakness." |
 | **3 — final / reversal cost & second-order** | "This is the FINAL adversarial pass on a plan already hardened by two prior reviews. Decisions expensive to undo (schema, public API contracts, file formats, dependency choices, naming that leaks into URLs/configs/env vars) with thin justification; second-order effects once it ships — what becomes load-bearing, what gets gamed, what maintenance burden appears in month two. Press tenet T3: does §1.4 carry enough mission + codebase + decision-principles context that an agent can direct unplanned follow-on work without the user? If it cannot, expand it. Then do a holistic final read: do the prior passes' edits hang together, or did they leave seams? Anything P0/P1 you raise here is the last chance to catch it before the gate." |
 
 ### 5.7.2 Dispatch One Pass
@@ -1443,7 +1489,7 @@ You are pass {k} of 3 sequential adversarial reviews. The plan you are reading a
 
 Apply protocol: write the full review artifact first, then incorporate. P0/P1 (confidence ≥0.80) → revise the affected plan section directly, marking any premise fork with `> **Revised {date} (adversarial review):** ...`. P1/P2 (0.60–0.79) → add a row to the plan's existing Risk Register (Section 11), citing the finding id; do NOT create a separate "Risks & Open Questions" section — this plan already has Section 11. Confidence <0.60 → artifact-only. Append one line per incorporated finding to decisions.md. Never touch progress.md or completed-work records.
 
-Plan-execution tenets (T1–T3) are requirements, not judgment calls: enforce them by editing plan.md. If human work is agent-doable or wedged mid-run, revise the plan's Human-Epics (§6) / Prerequisites (§4) to drop or edge-bucket it (T1). If the follow-up-completion contract (§9.5) is missing or vague, add it (T2). If §1.4's mission/codebase/decision-principles context is too thin for an agent to direct unplanned follow-on work, expand it (T3). Park a tenet in the Risk Register only if it genuinely needs an author decision you cannot make — and say so.
+Plan-execution tenets (T1–T4) are requirements, not judgment calls: enforce them by editing plan.md. If human work is agent-doable or wedged mid-run, revise the plan's Human-Epics (§6) / Prerequisites (§4) to drop or edge-bucket it (T1). If the follow-up-completion contract (§9.5) is missing or vague, add it (T2). If §1.4's mission/codebase/decision-principles context is too thin for an agent to direct unplanned follow-on work, expand it (T3). If §8's autonomous E2E suite leaves a testable surface uncovered, is not wired into CI as a blocking merge gate, or (for `--repo`) leaves a touched-area coverage gap unfilled, expand §8 to close it — add the E2E-coverage epics/tasks optimistically (the user wants more coverage) rather than deferring to a question (T4). Park a tenet in the Risk Register only if it genuinely needs an author decision you cannot make — and say so.
 ```
 
 **Anchor propagation (only when `--repo` was given).** Append the same `SOURCE FRESHNESS — repo facts` block used for the Phase 4 review agents (verification anchor `{DEFAULT_REF} @ {ANCHOR}`; read every repo fact from `{WORKTREE}` or `git -C {REPO} show {DEFAULT_REF}:<path>`, never the stale working tree; flag any plan claim that disagrees with the anchor as a finding).
@@ -1644,6 +1690,7 @@ Structure the output in this exact order, as a single message (or a small number
 - Include the Phase 2 naming auto-selection (with the top-5 alternatives inline so the user can swap)
 - Include the Phase 2.6 scope inference
 - Include the Phase 2.7 multi-agent setup inference
+- Include the **Optimistic E2E coverage additions** (decisions.md) — E2E-coverage work added on the assumption the user wants it. List each so the user can veto a specific one; the default is to keep them all.
 - Each row: "I assumed X; correct if wrong."
 
 **8. Open questions**
@@ -1822,7 +1869,8 @@ When all wave agents complete:
 - Verify all PRs are created and passing CI
 - Verify all tests pass, no conflicts between PRs
 - Merge all PRs for the wave
-- **Execute the wave's Bring-Up Runbook (plan.md Section 9.1)**: run migrations in order, install new deps, regenerate types, set new env vars/secrets, restart local dev servers, trigger/verify deploys, invalidate caches, load seed data, run smoke tests. Do not declare the wave done until every step has run and passed.
+- **Execute the wave's Bring-Up Runbook (plan.md Section 9.1)**: run migrations in order, install new deps, regenerate types, set new env vars/secrets, restart local dev servers, trigger/verify deploys, invalidate caches, load seed data. Do not declare the wave done until every step has run and passed.
+- **Run the full autonomous E2E suite (plan.md Section 8) against the reactivated system** — this supersedes a bare smoke test. Every PR in the wave already passed the E2E suite as a blocking CI check before merge; now the full suite must be green against the integrated system. A wave is NOT done while the E2E suite is red.
 
 #### 7.3.5 Checkpoint (MANDATORY after each wave)
 
@@ -1844,7 +1892,7 @@ Write to `progress.md`:
 - CI status: green/red
 - Bring-up runbook executed: yes/no
 - All layers verified live (DB, backend, frontend, workers, deploy): yes/no
-- Smoke test passed: yes/no
+- Autonomous E2E suite (Section 8) green: yes/no
 - Open blockers: none / [list]
 ### Resume context
 [Key decisions, patterns established, and gotchas discovered so far]
@@ -1876,9 +1924,9 @@ After each wave, AFTER the Bring-Up Runbook (7.3.4) has executed:
   - Frontend: loads without console errors, hits the backend successfully
   - Workers/background jobs: running, processing queues, no crash loops
   - Deploy (if production-affecting): new version live at the canonical URL, old version retired
-- **Run the wave's smoke test** against the running system (curl, browser automation, or explicit manual steps) - not just CI
-- If any layer is broken or stale, fix it before proceeding. The next wave does NOT start against a degraded system.
-- Record completion in progress.md: bring-up done, layers verified, smoke test passed
+- **Run the full autonomous E2E suite (plan.md Section 8)** against the running system — not just CI, and not just a smoke test. This is the wave's certainty gate.
+- If any layer is broken or stale, or the E2E suite is red, fix it before proceeding. The next wave does NOT start against a degraded system or a red suite.
+- Record completion in progress.md: bring-up done, layers verified, E2E suite green
 
 ### 7.5 Continue Until Complete
 
@@ -1892,7 +1940,7 @@ After each wave, AFTER the Bring-Up Runbook (7.3.4) has executed:
 - Deployment working
 - **All in-scope follow-up work completed (plan.md Section 9.5)** - do a final follow-up sweep: no open `follow-up` issue remains except genuinely human-blocked ones, and each of those has been surfaced to the user with the exact ask. Execution is NOT complete while an in-scope, non-human-blocked follow-up is open.
 - **Final Bring-Up (plan.md Section 9.4) executed** - all migrations applied, all services running current code, all layers confirmed live
-- **End-to-end smoke test passes** against the running system - the user should be able to open the app and use it immediately
+- **The full autonomous E2E suite (plan.md Section 8) is green** against the running system - every covered surface passes. Green suite ⇒ the user can open the app and use it immediately without any manual testing on their part. Any surface not covered is named in §8.5, not silently left for the user to check.
 
 If blocked by a human-epic or a human-blocked follow-up: create a P0 issue with exact instructions, notify the user, continue non-blocked work. Human-required work is the *only* thing allowed to remain open at completion — reason through everything else yourself using plan §1.4 rather than deferring it to the user.
 
@@ -2056,6 +2104,10 @@ The user should not be a step *inside* an execution run. Minimize required human
 - Every PR passes CI before merge
 - **Every feature is verified to actually work** end-to-end - unit tests passing is the bare minimum, not the finish line. Mocked tests prove internal consistency; they say nothing about whether the real system functions. Use the real API, the real database, the real UI.
 - Security, architecture, and business logic reviews are mandatory unless explicitly skipped
+
+### Autonomous End-to-End Testing — No Manual Testing
+
+Every plan ships a **comprehensive autonomous E2E suite** covering all testable surfaces, wired into CI as a blocking merge gate (plan §8, Phase 3.3.5). The suite is the certainty oracle: green ⇒ clean and ready to merge, red ⇒ broken. **The user's time is not spent on manual testing** — where a flow can't be asserted programmatically, a testing agent drives it; where the surface needs it, the plan provisions third-party infra (RunPod, cloud Mac, real devices). There is no resource constraint on testing. New projects build the suite in from the ground up; existing projects get optimistic gap-fill for every touched area that lacks E2E coverage (the standing assumption is the user always wants more coverage). This is tenet T4 the adversarial review (Phase 5.7) enforces — it expands §8 when coverage is thin rather than deferring to a question.
 
 ### Scope Over Time
 
