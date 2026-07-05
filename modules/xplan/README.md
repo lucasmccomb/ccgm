@@ -33,6 +33,14 @@ xplan is a human-in-the-loop planning framework with mandatory confirmation gate
 
 Reviews run in two stages: Phase 4 standard peer review against the draft, then the Phase 5.7 adversarial sequence (3 sequential passes) against the finished plan. A completed plan has survived **6 independent reviews in the full configuration** (3 standard + 3 adversarial).
 
+### Autonomous-Execution Tenets
+
+Every plan carries three requirements that let it execute with minimal human involvement — written during planning (Phase 3), verified by the self-review (Phase 5.6), and enforced by the adversarial reviewer (Phase 5.7 / `adrev-reviewer` tenets T1–T3), which expands the plan when any is thin:
+
+1. **Human work at the edges** (T1) — human involvement is minimized (anything an agent can do via CLI/API is not human work) and what remains is bucketed to the start (front-loaded prerequisites) or the end (deferred steps), never mid-run. Once execution starts, it does not pause for a person.
+2. **Follow-up-completion contract** (T2, plan §9.5) — any follow-on work discovered during execution is tracked, triaged, and — if in-scope — completed before execution is reported complete. Only genuinely human-blocked work may remain open. Phase 7 gates completion on it.
+3. **Autonomous decision context** (T3, plan §1.4) — the plan carries the software's mission, the codebase's governing conventions, and its decision principles, so an execution agent directs unplanned follow-on work itself instead of stopping to ask. `/etp` reads this context (its Phase 1.5) to triage and reason.
+
 **`--light`**: fast path. Reduced depth, minimal interaction. Skips Phases 0.5, 1.5, 2.5, 2.6, and 2.7. Traditional section-by-section walkthrough at the end.
 
 **`--autonomous`**: deep path. Maximum depth, zero interruption until the final gate. Runs the full research pipeline (all 7 agents), full standard review (security + architecture + business logic), the self-review loop, and the Phase 5.7 adversarial review sequence (3 sequential `adrev-reviewer` passes on Opus 4.8 at max effort, each incorporating its fixes before the next; the third judges the fully-hardened plan). Tech stack, scope, naming, and multi-agent setup are inferred and documented in `decisions.md`. At Phase 6 the completed plan is presented as a single structured artifact with every inferred default called out, then the (non-bypassable) Phase 6.5 final execution gate fires. Pick this when you know exactly what you want to plan and prefer reviewing a finished artifact over answering questions during creation. Correct any wrong inferences with `/xplan --deepen ~/code/plans/{concept-name}` rather than re-running from scratch.

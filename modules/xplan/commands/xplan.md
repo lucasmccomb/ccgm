@@ -870,6 +870,18 @@ If "workspace model" is chosen, add workspace migration as a prerequisite step i
 
 **Goal**: Create a comprehensive, parallelized execution plan divided into agent-epics.
 
+### 3.0 Mission & Guiding Decision Principles
+
+Before designing epics, capture the context an execution agent needs to **make follow-on decisions without you**. During execution, work always surfaces that the plan did not enumerate (a bug found while integrating, a missing prerequisite, a gap between two epics). For the agent to complete that work autonomously — instead of stopping to ask — it must be able to deduce the right *direction* from the plan alone. Write that context now; it becomes plan.md Section 1.4 and is the reference the follow-up-completion contract (3.4.5) points at.
+
+Capture three things:
+
+1. **The software's mission** — what the system is for, who it serves, and what "good" looks like. One paragraph an agent can hold in context while judging whether a discovered change serves the goal.
+2. **The codebase's governing context** — the conventions, patterns, and hard constraints the code already follows (from Phase 0.4 repo analysis) or, for greenfield, the ones this plan establishes (from the approved tech stack and architecture). So a follow-on change matches the codebase rather than diverging from it.
+3. **Decision principles** — the heuristics an agent uses to triage and direct unplanned work: what to prefer, what to reject as out-of-scope ("while I'm here" work, speculative features), when a matter is genuinely human-blocked (needs a credential, a dashboard action, or a product decision with no right answer) versus something to reason through. State them concretely enough that two different agents would resolve the same ambiguity the same way.
+
+The test: *could a fresh agent, reading only plan.md, decide how to handle a plausible unplanned follow-on item the way you would?* If not, this section is too thin — expand it until it can. This is the same context the Phase 5.7 adversarial reviewer (tenet T3) will check for and expand if missing; writing it well here avoids that rework.
+
 ### 3.1 Tech Stack Documentation
 
 **If default interactive mode (neither flag)**: The tech stack was already approved in Phase 2.5. Use the approved stack as the basis for architecture and epic design. Do not re-propose it.
@@ -931,7 +943,25 @@ For each human-epic:
 - Whether it can be done in parallel with agent execution
 - Links to relevant dashboards/services
 
-**Minimize human-epics.** For each, ask: "Can this be done via CLI/API instead?" Only create human-epics for things that genuinely require browser-based human action (OAuth app setup in Google Console, payment provider setup, etc.).
+**Minimize human-epics.** For each, ask: "Can this be done via CLI/API instead?" Only create human-epics for things that genuinely require browser-based human action (OAuth app setup in Google Console, payment provider setup, etc.). If an agent can do it with a CLI or API, it is not a human-epic.
+
+**Bucket unavoidable human work to the edges.** The user should not be a step *inside* the execution run. Every human-epic that survives the minimization test is scheduled to one of two buckets, never the middle:
+
+- **Front-loaded** — done *before* Wave 1 begins, as a prerequisite (API keys, service signups, OAuth setup, DNS). Preferred: the human does their part once, up front, and then execution runs to done untouched.
+- **Deferred** — done *after* all agent work completes (final DNS cutover, store submission, a human sign-off on the finished product).
+
+Only place a human-epic mid-execution when it *genuinely* blocks a specific wave and cannot be front-loaded (rare — most "mid" human work can be pulled forward). When one is unavoidable mid-run, say so explicitly and justify why it could not move to an edge. The goal: once execution starts, it does not pause waiting on a person.
+
+### 3.4.5 Follow-Up Work Completion Contract
+
+The plan must state, in a clearly-defined and locatable clause, that **any follow-on work discovered during execution is completed before execution is reported complete.** This becomes plan.md Section 9.5 and is enforced in Phase 7 (execution) and Section 13 (completion checklist).
+
+Define the contract concretely:
+
+- **Discover & track** — anything an agent finds that the plan did not enumerate but that the work needs (a bug, a missing prerequisite, a gap between epics) is opened as a tracked GitHub issue labeled `follow-up`, so nothing evaporates.
+- **Triage by the decision principles (§3.0 / plan §1.4)** — the agent decides *in-scope-now* (the work cannot be called complete or valid without it), *out-of-scope/deferred* (a nice-to-have or v2 idea — logged, not done), or *human-blocked* (needs a credential/dashboard/decision the agent cannot supply). Because §3.0 gives the mission + principles, the agent makes this call itself instead of asking.
+- **Complete before done** — every in-scope-now follow-up is implemented, reviewed with the same discipline as planned work, and merged. Execution is **not complete** while any in-scope, non-human-blocked follow-up remains open.
+- **Only human-blocked may remain** — human-blocked follow-ups are surfaced explicitly (bucketed and notified, per 3.4), never buried, and are the only work allowed to be open at completion.
 
 ### 3.5 Define Prerequisites
 
@@ -1065,6 +1095,12 @@ Create `~/code/plans/{concept-name}/plan.md`:
 ### 1.1 Vision
 ### 1.2 Key Insights from Research
 ### 1.3 Scope (v1 in / v1 out)
+### 1.4 Mission & Guiding Decision Principles
+[From Phase 3.0. The context an execution agent uses to make follow-on decisions WITHOUT the user. Three parts, all concrete:
+- **Mission**: what the system is for, who it serves, what "good" looks like.
+- **Codebase governing context**: conventions, patterns, and hard constraints a follow-on change must match (from repo analysis, or established by this plan for greenfield).
+- **Decision principles**: heuristics for triaging unplanned work — what to prefer, what to reject as out-of-scope, when a matter is genuinely human-blocked vs. reason-through. Concrete enough that two agents resolve the same ambiguity the same way.
+This section is what makes the Section 9.5 follow-up contract executable autonomously.]
 
 ## 2. Tech Stack
 [Each choice with rationale - pull from approved stack in Phase 2.5]
@@ -1094,8 +1130,9 @@ Create `~/code/plans/{concept-name}/plan.md`:
 - **Checkpoint notes**: [Key context to preserve if session compacts]
 
 ## 6. Human-Epics
+[Minimized (anything an agent can do via CLI/API is NOT here) and bucketed to the edges — see §3.4.]
 ### Human-Epic 1: {Name}
-- **When**: Before Wave N / During Wave N / After Wave N
+- **When (bucket)**: Front-loaded (before Wave 1) / Deferred (after all agent work) / Mid-run (only if genuinely unavoidable — justify why it cannot move to an edge)
 - **Blocks**: Epic N, Epic M
 - **Instructions**: [Step-by-step]
 
@@ -1148,6 +1185,22 @@ For each wave's bring-up, specify the rollback: how to revert migrations, redepl
 
 The last-wave bring-up runbook that takes the fully-merged project to a confirmed-live state. This is the single source of truth for "app is ready to test". Anything that was deferred or flagged during waves gets resolved here.
 
+### 9.5 Follow-Up Work Completion Contract
+
+[From Phase 3.4.5. Execution is NOT complete while in-scope follow-on work discovered during the run remains open.]
+
+Any work that surfaces during execution but was not enumerated in this plan is handled as follows, and this run is not reported complete until the contract is satisfied:
+
+1. **Track** — open a GitHub issue labeled `follow-up` for every discovered item so nothing is lost.
+2. **Triage against §1.4** — using the Mission & Decision Principles, classify each item:
+   - **In-scope-now** — the work cannot be called complete or valid without it. Implement it, review it with the same discipline as planned work, merge it.
+   - **Out-of-scope / deferred** — a nice-to-have, unrelated improvement, or v2 idea. Log it as a deferred issue; do not do it. Surface the deferred list in the final report.
+   - **Human-blocked** — needs a credential, a browser/dashboard action, or a product decision with no right answer. Notify the user with the exact ask, file a `blocked` issue, and continue all non-blocked work.
+3. **Complete before done** — every in-scope-now follow-up is DONE (implemented, reviewed, merged, verified) before execution is reported complete.
+4. **Only human-blocked may remain open** at completion, and each is surfaced explicitly (never buried).
+
+The agent decides the triage itself using §1.4 — it does not stop to ask the user how to direct in-scope follow-on work. The completion checklist (Section 13) gates on "no open in-scope follow-up work."
+
 ## 10. Review Findings
 [Only sections for reviews selected in Phase 4.0]
 ### 10.1 Security Review Summary (if selected)
@@ -1170,6 +1223,8 @@ The last-wave bring-up runbook that takes the fully-merged project to a confirme
 - [ ] No open PRs (except human-blocked)
 - [ ] No uncommitted changes in any clone
 - [ ] No open issues (except human-agent/human-epic)
+- [ ] **All in-scope follow-up work (Section 9.5) completed — no open `follow-up` issues except genuinely human-blocked ones**
+- [ ] **Every human-blocked follow-up surfaced to the user with the exact ask (not buried)**
 - [ ] CI/CD pipeline green
 - [ ] **Final Bring-Up runbook (Section 9.4) executed end-to-end**
 - [ ] **All app layers confirmed live: frontend loads, backend responds, DB reachable, migrations applied, deploys current**
@@ -1298,6 +1353,14 @@ Each agent-epic must be executable by a sub-agent without needing to ask the orc
 
 If any epic fails these checks, rewrite it until it passes. An epic that cannot be scoped concretely belongs in a different epic structure - consider splitting or merging.
 
+**Autonomous-execution readiness** (plan-level, not per-epic) — verify the plan can be executed without the user having to direct unplanned work:
+
+- **§1.4 Mission & Guiding Decision Principles is present and concrete** - the mission, codebase governing context, and decision principles are all filled in, not placeholders. The test: could a fresh agent, reading only plan.md, triage a plausible unplanned follow-on item the way the author would? If not, expand §1.4 until it can.
+- **§9.5 Follow-Up Work Completion Contract is present** - the plan states that in-scope follow-on work discovered during execution is completed before the run is reported complete, and Section 13's checklist includes "no open in-scope follow-up work."
+- **Human work is bucketed to the edges** - every human-epic is scheduled front-loaded (before Wave 1) or deferred (after all agent work), or carries an explicit justification for why it must sit mid-run. No agent-doable step is labeled human work.
+
+These are the same three tenets the Phase 5.7 adversarial reviewer enforces (T1–T3); satisfying them here means the adversarial pass confirms rather than reworks them.
+
 #### 5.6.4 Loop Until Clean
 
 Re-run 5.6.1, 5.6.2, and 5.6.3 after every round of fixes. Do not advance to Phase 6 until all three scans report zero findings. If three consecutive passes do not converge (new placeholders or drift keep appearing), stop and surface the specific section(s) to the user - the plan likely has a structural ambiguity that needs a human decision.
@@ -1357,8 +1420,8 @@ Each pass runs the full attack battery. Give each a **distinct lead lens** via `
 | Pass | Lead lens (`focus`) |
 |------|---------------------|
 | **1 — premises** | "The plan's load-bearing *unstated* premises, the falsifiability of its claims, and the strongest opposing case including do-nothing. What does this assume about users, scale, data shape, ordering, and the behavior of other systems that nobody examined?" |
-| **2 — execution & failure modes** | "How execution breaks: which step fails first when an assumption is wrong and whether the plan notices or plows on; partial failure mid-wave; concurrency and merge conflicts across parallel agent-epics; retries and idempotency; the gap between 'PR merged' and 'app live' in the bring-up runbook. Also check whether Pass 1's revisions introduced any new weakness." |
-| **3 — final / reversal cost & second-order** | "This is the FINAL adversarial pass on a plan already hardened by two prior reviews. Decisions expensive to undo (schema, public API contracts, file formats, dependency choices, naming that leaks into URLs/configs/env vars) with thin justification; second-order effects once it ships — what becomes load-bearing, what gets gamed, what maintenance burden appears in month two. Then do a holistic final read: do the two prior passes' edits hang together, or did they leave seams? Anything P0/P1 you raise here is the last chance to catch it before the gate." |
+| **2 — execution & failure modes** | "How execution breaks: which step fails first when an assumption is wrong and whether the plan notices or plows on; partial failure mid-wave; concurrency and merge conflicts across parallel agent-epics; retries and idempotency; the gap between 'PR merged' and 'app live' in the bring-up runbook. Press tenets T1 and T2: is human work minimized and bucketed to the edges (plan §6 Human-Epics) rather than wedged mid-run, and is the follow-up-completion contract (§9.5) present, clearly defined, and gated by the Section 13 checklist? Also check whether Pass 1's revisions introduced any new weakness." |
+| **3 — final / reversal cost & second-order** | "This is the FINAL adversarial pass on a plan already hardened by two prior reviews. Decisions expensive to undo (schema, public API contracts, file formats, dependency choices, naming that leaks into URLs/configs/env vars) with thin justification; second-order effects once it ships — what becomes load-bearing, what gets gamed, what maintenance burden appears in month two. Press tenet T3: does §1.4 carry enough mission + codebase + decision-principles context that an agent can direct unplanned follow-on work without the user? If it cannot, expand it. Then do a holistic final read: do the prior passes' edits hang together, or did they leave seams? Anything P0/P1 you raise here is the last chance to catch it before the gate." |
 
 ### 5.7.2 Dispatch One Pass
 
@@ -1379,6 +1442,8 @@ Reference files (read as needed):
 You are pass {k} of 3 sequential adversarial reviews. The plan you are reading already incorporates the fixes from passes 1..{k-1}. Reason at maximum depth. A review that returns "looks good, minor nits" is a FAILED review unless you genuinely attacked from every angle and the plan survived — and then your report must show the attacks in `survived`, not just the verdict.
 
 Apply protocol: write the full review artifact first, then incorporate. P0/P1 (confidence ≥0.80) → revise the affected plan section directly, marking any premise fork with `> **Revised {date} (adversarial review):** ...`. P1/P2 (0.60–0.79) → add a row to the plan's existing Risk Register (Section 11), citing the finding id; do NOT create a separate "Risks & Open Questions" section — this plan already has Section 11. Confidence <0.60 → artifact-only. Append one line per incorporated finding to decisions.md. Never touch progress.md or completed-work records.
+
+Plan-execution tenets (T1–T3) are requirements, not judgment calls: enforce them by editing plan.md. If human work is agent-doable or wedged mid-run, revise the plan's Human-Epics (§6) / Prerequisites (§4) to drop or edge-bucket it (T1). If the follow-up-completion contract (§9.5) is missing or vague, add it (T2). If §1.4's mission/codebase/decision-principles context is too thin for an agent to direct unplanned follow-on work, expand it (T3). Park a tenet in the Risk Register only if it genuinely needs an author decision you cannot make — and say so.
 ```
 
 **Anchor propagation (only when `--repo` was given).** Append the same `SOURCE FRESHNESS — repo facts` block used for the Phase 4 review agents (verification anchor `{DEFAULT_REF} @ {ANCHOR}`; read every repo fact from `{WORKTREE}` or `git -C {REPO} show {DEFAULT_REF}:<path>`, never the stale working tree; flag any plan claim that disagrees with the anchor as a finding).
@@ -1745,6 +1810,7 @@ Each agent:
 - **Verifies the work actually functions** end-to-end (not just unit tests passing)
 - Creates a PR
 - Reports completion with verification evidence
+- **Reports any follow-on work it discovered but did not fix in-scope** (a bug found while integrating, a missing prerequisite, a gap between epics) so the orchestrator can triage it per §9.5 — nothing discovered is allowed to evaporate
 
 #### 7.3.3 Monitor & Report
 
@@ -1788,6 +1854,17 @@ This checkpoint enables `/xplan-resume` to pick up where execution left off.
 
 #### 7.3.6 Update progress.md table and proceed to next wave.
 
+#### 7.3.7 Triage & Complete Follow-Up Work (§9.5 contract)
+
+Collect everything the wave's agents surfaced but did not fix in-scope (7.3.2), plus anything the integration verification (7.4) turns up. For each item, execute the plan's Section 9.5 Follow-Up Work Completion Contract:
+
+1. **Track** — open a `follow-up`-labeled issue so nothing is lost.
+2. **Triage against plan §1.4** — using the Mission & Guiding Decision Principles, classify it: **in-scope-now** (the work cannot be called complete or valid without it), **out-of-scope/deferred** (a nice-to-have or v2 idea), or **human-blocked** (needs a credential, dashboard action, or a product decision with no right answer). Decide this yourself from the plan's context — do NOT stop to ask the user how to direct in-scope follow-on work. That is exactly what §1.4 exists to let you do.
+3. **Complete in-scope-now items** — branch, implement, review with the same discipline as planned work, merge. Fold a small in-scope follow-up into the current wave; spin a dedicated agent for a larger one.
+4. **Log deferred, notify human-blocked** — deferred items stay as open issues surfaced in the final report; human-blocked items get a notification with the exact ask, then continue-around (never halt non-blocked work).
+
+A wave is not "done" while an in-scope-now follow-up it produced is still open. Record the follow-up disposition in the wave checkpoint (7.3.5).
+
 ### 7.4 Integration Verification
 
 After each wave, AFTER the Bring-Up Runbook (7.3.4) has executed:
@@ -1813,10 +1890,11 @@ After each wave, AFTER the Bring-Up Runbook (7.3.4) has executed:
 - No open PRs
 - CI is green
 - Deployment working
+- **All in-scope follow-up work completed (plan.md Section 9.5)** - do a final follow-up sweep: no open `follow-up` issue remains except genuinely human-blocked ones, and each of those has been surfaced to the user with the exact ask. Execution is NOT complete while an in-scope, non-human-blocked follow-up is open.
 - **Final Bring-Up (plan.md Section 9.4) executed** - all migrations applied, all services running current code, all layers confirmed live
 - **End-to-end smoke test passes** against the running system - the user should be able to open the app and use it immediately
 
-If blocked by a human-epic: create a P0 issue with exact instructions, notify the user, continue non-blocked work.
+If blocked by a human-epic or a human-blocked follow-up: create a P0 issue with exact instructions, notify the user, continue non-blocked work. Human-required work is the *only* thing allowed to remain open at completion — reason through everything else yourself using plan §1.4 rather than deferring it to the user.
 
 ---
 
@@ -1826,6 +1904,8 @@ If blocked by a human-epic: create a P0 issue with exact instructions, notify th
 
 ```bash
 gh issue list --state open --repo {username}/{project-name}
+# Follow-up issues must all be closed except genuinely human-blocked ones (§9.5 contract):
+gh issue list --state open --label follow-up --repo {username}/{project-name}
 gh pr list --state open --repo {username}/{project-name}
 for i in 0 1 2 3; do
   echo "=== Clone $i ==="
@@ -1834,6 +1914,8 @@ done
 cd ~/code/{project-name}-repos/{project-name}-0
 npm test && npm run build
 ```
+
+Any open `follow-up` issue that is NOT human-blocked means execution is not complete — return to Phase 7.3.7 and finish it before reporting. Only human-blocked follow-ups may remain, each surfaced with its exact ask.
 
 ### 8.2 Report
 
@@ -1964,6 +2046,10 @@ Maximize parallel agents based on the setup confirmed in Phase 2.7:
 
 Do as much as possible without human intervention. Only create human-epics for things that genuinely require the user's browser session or credentials you don't have. CLI/API access replaces human actions wherever possible.
 
+### Human Work at the Edges
+
+The user should not be a step *inside* an execution run. Minimize required human interaction first (anything an agent can do via CLI/API is not human work), then bucket whatever genuinely remains to the **beginning** (front-loaded prerequisites) or the **end** (final human steps) — never mid-run, where it stalls the whole run waiting on a person. Once execution starts, it proceeds to done without pausing for a human. This is tenet T1 the adversarial review (Phase 5.7) enforces.
+
 ### Quality Over Speed
 
 - Every piece of code has tests
@@ -1984,6 +2070,14 @@ Epic sizing is about isolation, testability, and merge safety - not clock time. 
 ### Complete Execution
 
 Plans execute until ALL completable work is done. No stopping halfway. No leaving broken or half-finished work. Every session ends with a clean state.
+
+### Follow-Up Completion Before Done
+
+Execution always surfaces work the plan did not enumerate. Execution is **not complete** while in-scope follow-on work discovered during the run remains open. Every such item is tracked as a `follow-up` issue, triaged against plan §1.4, and — if in-scope — completed and reviewed before the run is reported done (plan §9.5). The only work allowed to remain open at completion is genuinely human-blocked, and it is surfaced explicitly. This is tenet T2 the adversarial review (Phase 5.7) enforces.
+
+### Autonomous Follow-On Decisions
+
+An agent triages and directs unplanned follow-on work *itself*, using the plan's Mission & Guiding Decision Principles (§1.4) — the software's mission, the codebase's governing context, and the plan's decision heuristics. It does not stop to ask the user how to handle in-scope follow-on work; the plan carries enough context to deduce the direction. If it does not, the plan is under-specified and §1.4 must be expanded — this is tenet T3 the adversarial review (Phase 5.7) enforces.
 
 ### Resumability
 

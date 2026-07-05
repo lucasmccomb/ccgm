@@ -148,9 +148,23 @@ Group independent units into **waves** (parallel within a wave, sequential acros
 
   Do not impose plan-scale ceremony (multi-clone provisioning, wave checkpoints, bring-up runbooks) on a single issue. Do not skip it for a real multi-epic plan.
 
-### 1.4 Surface prerequisites and human-only steps
+### 1.4 Surface prerequisites and human-only steps (bucket them to the edges)
 
-Scan for anything the work needs that an agent cannot do: credentials, API keys, OAuth/dashboard setup, DNS, paid-service signups. List them now. They become Phase 5 blockers (notify-and-continue), not silent failures mid-run.
+Scan for anything the work needs that an agent cannot do: credentials, API keys, OAuth/dashboard setup, DNS, paid-service signups. First apply the minimization test — anything an agent *can* do via CLI/API is not human work; do it, don't ask. Whatever genuinely remains is **bucketed to the edges**, never left to stall the run mid-stream:
+
+- **Front-loaded** — surface every up-front human-only step *now*, before any unit runs, so the human can clear them once and the run then proceeds untouched.
+- **Deferred** — human steps that only make sense at the end (final DNS cutover, store submission, a human sign-off) are queued for after all agent work completes.
+
+They become Phase 5 blockers (notify-and-continue), not silent failures mid-run. The user should not be a step *inside* the run: never pause the whole run waiting on human work that could have been front-loaded.
+
+### 1.5 Establish the decision context (so follow-on calls need no human)
+
+Execution will surface unplanned follow-on work (Phase 5). To triage and direct it *without stopping to ask the user*, ground yourself in the decision context first:
+
+- **Plan target**: read the plan's **Mission & Guiding Decision Principles** (xplan plans: §1.4) — the software's mission, the codebase's governing conventions, and the plan's decision heuristics. This is what lets you decide follow-on direction the way the plan's author would.
+- **Issue target, or a plan missing that section**: derive the equivalent from the codebase — its `CLAUDE.md`, `README.md`, and the conventions visible in the code — plus the issue's own stated intent. If you cannot form a confident decision context this way, that gap itself is a Phase 5 human-blocked item (a product decision with no right answer), not a reason to guess.
+
+Hold this context for Phases 5 and 6: it is the reference you triage and reason against.
 
 ---
 
@@ -284,14 +298,14 @@ Record progress so the run is resumable, matched to the ceremony level (1.3):
 
 ## Phase 5: Follow-Up Work That Arises
 
-Execution surfaces work the target did not enumerate: a bug found while integrating, a missing prerequisite, a gap between two units, a flaky test that is really a real bug. Handle every one - do not let it evaporate. This is the directive's "complete any follow-up issues that arise."
+Execution surfaces work the target did not enumerate: a bug found while integrating, a missing prerequisite, a gap between two units, a flaky test that is really a real bug. Handle every one - do not let it evaporate. This is the directive's "complete any follow-up issues that arise," and for an xplan-authored plan it is that plan's **Follow-Up Work Completion Contract (§9.5)**: execution is **not complete** while an in-scope follow-up remains open.
 
 For each arising item:
-1. **Track it** - open a GitHub issue, so nothing is lost.
-2. **Triage scope**:
+1. **Track it** - open a GitHub issue (label it `follow-up`), so nothing is lost.
+2. **Triage scope against the decision context (Phase 1.5)** - decide this *yourself* from the plan's §1.4 / the codebase's mission and conventions; do NOT stop to ask the user how to direct in-scope follow-on work. That is what the decision context is for.
    - **In-scope-now** (the work cannot be called complete, or reasonable+valid, without it) → treat it as a first-class unit: branch, implement (`implementer`), then the **same adversarial review** as any other PR (Phase 4.2-4.4), then merge. Follow-up PRs get adversarially reviewed too - this is explicit in the directive.
    - **Out-of-scope / speculative** (a nice-to-have, an unrelated improvement, a v2 idea) → log it as a deferred issue and leave it. Surface the deferred list in the final report. Scope discipline: finish the work and what it necessitates, not every improvement you can see.
-3. **Absolute blocker** (needs a credential you do not have, a human-only dashboard action, an external dependency) → notify the user immediately with the exact ask, file a `blocked` issue, and **continue all non-blocked work**. A blocker stops one unit, never the run.
+3. **Absolute blocker** (needs a credential you do not have, a human-only dashboard action, a product decision with no right answer) → notify the user immediately with the exact ask, file a `blocked` issue, and **continue all non-blocked work**. A blocker stops one unit, never the run. Human-blocked follow-ups are the *only* work allowed to remain open when the run is reported complete.
 
 ---
 
@@ -303,7 +317,7 @@ When a unit fails - red CI, merge conflict, failing test, an ambiguous step - do
 3. Form one hypothesis, make the minimal change, verify it.
 4. If three focused attempts fail (three-strike rule), stop guessing: question the assumption, re-read the relevant source/docs, or escalate that single unit as a blocker - then continue the rest.
 
-Distinguish "something I can reason through" (the overwhelming majority - ambiguous wording, an obvious-once-traced bug, a missing import) from "an absolute blocker that genuinely needs the human" (missing credentials, a product decision with no right answer, an irreversible action the work does not authorize). Reason through the first kind. Notify on the second. Never conflate "this is hard" with "this is blocked."
+Distinguish "something I can reason through" (the overwhelming majority - ambiguous wording, an obvious-once-traced bug, a missing import) from "an absolute blocker that genuinely needs the human" (missing credentials, a product decision with no right answer, an irreversible action the work does not authorize). Reason through the first kind — ground the call in the decision context (Phase 1.5): the plan's mission and decision principles, or the codebase's conventions, tell you which direction the author would take. Notify on the second. Never conflate "this is hard" with "this is blocked."
 
 ---
 
@@ -355,6 +369,8 @@ A plan run: mark the progress file `COMPLETE`, or `BLOCKED - WAITING ON HUMAN` w
 **Scope discipline.** Execute the work plus the follow-ups it necessitates. Reject "while I'm here" work, speculative features, and review suggestions with no caller. Finishing the job is not expanding the job.
 
 **Notify-and-continue.** Absolute blockers are reported the moment they are found and never halt non-blocked work. The run degrades gracefully around blockers; it does not stop dead.
+
+**Human work at the edges.** The user is not a step inside the run. Anything an agent can do via CLI/API is done, not asked. Genuine human-only work is surfaced up front (front-loaded, Phase 1.4) or queued for the end (deferred), never left to stall the run mid-stream. In-scope follow-on work is reasoned through against the decision context (Phase 1.5), not bounced to the user — only genuinely human-blocked items remain open at completion, each surfaced with its exact ask.
 
 **Safety on irreversible / outward actions.** Even in autonomous mode, anything destructive or externally-visible that the work did not clearly authorize - production deploys, resource deletion, force-pushing shared branches, sending external communications - requires notifying the user first. The work authorizes its own scope; it does not authorize off-scope irreversible acts.
 
