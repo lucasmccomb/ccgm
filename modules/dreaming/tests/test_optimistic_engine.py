@@ -676,7 +676,11 @@ class RecordAnomalyTests(OptimisticEngineTestBase):
         self.assertIsNone(result.get("circuit_breaker"), result)
         state = self._read_optimistic_state_file()
         self.assertFalse(state["suspended"])
-        self.assertEqual(len(state["anomaly_log"]), 2)  # old + new, but only 1 "recent"
+        # The 20-day-old entry is also beyond the 2*7=14-day prune retention
+        # (review fix for #801, PR #810 -- see AnomalyLogBoundedGrowthTests)
+        # and is dropped entirely on this append, leaving only the
+        # freshly-recorded anomaly.
+        self.assertEqual(len(state["anomaly_log"]), 1)
 
     def test_record_anomaly_while_already_suspended_does_not_refire_trip_audit(self):
         # Idempotency: a red-gate night that happens while the breaker is
@@ -710,6 +714,151 @@ class RecordAnomalyTests(OptimisticEngineTestBase):
         self.assertTrue(path.is_file())
         on_disk = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(len(on_disk["anomaly_log"]), 1)
+
+
+# ---------------------------------------------------------------------------
+# Auto-resume clean slate (review fix for #801, PR #810): _maybe_auto_resume()
+# now clears anomaly_log on a genuine quiet-period resume, so stale-but-
+# still-within-window entries recorded before the original trip cannot
+# immediately re-trip the breaker the moment the engine resumes (which used
+# to apply-and-commit at most one capped batch before re-suspending --
+# "auto-resume" leaking a single batch per cycle instead of actually
+# resuming). anomaly_log accumulated AFTER the resume is unaffected -- it
+# still re-trips normally once it reaches the configured threshold.
+# ---------------------------------------------------------------------------
+
+
+class AutoResumeCleanSlateTests(OptimisticEngineTestBase):
+    def test_resume_clears_anomaly_log_then_new_anomalies_retrip_normally(self):
+        self._write_config({
+            "circuit_breaker_window_nights": 7,
+            "circuit_breaker_max_anomalies": 2,
+            "circuit_breaker_auto_resume_nights": 7,
+            "batch_anomaly_max_same_tag_fraction": 0.5,
+        })
+        now = time.time()
+        # Suspended long enough ago to auto-resume, but anomaly_log still
+        # carries entries that are STALE (recorded before the original
+        # trip) yet still fall inside the 7-night trip-window -- exactly
+        # the condition that used to cause an immediate re-trip on resume.
+        self._write_optimistic_state({
+            "suspended": True, "suspended_at": self._iso(now - 8 * 86400),
+            "anomaly_log": [self._iso(now - 2 * 86400), self._iso(now - 3 * 86400)],
+            "last_run": None,
+        })
+
+        # Phase 1: quiet-period resume with a harmless verify-only batch --
+        # must resume, reset anomaly_log to a clean slate, and NOT re-trip
+        # within this same run.
+        slug = _unique_slug("resume-cleanslate")
+        target_id = self._seed_learning(slug, confidence=8)
+        day1 = _unique_day()
+        self._write_day(day1, [_proposal_row(pid="rc1", kind="learning_verify", project=slug,
+                                              target_id=target_id, confidence=8)])
+        summary1 = adp.run_optimistic_integrate(day1)
+        self.assertEqual(summary1["circuit_breaker"], "auto_resumed", summary1)
+        self.assertEqual(summary1["applied"], 1, summary1)  # the resume actually let this batch through
+
+        state_after_resume = self._read_optimistic_state_file()
+        self.assertFalse(state_after_resume["suspended"])
+        self.assertEqual(state_after_resume["anomaly_log"], [],
+                          "resume must reset the window, not carry stale entries forward")
+
+        # Phase 2: exactly ONE new anomaly after the resume -- below
+        # max_anomalies=2, must not trip.
+        slug2 = _unique_slug("resume-cleanslate-evict1")
+        t0 = self._seed_learning(slug2, content="s0", confidence=8, tags=["x"])
+        t1 = self._seed_learning(slug2, content="s1", confidence=8, tags=["x"])
+        day2 = _unique_day()
+        self._write_day(day2, [
+            _proposal_row(pid="rc2a", kind="learning_deprecate", project=slug2, target_id=t0, confidence=9),
+            _proposal_row(pid="rc2b", kind="learning_deprecate", project=slug2, target_id=t1, confidence=9),
+        ])
+        summary2 = adp.run_optimistic_integrate(day2)
+        self.assertNotEqual(summary2["circuit_breaker"], "tripped", summary2)
+        state_after_one_new = self._read_optimistic_state_file()
+        self.assertFalse(state_after_one_new["suspended"])
+        self.assertEqual(len(state_after_one_new["anomaly_log"]), 1, state_after_one_new)
+
+        # Phase 3: a SECOND new anomaly reaches max_anomalies=2 -- the
+        # breaker re-trips normally, exactly as it would with no prior
+        # suspension history.
+        slug3 = _unique_slug("resume-cleanslate-evict2")
+        t2 = self._seed_learning(slug3, content="s2", confidence=8, tags=["y"])
+        t3 = self._seed_learning(slug3, content="s3", confidence=8, tags=["y"])
+        day3 = _unique_day()
+        self._write_day(day3, [
+            _proposal_row(pid="rc3a", kind="learning_deprecate", project=slug3, target_id=t2, confidence=9),
+            _proposal_row(pid="rc3b", kind="learning_deprecate", project=slug3, target_id=t3, confidence=9),
+        ])
+        summary3 = adp.run_optimistic_integrate(day3)
+        self.assertEqual(summary3["circuit_breaker"], "tripped", summary3)
+        state_after_retrip = self._read_optimistic_state_file()
+        self.assertTrue(state_after_retrip["suspended"])
+
+
+# ---------------------------------------------------------------------------
+# Bounded anomaly_log growth (review fix for #801, PR #810): every append
+# site (record_anomaly(), run_optimistic_integrate()) prunes entries older
+# than 2 * circuit_breaker_window_nights days so the state file cannot grow
+# forever under a sustained anomaly stream, without ever pruning an entry
+# _evaluate_breaker_trip() would still count (its own window is exactly
+# circuit_breaker_window_nights -- half this retention).
+# ---------------------------------------------------------------------------
+
+
+class AnomalyLogBoundedGrowthTests(OptimisticEngineTestBase):
+    def test_record_anomaly_prunes_entries_beyond_retention(self):
+        self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 100})
+        now = time.time()
+        # Retention = 2 * 7 = 14 days. Seed a mix spanning well beyond that.
+        old_entries = [self._iso(now - 40 * 86400), self._iso(now - 15 * 86400)]
+        kept_entries = [self._iso(now - 10 * 86400), self._iso(now - 1 * 86400)]
+        self._write_optimistic_state({
+            "suspended": False, "suspended_at": None,
+            "anomaly_log": old_entries + kept_entries,
+            "last_run": None,
+        })
+
+        result = adp.record_anomaly("red_eval_gate")
+        self.assertTrue(result["ok"], result)
+
+        log = self._read_optimistic_state_file()["anomaly_log"]
+        for old in old_entries:
+            self.assertNotIn(old, log, log)
+        for kept in kept_entries:
+            self.assertIn(kept, log, log)
+        # kept_entries plus this call's own freshly-appended anomaly.
+        self.assertEqual(len(log), len(kept_entries) + 1, log)
+
+    def test_run_optimistic_integrate_prunes_entries_beyond_retention(self):
+        self._write_config({
+            "circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 100,
+            "batch_anomaly_max_same_tag_fraction": 0.5,
+        })
+        now = time.time()
+        old_entry = self._iso(now - 40 * 86400)  # far beyond the 14-day retention
+        kept_entry = self._iso(now - 5 * 86400)  # within retention
+        self._write_optimistic_state({
+            "suspended": False, "suspended_at": None,
+            "anomaly_log": [old_entry, kept_entry],
+            "last_run": None,
+        })
+
+        slug = _unique_slug("prune-viaintegrate")
+        t0 = self._seed_learning(slug, content="s0", confidence=8, tags=["x"])
+        t1 = self._seed_learning(slug, content="s1", confidence=8, tags=["x"])
+        day = _unique_day()
+        self._write_day(day, [
+            _proposal_row(pid="pv0", kind="learning_deprecate", project=slug, target_id=t0, confidence=9),
+            _proposal_row(pid="pv1", kind="learning_deprecate", project=slug, target_id=t1, confidence=9),
+        ])
+        adp.run_optimistic_integrate(day)
+
+        log = self._read_optimistic_state_file()["anomaly_log"]
+        self.assertNotIn(old_entry, log, log)
+        self.assertIn(kept_entry, log, log)
+        self.assertEqual(len(log), 2, log)  # kept_entry plus this run's own new anomaly
 
 
 # ---------------------------------------------------------------------------

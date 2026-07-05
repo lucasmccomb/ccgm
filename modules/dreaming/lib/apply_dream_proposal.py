@@ -102,11 +102,14 @@ existing caller.
 Lock topology (adrev-opt-011): the engine NEVER holds `_apply_lock()` across
 the batch -- each proposal is applied through `apply_proposal()`, which
 takes/releases the lock per call exactly as it does today. The breaker
-state read (before the loop) and the breaker state write + single batch
-commit (after the loop) each acquire the lock in their OWN, non-nested
-critical section. `fcntl.flock` is non-reentrant; nesting a batch-wide lock
-around per-proposal `apply_proposal()` calls would self-deadlock on the
-very first row.
+state read (before the loop) and the breaker state write (after the loop)
+each acquire the lock in their OWN, non-nested critical section.
+`fcntl.flock` is non-reentrant; nesting a batch-wide lock around
+per-proposal `apply_proposal()` calls would self-deadlock on the very first
+row. The single batch commit (review fix for #801, PR #810) runs AFTER the
+breaker-state-write section has already released the lock -- see that
+section's own comment in `run_optimistic_integrate()` for why issuing it
+while still holding `_apply_lock()` is unsafe.
 
 Red-gate-as-anomaly (review fix for #801, PR #810): plan.md §3.5 says the
 breaker trips on "batch-anomaly fire OR red eval gate", but a red
@@ -1146,9 +1149,9 @@ def _rolling_rate_exceeded(slug: str, cfg: dict[str, Any], *, now: float | None 
 
 def _maybe_auto_resume(state: dict[str, Any], cfg: dict[str, Any], batch_id: str) -> dict[str, Any]:
     """If `state['suspended']` and enough quiet time has elapsed since
-    `suspended_at`, clears the suspension, persists it, and audits the
-    transition. Returns the (possibly updated) state. Caller MUST already
-    hold `_apply_lock()`.
+    `suspended_at`, clears the suspension, resets `anomaly_log` to a clean
+    slate, persists it, and audits the transition. Returns the (possibly
+    updated) state. Caller MUST already hold `_apply_lock()`.
 
     "Quiet" needs no separate tracking: while suspended, run_optimistic_
     integrate() itself applies nothing (see its early return below), so no
@@ -1157,11 +1160,20 @@ def _maybe_auto_resume(state: dict[str, Any], cfg: dict[str, Any], batch_id: str
     `circuit_breaker_auto_resume_nights` is sufficient. `record_anomaly()`
     (review fix for #801, PR #810 -- a red eval gate never reaches
     run_optimistic_integrate() at all) is an INDEPENDENT path that CAN
-    still append to `anomaly_log` while suspended; that does not change
-    this function's own check, which only ever looks at wall-clock time
-    since `suspended_at`, never at `anomaly_log` contents. An ambiguous
-    state (suspended but no parseable `suspended_at`, e.g. a hand-edited
-    file) never auto-resumes -- fails closed, requires a manual
+    still append to `anomaly_log` while suspended -- and without clearing
+    it here, those stale-but-still-within-window entries would survive the
+    resume and immediately re-trip `_evaluate_breaker_trip()` on this SAME
+    call, applying (and committing) at most one capped batch before
+    re-suspending: "auto-resume" would leak a single batch per cycle
+    instead of actually resuming (review fix for #801, PR #810). Resetting
+    `anomaly_log` to `[]` on a genuine resume gives the breaker a true clean
+    slate -- it re-trips only on anomalies recorded AFTER this point, never
+    on the ones that caused the original trip. This function's OWN decision
+    to resume still depends ONLY on wall-clock time since `suspended_at`,
+    never on `anomaly_log` contents -- clearing the log is an action taken
+    upon resuming, not a new precondition for resuming. An ambiguous state
+    (suspended but no parseable `suspended_at`, e.g. a hand-edited file)
+    never auto-resumes -- fails closed, requires a manual
     `optimistic-resume`.
     """
     if not state.get("suspended"):
@@ -1178,10 +1190,12 @@ def _maybe_auto_resume(state: dict[str, Any], cfg: dict[str, Any], batch_id: str
     state = dict(state)
     state["suspended"] = False
     state["suspended_at"] = None
+    state["anomaly_log"] = []
     _write_optimistic_state_atomic(state)
     _write_audit({
         "outcome": "circuit_breaker_auto_resumed", "batch_id": batch_id,
-        "detail": f"quiet for >= {cfg.get('circuit_breaker_auto_resume_nights', 7)} night(s) since suspension",
+        "detail": f"quiet for >= {cfg.get('circuit_breaker_auto_resume_nights', 7)} night(s) since suspension; "
+                  f"anomaly_log reset to a clean slate",
     })
     return state
 
@@ -1200,6 +1214,31 @@ def optimistic_resume() -> dict[str, Any]:
     record = {"outcome": "circuit_breaker_manual_resume", "was_suspended": was_suspended, "ok": True}
     _write_audit(record)
     return record
+
+
+def _prune_anomaly_log(anomaly_log: list[str], cfg: dict[str, Any], *, now: float | None = None) -> list[str]:
+    """Bounds `anomaly_log`'s otherwise-unbounded growth (review fix for
+    #801, PR #810): it is append-only at every call site
+    (`record_anomaly()`, `run_optimistic_integrate()`) and, absent this
+    prune, would accumulate forever under a sustained anomaly stream (e.g.
+    a long red-eval-gate streak recorded nightly via `record_anomaly()`).
+
+    Drops entries older than `2 * circuit_breaker_window_nights` days -- a
+    generous retention that can NEVER remove anything
+    `_evaluate_breaker_trip()` would otherwise have counted (that
+    function's own window is exactly `circuit_breaker_window_nights`, half
+    this retention), so pruning changes no trip decision; it only keeps the
+    on-disk state file bounded. Each call site is expected to prune
+    immediately after appending/extending, before persisting.
+    """
+    window_nights = int(cfg.get("circuit_breaker_window_nights", 7))
+    retention_s = 2 * window_nights * 86400.0
+    now_ts = now if now is not None else time.time()
+    cutoff = now_ts - retention_s
+    return [
+        t for t in anomaly_log
+        if learnings_store._parse_iso(t) >= cutoff  # noqa: SLF001 -- see _rolling_auto_add_supersede_count
+    ]
 
 
 def _evaluate_breaker_trip(state: dict[str, Any], cfg: dict[str, Any], *, batch_id: str) -> bool:
@@ -1266,7 +1305,10 @@ def record_anomaly(reason: str) -> dict[str, Any]:
     REUSES `_read_optimistic_state()` / `_write_optimistic_state_atomic()`
     / the same windowed-breaker evaluation `run_optimistic_integrate()`
     uses (via `_evaluate_breaker_trip()`) rather than re-deriving any of
-    that logic.
+    that logic. Also prunes `anomaly_log` via `_prune_anomaly_log()`
+    immediately after appending (review fix for #801, PR #810), so a
+    sustained red-eval-gate streak recorded nightly through this function
+    cannot grow the log forever.
 
     Always audited: one `anomaly_recorded` record unconditionally, plus a
     `circuit_breaker_tripped` record (written by `_evaluate_breaker_trip`,
@@ -1290,6 +1332,7 @@ def record_anomaly(reason: str) -> dict[str, Any]:
         state = _read_optimistic_state()
         state.setdefault("anomaly_log", [])
         state["anomaly_log"].append(_utc_now_iso())
+        state["anomaly_log"] = _prune_anomaly_log(state["anomaly_log"], cfg)
 
         tripped = _evaluate_breaker_trip(state, cfg, batch_id=context_id)
         _write_optimistic_state_atomic(state)
@@ -1423,8 +1466,11 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
     Lock topology (adrev-opt-011): this function NEVER holds `_apply_lock()`
     across the batch. Each proposal is applied through `apply_proposal()`,
     which takes/releases the lock per call. The breaker-state read (before
-    the loop) and the breaker-state write + single batch commit (after the
-    loop) each acquire the lock in their OWN, non-nested critical section.
+    the loop) and the breaker-state write (after the loop) each acquire the
+    lock in their OWN, non-nested critical section. The single batch commit
+    (review fix for #801, PR #810) is issued AFTER the breaker-state-write
+    section releases the lock -- see that section's own comment below for
+    why committing while still holding `_apply_lock()` is unsafe.
 
     Transaction model (adrev-opt-012/013): the whole batch runs with
     per-write autocommit suppressed (`_suppressed_autocommit()`) and makes
@@ -1538,13 +1584,14 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
             summary["anomalies"].append({"slug": slug, "kind": "rolling_add_rate_exceeded"})
             _write_audit({"outcome": "rolling_add_rate_exceeded", "batch_id": batch_id, "project": slug})
 
-    # Breaker-state write + single batch commit: ONE non-nested critical
-    # section (adrev-opt-011), acquired AFTER every per-proposal
-    # apply_proposal() call above has already released the lock.
+    # Breaker-state write: ONE non-nested critical section (adrev-opt-011),
+    # acquired AFTER every per-proposal apply_proposal() call above has
+    # already released the lock.
     with _apply_lock():
         state = _read_optimistic_state()
         state.setdefault("anomaly_log", [])
         state["anomaly_log"].extend(run_anomaly_timestamps)
+        state["anomaly_log"] = _prune_anomaly_log(state["anomaly_log"], cfg)
         state["last_run"] = _utc_now_iso()
 
         if _evaluate_breaker_trip(state, cfg, batch_id=batch_id):
@@ -1552,11 +1599,23 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
 
         _write_optimistic_state_atomic(state)
 
-        if summary["applied"] > 0:
-            commit_result = _run_sync_commit(
-                message=f"dreaming: optimistic-integrate batch {batch_id} ({day})"
-            )
-            summary["commit"] = commit_result
+    # Single batch commit, tagged with batch_id -- issued AFTER the
+    # breaker-state lock above has been released, NEVER while holding it
+    # (review fix for #801, PR #810). `ccgm-learnings-sync commit` blocks
+    # on a SEPARATE sync lock that a concurrent pull/push/autocommit can
+    # hold for an unbounded time; holding `_apply_lock()` across that call
+    # would stall every other apply-lock consumer (a human `/dream-apply
+    # accept`, `record_anomaly()`, a second integrate run) behind git-sync
+    # contention this module has no control over. The breaker state above
+    # is already durably persisted (atomic rename) and every write this
+    # batch made is already on disk by this point, so moving the commit
+    # outside the lock changes only WHEN it is issued, never WHAT it
+    # commits.
+    if summary["applied"] > 0:
+        commit_result = _run_sync_commit(
+            message=f"dreaming: optimistic-integrate batch {batch_id} ({day})"
+        )
+        summary["commit"] = commit_result
 
     return summary
 
