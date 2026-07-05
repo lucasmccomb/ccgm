@@ -292,6 +292,44 @@ def load_config() -> dict[str, Any]:
             cfg.update(overlay)
             if isinstance(optimistic_overlay, dict):
                 cfg["optimistic_integration"].update(optimistic_overlay)
+            elif optimistic_overlay is None and cfg.get("auto_apply_counters") is True:
+                # Legacy-flag migration (optimistic-memory plan.md §3.5 / §5
+                # Epic 8). A config.json written before this block existed
+                # may have flipped the OLD verify-only `auto_apply_counters`
+                # gate to true and never been touched since -- it has no
+                # "optimistic_integration" key on disk AT ALL (optimistic_
+                # overlay is None here only when the key is truly absent;
+                # an operator who already wrote an explicit block -- even
+                # `{}` -- takes the `isinstance(..., dict)` branch above and
+                # is left alone, since that block IS their post-migration
+                # choice). Synthesize enabled=true onto the §3.5 defaults
+                # already seeded above so that prior, explicit opt-in
+                # survives the flag rename instead of silently reverting to
+                # off -- the plan is explicit that this auto-activation is
+                # intended, not a privilege escalation: the operator already
+                # opted into autonomous integration once, under the old
+                # verify-only gate.
+                #
+                # This is an in-memory synthesis on READ, not a rewrite of
+                # config.json on disk -- `auto_apply_counters` itself is left
+                # untouched in `cfg` (kept for back-compat/display); the
+                # engine (`run_optimistic_integrate` / `resolve_posture`)
+                # reads ONLY `cfg["optimistic_integration"]` from this point
+                # on. Note dream-daily.sh's own `_optimistic_integration_
+                # active()` gate deliberately does its own raw on-disk read
+                # of config.json and does NOT bridge this legacy flag
+                # (review fix for #801, PR #810; see test_optimistic_engine.
+                # py's GatingTests) -- this migration affects Python-level
+                # callers of load_config() (e.g. a direct `optimistic-
+                # integrate` CLI invocation), not that bash gate.
+                cfg["optimistic_integration"]["enabled"] = True
+                print(
+                    "dream_analyze: migrated legacy auto_apply_counters=true -> "
+                    "optimistic_integration.enabled=true (§3.5 defaults applied to "
+                    "the rest of the block). Add an explicit \"optimistic_integration\" "
+                    "block to config.json to override or opt back out.",
+                    file=sys.stderr,
+                )
     return cfg
 
 

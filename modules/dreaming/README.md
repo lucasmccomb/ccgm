@@ -2,10 +2,13 @@
 
 Nightly, cost-capped dreaming service that mines Claude Code session
 transcripts for cross-session failure patterns and proposes evidence-tagged
-memory-store changes behind a human gate. Extends the `self-improving`
-learnings store with an out-of-band analyzer -- `autoheal`'s
-capture-analyze-propose pipeline, retargeted at session transcripts instead
-of permission events.
+memory-store changes. Extends the `self-improving` learnings store with an
+out-of-band analyzer -- `autoheal`'s capture-analyze-propose pipeline,
+retargeted at session transcripts instead of permission events. Every
+proposal is human-reviewed via `/dream-apply` by default; an opt-in
+`optimistic_integration` mode (default off) auto-integrates instead, behind
+a per-op-kind posture engine, a dwell window, blast-radius caps, and a
+circuit breaker -- see "Optimistic auto-integration" below.
 
 Status: **beta**. This module ships incrementally; see "What's implemented
 so far" below.
@@ -18,10 +21,59 @@ mines the richer session-transcript JSONL directly -- tool errors, hook
 errors, user corrections, token/cache economics, PR links. `dreaming` closes
 that gap: a nightly job reads the transcripts every session already writes,
 extracts patterns a single in-session agent cannot see, and proposes
-per-change memory-store updates for a human to accept or reject.
+per-change memory-store updates for a human to accept/reject, or for the
+opt-in optimistic engine to integrate on its own, subject to its own gates.
 
-Full design: `~/code/plans/ccgm-durable-memory-system/plan.md` (§5 Epic 2 /
-Epic 3 for what has landed so far).
+Full design: `~/code/plans/ccgm-durable-memory-system/plan.md` (the mining /
+map-reduce analyzer / apply path / eval harness / scheduler foundation) and
+`~/code/plans/ccgm-optimistic-memory/plan.md` (the dwell-window,
+per-op-kind-posture optimistic auto-integration engine built on top of it).
+
+## What's implemented so far (optimistic-memory Epics 1-8)
+
+The **opt-in optimistic auto-integration engine**, on top of the map-reduce
+analyzer below:
+
+- `lib/learnings_store.py` (in `self-improving`) -- the `dwell_until` field,
+  `is_dwelling()`, and the `include_dwelling` kwarg / `--include-dwelling`
+  CLI flag that excludes a still-dwelling row from `search()` (and therefore
+  from SessionStart injection) without hiding it from `load_all()`/by-id
+  lookups.
+- `lib/dream_analyze.py` -- `OPTIMISTIC_POSTURE` (the per-op-kind policy
+  table: `optimistic-immediate` for `verify`, `optimistic-dwell` for
+  `add`/`supersede`, `dwell-quarantine` for `contradict`/`deprecate`,
+  `gated` for anything targeting `_global`), the `optimistic_integration`
+  config block (`~/.claude/dreaming/config.json`, `enabled: false` shipped
+  default), and the legacy `auto_apply_counters` migration in
+  `load_config()`.
+- `lib/apply_dream_proposal.py` -- `run_optimistic_integrate()`: the actual
+  engine. Per-slug blast-radius caps, a batch eviction-concentration
+  anomaly check, a cross-night accumulation signal, and a windowed,
+  self-healing circuit breaker, all evaluated before any write; every
+  proposal it applies routes through the same `apply_proposal()` (and the
+  same human-race lock) `/dream-apply` already uses.
+- `bin/dream-daily.sh` -- the nightly chain gained an eval-refresh step and
+  an `optimistic-integrate` step, both config- and eval-gated, placed
+  BEFORE the digest step (so tonight's just-integrated batch is reported
+  while its dwell window is still entirely ahead of it).
+- `bin/dream-eval.sh` -- extended with poisoning negative-control fixtures
+  so the regression gate optimistic integration must pass every night
+  actually exercises the attack shapes the engine is designed against.
+- `commands/dream-review.md` (`/dream-review`) -- post-hoc review of
+  auto-integrated and still-dwelling rows.
+- `bin/ccgm-learnings-sync` (in `self-improving`) -- `revert <sha>`: a
+  line-set-difference rollback that does NOT shell out to `git revert`
+  (unsound against this store's `merge=union` shard files -- see
+  `modules/self-improving/rules/learnings-store.md`'s Rollback section).
+- `lib/scorecard.py` -- extended with auto-integrated / mid-dwell /
+  reverted / breaker-trip counts.
+- `bin/memory-setup.sh` (in `self-improving`) -- the activation
+  forcing-function: an explicit prompt offering optimistic mode, the same
+  script that already activates dreaming itself.
+
+`optimistic_integration.enabled` is `false` by default in every case; the
+operator opts in on their own machine via `memory-setup.sh`, never a hand
+JSON edit.
 
 ## What's implemented so far (Epic 3)
 
@@ -79,10 +131,13 @@ calls, no LLM calls, no scheduling:
 - `schema_canary(mined_sessions)` -- fail loud (raise) if the transcript
   schema appears to have drifted since this miner was last validated.
 
-Not yet built (later epics, same module): the apply path / slash commands /
-scheduler (Epic 6), the eval harness (Epic 7), and MEMORY.md reconciliation
-(Epic 8). The map-reduce analyzer that turns evidence into proposals landed
-in Epic 3 -- see above.
+The map-reduce analyzer that turns evidence into proposals landed in Epic 3
+(see above). The apply path / slash commands / scheduler, the eval harness,
+and the auto-memory reconciliation report all landed in later durable-memory
+Epics 4-8 and are built today (`/dream-apply`, `bin/dream-daily.sh`,
+`bin/dream-eval.sh`, `lib/reconcile_automemory.py`); the opt-in optimistic
+auto-integration engine on top of all of it is covered in its own section
+above.
 
 ## Slug identity (read this before touching project-identity code)
 
@@ -198,13 +253,15 @@ python3 -m pytest modules/dreaming/tests/test_dream_analyze.py -q
 bash modules/dreaming/tests/test-dream-pipeline.sh
 ```
 
-## When NOT to use this module (yet)
+## When NOT to invoke this module's internals directly
 
-- There is no scheduler, slash commands, or apply path in this landing --
-  `dreaming` never writes to the learnings store itself; it only reads it
-  (for the reduce-phase projection) and proposes. If you need a proposal to
-  actually become a learning, that is a later epic (`/dream-apply`, Epic
-  6). Nothing here auto-applies.
+- The miner and analyzer never write to the learnings store themselves --
+  they only read it (for the reduce-phase projection) and propose.
+  `/dream-apply` is the always-available, human-gated write path; the
+  opt-in `optimistic_integration` engine (default off) is the other one --
+  see `modules/dreaming/rules/dreaming.md` for the full contract. Do not
+  hand-edit `~/.claude/dreaming/proposals/*.jsonl` expecting either path to
+  respect the edit.
 - Do not call `mine()`/`discover()` against real transcripts expecting a
   file the analyzer has not consumed; run `dream-analyze.sh` (which mines
   internally) rather than wiring the miner up by hand.
@@ -218,12 +275,16 @@ bash start.sh --add dreaming
 
 ## Cross-references
 
-- Plan: `~/code/plans/ccgm-durable-memory-system/plan.md` (§5 Epic 2 / Epic
-  3; §3.3 for the runtime-dir and config-key contract later epics build on).
+- Plan (mining/apply/eval/scheduler foundation): `~/code/plans/ccgm-durable-memory-system/plan.md`
+  (§5 Epics 1-8; §3.3 for the runtime-dir and config-key contract later
+  epics build on).
+- Plan (optimistic auto-integration): `~/code/plans/ccgm-optimistic-memory/plan.md`
+  (§3 dwell-window architecture / per-op-kind posture / blast-radius caps /
+  circuit breaker; §5 Epics 1-8).
 - Decision log: `~/code/plans/ccgm-durable-memory-system/decisions.md`.
-- `modules/self-improving/` -- the learnings store the analyzer proposes
-  changes into (read-only from this module's side; a later epic's
-  `/dream-apply` is the only future writer).
+- `modules/self-improving/` -- the learnings store this module proposes
+  changes into and (opt-in) auto-integrates into. `/dream-apply` and the
+  optimistic engine are the only two writers.
 - `modules/autoheal/` -- the capture-analyze-propose pipeline this module
   mirrors (not imports) -- curl invocation shape, daily cost cap, and
   cost.log bookkeeping are deliberately duplicated, not shared, per

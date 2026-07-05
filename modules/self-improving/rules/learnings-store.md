@@ -72,6 +72,7 @@ Each returned entry is a JSON object:
 | `supersedes` | string | no | Id of the entry this one replaces (set on the new entry) |
 | `superseded_by` | string | no | Id of the entry that replaced this one (set on the old entry) |
 | `supersede_reason` | string | no | Free-form note on why the replacement happened |
+| `dwell_until` | ISO 8601 UTC | no | Optimistic-integration only (see "Dwell Window" below); absent = immediately live |
 
 ### Type vocabulary
 
@@ -162,6 +163,18 @@ This is why both primitives above exist: supersede provides the audit-preserving
 An entry is stale if its `last_verified` is older than `stale_days` (default 180). Stale entries are excluded from search by default; pass `--include-stale` to see them. Staleness is a separate dimension from confidence decay; an entry can be high-confidence AND stale (e.g., a once-important pattern for a codebase that has been refactored).
 
 When the entry lists `files`, the search path can optionally verify those files still exist. Missing anchors are a strong signal the learning no longer applies.
+
+---
+
+## Dwell Window
+
+`dwell_until` (optimistic-memory plan.md §3.2) marks a row **written but not yet live** — the mechanism behind `dreaming`'s opt-in optimistic auto-integration (see `modules/dreaming/rules/dreaming.md`). A row with a `dwell_until` in the future is excluded from `search()` — and therefore from SessionStart injection and the mining reduce projection — until that timestamp passes, exactly mirroring how `include_stale`/`include_superseded` work above:
+
+- `is_dwelling(entry, now=...)` returns true iff `dwell_until` parses to a time strictly after `now`. Absent or malformed `dwell_until` fails open to `False` ("live") — a parse bug must never trap a row in permanent dwell.
+- `search()` takes a matching `include_dwelling: bool = False` kwarg; `ccgm-learnings-search` exposes it as `--include-dwelling`, so a human reviewing the store (or `/dream-review`) can see a still-dwelling row while agent context cannot.
+- A dwelling row is still resolvable by id — `load_all()`, `update_entry_by_id()`, `supersede_entry()`, and the CAS liveness check all go through the *unfiltered* projection, not `search()`. Only the ranked, injectable result set hides it.
+- **The dwell can only get longer, never shorter.** `dwell_until` is folded with `max(old, new)` whenever a head is rebuilt (a fresh `add`, a `supersede` targeting an existing row, or a counter-op) — so a `supersede` can never shorten a target's existing dwell window. This closes the "chain a cheap op to release a poisoned row early" attack against a row still dwelling (or a row a human has manually quarantined with a long dwell).
+- `dwell_hours` is a config knob read by `dreaming`'s optimistic engine, not by this store — the engine computes the dwell and passes it to `ccgm-learnings-log add`/`supersede`/`contradict`/`deprecate` as `--dwell-hours <n>`; the store only ever applies the max-with-existing rule above.
 
 ---
 
@@ -350,12 +363,16 @@ This repo holds personal memory — keep it **private**; never point it at the p
 
 ```bash
 git -C ~/.claude/learnings log --oneline
-git -C ~/.claude/learnings revert <sha>
+ccgm-learnings-sync revert <sha>
 ```
 
-Every commit is a normal git commit, so any batch of writes can be reverted like any other git history. Two caveats:
+`ccgm-learnings-sync revert <sha>` is the only sound way to undo a commit here — it deliberately does **not** shell out to `git revert`. A plain `git revert` is unsound against this store's shard files specifically because of the `*.jsonl merge=union` gitattribute every shard carries (the same attribute that makes `pull` safe): once a shard has had even one write since the reverted commit (the realistic case — a `/dream-review` target from days ago has almost certainly had later nights or human accepts touch the same file), `git revert` invokes the union merge driver for that path's 3-way merge, and the driver's whole job is "never let a line disappear" — it silently re-adds the very content the revert was trying to remove and reports "nothing to commit, working tree clean," having made no change at all.
 
-- **Revert stops future reads, not the current session's.** A row that was already read, ranked, and injected into a live session's frozen SessionStart context (see "Injection Filter" above) stays in that session's prompt — the frozen prefix cannot be un-injected mid-session. `git revert` removes the row from every projection computed *after* the revert; an already-running session that picked it up must be restarted to actually drop it.
+Instead, `revert` computes the exact set of lines commit `<sha>` **added** (`git diff --unified=0 <sha>~1 <sha>`) and removes that exact multiset from each touched file's current content directly — a plain content transformation that never invokes git's merge/attribute machinery, so the union driver never gets a vote. This is sound *because of* (not despite) the store's own append-only invariant (every write is a new appended line; existing lines are never rewritten in place): reverting a commit always reduces to "remove the lines it added," regardless of what else has been appended to the same file since, in what order, or whether the commit created the file fresh. If any file in the commit's diff also shows removed or modified lines — this store's own write path never produces that shape; a hand-edited shard or an unrelated manual commit could — the whole revert is refused before any file is touched: nothing mutated, resolve manually.
+
+`revert` is guarded by the same store-wide sync lock as `commit`/`pull`/`push`, and refuses outright (not attempted) on a dirty working tree or an already in-progress git operation. Two caveats:
+
+- **Revert stops future reads, not the current session's.** A row that was already read, ranked, and injected into a live session's frozen SessionStart context (see "Injection Filter" above) stays in that session's prompt — the frozen prefix cannot be un-injected mid-session. `ccgm-learnings-sync revert` removes the row from every projection computed *after* the revert; an already-running session that picked it up must be restarted to actually drop it. This is also the honest limit on `dreaming`'s optimistic-integration dwell window (see `modules/dreaming/rules/dreaming.md`): the dwell shrinks the *pre-exposure* blind spot to zero, but reverting an already-exposed row still only stops *future* sessions, not the one that already read it.
 - Pre-`init` mutations (writes made before this repo existed) have no commit to revert; use `ccgm-learnings-log deprecate <id>` instead.
 
 ### Autocommit lives outside the store

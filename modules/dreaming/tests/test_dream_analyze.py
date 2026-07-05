@@ -429,6 +429,55 @@ class LruOrderingTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# load_config() legacy auto_apply_counters -> optimistic_integration
+# migration (optimistic-memory plan.md §3.5 / §5 Epic 8).
+# ---------------------------------------------------------------------------
+
+class ConfigMigrationTests(unittest.TestCase):
+    def _write_config(self, tmp: Path, payload: dict) -> None:
+        (tmp / "config.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_legacy_flag_true_migrates_when_block_absent(self):
+        tmp = _isolate_env(self)
+        self._write_config(tmp, {"auto_apply_counters": True})
+        cfg = da.load_config()
+        self.assertTrue(cfg["optimistic_integration"]["enabled"])
+        # The rest of the §3.5 defaults are still applied alongside the
+        # migrated flag -- this is a synthesis onto DEFAULT_OPTIMISTIC_
+        # INTEGRATION, not a bespoke partial dict.
+        self.assertEqual(cfg["optimistic_integration"]["dwell_hours"], da.DEFAULT_OPTIMISTIC_INTEGRATION["dwell_hours"])
+        # auto_apply_counters itself is left readable, for back-compat.
+        self.assertTrue(cfg["auto_apply_counters"])
+
+    def test_legacy_flag_false_does_not_migrate(self):
+        tmp = _isolate_env(self)
+        self._write_config(tmp, {"auto_apply_counters": False})
+        cfg = da.load_config()
+        self.assertFalse(cfg["optimistic_integration"]["enabled"])
+
+    def test_legacy_flag_absent_does_not_migrate(self):
+        tmp = _isolate_env(self)
+        self._write_config(tmp, {})
+        cfg = da.load_config()
+        self.assertFalse(cfg["optimistic_integration"]["enabled"])
+
+    def test_explicit_optimistic_integration_block_is_not_overridden(self):
+        # An operator who has ALREADY made an explicit post-migration choice
+        # (even a bare {}, even alongside a still-true legacy flag) is left
+        # alone -- the migration only fires when the block is truly absent.
+        tmp = _isolate_env(self)
+        self._write_config(tmp, {"auto_apply_counters": True, "optimistic_integration": {"enabled": False}})
+        cfg = da.load_config()
+        self.assertFalse(cfg["optimistic_integration"]["enabled"])
+
+    def test_explicit_empty_block_is_not_migrated(self):
+        tmp = _isolate_env(self)
+        self._write_config(tmp, {"auto_apply_counters": True, "optimistic_integration": {}})
+        cfg = da.load_config()
+        self.assertFalse(cfg["optimistic_integration"]["enabled"])
+
+
+# ---------------------------------------------------------------------------
 # Pricing / cost estimation.
 # ---------------------------------------------------------------------------
 

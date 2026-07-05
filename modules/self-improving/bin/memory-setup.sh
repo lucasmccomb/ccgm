@@ -9,7 +9,8 @@
 # autoheal-install.sh / dream-install.sh — NOT an auto-run postInstall.
 #
 # It turns on the READ PATH and, when the `dreaming` module is also installed,
-# OFFERS the WRITE PATH:
+# OFFERS the WRITE PATH -- and, on top of that, the OPTIMISTIC AUTO-INTEGRATION
+# mode:
 #
 #   Read path   self-improving learnings store + SessionStart injection.
 #               Sets CCGM_LEARNINGS_INJECT=true in ~/.claude/settings.json (jq
@@ -20,6 +21,16 @@
 #               installs a nightly LaunchAgent. Prompts for an API key, writes it
 #               to ~/.claude/dreaming/.env (mode 0600, never echoed), then runs
 #               dream-install.sh.
+#
+#   Optimistic  auto-integration (opt-in, offered after the write path, only
+#   mode        when `dreaming` is installed). Instead of every mined memory
+#               sitting `pending` for a human `/dream-apply`, it auto-integrates
+#               behind a 24h dwell window + daily report + one-command rollback
+#               (optimistic-memory plan.md §3.5 / §5 Epic 8 -- the activation
+#               forcing-function: the operator never has to hand-edit
+#               config.json to turn this on). Sets
+#               optimistic_integration.enabled=true in
+#               ~/.claude/dreaming/config.json.
 #
 # Safety posture:
 #   * Idempotent — re-running reports current state and no-ops what is already on.
@@ -79,6 +90,12 @@ write is confirmed first; the script commits to no git repo.
   Write path  the `dreaming` nightly analyzer (opt-in). Costs Anthropic API
               tokens and installs a nightly LaunchAgent. Prompts for an API key,
               writes it to ~/.claude/dreaming/.env (mode 0600, never echoed).
+
+  Optimistic  auto-integration (opt-in, offered when `dreaming` is installed).
+  mode        Adds a 24h dwell window + daily report + one-command rollback
+              instead of every mined memory sitting pending for a human
+              /dream-apply. Sets optimistic_integration.enabled=true in
+              ~/.claude/dreaming/config.json.
 
 Options:
   -h, --help  Show this help and exit.
@@ -310,6 +327,122 @@ offer_dreaming() {
 }
 
 # ---------------------------------------------------------------------------
+# Optimistic auto-integration (opt-in, offered alongside dreaming) — the
+# Epic 8 activation forcing-function (optimistic-memory plan.md §3.5 / §5
+# Epic 8, P0 business review): the operator must never have to hand-edit
+# config.json to turn this on. Offered whenever the `dreaming` module is
+# installed, independent of whether THIS run's offer_dreaming() call
+# activated it — memory-setup.sh is meant to be re-run any time (see the
+# file header's "Idempotent" note), so someone who set up dreaming in an
+# earlier run and is re-running this script only to opt into optimistic
+# mode later should still see this prompt.
+# ---------------------------------------------------------------------------
+
+# Echo the current optimistic_integration.enabled value: "true", "unset", or
+# "invalid" (config.json present but unparseable). A missing OR zero-byte
+# file is "unset". Deliberately does NOT use jq's `//` alternative operator
+# against the raw boolean (`.optimistic_integration.enabled // "unset"`) --
+# `//` treats a JSON `false` the same as `null`/absent, which would report
+# the common, correct "explicitly disabled" state as "unset" and re-offer a
+# prompt the operator already answered. An explicit `if/then/else` keys on
+# real presence-and-truth instead.
+current_optimistic_flag() {
+    local cfg="${DREAMING_DIR}/config.json"
+    if [ ! -s "$cfg" ]; then
+        printf 'unset\n'
+        return
+    fi
+    jq -r 'if .optimistic_integration.enabled == true then "true" else "unset" end' "$cfg" 2>/dev/null \
+        || printf 'invalid\n'
+}
+
+# Merge optimistic_integration.enabled=true into ~/.claude/dreaming/config.json,
+# preserving every other top-level and optimistic_integration key --
+# dream_analyze.py's own load_config() fills in every other
+# optimistic_integration default (dwell_hours, caps, floors, ...) at read
+# time, so this write only ever needs to set the one flag. A missing or
+# zero-byte config.json is treated as {} so the merge always yields valid
+# JSON. Verified by reading the flag back out of the file afterward: the
+# success line prints ONLY if config.json now actually contains
+# optimistic_integration.enabled == true. Any silent failure (unwritable
+# target, jq error, empty output) prints a warning and returns non-zero --
+# never a false "enabled" (mirrors write_inject_flag() above).
+write_optimistic_flag() {
+    mkdir -p "$DREAMING_DIR" 2>/dev/null || true
+
+    local cfg="${DREAMING_DIR}/config.json"
+    local tmp
+    tmp="$(mktemp)" || {
+        warn "Could not enable — failed to create a temp file; ${cfg} unchanged."
+        return 1
+    }
+
+    if [ -s "$cfg" ]; then
+        jq '.optimistic_integration.enabled = true' "$cfg" >"$tmp" 2>/dev/null
+    else
+        printf '{}\n' | jq '.optimistic_integration.enabled = true' >"$tmp" 2>/dev/null
+    fi
+
+    if [ ! -s "$tmp" ]; then
+        rm -f "$tmp"
+        warn "Could not enable — jq merge produced no output; ${cfg} unchanged."
+        return 1
+    fi
+
+    if ! mv "$tmp" "$cfg" 2>/dev/null; then
+        rm -f "$tmp"
+        warn "Could not enable — ${cfg} is not writable; left unchanged."
+        return 1
+    fi
+
+    if [ "$(jq -r '.optimistic_integration.enabled // "unset"' "$cfg" 2>/dev/null)" = "true" ]; then
+        ok "Optimistic auto-integration enabled — optimistic_integration.enabled=true verified in ${cfg}."
+        return 0
+    fi
+
+    warn "Could not enable — write did not take effect; verify ${cfg} by hand."
+    return 1
+}
+
+offer_optimistic_integration() {
+    if [ ! -e "$DREAM_INSTALL" ]; then
+        return 0   # dreaming module not installed -- offer_dreaming() already explained why
+    fi
+
+    say ""
+    say "── Optimistic auto-integration (opt-in, dreaming only) ────"
+
+    local state
+    state="$(current_optimistic_flag)"
+    case "$state" in
+        true)
+            ok "Optimistic auto-integration already enabled (optimistic_integration.enabled=true) — no change."
+            return 0
+            ;;
+        invalid)
+            warn "Could not offer optimistic mode — ${DREAMING_DIR}/config.json is not valid JSON; left untouched."
+            return 1
+            ;;
+        *)
+            say "Mined memories normally sit pending until you run /dream-apply. Optimistic"
+            say "mode auto-integrates them instead: written immediately, held behind a 24h"
+            say "dwell window before any agent session can see them, reported in the next"
+            say "daily digest, and reversible with /dream-review or"
+            say "'ccgm-learnings-sync revert <sha>'. Per-slug blast-radius caps, a batch"
+            say "anomaly check, and a windowed circuit breaker bound every run whether or"
+            say "not you ever read the report."
+            say ""
+            if confirm "Enable auto-integration with a 24h dwell window + daily report?"; then
+                write_optimistic_flag
+                return $?
+            fi
+            skip "Left optimistic auto-integration disabled. Re-run any time to enable it."
+            return 0
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 main() {
@@ -342,6 +475,7 @@ main() {
     local rc=0
     enable_read_path || rc=1
     offer_dreaming
+    offer_optimistic_integration
 
     say ""
     say "Done. Full guide: docs/memory-system.md"
