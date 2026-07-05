@@ -1,15 +1,28 @@
 #!/usr/bin/env bash
-# CCGM dreaming — daily chain wrapper (Epic 6).
+# CCGM dreaming — daily chain wrapper (Epic 6; chain order revised by the
+# optimistic-memory plan.md Epic 3).
 #
-# Full nightly chain (plan.md §5 Epic 6):
-#   1. bin/dream-analyze.sh    (Epic 3) — mine + map/reduce -> proposals
-#   2. bin/dream-digest.sh     (Epic 3) — render today's digest
-#   3. bin/dream-reconcile.sh  (Epic 8) — read-only auto-memory reconciliation.
+# Full nightly chain (plan.md §5 Epic 3/6):
+#   1. bin/dream-analyze.sh       (Epic 3) — mine + map/reduce -> proposals
+#   2. eval-refresh                — opt-in, weekly, cost-capped live eval
+#      refresh so dream-eval.sh --gate's 14-day freshness bound stays met
+#      without manual intervention (fix (b) for adrev-opt-001). Runs BEFORE
+#      optimistic-integrate so a freshly-refreshed result is available to
+#      the SAME night's gate check.
+#   3. optimistic-integrate        — opt-in, config- AND eval-gated (see
+#      below). The full per-op-kind posture engine
+#      (apply_dream_proposal.run_optimistic_integrate) -- supersedes the
+#      retired verify-only auto-apply step. Runs BEFORE digest so the
+#      digest reports tonight's batch while its dwell window is still
+#      entirely ahead of it (the pre-Epic-3 order ran auto-apply AFTER
+#      digest, which meant a batch was never reported until its own dwell
+#      had already expired).
+#   4. bin/dream-digest.sh        (Epic 3) — render today's digest
+#   5. bin/dream-reconcile.sh     (Epic 8) — read-only auto-memory reconciliation.
 #      Does not exist yet; run_step's "missing -> skip, return 0" makes this
 #      a harmless no-op until Epic 8 lands it (mirrors autoheal-daily.sh's
 #      own "steps that land in later epics" tolerance).
-#   4. auto-apply              — opt-in, config- AND eval-gated (see below).
-#   5. retention                — gzip >30d, delete >60d (mirrors
+#   6. retention                   — gzip >30d, delete >60d (mirrors
 #      modules/autoheal/bin/autoheal-retention.sh, scoped to dreaming's dirs).
 #
 # Each step is exit-tolerant: a failure of one step does not kill the rest.
@@ -23,9 +36,9 @@
 #
 # All flags are forwarded VERBATIM to dream-analyze.sh, which already owns
 # this exact surface (bin/dream-analyze.sh --help). --force-day additionally
-# tells this wrapper which day the digest/auto-apply/retention steps are
-# "for", so `--force-day 2026-01-01` produces a fully self-consistent run
-# for that single day end to end.
+# tells this wrapper which day the digest/optimistic-integrate/eval-refresh/
+# retention steps are "for", so `--force-day 2026-01-01` produces a fully
+# self-consistent run for that single day end to end.
 #
 # Env overrides (tests):
 #   CCGM_DREAMING_DIR          default ~/.claude/dreaming
@@ -34,9 +47,13 @@
 #                               --force-day when given
 #   CCGM_DREAMING_BIN_DIR      default to dirname of this script
 #   CCGM_DREAMING_EVAL_SCRIPT  default ${CCGM_DREAMING_BIN_DIR}/dream-eval.sh
-#                               (Epic 7); override to test the auto-apply
-#                               fail-closed gate independent of whether
-#                               that file exists in this checkout
+#                               (Epic 7); override to test the optimistic-
+#                               integrate fail-closed gate independent of
+#                               whether that file exists in this checkout
+#   CCGM_DREAMING_EVAL_REFRESH_SCRIPT  override for the live eval harness
+#                               the eval-refresh step invokes (tests only --
+#                               see apply_dream_proposal.py's
+#                               _eval_script_path())
 
 set -u
 
@@ -106,47 +123,112 @@ run_step() {
 }
 
 # ---------------------------------------------------------------------
-# Step 4: opt-in, config- AND eval-gated auto-apply.
+# Shared config gate: is optimistic auto-integration active?
 #
-# Two independent gates must BOTH pass before anything is applied:
-#   (a) config gate: ~/.claude/dreaming/config.json's `auto_apply_counters`
-#       must be true (default false — auto-apply stays off until a human
-#       opts in).
-#   (b) eval gate: `bin/dream-eval.sh --gate` must exit 0. dream-eval.sh is
-#       Epic 7's deliverable and does not exist in this branch yet — a
-#       missing eval harness FAILS CLOSED (no auto-apply this run) rather
-#       than being treated as "no gate configured, proceed anyway". This is
-#       the same fail-closed posture modules/autoheal/bin/autoheal-auto-apply.sh
-#       uses for its own missing-evaluator case.
-#
-# Per plan.md Epic 6 / sec-5, the per-proposal STRUCTURAL predicate (kind ==
-# learning_verify AND confidence >= 9 AND status == pending — NEVER
-# learning_add/supersede/deprecate/contradict at any confidence) lives in
-# apply_dream_proposal.py's run_auto_apply(), not here — this function's job
-# is only the two gates above, then a single CLI invocation for the day.
-#
-# Always returns 0: an auto-apply stand-down (disabled, gate missing, gate
-# red) is a successful, expected outcome, never a chain failure (mirrors
-# autoheal-auto-apply.sh's own "Exit codes: 0 always" contract).
+# True iff ONLY `optimistic_integration.enabled` is true -- enabled-only,
+# no legacy bridge (review fix for #801, PR #810). The legacy
+# `auto_apply_counters` flag is intentionally NOT read here: migrating a
+# `true` legacy flag into `optimistic_integration.enabled` is Epic 8's job
+# (memory-setup.sh offers optimistic mode as an explicit, logged opt-in
+# prompt, plan.md §3.5), not an implicit OR-bridge in this gate. Bridging
+# the two would let the new engine -- and its ~$2/night eval-refresh API
+# spend -- silently activate on a machine that only ever opted into the
+# OLD verify-only auto-apply step, without the operator ever seeing or
+# confirming the migration.
+# Both new steps below (eval-refresh, optimistic-integrate) share this one
+# gate so they turn on and off together.
 # ---------------------------------------------------------------------
 
-run_auto_apply_step() {
+_optimistic_integration_active() {
     local cfg="${DREAMING_DIR}/config.json"
-    local enabled="false"
-    if [ -f "${cfg}" ]; then
-        enabled="$(python3 -c "
+    if [ ! -f "${cfg}" ]; then
+        echo false
+        return
+    fi
+    python3 -c "
 import json, sys
 try:
     cfg = json.load(open(sys.argv[1], encoding='utf-8'))
 except Exception:
     print('false')
     sys.exit(0)
-print('true' if isinstance(cfg, dict) and bool(cfg.get('auto_apply_counters', False)) else 'false')
-" "${cfg}" 2>/dev/null || echo false)"
+if not isinstance(cfg, dict):
+    print('false')
+    sys.exit(0)
+opt = cfg.get('optimistic_integration')
+enabled = isinstance(opt, dict) and bool(opt.get('enabled', False))
+print('true' if enabled else 'false')
+" "${cfg}" 2>/dev/null || echo false
+}
+
+# ---------------------------------------------------------------------
+# Step 2: weekly, cost-capped eval refresh (fix (b) for adrev-opt-001).
+#
+# Gated on _optimistic_integration_active() only -- the preconditions that
+# actually decide whether a refresh RUNS (results-file age, API key
+# presence, its own eval_refresh_cost_cap_usd budget) live in
+# apply_dream_proposal.py's run_eval_refresh(), not here, so this step is
+# a thin, always-safe wrapper: it never blocks the rest of the chain and
+# never itself decides whether to spend money. Placed BEFORE
+# optimistic-integrate so a freshly-refreshed result is available to the
+# SAME night's --gate check.
+#
+# Always returns 0: any stand-down (inactive, too fresh, no key, cap
+# exhausted) is a successful, expected outcome, never a chain failure.
+# ---------------------------------------------------------------------
+
+run_eval_refresh_step() {
+    if [ "$(_optimistic_integration_active)" != "true" ]; then
+        log "eval-refresh: optimistic integration inactive; skipping ${TODAY}"
+        return 0
     fi
 
-    if [ "${enabled}" != "true" ]; then
-        log "auto-apply: auto_apply_counters=false (default off); skipping ${TODAY}"
+    log "eval-refresh: running apply_dream_proposal.py eval-refresh for ${TODAY}"
+    local refresh_out refresh_rc
+    refresh_out="$(python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" eval-refresh --day "${TODAY}" 2>&1)"
+    refresh_rc=$?
+    printf '%s\n' "${refresh_out}" >>"${DAILY_LOG}"
+    log "eval-refresh: exit=${refresh_rc} (${refresh_out})"
+    return 0
+}
+
+# ---------------------------------------------------------------------
+# Step 3: opt-in, config- AND eval-gated optimistic auto-integration.
+# Supersedes the retired verify-only auto-apply step.
+#
+# Two independent gates must BOTH pass before anything is applied:
+#   (a) config gate: _optimistic_integration_active() above (default false
+#       -- optimistic integration stays off until a human opts in).
+#   (b) eval gate: `bin/dream-eval.sh --gate` must exit 0. dream-eval.sh is
+#       Epic 7's deliverable; a missing eval harness FAILS CLOSED (no
+#       integration this run) rather than being treated as "no gate
+#       configured, proceed anyway". This is the same fail-closed posture
+#       modules/autoheal/bin/autoheal-auto-apply.sh uses for its own
+#       missing-evaluator case, and the same posture the retired
+#       run_auto_apply_step used.
+#
+# Per plan.md Epic 3, the full per-op-kind posture/cap/anomaly/breaker
+# engine lives in apply_dream_proposal.py's run_optimistic_integrate(), not
+# here -- this function's job is only the two gates above, then a single
+# CLI invocation for the day.
+#
+# Red-gate-as-anomaly (review fix for #801, PR #810): plan.md §3.5 says the
+# breaker trips on "batch-anomaly fire OR red eval gate" -- but a red
+# `--gate` result short-circuits BEFORE `apply_dream_proposal.py
+# optimistic-integrate` is ever invoked, so the breaker's own anomaly_log
+# previously had zero memory of a red-gate streak. When gate (b) fails,
+# this function now ALSO calls `apply_dream_proposal.py record-anomaly
+# --reason red_eval_gate` before returning -- still fail-closed (no
+# integration on a red gate; only the anomaly itself is recorded).
+#
+# Always returns 0: a stand-down (disabled, gate missing, gate red) is a
+# successful, expected outcome, never a chain failure (mirrors
+# autoheal-auto-apply.sh's own "Exit codes: 0 always" contract).
+# ---------------------------------------------------------------------
+
+run_optimistic_integrate_step() {
+    if [ "$(_optimistic_integration_active)" != "true" ]; then
+        log "optimistic-integrate: optimistic_integration.enabled=false (default off); skipping ${TODAY}"
         return 0
     fi
 
@@ -157,7 +239,7 @@ print('true' if isinstance(cfg, dict) and bool(cfg.get('auto_apply_counters', Fa
     # this checkout yet.
     local eval_script="${CCGM_DREAMING_EVAL_SCRIPT:-${BIN_DIR}/dream-eval.sh}"
     if [ ! -f "${eval_script}" ]; then
-        log "auto-apply: ${eval_script} missing (Epic 7 not yet installed); failing closed -- no auto-apply this run"
+        log "optimistic-integrate: ${eval_script} missing (Epic 7 not yet installed); failing closed -- no integration this run"
         return 0
     fi
 
@@ -165,19 +247,24 @@ print('true' if isinstance(cfg, dict) and bool(cfg.get('auto_apply_counters', Fa
     gate_out="$(bash "${eval_script}" --gate 2>&1)"
     gate_rc=$?
     if [ "${gate_rc}" -ne 0 ]; then
-        log "auto-apply: dream-eval.sh --gate exit=${gate_rc}; failing closed (${gate_out})"
+        log "optimistic-integrate: dream-eval.sh --gate exit=${gate_rc}; failing closed (${gate_out})"
+        local anomaly_out anomaly_rc
+        anomaly_out="$(python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" record-anomaly --reason red_eval_gate 2>&1)"
+        anomaly_rc=$?
+        printf '%s\n' "${anomaly_out}" >>"${DAILY_LOG}"
+        log "optimistic-integrate: recorded red_eval_gate anomaly (exit=${anomaly_rc})"
         return 0
     fi
 
-    log "auto-apply: eval gate passed; running apply_dream_proposal.py auto-apply for ${TODAY}"
-    local apply_out apply_rc
-    apply_out="$(python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" auto-apply --day "${TODAY}" 2>&1)"
-    apply_rc=$?
-    printf '%s\n' "${apply_out}" >>"${DAILY_LOG}"
-    if [ "${apply_rc}" -ne 0 ]; then
-        log "auto-apply: apply_dream_proposal.py exit=${apply_rc} (see log for details)"
+    log "optimistic-integrate: eval gate passed; running apply_dream_proposal.py optimistic-integrate for ${TODAY}"
+    local integrate_out integrate_rc
+    integrate_out="$(python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" optimistic-integrate --day "${TODAY}" 2>&1)"
+    integrate_rc=$?
+    printf '%s\n' "${integrate_out}" >>"${DAILY_LOG}"
+    if [ "${integrate_rc}" -ne 0 ]; then
+        log "optimistic-integrate: apply_dream_proposal.py exit=${integrate_rc} (see log for details)"
     else
-        log "auto-apply: done (${apply_out})"
+        log "optimistic-integrate: done (${integrate_out})"
     fi
     return 0
 }
@@ -272,17 +359,23 @@ log "dream-daily start (${TODAY})"
 steps_total=$((steps_total + 1))
 run_step "analyze" "${BIN_DIR}/dream-analyze.sh" "$@" || steps_failed=$((steps_failed + 1))
 
+# eval-refresh, optimistic-integrate, and retention always return 0 (see
+# comments above) -- their own internal stand-down/failure reasons are
+# logged, never surfaced as a chain step failure.
+steps_total=$((steps_total + 1))
+run_eval_refresh_step || steps_failed=$((steps_failed + 1))
+
+steps_total=$((steps_total + 1))
+run_optimistic_integrate_step || steps_failed=$((steps_failed + 1))
+
+# digest runs AFTER optimistic-integrate (chain order revised by
+# optimistic-memory plan.md Epic 3) so tonight's just-integrated batch is
+# reported while its dwell window is still entirely ahead of it.
 steps_total=$((steps_total + 1))
 run_step "digest" "${BIN_DIR}/dream-digest.sh" "${TODAY}" || steps_failed=$((steps_failed + 1))
 
 steps_total=$((steps_total + 1))
 run_step "reconcile" "${BIN_DIR}/dream-reconcile.sh" || steps_failed=$((steps_failed + 1))
-
-# Auto-apply and retention always return 0 (see comments above) — their own
-# internal stand-down/failure reasons are logged, never surfaced as a chain
-# step failure.
-steps_total=$((steps_total + 1))
-run_auto_apply_step || steps_failed=$((steps_failed + 1))
 
 steps_total=$((steps_total + 1))
 run_retention_step || steps_failed=$((steps_failed + 1))
