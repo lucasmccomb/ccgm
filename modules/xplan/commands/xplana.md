@@ -55,9 +55,18 @@ Autonomous mode affects these xplan phases:
 | 6 (Walkthrough) | Runs the new **Phase 6.A Autonomous Plan Walkthrough** - structured plan-as-artifact presentation with explicit assumption callouts. |
 | 6.5 (Final Execution Gate) | **Always fires**, same as any xplan run. Autonomous mode does NOT bypass this gate. |
 
+## Built-In Execution Tenets (matter most here)
+
+Autonomous mode is where these three plan tenets matter most: there is no human in the loop during creation *or* execution, so the plan must stand entirely on its own. They apply in every xplan mode, but `/xplana` leans on them hardest. The Phase 5.7 adversarial reviewer enforces all three (T1–T3), expanding the plan when any is thin:
+
+1. **Human interaction is minimized and bucketed to the edges** (T1). No human step an agent could do via CLI/API; unavoidable human work is front-loaded before Wave 1 or deferred to the end, never wedged mid-run. Once execution starts, it runs to done without pausing for a person.
+2. **Follow-up-completion contract** (T2, plan §9.5). Any follow-on work discovered during execution is tracked, triaged, and — if in-scope — completed before execution is reported complete. Only genuinely human-blocked work may remain open, surfaced with its exact ask.
+3. **Autonomous decision context** (T3, plan §1.4). The plan carries the software's mission, the codebase's governing context, and its decision principles, so an execution agent deduces the direction for unplanned follow-on work *itself* — critical in autonomous mode, where there is no user to ask mid-run. If that context is thin, the adversarial review expands the plan to add it.
+
 ## What This Command Does NOT Do
 
 - It does NOT skip research, naming, the standard reviews, the self-review loop, or the Phase 5.7 adversarial review sequence. Autonomous is the *deep* mode, not the fast one — the finished plan has survived 6 reviews (3 standard + 3 sequential adversarial) before you see it.
+- It does NOT skip the three execution tenets above. The adversarial review enforces minimal edge-bucketed human work (T1), a follow-up-completion contract (T2), and enough decision context to direct unplanned work without a human (T3) — expanding the plan when any is missing.
 - It does NOT skip the final execution gate. 6.5 is non-bypassable.
 - It does NOT automatically proceed to execution. The default recommendation at 6.5 in autonomous mode leans toward "save plan, don't execute yet" so the user can review before committing to multi-agent work.
 
