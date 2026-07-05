@@ -347,11 +347,22 @@ def _aggregate_applied(
     """Applied = apply-audit records whose outcome is a successful apply and
     whose `ts` is in-window (the audit carries the authoritative applied-at
     time). Cross-referenced with proposals generated in-window for the
-    generated->applied funnel."""
+    generated->applied funnel.
+
+    Keys strictly on `outcome == "applied"` (#822), never on an `ok` field.
+    `apply_proposal()` always writes `ok` in lockstep with
+    `outcome == "applied"` for its own records, so the two were equivalent
+    for that writer alone -- but other apply-audit writers use `ok: True`
+    to mean "this bookkeeping action succeeded" for outcomes that are NOT
+    an apply (e.g. `reject_proposal()`'s "rejected" record), and the old
+    `ok is True or outcome == "applied"` predicate silently counted those
+    as applies too. `outcome` is the one field every audit record can be
+    trusted to name honestly.
+    """
     applied_by_kind: Counter[str] = Counter()
     applied_total = 0
     for r in audit_rows:
-        if not (r.get("ok") is True or r.get("outcome") == "applied"):
+        if r.get("outcome") != "applied":
             continue
         if not _in_window(_parse_ts(r.get("ts", "")), start, end):
             continue
