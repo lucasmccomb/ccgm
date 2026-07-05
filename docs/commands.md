@@ -835,16 +835,20 @@ A human-in-the-loop planning framework that interviews you upfront, researches y
 - **Phase 2.5** - Tech stack sign-off: propose stack, get approval
 - **Phase 2.6** - Scope sign-off: approve epic structure
 - **Phase 2.7** - Multi-agent setup review
-- **Phase 3** - Plan creation with parallelized epics and dependency waves
-- **Phase 4** - Peer review by security, architecture, and business logic agents
-- **Phase 5** - Write plan.md
-- **Phase 6** - Final confirmation gate before execution
-- **Phase 7** - Execute via parallel agents in separate clones
+- **Phase 3** - Plan creation with parallelized epics and dependency waves, including a comprehensive **autonomous E2E test suite** (built in from the ground up for new projects; optimistic coverage gap-fill for touched areas of existing repos)
+- **Phase 4** - Constructive peer review by security, architecture, and business logic agents (stage 1 of 2)
+- **Phase 5** - Write plan.md, then a self-review loop (5.6) and a 3-pass adversarial review sequence (5.7) that enforces the four plan-execution tenets: minimal/edge-bucketed human work, follow-up completion, autonomous decision context, and comprehensive autonomous E2E coverage
+- **Phase 6** - Web review + final confirmation gate before execution
+- **Phase 7** - Execute via parallel agents in separate clones; waves and completion gate on a green E2E suite and completion of all in-scope follow-up work
 - **Phase 8** - Verification, audit, and retrospective
+
+Every plan is engineered to execute with minimal human involvement (human work bucketed to the start/end), to complete unplanned follow-on work before reporting done, and to self-certify via the autonomous E2E suite so you never test manually.
 
 **Flags**:
 - `--repo <path>` - Analyze and plan work for an existing repo
 - `--light` - Skip interactive interview phases (Phases 0.5, 1.5, 2.5, 2.6, 2.7); uses minimal clarification + traditional walkthrough instead
+- `--autonomous` (alias `-a`, or `/xplana`) - Skip all mid-flow prompts; run the full-depth research + planning + review pipeline end-to-end, then present the completed plan at a single final gate
+- `--deepen [<plan-dir>]` - Load an existing plan and run targeted deepening passes on under-specified sections instead of planning fresh
 
 **Usage**:
 ```
@@ -892,7 +896,7 @@ Reconstructs context from plan files (`progress.md`, `plan.md`, `decisions.md`, 
 
 **Execute ready work — a plan or one-or-more GitHub issues — end-to-end with parallel agents, adversarial PR review, and follow-up completion.**
 
-Resolves a target (a plan file/dir, a single issue, a batch of issues, or the in-progress plan) into units, then runs each through the same hardened loop. A plan fans out across dependency-ordered waves; a single issue is one unit; a batch runs independent issues in parallel. For an issue, the body **and comments** (the investigation) become the spec. Every PR gets a two-stage adversarial review by a *separate* agent (`spec-compliance-reviewer` then `code-quality-reviewer`) that never sees the implementer's rationale — full two-stage by default regardless of diff size; reasonable-and-valid findings are fixed, speculative ones deferred. Follow-up work that arises is tracked, triaged, and the in-scope items get the same review. Ceremony scales to the work (a single issue skips the wave/clone/bring-up machinery). Reconciles against live git/GitHub state so finished work is skipped — resumable; re-running a batch continues the unfinished issues. Runs to completion, stopping only for absolute blockers, which it reports while continuing all non-blocked work.
+Resolves a target (a plan file/dir, a single issue, a batch of issues, or the in-progress plan) into units, then runs each through the same hardened loop. A plan fans out across dependency-ordered waves; a single issue is one unit; a batch runs independent issues in parallel. For an issue, the body **and comments** (the investigation) become the spec. Every PR gets a two-stage adversarial review by a *separate* agent (`spec-compliance-reviewer` then `code-quality-reviewer`) that never sees the implementer's rationale — full two-stage by default regardless of diff size; reasonable-and-valid findings are fixed, speculative ones deferred. Follow-up work that arises is tracked, triaged against the plan's decision context, and the in-scope items get the same review — completed before the run is reported done. The **autonomous E2E suite is the completion oracle** (green ⇒ clean/mergeable), not a bare smoke test, and a changed surface without coverage gets an E2E test before completion; test infrastructure (testing agents, RunPod, cloud Mac, real devices) is provisioned as needed. Ceremony scales to the work (a single issue skips the wave/clone/bring-up machinery). Reconciles against live git/GitHub state so finished work is skipped — resumable; re-running a batch continues the unfinished issues. Runs to completion, stopping only for absolute blockers, which it reports while continuing all non-blocked work.
 
 **Usage**:
 ```
@@ -1333,7 +1337,7 @@ Unlike commands, skills may carry supporting assets (sub-docs, scripts, referenc
 
 **Adversarial review of a plan or any entity.**
 
-Resolves a target - plan, doc, PR, issue, code directory, or a concept stated inline - and dispatches a separate adrev-reviewer agent (fresh context, so the author session never grades its own work) that attacks premises, hunts failure modes, steelmans the strongest opposing case, and checks falsifiability and reversal costs. Findings carry P0-P3 severity and confidence. When the target is a plan, the reviewing agent incorporates its findings into the plan automatically (high-confidence findings revise sections; judgment calls go to `## Risks & Open Questions`; the full review lands in the plan's `reviews/` directory) unless told not to. Non-plan targets are never modified. Single-lens, any-entity counterpart to `/document-review`'s 7-lens doc gate.
+Resolves a target - plan, doc, PR, issue, code directory, or a concept stated inline - and dispatches a separate adrev-reviewer agent (fresh context, so the author session never grades its own work) that attacks premises, hunts failure modes, steelmans the strongest opposing case, and checks falsifiability and reversal costs. Findings carry P0-P3 severity and confidence. When the target is a plan, the reviewing agent incorporates its findings into the plan automatically (high-confidence findings revise sections; judgment calls go to `## Risks & Open Questions`; the full review lands in the plan's `reviews/` directory) unless told not to. Plan targets additionally get four autonomous-execution tenets enforced by editing the plan: minimal/edge-bucketed human work (T1), a follow-up-completion contract (T2), enough decision context to direct unplanned work without a human (T3), and a comprehensive autonomous E2E test suite over every testable surface (T4). Non-plan targets are never modified. Single-lens, any-entity counterpart to `/document-review`'s 7-lens doc gate.
 
 **Usage**:
 ```
