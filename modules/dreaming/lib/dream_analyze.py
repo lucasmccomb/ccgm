@@ -212,6 +212,31 @@ def _utc_now_iso() -> str:
 # dream-install.sh owns bootstrapping a real config.json)
 # ---------------------------------------------------------------------------
 
+# optimistic-memory plan.md §3.5 config block. Kept as its own named
+# constant (rather than an inline literal inside DEFAULT_CONFIG) so
+# load_config() can deep-merge it independently of the rest of the file
+# (see the merge fix in load_config() below) and so resolve_posture()'s
+# per-op-kind table (further down) can document which config keys its
+# floors/caps name without a forward reference into DEFAULT_CONFIG.
+DEFAULT_OPTIMISTIC_INTEGRATION: dict[str, Any] = {
+    "enabled": False,
+    "dwell_hours": 24,
+    "max_add_supersede_per_run": 10,
+    "max_eviction_absolute": 3,
+    "max_eviction_fraction_per_run": 0.20,
+    "confidence_floor_verify": 7,
+    "confidence_floor_content": 8,
+    "add_min_sessions": 2,
+    "batch_anomaly_max_same_tag_fraction": 0.6,
+    "circuit_breaker_window_nights": 7,
+    "circuit_breaker_max_anomalies": 2,
+    "circuit_breaker_auto_resume_nights": 7,
+    "rolling_add_rate_window_nights": 14,
+    "rolling_add_rate_max": 40,
+    "eval_refresh_min_age_days": 7,
+    "eval_refresh_cost_cap_usd": 2.00,
+}
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
     "map_model": DEFAULT_MAP_MODEL,
@@ -230,11 +255,31 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # store. Set an explicit list here to pin dreaming to specific projects.
     "scopes": [],
     "cost_pricing": {},
+    # optimistic-memory plan.md §3.5. `enabled: false` here is the
+    # shipped-module default (CCGM's existing "auto-apply off by default"
+    # posture) -- a DIFFERENT flag from the top-level `enabled` above, which
+    # gates the mining/analyze pipeline itself, not auto-integration. Inert
+    # until Epic 3's engine reads it and Epic 8 flips it on via
+    # memory-setup.sh (never via a hand JSON edit -- see the plan's §3.5
+    # rationale for why that activation path matters).
+    "optimistic_integration": dict(DEFAULT_OPTIMISTIC_INTEGRATION),
 }
 
 
 def load_config() -> dict[str, Any]:
     cfg = dict(DEFAULT_CONFIG)
+    # Deep-merge fill (optimistic-memory plan.md §3.5 Epic 2 requirement):
+    # optimistic_integration is the one sub-dict that ships with real,
+    # non-empty defaults (blast-radius caps, confidence floors,
+    # circuit-breaker knobs). A shallow `cfg.update(loaded)` below would let
+    # a user's partial override -- e.g. {"optimistic_integration":
+    # {"dwell_hours": 6}} -- silently wipe every other key in the sub-dict
+    # instead of just overriding the one they set. Re-copying here (rather
+    # than relying on DEFAULT_CONFIG's own nested dict) also means this
+    # function never hands back a dict whose "optimistic_integration" value
+    # is the same object as DEFAULT_OPTIMISTIC_INTEGRATION -- a caller
+    # mutating the returned config can never corrupt the shared default.
+    cfg["optimistic_integration"] = dict(DEFAULT_OPTIMISTIC_INTEGRATION)
     path = config_path()
     if path.is_file():
         try:
@@ -242,8 +287,86 @@ def load_config() -> dict[str, Any]:
         except (OSError, json.JSONDecodeError):
             loaded = {}
         if isinstance(loaded, dict):
-            cfg.update(loaded)
+            overlay = dict(loaded)
+            optimistic_overlay = overlay.pop("optimistic_integration", None)
+            cfg.update(overlay)
+            if isinstance(optimistic_overlay, dict):
+                cfg["optimistic_integration"].update(optimistic_overlay)
     return cfg
+
+
+# ---------------------------------------------------------------------------
+# Per-op-kind posture policy (optimistic-memory plan.md §3.3 -- the policy
+# spine). OPTIMISTIC_POSTURE is the single source of truth: every downstream
+# gate (Epic 3's run_optimistic_integrate) is meant to read resolve_posture()
+# instead of hardcoding an `if kind == ...` check. Table values name *config
+# keys* (looked up in the optimistic_integration block above at the point of
+# use), not resolved numbers -- resolving a cap against live config and live
+# store state (e.g. live_head_count(slug) for the eviction cap) is Epic 3's
+# job, not this policy table's.
+# ---------------------------------------------------------------------------
+
+GATED_POSTURE: dict[str, Any] = {
+    "posture": "gated",
+    "needs_dwell": False,
+    "confidence_floor": None,
+    "per_run_cap": None,
+}
+
+OPTIMISTIC_POSTURE: dict[str, dict[str, Any]] = {
+    "learning_verify": {
+        "posture": "optimistic-immediate",
+        "needs_dwell": False,
+        "confidence_floor": "confidence_floor_verify",
+        "per_run_cap": None,
+    },
+    "learning_add": {
+        "posture": "optimistic-dwell",
+        "needs_dwell": True,
+        "confidence_floor": "confidence_floor_content",
+        "per_run_cap": "max_add_supersede_per_run",
+    },
+    "learning_supersede": {
+        "posture": "optimistic-dwell",
+        "needs_dwell": True,
+        "confidence_floor": "confidence_floor_content",
+        "per_run_cap": "max_add_supersede_per_run",
+    },
+    "learning_contradict": {
+        "posture": "dwell-quarantine",
+        "needs_dwell": True,
+        "confidence_floor": "confidence_floor_content",
+        # Eviction cap is a compound formula (§3.3): min(max_eviction_absolute,
+        # max_eviction_fraction_per_run x live_head_count(slug)). Two config
+        # keys, not one -- Epic 3 reads both off this tuple rather than this
+        # table inventing a single derived number (that computation needs
+        # live_head_count(slug), which is live store state, not policy).
+        "per_run_cap": ("max_eviction_absolute", "max_eviction_fraction_per_run"),
+    },
+    "learning_deprecate": {
+        "posture": "dwell-quarantine",
+        "needs_dwell": True,
+        "confidence_floor": "confidence_floor_content",
+        "per_run_cap": ("max_eviction_absolute", "max_eviction_fraction_per_run"),
+    },
+}
+
+
+def resolve_posture(kind: str, project: str) -> dict[str, Any]:
+    """Pure lookup -- the single source of truth for per-op-kind posture
+    (optimistic-memory plan.md §3.3). `_global` always resolves to `gated`
+    regardless of kind: defense-in-depth over promote_to_global()'s existing
+    human-accept gate (VF9), not a replacement for it. An unrecognized kind
+    also resolves to `gated` (fail-safe -- an op-kind this table does not
+    know must never be treated as auto-integrable). Returns a fresh copy so
+    callers can never mutate the shared policy table.
+    """
+    if project == GLOBAL_SLUG:
+        return dict(GATED_POSTURE)
+    entry = OPTIMISTIC_POSTURE.get(kind)
+    if entry is None:
+        return dict(GATED_POSTURE)
+    return dict(entry)
 
 
 # ---------------------------------------------------------------------------

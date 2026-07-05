@@ -122,6 +122,19 @@
         }
       },
       "description": "OPTIONAL. Present only on 'learning_supersede' proposals where learnings_store.compact_preserves_facts(old_content, new_content) returned false (sec-11). The proposal stays 'pending' but is flagged for extra human scrutiny rather than treated as an ordinary supersede."
+    },
+    "dwell_until": {
+      "type": "string",
+      "description": "OPTIONAL. ISO-8601 UTC timestamp (optimistic-memory plan.md §3.4). Set when the optimistic-integration engine (Epic 3) auto-applies a 'needs_dwell' posture (learning_add/learning_supersede/learning_contradict/learning_deprecate, per resolve_posture()'s OPTIMISTIC_POSTURE table). Mirrors the op-event/head field of the same name that learnings_store.py's fold layer inherits via the max-with-target rule; absent means the proposal was never auto-applied under a dwelling posture."
+    },
+    "batch_id": {
+      "type": "string",
+      "description": "OPTIONAL. Correlates every proposal auto-applied in one nightly optimistic-integration run (optimistic-memory plan.md §3.4), for the batch-anomaly check and for grouping in the daily report. Absent for proposals that were never auto-applied."
+    },
+    "posture": {
+      "type": "string",
+      "enum": ["optimistic-immediate", "optimistic-dwell", "dwell-quarantine", "gated"],
+      "description": "OPTIONAL. The posture string resolve_posture(kind, project) returned for this proposal at apply time (optimistic-memory plan.md §3.3/§3.4). Recorded for audit/report purposes; absent for proposals produced before Epic 3 or never routed through the optimistic-integration engine."
     }
   }
 }
