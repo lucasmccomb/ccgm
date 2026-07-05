@@ -57,16 +57,17 @@ Autonomous mode affects these xplan phases:
 
 ## Built-In Execution Tenets (matter most here)
 
-Autonomous mode is where these three plan tenets matter most: there is no human in the loop during creation *or* execution, so the plan must stand entirely on its own. They apply in every xplan mode, but `/xplana` leans on them hardest. The Phase 5.7 adversarial reviewer enforces all three (T1–T3), expanding the plan when any is thin:
+Autonomous mode is where these four plan tenets matter most: there is no human in the loop during creation *or* execution, so the plan must stand entirely on its own. They apply in every xplan mode, but `/xplana` leans on them hardest. The Phase 5.7 adversarial reviewer enforces all four (T1–T4), expanding the plan when any is thin:
 
 1. **Human interaction is minimized and bucketed to the edges** (T1). No human step an agent could do via CLI/API; unavoidable human work is front-loaded before Wave 1 or deferred to the end, never wedged mid-run. Once execution starts, it runs to done without pausing for a person.
 2. **Follow-up-completion contract** (T2, plan §9.5). Any follow-on work discovered during execution is tracked, triaged, and — if in-scope — completed before execution is reported complete. Only genuinely human-blocked work may remain open, surfaced with its exact ask.
 3. **Autonomous decision context** (T3, plan §1.4). The plan carries the software's mission, the codebase's governing context, and its decision principles, so an execution agent deduces the direction for unplanned follow-on work *itself* — critical in autonomous mode, where there is no user to ask mid-run. If that context is thin, the adversarial review expands the plan to add it.
+4. **Comprehensive autonomous E2E testing** (T4, plan §8). Every plan ships a full autonomous E2E suite over all testable surfaces, wired into CI as a blocking merge gate — the certainty oracle so the user never tests manually. New projects build it in from the ground up; existing repos get **optimistic gap-fill** for touched areas that lack coverage (added by default on the assumption the user wants more coverage — surfaced in the final walkthrough, not gated behind a mid-flow question, which fits autonomous mode). The plan provisions whatever infra certainty needs (testing agents, RunPod, cloud Mac, real devices); there is no resource constraint on testing. The adversarial review expands §8 when coverage is thin.
 
 ## What This Command Does NOT Do
 
 - It does NOT skip research, naming, the standard reviews, the self-review loop, or the Phase 5.7 adversarial review sequence. Autonomous is the *deep* mode, not the fast one — the finished plan has survived 6 reviews (3 standard + 3 sequential adversarial) before you see it.
-- It does NOT skip the three execution tenets above. The adversarial review enforces minimal edge-bucketed human work (T1), a follow-up-completion contract (T2), and enough decision context to direct unplanned work without a human (T3) — expanding the plan when any is missing.
+- It does NOT skip the four execution tenets above. The adversarial review enforces minimal edge-bucketed human work (T1), a follow-up-completion contract (T2), enough decision context to direct unplanned work without a human (T3), and a comprehensive autonomous E2E suite over all testable surfaces (T4) — expanding the plan when any is missing.
 - It does NOT skip the final execution gate. 6.5 is non-bypassable.
 - It does NOT automatically proceed to execution. The default recommendation at 6.5 in autonomous mode leans toward "save plan, don't execute yet" so the user can review before committing to multi-agent work.
 
