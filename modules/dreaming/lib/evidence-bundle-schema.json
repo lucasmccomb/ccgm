@@ -143,16 +143,11 @@
     "malformed_line_total": { "type": "integer", "minimum": 0 },
     "canary": {
       "type": "object",
-      "required": ["observed_versions", "untested_versions"],
+      "required": ["observed_versions"],
       "properties": {
         "observed_versions": {
           "type": "object",
           "description": "Map of observed transcript `version` string to session count."
-        },
-        "untested_versions": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Subset of observed_versions' keys not in TESTED_TRANSCRIPT_VERSIONS -- a warn signal, not itself a failure."
         }
       }
     }
