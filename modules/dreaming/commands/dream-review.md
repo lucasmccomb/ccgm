@@ -115,6 +115,51 @@ already uses.
    (a human scanning the output should never have to guess whether "no
    rows" means "nothing happened" or "the command broke").
 
+### Composite eligibility breakdown (add/supersede rows)
+
+When `optimistic_integration.eligibility.enabled` is `true`, every
+auto-integrated `learning_add` / `learning_supersede` row was admitted by
+the deterministic composite eligibility gate (composite-eligibility plan.md
+§3.2), and the optimistic engine wrote its full per-signal breakdown to
+`~/.claude/dreaming/state/apply-audit.jsonl` as a record with `audit_kind
+== "eligibility"` and the SAME `proposal_id` as the auto-integrated row.
+Surface that breakdown when listing or vetoing such a row — it is the
+"why this landed" the human is reviewing, and it is identical to the block
+`/dream-digest` renders (§3.7):
+
+```bash
+# The eligibility audit record for a given proposal_id (last write wins).
+python3 -c "
+import json, sys
+pid = '<proposal_id>'
+rec = None
+for ln in open('${HOME}/.claude/dreaming/state/apply-audit.jsonl', encoding='utf-8'):
+    ln = ln.strip()
+    if not ln:
+        continue
+    r = json.loads(ln)
+    if r.get('audit_kind') == 'eligibility' and r.get('proposal_id') == pid:
+        rec = r
+print(json.dumps(rec, indent=2, sort_keys=True) if rec else 'no eligibility record')
+"
+```
+
+Render, per row: `outcome` (`eligible` / `skipped_composite` /
+`skipped_origin` / `skipped_floor`) and `decision_basis`
+(`composite` / `legacy_floor`); `score` **S**, `threshold` **θ**, and
+`margin` (over/short); the four normalized `signals`
+(`confidence` / `prevalence` / `recency` / `novelty`) and the
+`weakest_signal`; the `evidence_tier` + its `evidence_tier_source`
+(session id / line / origin, when user-corrected); and
+`verified_sessions` vs the count of `unresolved_session_ids`. For a
+supersede row, also relay `near_duplicate_supersede` when true (a
+near-duplicate-with-changed-facts advisory — never a block on its own).
+
+This record carries only scalar score/signal/session data, never excerpt
+or transcript text — render it verbatim. An auto-integrated row that
+predates eligibility being enabled (or a disabled-mode night) simply has
+no such record; say so plainly rather than inventing a breakdown.
+
 ### `/dream-review veto <id>`
 
 `<id>` is a **learning row id** (a store entry id — one of the ids the

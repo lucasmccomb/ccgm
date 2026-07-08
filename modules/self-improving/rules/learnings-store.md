@@ -101,6 +101,8 @@ effective = base * 0.5 ^ (age_days / half_life_days)
 
 Entries whose effective confidence falls below the deprecate threshold (default 2.0) are skipped at read time without being deleted from the JSONL. This keeps the audit trail intact.
 
+**Read-time decay vs gate-time eligibility — different clocks, non-duplicative.** The `dreaming` module's opt-in composite-eligibility gate (see `modules/dreaming/rules/dreaming.md` → "Eligibility composite") scores an *evidence recency* signal at **admission** time — how old the mined transcript evidence is when a `learning_add`/`learning_supersede` is auto-integrated, on a short (default 30-day) half-life. The confidence decay above is a separate, later clock: it ages an *already-admitted* entry by its own `timestamp` on the store's 90-day half-life, every time the entry is read. One is a write-gate on evidence freshness; the other is a read-time weakening of stored rows. They never double-count — a row that clears the gate then begins decaying independently — so neither is a substitute for the other.
+
 ---
 
 ## Supersede Chains

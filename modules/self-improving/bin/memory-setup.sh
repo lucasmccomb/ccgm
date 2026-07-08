@@ -30,7 +30,12 @@
 #               forcing-function: the operator never has to hand-edit
 #               config.json to turn this on). Sets
 #               optimistic_integration.enabled=true in
-#               ~/.claude/dreaming/config.json.
+#               ~/.claude/dreaming/config.json. When you turn it on, a second
+#               prompt OFFERS the composite eligibility gate
+#               (optimistic_integration.eligibility.enabled=true, recommended
+#               defaults; composite-eligibility plan.md §5 Epic E6) -- offered
+#               only alongside the outer flag so eligibility never lands on with
+#               the engine off.
 #
 # Safety posture:
 #   * Idempotent — re-running reports current state and no-ops what is already on.
@@ -95,7 +100,9 @@ write is confirmed first; the script commits to no git repo.
   mode        Adds a 24h dwell window + daily report + one-command rollback
               instead of every mined memory sitting pending for a human
               /dream-apply. Sets optimistic_integration.enabled=true in
-              ~/.claude/dreaming/config.json.
+              ~/.claude/dreaming/config.json. Turning it on then offers the
+              composite eligibility gate (recommended defaults) as a second
+              prompt.
 
 Options:
   -h, --help  Show this help and exit.
@@ -404,6 +411,109 @@ write_optimistic_flag() {
     return 1
 }
 
+# Echo the current optimistic_integration.eligibility.enabled value: "true",
+# "unset", or "invalid". Same presence-and-truth discipline as
+# current_optimistic_flag() above (an explicit false is "unset", i.e. offer
+# it, not an error).
+current_eligibility_flag() {
+    local cfg="${DREAMING_DIR}/config.json"
+    if [ ! -s "$cfg" ]; then
+        printf 'unset\n'
+        return
+    fi
+    jq -r 'if .optimistic_integration.eligibility.enabled == true then "true" else "unset" end' "$cfg" 2>/dev/null \
+        || printf 'invalid\n'
+}
+
+# Enable the composite eligibility gate (composite-eligibility plan.md §5 Epic
+# E6, adrev2-001). Writes a MINIMAL eligibility block -- just enabled=true --
+# into ~/.claude/dreaming/config.json; dream_analyze.py's load_config()
+# deep-merges every other eligibility default (weights, threshold, floors, ...)
+# from eligibility.DEFAULT_ELIGIBILITY at read time, so the on-disk block can
+# never drift from or fail validate_eligibility_config() (the "recommended
+# defaults" the prompt names). The SAME jq-merge-then-verify mechanism as
+# write_optimistic_flag() above.
+#
+# CRITICAL (adrev2-001): this ALSO forces optimistic_integration.enabled=true
+# in the same write. Enabling eligibility while the outer engine is off is
+# inert (the nightly skips optimistic-integrate entirely on the outer gate), so
+# the write makes "never leave the outer flag off" a structural property of the
+# write itself, not merely of the caller's ordering. Verified by reading BOTH
+# flags back out: the success line prints only if both are true on disk.
+write_eligibility_flag() {
+    mkdir -p "$DREAMING_DIR" 2>/dev/null || true
+
+    local cfg="${DREAMING_DIR}/config.json"
+    local tmp
+    tmp="$(mktemp)" || {
+        warn "Could not enable — failed to create a temp file; ${cfg} unchanged."
+        return 1
+    }
+
+    local filter='.optimistic_integration.enabled = true | .optimistic_integration.eligibility.enabled = true'
+    if [ -s "$cfg" ]; then
+        jq "$filter" "$cfg" >"$tmp" 2>/dev/null
+    else
+        printf '{}\n' | jq "$filter" >"$tmp" 2>/dev/null
+    fi
+
+    if [ ! -s "$tmp" ]; then
+        rm -f "$tmp"
+        warn "Could not enable — jq merge produced no output; ${cfg} unchanged."
+        return 1
+    fi
+
+    if ! mv "$tmp" "$cfg" 2>/dev/null; then
+        rm -f "$tmp"
+        warn "Could not enable — ${cfg} is not writable; left unchanged."
+        return 1
+    fi
+
+    local outer elig
+    outer="$(jq -r '.optimistic_integration.enabled // "unset"' "$cfg" 2>/dev/null)"
+    elig="$(jq -r '.optimistic_integration.eligibility.enabled // "unset"' "$cfg" 2>/dev/null)"
+    if [ "$outer" = "true" ] && [ "$elig" = "true" ]; then
+        ok "Composite eligibility gate enabled — optimistic_integration.eligibility.enabled=true (recommended defaults) verified in ${cfg}."
+        return 0
+    fi
+
+    warn "Could not enable — write did not take effect; verify ${cfg} by hand."
+    return 1
+}
+
+# Offer the composite eligibility gate. Called ONLY once the outer optimistic
+# engine is confirmed ON (either just turned on this run, or already on), so a
+# yes here can never land eligibility=true with the outer flag off (adrev2-001).
+offer_eligibility_gate() {
+    local estate
+    estate="$(current_eligibility_flag)"
+    case "$estate" in
+        true)
+            ok "Composite eligibility gate already enabled (optimistic_integration.eligibility.enabled=true) — no change."
+            return 0
+            ;;
+        invalid)
+            warn "Could not offer the eligibility gate — ${DREAMING_DIR}/config.json is not valid JSON; left untouched."
+            return 1
+            ;;
+        *)
+            say ""
+            say "The composite eligibility gate scores each mined add/supersede with a"
+            say "deterministic blend (verified origin + prevalence + evidence recency +"
+            say "novelty) instead of a flat confidence floor, so a user-corrected or"
+            say "seen-across-sessions conf-6 memory can auto-integrate while an"
+            say "inferred-once one still cannot. Default off; evictions are unaffected."
+            say ""
+            if confirm "Also enable the composite eligibility gate (recommended defaults)?"; then
+                write_eligibility_flag
+                return $?
+            fi
+            skip "Left the composite eligibility gate disabled (flat confidence floor stays in effect). Re-run any time to enable it."
+            return 0
+            ;;
+    esac
+}
+
 offer_optimistic_integration() {
     if [ ! -e "$DREAM_INSTALL" ]; then
         return 0   # dreaming module not installed -- offer_dreaming() already explained why
@@ -417,6 +527,10 @@ offer_optimistic_integration() {
     case "$state" in
         true)
             ok "Optimistic auto-integration already enabled (optimistic_integration.enabled=true) — no change."
+            # Outer already on -> the eligibility gate may be offered with no
+            # risk of leaving the outer flag off (adrev2-001), so an operator who
+            # opted into optimistic mode earlier can still add the gate now.
+            offer_eligibility_gate
             return 0
             ;;
         invalid)
@@ -433,8 +547,13 @@ offer_optimistic_integration() {
             say "not you ever read the report."
             say ""
             if confirm "Enable auto-integration with a 24h dwell window + daily report?"; then
-                write_optimistic_flag
-                return $?
+                write_optimistic_flag || return 1
+                # The eligibility gate is offered ONLY here -- strictly AFTER the
+                # outer flag is confirmed on (write_optimistic_flag verified it) --
+                # so a yes can never land eligibility=true with the outer engine
+                # off (adrev2-001).
+                offer_eligibility_gate
+                return 0
             fi
             skip "Left optimistic auto-integration disabled. Re-run any time to enable it."
             return 0
@@ -482,4 +601,11 @@ main() {
     return "$rc"
 }
 
-main "$@"
+# Run main only on direct execution, not when sourced. Sourcing (with main
+# suppressed) lets a test drive an individual writer -- e.g.
+# write_eligibility_flag against a redirected DREAMING_DIR -- deterministically,
+# without piping answers through every unrelated confirm() prompt. Direct
+# execution (./memory-setup.sh) is unchanged: BASH_SOURCE[0] == $0, so main runs.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    main "$@"
+fi

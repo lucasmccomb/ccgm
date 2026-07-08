@@ -53,6 +53,11 @@
       "type": "lib",
       "template": false
     },
+    "lib/eligibility.py": {
+      "target": "lib/eligibility.py",
+      "type": "lib",
+      "template": false
+    },
     "lib/reconcile_automemory.py": {
       "target": "lib/reconcile_automemory.py",
       "type": "lib",
