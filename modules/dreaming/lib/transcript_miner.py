@@ -18,7 +18,8 @@ Locked API (Epic 3 depends on these signatures):
     mine(path) -> dict                       # MinedSession
     cluster(events) -> list[dict]            # list[Cluster]
     budget(clusters, max_input_tokens) -> dict
-    schema_canary(mined_sessions) -> dict    # raises SchemaDriftError on drift
+    validate_structure(mined_sessions) -> list[dict]  # pure; list[finding]
+    schema_canary(mined_sessions) -> dict    # {observed_versions}; raises SchemaDriftError on drift
     mine_to_evidence_bundle(paths, *, max_input_tokens=200_000) -> dict
     read_watermark() / write_watermark(slug, iso_timestamp)
     redact_pii(text) -> str
@@ -119,9 +120,11 @@ detect_project_slug = _learnings_store.detect_project_slug
 
 
 class SchemaDriftError(RuntimeError):
-    """Raised by schema_canary() when the transcript schema appears to
-    have drifted (recognized friction fields are structurally absent
-    despite tool_use activity being present). See schema_canary()."""
+    """Raised by schema_canary() when the field-level structural contract
+    (see validate_structure()) is violated -- a whole family of expected
+    fields (friction, token-economics, or turn-structure) is structurally
+    absent from the mined batch despite its corroborating signal being
+    present. See schema_canary()."""
 
 
 # ---------------------------------------------------------------------------
@@ -168,14 +171,6 @@ NEGATION_PHRASES = (
     "wrong approach",
     "not correct",
 )
-
-# Transcript `version` values the miner has been validated against.
-# schema_canary() WARNS (does not fail) on an unrecognized version -- the
-# transcript format is internal/undocumented and known to drift across
-# Claude Code releases (adrev-002; live-verified version at plan-authoring
-# time was 2.1.198, plan.md §5 Epic 2).
-TESTED_TRANSCRIPT_VERSIONS = {"2.1.198"}
-
 
 # ---------------------------------------------------------------------------
 # PII redaction (companion to hook_utils.redact_secrets -- sec-6)
@@ -408,6 +403,12 @@ def mine(path: str | Path) -> dict[str, Any]:
     event -- a fixed, cheap, two-pass design (collect friction with
     turn_index, then scan user turns) rather than a streaming pending-
     queue, so "within 2 turns" is unambiguous and easy to test.
+
+    Structural presence counters (turn_count, assistant_turn_count,
+    usage_field_presence, parsed_line_count) feed validate_structure()'s
+    field-level drift contract (schema_canary()) -- they count STRUCTURAL
+    presence of a recognized field/shape, not event volume, mirroring
+    friction_field_presence's existing idiom.
     """
     path = Path(path)
 
@@ -427,6 +428,7 @@ def mine(path: str | Path) -> dict[str, Any]:
     ended_at: str | None = None
     tool_use_count = 0
     friction_field_presence = 0
+    usage_field_presence = 0
     pr_links: list[dict[str, Any]] = []
     token_totals = {
         "input_tokens": 0,
@@ -474,6 +476,8 @@ def mine(path: str | Path) -> dict[str, Any]:
             )
             message = obj.get("message") or {}
             usage = message.get("usage") or {}
+            if isinstance(usage, dict) and any(key in usage for key in token_totals):
+                usage_field_presence += 1
             for key in token_totals:
                 v = usage.get(key)
                 if isinstance(v, (int, float)):
@@ -620,6 +624,10 @@ def mine(path: str | Path) -> dict[str, Any]:
         "malformed_line_count": malformed_line_count,
         "tool_use_count": tool_use_count,
         "friction_field_presence": friction_field_presence,
+        "turn_count": len(turn_sequence),
+        "assistant_turn_count": sum(1 for t in turn_sequence if t.get("role") == "assistant"),
+        "usage_field_presence": usage_field_presence,
+        "parsed_line_count": len(lines),
     }
 
 
@@ -739,52 +747,125 @@ def budget(clusters: list[dict[str, Any]], max_input_tokens: int) -> dict[str, A
 
 
 # ---------------------------------------------------------------------------
-# schema_canary() -- fail loud on silent transcript-schema drift (adrev-002)
+# validate_structure() / schema_canary() -- fail loud on silent transcript-
+# schema drift via a field-level structural contract (plan.md §3.2)
 # ---------------------------------------------------------------------------
+
+
+def validate_structure(mined_sessions: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Pure, batch-level structural contract over MinedSession dicts.
+
+    Returns list[{"extraction", "field", "detail"}] -- an empty list means
+    clean. Three hard invariants, each gated on a corroborating
+    "should-be-present" signal so a genuinely quiet/thin window never
+    trips a finding (adrev-015); a finding only fires when the WHOLE
+    family of fields an extraction depends on is structurally absent
+    across the entire batch:
+
+      - friction_events: gated on total tool_use > 0; violated when zero
+        recognized friction-bearing fields (is_error/toolUseResult/
+        hookErrors/preventedContinuation) were found anywhere.
+      - token_economics: gated on total assistant turns > 0 (NOT
+        tool_use -- message.usage is read on every assistant line
+        regardless of tool_use); violated when zero recognized
+        token/cache usage fields were found anywhere.
+      - turn_structure: gated on total parsed lines > 0 (NOT tool_use --
+        this is what catches an envelope-`type` rename, which silently
+        zeros tool_use_count too); violated when zero recognized
+        user/assistant turns were found anywhere.
+
+    A best-effort PR-link invariant (note-only, never raising) is
+    deliberately NOT implemented here -- PR links are optional evidence,
+    not integrity-critical (decision #4, accepted residual, plan.md
+    §8.5/§11/decisions.md).
+
+    Every counter is read via `.get(key, 0)`, so a MinedSession-shaped
+    dict missing any counter (including a hand-built test dict) defaults
+    to a non-raising state rather than raising a KeyError.
+
+    Pure function: no I/O, never raises -- callers (schema_canary())
+    decide whether a non-empty finding list means "raise".
+    """
+    total_tool_use = sum(s.get("tool_use_count", 0) for s in mined_sessions)
+    total_friction_fields = sum(s.get("friction_field_presence", 0) for s in mined_sessions)
+    total_assistant_turns = sum(s.get("assistant_turn_count", 0) for s in mined_sessions)
+    total_usage_fields = sum(s.get("usage_field_presence", 0) for s in mined_sessions)
+    total_parsed_lines = sum(s.get("parsed_line_count", 0) for s in mined_sessions)
+    total_turns = sum(s.get("turn_count", 0) for s in mined_sessions)
+
+    findings: list[dict[str, str]] = []
+
+    if total_tool_use > 0 and total_friction_fields == 0:
+        findings.append(
+            {
+                "extraction": "friction_events",
+                "field": "is_error/toolUseResult/hookErrors/preventedContinuation",
+                "detail": (
+                    f"{total_tool_use} tool_use block(s) observed across "
+                    f"{len(mined_sessions)} session(s) but zero recognized "
+                    "friction-bearing fields were found anywhere in the window."
+                ),
+            }
+        )
+
+    if total_assistant_turns > 0 and total_usage_fields == 0:
+        findings.append(
+            {
+                "extraction": "token_economics",
+                "field": "message.usage.{input,output,cache_creation,cache_read}_tokens",
+                "detail": (
+                    f"{total_assistant_turns} assistant turn(s) observed across "
+                    f"{len(mined_sessions)} session(s) but zero recognized token/cache "
+                    "usage fields were found anywhere in the window."
+                ),
+            }
+        )
+
+    if total_parsed_lines > 0 and total_turns == 0:
+        findings.append(
+            {
+                "extraction": "turn_structure",
+                "field": "type (user/assistant)",
+                "detail": (
+                    f"{total_parsed_lines} parsed line(s) observed across "
+                    f"{len(mined_sessions)} session(s) but zero recognized user/assistant "
+                    "turns were found anywhere in the window."
+                ),
+            }
+        )
+
+    return findings
 
 
 def schema_canary(mined_sessions: list[dict[str, Any]]) -> dict[str, Any]:
     """Fail loud when the transcript schema appears to have drifted.
 
-    Keyed on FIELD/SHAPE presence, not event count (adrev-015): a batch
-    of sessions with tool_use blocks but zero recognized friction-bearing
-    fields (`is_error`, `hookErrors`, `preventedContinuation`,
-    `toolUseResult`) ANYWHERE in the whole window is treated as drift
-    (the parser no longer recognizes this transcript version's field
-    names) and raises SchemaDriftError. A batch with tool_use blocks AND
-    recognized fields present but reporting no problems
-    (is_error=False everywhere, hookErrors=[] everywhere) is a genuinely
-    quiet window -- friction_field_presence is what distinguishes "quiet"
-    from "drifted", not len(friction_events), so a real quiet week never
-    cries wolf.
-
-    Returns a summary dict {"observed_versions": {version: count},
-    "untested_versions": [...]} for the caller to persist in run state
-    and surface in the digest (adrev-002). Never returns silently on
-    drift -- raises SchemaDriftError instead.
+    Delegates to validate_structure() for the field-level structural
+    contract (three hard invariants: friction, token-economics,
+    turn-structure -- see validate_structure()'s docstring). Raises
+    SchemaDriftError naming every finding's extraction + field when the
+    contract is violated; returns {"observed_versions": {version: count}}
+    (informational only -- never gates the raise) when clean. Never
+    returns silently on drift -- raises SchemaDriftError instead.
     """
-    total_tool_use = sum(s.get("tool_use_count", 0) for s in mined_sessions)
-    total_friction_fields = sum(s.get("friction_field_presence", 0) for s in mined_sessions)
-
     observed_versions: dict[str, int] = {}
     for s in mined_sessions:
         v = s.get("transcript_version")
         if v:
             observed_versions[v] = observed_versions.get(v, 0) + 1
-    untested = sorted(v for v in observed_versions if v not in TESTED_TRANSCRIPT_VERSIONS)
 
-    if total_tool_use > 0 and total_friction_fields == 0:
+    findings = validate_structure(mined_sessions)
+    if findings:
+        named = "; ".join(f"{f['extraction']} ({f['field']}): {f['detail']}" for f in findings)
         raise SchemaDriftError(
-            f"schema_canary: {total_tool_use} tool_use block(s) observed across "
-            f"{len(mined_sessions)} session(s) but zero recognized friction-bearing "
-            "fields (is_error/hookErrors/preventedContinuation/toolUseResult) were "
-            "found anywhere in the window. This likely means the transcript schema "
-            f"drifted (observed versions: {sorted(observed_versions) or ['unknown']}) "
-            "and the miner is silently reading zero friction. Investigate before "
-            "trusting an empty evidence bundle."
+            f"schema_canary: structural drift detected -- {named} "
+            f"(observed versions: {sorted(observed_versions) or ['unknown']}). "
+            "This likely means the transcript schema drifted and the miner is "
+            "silently reading incomplete evidence. Investigate before trusting "
+            "an empty evidence bundle."
         )
 
-    return {"observed_versions": observed_versions, "untested_versions": untested}
+    return {"observed_versions": observed_versions}
 
 
 # ---------------------------------------------------------------------------
@@ -1051,6 +1132,10 @@ def mine_to_evidence_bundle(
             "malformed_line_count": s["malformed_line_count"],
             "tool_use_count": s["tool_use_count"],
             "friction_field_presence": s["friction_field_presence"],
+            "turn_count": s["turn_count"],
+            "assistant_turn_count": s["assistant_turn_count"],
+            "usage_field_presence": s["usage_field_presence"],
+            "parsed_line_count": s["parsed_line_count"],
         }
         for s in mined_sessions
     ]

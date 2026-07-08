@@ -195,7 +195,12 @@ class CommandPrefixRedactionTests(unittest.TestCase):
                             "content": [
                                 {"type": "tool_use", "id": "tool_1", "name": "Bash", "input": {"command": command}}
                             ],
-                            "usage": {},
+                            "usage": {
+                                "input_tokens": 300,
+                                "output_tokens": 30,
+                                "cache_creation_input_tokens": 0,
+                                "cache_read_input_tokens": 250,
+                            },
                         },
                     }
                 ),
@@ -355,14 +360,19 @@ class SchemaCanaryTests(unittest.TestCase):
         mined = tm.mine(_fixture("drift.jsonl"))
         self.assertEqual(mined["tool_use_count"], 1)
         self.assertEqual(mined["friction_field_presence"], 0)
-        with self.assertRaises(tm.SchemaDriftError):
+        with self.assertRaises(tm.SchemaDriftError) as cm:
             tm.schema_canary([mined])
+        self.assertIn("friction_events", str(cm.exception))
+        self.assertEqual(
+            sorted(f["extraction"] for f in tm.validate_structure([mined])),
+            ["friction_events"],
+        )
 
     def test_passes_on_friction_fixture(self):
         mined = tm.mine(_fixture("friction.jsonl"))
         result = tm.schema_canary([mined])
         self.assertIn("2.1.198", result["observed_versions"])
-        self.assertEqual(result["untested_versions"], [])
+        self.assertNotIn("untested_versions", result)
 
     def test_passes_on_quiet_week_fixture_alone(self):
         # The critical adrev-015 regression guard: zero friction events
@@ -373,12 +383,6 @@ class SchemaCanaryTests(unittest.TestCase):
         result = tm.schema_canary([mined])
         self.assertIn("2.1.198", result["observed_versions"])
 
-    def test_untested_version_reported_not_raised(self):
-        mined = tm.mine(_fixture("drift.jsonl"))
-        mined["friction_field_presence"] = 1  # simulate a recognized-but-untested version
-        result = tm.schema_canary([mined])
-        self.assertIn("9.9.999", result["untested_versions"])
-
     def test_no_tool_use_no_friction_does_not_raise(self):
         # A session with zero tool_use blocks at all (pure conversation)
         # gives the canary nothing to judge -- must not raise.
@@ -386,6 +390,161 @@ class SchemaCanaryTests(unittest.TestCase):
             [{"tool_use_count": 0, "friction_field_presence": 0, "transcript_version": "2.1.198"}]
         )
         self.assertEqual(result["observed_versions"], {"2.1.198": 1})
+
+    def test_validate_structure_clean_on_healthy(self):
+        # Pure-function check: every healthy fixture, mined alone or
+        # together, produces zero findings.
+        healthy_names = ["friction.jsonl", "clean.jsonl", "user-correction.jsonl", "quiet-week.jsonl"]
+        mined_sessions = [tm.mine(_fixture(name)) for name in healthy_names]
+        for mined in mined_sessions:
+            self.assertEqual(tm.validate_structure([mined]), [])
+        self.assertEqual(tm.validate_structure(mined_sessions), [])
+
+    def test_raises_on_usage_drift(self):
+        # message.usage renamed to tokenUsage; friction fields and type
+        # intact -- trips token_economics only.
+        mined = tm.mine(_fixture("drift-usage.jsonl"))
+        with self.assertRaises(tm.SchemaDriftError) as cm:
+            tm.schema_canary([mined])
+        self.assertIn("token_economics", str(cm.exception))
+        self.assertEqual(
+            sorted(f["extraction"] for f in tm.validate_structure([mined])),
+            ["token_economics"],
+        )
+
+    def test_raises_on_type_drift(self):
+        # Top-level envelope `type` renamed to lineType on every line --
+        # trips turn_structure only.
+        mined = tm.mine(_fixture("drift-type.jsonl"))
+        with self.assertRaises(tm.SchemaDriftError) as cm:
+            tm.schema_canary([mined])
+        self.assertIn("turn_structure", str(cm.exception))
+        self.assertEqual(
+            sorted(f["extraction"] for f in tm.validate_structure([mined])),
+            ["turn_structure"],
+        )
+
+    def test_type_drift_is_missed_by_tool_use_gate_but_caught_by_turn_invariant(self):
+        # Regression lock for the research §3 gap: an envelope-`type`
+        # rename zeros tool_use_count too (the old canary's only gate),
+        # so the old canary would have silently passed this fixture. The
+        # turn-structure invariant (gated on parsed_lines, not tool_use)
+        # still catches it.
+        mined = tm.mine(_fixture("drift-type.jsonl"))
+        self.assertEqual(mined["tool_use_count"], 0)
+        with self.assertRaises(tm.SchemaDriftError):
+            tm.schema_canary([mined])
+
+    def test_mixed_batch_with_aborted_session_does_not_raise(self):
+        # An all-system/pr-link (zero-turn) "aborted session" snippet
+        # mixed with a healthy session must not false-positive the broad
+        # I3 parsed_lines>0 gate at batch scope -- the healthy session's
+        # turns/usage/friction dominate the batch total.
+        aborted_session = {
+            "tool_use_count": 0,
+            "friction_field_presence": 0,
+            "assistant_turn_count": 0,
+            "usage_field_presence": 0,
+            "turn_count": 0,
+            "parsed_line_count": 3,
+            "transcript_version": "2.1.198",
+        }
+        healthy = tm.mine(_fixture("friction.jsonl"))
+        findings = tm.validate_structure([aborted_session, healthy])
+        self.assertEqual(findings, [])
+
+
+class MineCounterTests(unittest.TestCase):
+    """New structural presence counters mine() returns for
+    validate_structure()'s field-level drift contract."""
+
+    def test_new_presence_counters_on_friction_fixture(self):
+        mined = tm.mine(_fixture("friction.jsonl"))
+        # friction.jsonl: 7 lines (user, assistant, user, assistant,
+        # system, system, pr-link). 4 turns (2 user + 2 assistant); both
+        # assistant lines carry a real usage block; all 7 lines parse.
+        self.assertEqual(mined["turn_count"], 4)
+        self.assertEqual(mined["assistant_turn_count"], 2)
+        self.assertEqual(mined["usage_field_presence"], 2)
+        self.assertEqual(mined["parsed_line_count"], 7)
+
+    def test_usage_field_presence_zero_when_usage_key_renamed(self):
+        mined = tm.mine(_fixture("drift-usage.jsonl"))
+        self.assertEqual(mined["assistant_turn_count"], 2)
+        self.assertEqual(mined["usage_field_presence"], 0)
+
+    def test_usage_field_presence_counts_present_but_all_zero_tokens(self):
+        # Structural presence regardless of value -- mirrors how
+        # friction_field_presence counts an is_error:false. A usage block
+        # whose four *_tokens keys are all present but zero still counts as
+        # present (usage_field_presence == 1), so I2 does NOT fire. Locks
+        # the key-membership check (`key in usage`) against a future
+        # refactor to value-truthiness (`usage.get(key)`), which would
+        # wrongly read an all-zero-but-present usage as absent and mask the
+        # real drift signal it exists to detect.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "zero-usage.jsonl"
+            lines = [
+                json.dumps(
+                    {
+                        "type": "user",
+                        "sessionId": "fixture-zerousage-0001",
+                        "uuid": "u1",
+                        "parentUuid": None,
+                        "timestamp": "2026-01-02T09:00:00.000Z",
+                        "cwd": "/Users/fixtureuser/code/tidy-app",
+                        "version": "2.1.198",
+                        "message": {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "sessionId": "fixture-zerousage-0001",
+                        "uuid": "a1",
+                        "parentUuid": "u1",
+                        "timestamp": "2026-01-02T09:00:01.000Z",
+                        "cwd": "/Users/fixtureuser/code/tidy-app",
+                        "version": "2.1.198",
+                        "message": {
+                            "role": "assistant",
+                            "usage": {
+                                "input_tokens": 0,
+                                "output_tokens": 0,
+                                "cache_creation_input_tokens": 0,
+                                "cache_read_input_tokens": 0,
+                            },
+                            "content": [{"type": "text", "text": "hello"}],
+                        },
+                    }
+                ),
+            ]
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            mined = tm.mine(path)
+        self.assertEqual(mined["assistant_turn_count"], 1)
+        # present-but-zero counts as structural presence -> I2 stays silent
+        self.assertEqual(mined["usage_field_presence"], 1)
+        self.assertEqual(tm.validate_structure([mined]), [])
+        # the zero values are genuinely read (value extraction still works)
+        self.assertEqual(mined["token_totals"]["input_tokens"], 0)
+
+    def test_turn_count_zero_when_envelope_type_renamed(self):
+        mined = tm.mine(_fixture("drift-type.jsonl"))
+        self.assertEqual(mined["turn_count"], 0)
+        self.assertEqual(mined["assistant_turn_count"], 0)
+        self.assertGreater(mined["parsed_line_count"], 0)
+
+
+class EvidenceBundleCounterTests(unittest.TestCase):
+    def test_bundle_sessions_carry_new_counters(self):
+        path = _fixture("friction.jsonl")
+        mined = tm.mine(path)
+        bundle = tm.mine_to_evidence_bundle([path])
+        session = bundle["sessions"][0]
+        self.assertEqual(session["turn_count"], mined["turn_count"])
+        self.assertEqual(session["assistant_turn_count"], mined["assistant_turn_count"])
+        self.assertEqual(session["usage_field_presence"], mined["usage_field_presence"])
+        self.assertEqual(session["parsed_line_count"], mined["parsed_line_count"])
 
 
 class MalformedLineTests(unittest.TestCase):
