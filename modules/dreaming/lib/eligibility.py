@@ -6,11 +6,11 @@ described in the composite-eligibility plan (plan.md §3.5). It takes an
 already-computed ``SignalBundle`` (scalars in) and returns an
 ``EligibilityDecision`` (decision out). It performs NO I/O: no filesystem,
 no network, no subprocess, and imports nothing beyond the stdlib set
-``dataclasses`` / ``math`` / ``difflib`` / ``re`` (plus ``__future__`` for
-deferred annotations). The HARD INVARIANT of the dreaming module -- "model
-proposes, deterministic rails decide" -- is enforceable here by an AST test
-precisely because this file cannot reach the store, the transcripts, or the
-network.
+``re`` / ``dataclasses`` / ``difflib`` (plus ``__future__`` for deferred
+annotations) -- a subset of the §3.5 permitted set. The HARD INVARIANT of
+the dreaming module -- "model proposes, deterministic rails decide" -- is
+enforceable here by an AST test precisely because this file cannot reach the
+store, the transcripts, or the network.
 
 Fail-closed doctrine (plan.md §1.4 principle 1, decisions.md #23): a signal
 that cannot be computed is 0, never 0.5, and NO signal computation catches an
@@ -60,6 +60,12 @@ MIN_STATIC_FLOOR = 4
 # minimum-viable motivating shape (case (d)) passes at <=15.4 days evidence
 # age, while stale junk (case (e)) fails at 0.41. `type` is NOT a scoring
 # input (decisions.md #38) -- the blend is four signals, weights sum to 1.0.
+#
+# Consumers that seed a config and then mutate it MUST take their seed from
+# :func:`default_eligibility` (a fresh, fully-independent copy). ``dict()`` of
+# this constant is a SHALLOW copy that ALIASES the nested ``weights`` dict, so
+# mutating a seed's weights in place would corrupt this module global
+# process-wide -- see :func:`default_eligibility` and R2.
 DEFAULT_ELIGIBILITY: dict = {
     "enabled": False,
     "static_floor": 5,
@@ -77,6 +83,22 @@ DEFAULT_ELIGIBILITY: dict = {
     "excerpt_match_min": 0.85,
     "max_transcript_bytes": 50000000,
 }
+
+
+def default_eligibility() -> dict:
+    """Return a fresh, fully-independent copy of :data:`DEFAULT_ELIGIBILITY`.
+
+    Consumers that seed an eligibility config and then mutate it (E2's
+    ``load_config()``, E3, tests) MUST obtain their seed here, NOT via
+    ``dict(DEFAULT_ELIGIBILITY)`` -- the latter is a shallow copy that ALIASES
+    the nested ``weights`` dict, so mutating the seed's weights corrupts the
+    module global process-wide (R2). This rebuilds the top-level dict AND a
+    fresh nested ``weights`` dict, so no reference to the constant survives.
+    :data:`DEFAULT_ELIGIBILITY` remains the canonical value; deriving the copy
+    from it keeps the two structurally unable to drift.
+    """
+    return {**DEFAULT_ELIGIBILITY, "weights": dict(DEFAULT_ELIGIBILITY["weights"])}
+
 
 # The exact four signal names the weights dict must carry. A stray key
 # (e.g. a pre-#38 "type_prior") is a validation FAILURE, catching stale
@@ -255,7 +277,13 @@ def _recency_score(newest_evidence_age_days: float | None, half_life_days: float
     """
     if newest_evidence_age_days is None:
         return 0.0
-    return 0.5 ** (newest_evidence_age_days / half_life_days)
+    # Clamp age to >= 0 before the exponent so a future-dated (negative-age)
+    # evidence timestamp cannot yield reĉ > 1 and push S out of [0, 1] (§3.3's
+    # "all ∈ [0,1]" normalization contract). A forged/skewed future timestamp
+    # gets at most the same 1.0 an age≈0 forger already gets -- never more. A
+    # NaN age stays NaN through max(), so S becomes NaN and fails closed.
+    age_days = max(newest_evidence_age_days, 0.0)
+    return 0.5 ** (age_days / half_life_days)
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +345,22 @@ def evaluate_eligibility(bundle: SignalBundle, optimistic: dict) -> EligibilityD
     this function owns steps 2, 4, 5, 6. It reads the eligibility sub-block
     plus ``confidence_floor_content`` and ``add_min_sessions`` from the whole
     merged ``optimistic`` dict.
+
+    Only ``learning_add`` / ``learning_supersede`` are routable here; steps 5-6
+    are "unreachable for kinds outside {add, supersede} by construction"
+    (plan.md §3.2). This raises ``ValueError`` (rather than returning a skip) on
+    any other kind so a future E3 routing slip fails CLOSED: the caller's outer
+    handler converts the exception to ``internal_error``, never an eligible
+    verdict. Raising keeps the outcome set a stable parse contract (no new
+    string) while making an unknown kind non-compensable by any signal.
     """
+    if bundle.kind not in ("learning_add", "learning_supersede"):
+        raise ValueError(
+            f"evaluate_eligibility received unroutable kind {bundle.kind!r}; "
+            "only 'learning_add'/'learning_supersede' reach the composite gate "
+            "(plan.md §3.2)"
+        )
+
     elig = optimistic["eligibility"]
     threshold = elig["threshold"]
     static_floor = elig["static_floor"]

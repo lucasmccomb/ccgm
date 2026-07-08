@@ -34,6 +34,7 @@ from eligibility import (  # noqa: E402
     EligibilityDecision,
     SignalBundle,
     composite_score,
+    default_eligibility,
     evaluate_eligibility,
     normalize_content,
     novelty_vs,
@@ -322,6 +323,58 @@ class MonotonicityTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Recency clamp — negative / extreme evidence age (B1 fail-open regression)
+# ---------------------------------------------------------------------------
+
+
+class RecencyClampTests(unittest.TestCase):
+    def test_negative_age_recency_clamps_to_one(self):
+        # B1: a future-dated (negative-age) timestamp must not score reĉ > 1.
+        _, sig = composite_score(bundle(newest_evidence_age_days=-30.0), DEFAULT_ELIGIBILITY)
+        self.assertEqual(sig["recency"], 1.0)
+        s, _ = composite_score(bundle(newest_evidence_age_days=-30.0), DEFAULT_ELIGIBILITY)
+        self.assertLessEqual(s, 1.0)
+
+    def test_future_dated_attack_now_skips_composite(self):
+        # The exact reproduced B1 attack: pre-clamp this scored S=1.16 -> ELIGIBLE
+        # (fail-open); the age=+60 twin is §3.9 case (e) at S=0.410 (skipped).
+        # With the clamp, reĉ saturates at 1.0 and
+        # S = .40*.5 + .30*.5 + .20*1.0 + .10*.1 = .560 < .58 -> skipped_composite.
+        b = bundle(kind="learning_add", confidence=5, verified_sessions=2,
+                   evidence_tier="inferred", newest_evidence_age_days=-60.0, novelty=0.1)
+        s, sig = composite_score(b, DEFAULT_ELIGIBILITY)
+        self.assertEqual(sig["recency"], 1.0)
+        self.assertEqual(round(s, 3), 0.560)
+        d = evaluate_eligibility(b, opt())
+        self.assertFalse(d.eligible)
+        self.assertEqual(d.outcome, "skipped_composite")
+
+    def test_all_signals_and_score_bounded_over_extreme_ages(self):
+        # Property sweep: across an age grid that spans future-dated, zero,
+        # huge, and infinite ages AND extreme (out-of-range) signal inputs,
+        # every emitted signal and the score stay in [0, 1]. (NaN age is
+        # excluded by design — it fails closed to S=NaN, not into [0,1].)
+        ages = (-1e9, -1.0, 0.0, 1.0, 1e9, float("inf"))
+        for kind in ("learning_add", "learning_supersede"):
+            for conf in (-5, 0, 5, 10, 99):
+                for vs in (-1, 0, 2, 99):
+                    for tier in ("inferred", "user-corrected"):
+                        for nov in (-1.0, 0.0, 0.5, 1.0, 5.0):
+                            for age in ages:
+                                b = bundle(kind=kind, confidence=conf, verified_sessions=vs,
+                                           evidence_tier=tier, newest_evidence_age_days=age,
+                                           novelty=nov)
+                                s, sig = composite_score(b, DEFAULT_ELIGIBILITY)
+                                ctx = (f"kind={kind} conf={conf} vs={vs} tier={tier} "
+                                       f"nov={nov} age={age}")
+                                for name, val in sig.items():
+                                    self.assertGreaterEqual(val, 0.0, msg=f"{name} {ctx}")
+                                    self.assertLessEqual(val, 1.0, msg=f"{name} {ctx}")
+                                self.assertGreaterEqual(s, 0.0, msg=ctx)
+                                self.assertLessEqual(s, 1.0, msg=ctx)
+
+
+# ---------------------------------------------------------------------------
 # Origin gate non-compensability (property sweep)
 # ---------------------------------------------------------------------------
 
@@ -416,6 +469,40 @@ class LegacyEscapeTests(unittest.TestCase):
         b = bundle(kind="learning_supersede", confidence=9, verified_sessions=0, evidence_tier="inferred")
         self.assertTrue(evaluate_eligibility(b, opt()).eligible)  # legacy on admits
         self.assertEqual(evaluate_eligibility(b, opt(legacy_floor_admits=False)).outcome, "skipped_origin")
+
+
+# ---------------------------------------------------------------------------
+# Unknown-kind guard (R1 — fail closed on unroutable kinds)
+# ---------------------------------------------------------------------------
+
+
+class UnknownKindGuardTests(unittest.TestCase):
+    def _maxed(self, kind):
+        # Maxed signals: if a kind slipped through, this would be ELIGIBLE.
+        return bundle(kind=kind, confidence=10, verified_sessions=9,
+                      evidence_tier="user-corrected", newest_evidence_age_days=0.0, novelty=1.0)
+
+    def test_learning_verify_raises_even_with_maxed_signals(self):
+        with self.assertRaises(ValueError):
+            evaluate_eligibility(self._maxed("learning_verify"), opt())
+
+    def test_learning_contradict_raises_even_with_maxed_signals(self):
+        with self.assertRaises(ValueError):
+            evaluate_eligibility(self._maxed("learning_contradict"), opt())
+
+    def test_garbage_kind_raises_even_with_maxed_signals(self):
+        with self.assertRaises(ValueError):
+            evaluate_eligibility(self._maxed("totally_bogus"), opt())
+
+    def test_valueerror_names_the_offending_kind(self):
+        with self.assertRaises(ValueError) as cm:
+            evaluate_eligibility(self._maxed("learning_verify"), opt())
+        self.assertIn("learning_verify", str(cm.exception))
+
+    def test_routable_kinds_do_not_raise(self):
+        for kind in ("learning_add", "learning_supersede"):
+            # Should evaluate without raising (verdict itself is not asserted here).
+            evaluate_eligibility(self._maxed(kind), opt())
 
 
 # ---------------------------------------------------------------------------
@@ -564,6 +651,32 @@ class ValidateConfigTests(unittest.TestCase):
         ok, errors = validate_eligibility_config(["not", "a", "dict"])
         self.assertFalse(ok)
         self.assertTrue(errors)
+
+
+# ---------------------------------------------------------------------------
+# default_eligibility() factory (R2 — no shared-nested-weights aliasing)
+# ---------------------------------------------------------------------------
+
+
+class DefaultEligibilityFactoryTests(unittest.TestCase):
+    def test_factory_equals_constant_by_value(self):
+        self.assertEqual(default_eligibility(), DEFAULT_ELIGIBILITY)
+
+    def test_factory_mutation_does_not_corrupt_constant(self):
+        f = default_eligibility()
+        f["weights"]["confidence"] = 0.99
+        self.assertEqual(DEFAULT_ELIGIBILITY["weights"]["confidence"], 0.40)
+
+    def test_two_factory_calls_do_not_alias(self):
+        a = default_eligibility()
+        b = default_eligibility()
+        a["weights"]["recency"] = 0.99
+        self.assertEqual(b["weights"]["recency"], 0.20)
+        a["threshold"] = 0.1
+        self.assertNotEqual(b["threshold"], 0.1)
+
+    def test_factory_weights_is_not_the_constant_weights_object(self):
+        self.assertIsNot(default_eligibility()["weights"], DEFAULT_ELIGIBILITY["weights"])
 
 
 # ---------------------------------------------------------------------------
@@ -725,6 +838,11 @@ class WeakestSignalTests(unittest.TestCase):
 
 
 class PurityTests(unittest.TestCase):
+    # The §3.5 permitted stdlib set, NOT the set actually imported. The module
+    # imports only re/dataclasses/difflib/__future__ (math and typing are
+    # allowed-but-unused). This is intentionally a superset so a future pure
+    # helper may reach for math/typing without a lint change; the AST test only
+    # rejects imports OUTSIDE this permitted set.
     ALLOWED_IMPORTS = {"__future__", "dataclasses", "math", "difflib", "re", "typing"}
 
     def _tree(self):
