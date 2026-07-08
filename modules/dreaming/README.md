@@ -99,8 +99,8 @@ The **nightly map->reduce analyzer**, on top of Epic 2's miner:
   written row is validated against before it touches disk.
 - `bin/dream-digest.sh` -- renders `~/.claude/dreaming/digests/{date}.md`:
   proposals grouped by project/kind with evidence, prevalence, and
-  confidence; a durable canary banner (schema drift / untested transcript
-  versions) that stays visible across days until acknowledged; yesterday's
+  confidence; a durable canary banner for schema-drift/reduce-failure
+  incidents that stays visible across days until acknowledged; yesterday's
   applied/rejected tally (forward-compatible with a later apply path).
 - `bin/dream-scorecard.sh` / `lib/scorecard.py` -- read-only weekly
   observability scorecard (`/dream-scorecard`) rendered to
@@ -128,8 +128,12 @@ calls, no LLM calls, no scheduling:
   command_prefix)`.
 - `budget(clusters, max_input_tokens)` -- trim to a token cap without ever
   dropping a friction cluster entirely.
-- `schema_canary(mined_sessions)` -- fail loud (raise) if the transcript
-  schema appears to have drifted since this miner was last validated.
+- `schema_canary(mined_sessions)` -- validates a field-level structural
+  contract via `validate_structure()` (friction, token-economics,
+  turn-structure); fails loud (raises `SchemaDriftError`, naming the
+  broken field + extraction) only on real structural drift, and passes a
+  benign Claude Code version bump silently -- no version allowlist to
+  maintain.
 
 The map-reduce analyzer that turns evidence into proposals landed in Epic 3
 (see above). The apply path / slash commands / scheduler, the eval harness,
@@ -201,7 +205,7 @@ Schema, validated by both this module's `--self-check` and, in Epic 3,
   "max_input_tokens": 200000,
   "over_budget": false,
   "malformed_line_total": 0,
-  "canary": {"observed_versions": {"2.1.198": 4}, "untested_versions": []}
+  "canary": {"observed_versions": {"2.1.198": 4}}
 }
 ```
 
@@ -226,13 +230,31 @@ machine (Epic 3's API calls).
 
 The transcript JSONL is an undocumented, internal Claude Code format that
 has already drifted once (a `queue-operation` line type absent from earlier
-research). `schema_canary()` distinguishes "genuinely quiet week" (friction
-*fields* present, just reporting no problems) from "the miner no longer
-recognizes this transcript version's field names" (fields absent despite
-`tool_use` activity) and raises loudly in the second case rather than
-silently returning an empty evidence bundle. It also records the observed
-`version` distribution so an untested version is visible even when it
-doesn't (yet) trip the canary.
+research). `schema_canary()` validates a field-level structural contract via
+the pure `validate_structure()` -- three hard invariants, each gated on a
+corroborating "should-be-present" signal so a genuinely quiet week never
+trips a finding:
+
+- **friction** -- gated on `tool_use_count > 0`; violated when zero
+  recognized friction-bearing fields (`is_error`/`toolUseResult`/
+  `hookErrors`/`preventedContinuation`) were found anywhere in the batch.
+- **token-economics** -- gated on `assistant_turn_count > 0`; violated when
+  zero recognized token/cache usage fields were found anywhere.
+- **turn-structure** -- gated on `parsed_line_count > 0`; violated when zero
+  recognized user/assistant turns were found anywhere (this is what catches
+  an envelope-`type` rename, which would otherwise silently zero
+  `tool_use_count` too and slip past the friction invariant).
+
+A violation raises `SchemaDriftError` naming the specific broken extraction
+and field. `dream_analyze.py` catches it and records it as the one loud,
+durable alarm (`state/canary.json`'s `active_incidents`, rendered by the
+digest banner) rather than silently returning a thin evidence bundle. A
+benign Claude Code version bump with every field intact passes silently --
+there is no version allowlist to maintain, and the observed `version`
+distribution (`canary.observed_versions`) is recorded for information only
+and never gates the raise. PR-link field drift is a documented, accepted
+residual the canary does not detect (PR links are optional evidence, not
+integrity-critical).
 
 ## Quick checks
 
