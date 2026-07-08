@@ -40,8 +40,9 @@ signals — the honest answer to "how do I know the memory system is working?"
     but not yet read-eligible) — a live snapshot as of report generation, not
     window-scoped, mirroring Store health's own always-current framing.
   - **reverted after review** — rows vetoed or batch-reverted this window
-    (apply-audit `outcome: "reverted"`). This is a convention `/dream-review`
-    (#804) is expected to write when it ships; until then this reads 0.
+    (apply-audit `outcome: "reverted"`). `/dream-review` (#823) writes this
+    record via `apply_dream_proposal.record_review_reversal`, which
+    `scorecard.py`'s `_aggregate_optimistic` counts.
   - **circuit-breaker trips** — how many times the windowed anomaly breaker
     tripped this window (apply-audit `outcome: "circuit_breaker_tripped"`),
     plus whether the breaker is currently suspended

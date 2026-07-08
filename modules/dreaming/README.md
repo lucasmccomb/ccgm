@@ -29,6 +29,46 @@ map-reduce analyzer / apply path / eval harness / scheduler foundation) and
 `~/code/plans/ccgm-optimistic-memory/plan.md` (the dwell-window,
 per-op-kind-posture optimistic auto-integration engine built on top of it).
 
+## What's implemented so far (composite-eligibility)
+
+An **opt-in composite eligibility gate** in front of the optimistic engine's
+`learning_add`/`learning_supersede` admission -- a second, independent opt-in
+*beneath* `optimistic_integration.enabled`, both flags `false` by default:
+
+- `lib/eligibility.py` -- the pure, I/O-free scoring core
+  (`DEFAULT_ELIGIBILITY`, `evaluate_eligibility()`,
+  `validate_eligibility_config()`). When
+  `optimistic_integration.eligibility.enabled` is on, an `add`/`supersede`
+  passes a deterministic waterfall with no LLM in the write decision: a static
+  floor (`static_floor` default 5, never below the hard-coded
+  `MIN_STATIC_FLOOR = 4` a config edit cannot hollow out); a legacy escape (so
+  enabling only widens what admits, never narrows it); a non-compensatory
+  origin gate (user-corrected tier OR >= 2 transcript-verified sessions -- no
+  soft signal rescues a weak origin); then a composite score
+  `S = Σ wᵢ·signalᵢ >= θ` (θ default 0.58) over four signals -- `confidence`
+  .40, `prevalence` .30, `recency` .20, `novelty` .10 -- all re-derived from
+  the transcripts and live store at apply time, never trusted from the row.
+  Evictions (`contradict`/`deprecate`) and `verify` are untouched; the gate
+  scopes adds/supersedes only.
+- `lib/apply_dream_proposal.py` -- the `eligibility-dry-run` CLI: a read-only
+  what-if inspector that scores a day's pending add/supersede proposals and
+  prints the per-signal breakdown, applying nothing and writing no audit. It
+  force-scores even while the gate is disabled in config, so you can preview a
+  day before opting in:
+  `python3 modules/dreaming/lib/apply_dream_proposal.py eligibility-dry-run [--date YYYY-MM-DD]`.
+- [`docs/composite-eligibility-poisoning-analysis.md`](docs/composite-eligibility-poisoning-analysis.md)
+  -- the adversarial poisoning analysis of the gate when enabled (threat model,
+  per-signal forgeability table, attack walkthroughs, residual-risk register),
+  every code-behavior claim cited to a passing test.
+- `.github/workflows/module-tests.yml` -- a required, blocking PR check
+  (ubuntu + macOS) running the `dreaming` + `self-improving` pytest suites, the
+  disabled- and enabled-mode offline chain smokes, and the offline eval harness.
+
+`optimistic_integration.eligibility.enabled` is `false` by default; the
+operator opts in via `memory-setup.sh` (offered only once optimistic mode
+itself is on), never a hand JSON edit. Full contract:
+`modules/dreaming/rules/dreaming.md` > "Eligibility composite".
+
 ## What's implemented so far (optimistic-memory Epics 1-8)
 
 The **opt-in optimistic auto-integration engine**, on top of the map-reduce

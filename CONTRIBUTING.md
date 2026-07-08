@@ -264,6 +264,19 @@ bash tests/test-installer.sh
 
 This runs the installer in a temporary directory to verify end-to-end behavior.
 
+### Module unit-test CI (dreaming + self-improving)
+
+The `dreaming` and `self-improving` modules are guarded by a required, blocking PR check, `.github/workflows/module-tests.yml`, that runs on **both** `ubuntu-latest` and `macos-latest` (macOS is ground truth — green-locally is not green-on-runner). It runs four steps: (a) the `dreaming` + `self-improving` pytest suites, (b) the disabled-mode (legacy-path) offline chain smoke, (c) the enabled-mode (composite eligibility) offline chain smoke, and (d) the offline eval harness. Reproduce the same commands locally:
+
+```bash
+python3 -m pytest modules/dreaming/tests/ modules/self-improving/tests/ -q
+CCGM_DREAMING_DIR="$(mktemp -d)" CCGM_LEARNINGS_DIR="$(mktemp -d)" \
+  bash modules/dreaming/bin/dream-daily.sh \
+    --offline modules/dreaming/tests/fixtures/offline-responses --force-day 2026-01-02
+bash modules/dreaming/tests/test-eligibility-enabled-chain.sh
+bash modules/dreaming/bin/dream-eval.sh --offline modules/dreaming/tests/fixtures/offline-responses
+```
+
 ## Commit Message Format
 
 All commits must follow this format:
