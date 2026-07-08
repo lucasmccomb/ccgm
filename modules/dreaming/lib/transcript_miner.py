@@ -285,6 +285,25 @@ def _text_from_content(content: Any) -> str:
     return ""
 
 
+def _is_human_origin_turn(obj: dict[str, Any]) -> bool:
+    """True iff a `type:"user"` transcript line was authored by the human
+    operator directly, rather than being a tool_result / synthetic / replayed
+    turn.
+
+    Requires an explicit POSITIVE origin signal -- `origin.kind == "human"`
+    OR `promptSource == "typed"` (both fields already present in the
+    transcript format and previously unread here; sec-C1, decisions.md #15).
+    Fail-closed: a turn missing BOTH signals is NOT treated as human-origin,
+    so a tool_result-only turn (which carries neither) can never mint a
+    user-correction even when its embedded tool output happens to contain a
+    negation phrase.
+    """
+    origin = obj.get("origin")
+    if isinstance(origin, dict) and origin.get("kind") == "human":
+        return True
+    return obj.get("promptSource") == "typed"
+
+
 def normalize_command_prefix(command: str, max_len: int = 80) -> str:
     """Normalize a shell command to a stable clustering key.
 
@@ -510,7 +529,14 @@ def mine(path: str | Path) -> dict[str, Any]:
             content = message.get("content")
             user_text = _text_from_content(content)
             turn_sequence.append(
-                {"turn_index": turn_index, "role": "user", "lineno": lineno, "text": user_text, "timestamp": ts}
+                {
+                    "turn_index": turn_index,
+                    "role": "user",
+                    "lineno": lineno,
+                    "text": user_text,
+                    "timestamp": ts,
+                    "human_origin": _is_human_origin_turn(obj),
+                }
             )
 
             if isinstance(obj.get("toolUseResult"), dict):
@@ -577,6 +603,14 @@ def mine(path: str | Path) -> dict[str, Any]:
     user_corrections: list[dict[str, Any]] = []
     for turn in turn_sequence:
         if turn["role"] != "user":
+            continue
+        # sec-C1 (decisions.md #15): a user-correction may only be minted from
+        # a human-authored turn. A tool_result-only turn carries no origin
+        # signal and is skipped here, so a negation phrase appearing INSIDE
+        # tool output can never be mistaken for the operator correcting the
+        # agent. Fail-closed: a turn with neither origin.kind=="human" nor
+        # promptSource=="typed" is not a correction candidate.
+        if not turn.get("human_origin"):
             continue
         lowered = turn["text"].lower()
         if not any(phrase in lowered for phrase in NEGATION_PHRASES):

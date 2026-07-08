@@ -18,6 +18,7 @@ Run with: python3 -m pytest modules/dreaming/tests/test_dream_analyze.py -q
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import sys
@@ -478,6 +479,171 @@ class ConfigMigrationTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# stamp_proposal_signals(): deterministic post-reduce signal stamping
+# (composite-eligibility plan.md §3.8). Digest aids only; never trusted by the
+# apply-time gate. Runs after fingerprint computation, so it must never change
+# a fingerprint.
+# ---------------------------------------------------------------------------
+
+class StampProposalSignalsTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg = dict(da.DEFAULT_CONFIG)
+        self.schema = da._load_proposal_schema()  # noqa: SLF001
+        self.store_by_id = {"widget-app": {}, da.GLOBAL_SLUG: {}}
+
+    def _row(self, session_ids, **overrides):
+        raw = {
+            "kind": "learning_add",
+            "project": "widget-app",
+            "target_id": None,
+            "content": "Deploys outside business hours are blocked by a pre-tool-use hook.",
+            "type": "pitfall",
+            "confidence": 6,
+            "prevalence": {"sessions": len(session_ids), "agents": 1},
+            "evidence": [
+                {"session_id": sid, "excerpt": f"friction excerpt for {sid}"} for sid in session_ids
+            ],
+            "justification": "Observed across sessions.",
+        }
+        raw.update(overrides)
+        row, reason = da.finalize_proposal(
+            raw, store_by_id=self.store_by_id, cfg=self.cfg, proposal_schema=self.schema
+        )
+        self.assertIsNone(reason, reason)
+        return row
+
+    @staticmethod
+    def _bundle(sessions):
+        return {"sessions": sessions}
+
+    def test_stamps_started_at_and_user_corrected_tier(self):
+        row = self._row(["s-1", "s-2"])
+        bundles = {
+            "widget-app": self._bundle([
+                {"session_id": "s-1", "started_at": "2026-07-06T10:00:00.000Z", "user_corrections": [{"excerpt": "no, that's wrong"}]},
+                {"session_id": "s-2", "started_at": "2026-07-07T09:00:00.000Z", "user_corrections": []},
+            ])
+        }
+        da.stamp_proposal_signals([row], bundles)
+        starts = {e["session_id"]: e.get("started_at") for e in row["evidence"]}
+        self.assertEqual(starts["s-1"], "2026-07-06T10:00:00.000Z")
+        self.assertEqual(starts["s-2"], "2026-07-07T09:00:00.000Z")
+        self.assertEqual(row["evidence_tier"], "user-corrected")
+        self.assertEqual(row["stamped_signals"]["evidence_tier"], "user-corrected")
+        self.assertEqual(row["stamped_signals"]["newest_evidence_started_at"], "2026-07-07T09:00:00.000Z")
+        # The stamped row still validates against the (additive) schema.
+        self.assertEqual(da.validate_against_schema(row, self.schema), [])
+
+    def test_no_user_correction_yields_inferred_tier(self):
+        row = self._row(["s-1"])
+        bundles = {
+            "widget-app": self._bundle([
+                {"session_id": "s-1", "started_at": "2026-07-06T10:00:00.000Z", "user_corrections": []},
+            ])
+        }
+        da.stamp_proposal_signals([row], bundles)
+        self.assertEqual(row["evidence_tier"], "inferred")
+        self.assertEqual(row["evidence"][0]["started_at"], "2026-07-06T10:00:00.000Z")
+
+    def test_session_absent_from_bundle_stays_inferred_and_omits_started_at(self):
+        row = self._row(["s-missing"])
+        bundles = {
+            "widget-app": self._bundle([
+                {"session_id": "s-present", "started_at": "2026-07-06T10:00:00.000Z", "user_corrections": [{"excerpt": "no, that's wrong"}]},
+            ])
+        }
+        da.stamp_proposal_signals([row], bundles)
+        self.assertEqual(row["evidence_tier"], "inferred")
+        self.assertNotIn("started_at", row["evidence"][0])
+        self.assertIsNone(row["stamped_signals"]["newest_evidence_started_at"])
+
+    def test_slug_absent_from_bundles_is_inferred(self):
+        row = self._row(["s-1"])
+        da.stamp_proposal_signals([row], {})  # no bundle for widget-app at all
+        self.assertEqual(row["evidence_tier"], "inferred")
+        self.assertNotIn("started_at", row["evidence"][0])
+
+    def test_stamping_does_not_change_fingerprint(self):
+        row = self._row(["s-1", "s-2"])
+        fingerprint_before = row["fingerprint"]
+        bundles = {
+            "widget-app": self._bundle([
+                {"session_id": "s-1", "started_at": "2026-07-06T10:00:00.000Z", "user_corrections": [{"excerpt": "x"}]},
+                {"session_id": "s-2", "started_at": "2026-07-07T09:00:00.000Z", "user_corrections": []},
+            ])
+        }
+        da.stamp_proposal_signals([row], bundles)
+        self.assertEqual(row["fingerprint"], fingerprint_before)
+
+    def test_stamping_is_deterministic(self):
+        bundles = {
+            "widget-app": self._bundle([
+                {"session_id": "s-1", "started_at": "2026-07-06T10:00:00.000Z", "user_corrections": [{"excerpt": "x"}]},
+                {"session_id": "s-2", "started_at": "2026-07-07T09:00:00.000Z", "user_corrections": []},
+            ])
+        }
+        row = self._row(["s-1", "s-2"])
+        da.stamp_proposal_signals([row], bundles)
+        first = copy.deepcopy(row)
+        # Same inputs -> byte-identical output (idempotent + deterministic).
+        da.stamp_proposal_signals([row], bundles)
+        self.assertEqual(row, first)
+
+
+# ---------------------------------------------------------------------------
+# Additive proposal-schema fields (composite-eligibility plan.md §3.8 / §5 E2):
+# evidence[].started_at, evidence_tier, stamped_signals. Old rows must still
+# validate; new rows validate; the evidence_tier enum is enforced.
+# ---------------------------------------------------------------------------
+
+class ProposalSchemaStampedFieldsTests(unittest.TestCase):
+    def setUp(self):
+        self.schema = da._load_proposal_schema()  # noqa: SLF001
+
+    @staticmethod
+    def _base_row():
+        return {
+            "id": "abc123def456",
+            "kind": "learning_add",
+            "project": "widget-app",
+            "target_id": None,
+            "content": "Deploys are blocked outside hours.",
+            "type": "pitfall",
+            "confidence": 6,
+            "prevalence": {"sessions": 1, "agents": 1},
+            "evidence": [{"session_id": "s-1", "excerpt": "hook blocked deploy"}],
+            "justification": "Observed.",
+            "fingerprint": "deadbeefcafe",
+            "generated_at": "2026-07-07T00:00:00.000Z",
+            "status": "pending",
+        }
+
+    def test_old_row_without_new_fields_still_validates(self):
+        self.assertEqual(da.validate_against_schema(self._base_row(), self.schema), [])
+
+    def test_stamped_row_validates(self):
+        row = self._base_row()
+        row["evidence"][0]["started_at"] = "2026-07-06T10:00:00.000Z"
+        row["evidence_tier"] = "user-corrected"
+        row["stamped_signals"] = {
+            "evidence_tier": "user-corrected",
+            "newest_evidence_started_at": "2026-07-06T10:00:00.000Z",
+        }
+        self.assertEqual(da.validate_against_schema(row, self.schema), [])
+
+    def test_inferred_tier_with_null_newest_validates(self):
+        row = self._base_row()
+        row["evidence_tier"] = "inferred"
+        row["stamped_signals"] = {"evidence_tier": "inferred", "newest_evidence_started_at": None}
+        self.assertEqual(da.validate_against_schema(row, self.schema), [])
+
+    def test_invalid_evidence_tier_enum_rejected(self):
+        row = self._base_row()
+        row["evidence_tier"] = "bogus-tier"
+        self.assertTrue(da.validate_against_schema(row, self.schema))
+
+
+# ---------------------------------------------------------------------------
 # Pricing / cost estimation.
 # ---------------------------------------------------------------------------
 
@@ -605,6 +771,39 @@ class MainIntegrationTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertFalse((dreaming_dir / "proposals" / "2026-01-01.jsonl").exists())
         self.assertFalse((dreaming_dir / "state" / "last-dreamed.json").exists())
+
+    def test_offline_chain_stamps_signals_onto_proposals(self):
+        # composite-eligibility §3.8: the deterministic post-reduce stamping
+        # pass runs inside main(), so proposals emitted by the offline chain
+        # carry evidence_tier + stamped_signals (and evidence items whose
+        # session is in the mined bundle carry started_at) -- none of which
+        # the reduce fixture itself supplies.
+        dreaming_dir = _isolate_env(self)
+        projects_root = _make_projects_root("stamp")
+        self.addCleanup(lambda: __import__("shutil").rmtree(projects_root, ignore_errors=True))
+
+        rc = da.main([
+            "--offline", str(OFFLINE_FIXTURES),
+            "--force-day", "2026-01-01",
+            "--slugs", "widget-app",
+            "--projects-root", str(projects_root),
+        ])
+        self.assertEqual(rc, 0)
+        day1 = dreaming_dir / "proposals" / "2026-01-01.jsonl"
+        rows = [json.loads(ln) for ln in day1.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        self.assertTrue(rows)
+        schema = da._load_proposal_schema()  # noqa: SLF001
+        for row in rows:
+            self.assertIn(row["evidence_tier"], ("user-corrected", "inferred"))
+            self.assertEqual(row["stamped_signals"]["evidence_tier"], row["evidence_tier"])
+            self.assertEqual(da.validate_against_schema(row, schema), [])
+        # friction.jsonl carries no human-origin user-correction -> inferred;
+        # its cited session IS in the widget-app bundle -> started_at stamped.
+        widget_rows = [r for r in rows if r["project"] == "widget-app"]
+        self.assertTrue(widget_rows)
+        for r in widget_rows:
+            self.assertEqual(r["evidence_tier"], "inferred")
+            self.assertTrue(any(e.get("started_at") for e in r["evidence"]))
 
     def test_fingerprint_dedup_across_two_consecutive_runs(self):
         dreaming_dir = _isolate_env(self)

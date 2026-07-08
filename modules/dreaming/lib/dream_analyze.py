@@ -1280,6 +1280,66 @@ def existing_fingerprints(exclude_path: Path | None = None) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+def stamp_proposal_signals(
+    written_rows: list[dict[str, Any]],
+    bundles: dict[str, dict[str, Any]],
+) -> None:
+    """Deterministic post-reduce signal-stamping pass (composite-eligibility
+    plan.md §3.8). Mutates `written_rows` IN PLACE, after finalize_proposal()
+    has already computed every fingerprint and before write_proposals() -- so
+    the stamped fields can never perturb a fingerprint (asserted by a test).
+
+    For each row it attaches, purely from the deterministic evidence bundle
+    (never from any model output):
+      * ``evidence[i]["started_at"]`` -- the cited session's bundle start
+        time, for evidence items whose session_id is present in this run's
+        bundle for the row's project slug.
+      * ``evidence_tier`` -- "user-corrected" iff any cited session present in
+        the bundle carries a user-correction (human-origin by construction of
+        the miner's own origin filter -- sec-C1), else "inferred".
+      * ``stamped_signals`` -- a compact digest-aid summary object.
+
+    These are digest aids ONLY. The enabled-mode eligibility gate (Epic E3)
+    re-derives every signal from the transcript files at apply time and its
+    gatherer takes NO stamped-field parameter, so a forged stamped value can
+    never influence a gate decision (arch-C3, decisions.md #20). A cited
+    session absent from this run's bundle contributes no started_at and does
+    not make the row user-corrected (fail toward the weaker "inferred").
+    """
+    # Per-slug {session_id: session} maps, built once from the bundles.
+    sessions_by_slug: dict[str, dict[str, dict[str, Any]]] = {}
+    for slug, bundle in bundles.items():
+        by_id: dict[str, dict[str, Any]] = {}
+        for session in bundle.get("sessions", []):
+            sid = session.get("session_id")
+            if isinstance(sid, str):
+                by_id[sid] = session
+        sessions_by_slug[slug] = by_id
+
+    for row in written_rows:
+        session_map = sessions_by_slug.get(row.get("project"), {})
+        newest_started_at: str | None = None
+        user_corrected = False
+        for item in row.get("evidence", []):
+            sid = item.get("session_id")
+            session = session_map.get(sid) if isinstance(sid, str) else None
+            if session is None:
+                continue
+            started_at = session.get("started_at")
+            if isinstance(started_at, str) and started_at:
+                item["started_at"] = started_at
+                if newest_started_at is None or started_at > newest_started_at:
+                    newest_started_at = started_at
+            if session.get("user_corrections"):
+                user_corrected = True
+        tier = "user-corrected" if user_corrected else "inferred"
+        row["evidence_tier"] = tier
+        row["stamped_signals"] = {
+            "evidence_tier": tier,
+            "newest_evidence_started_at": newest_started_at,
+        }
+
+
 def write_proposals(rows: list[dict[str, Any]], target_path: Path, *, overwrite: bool) -> None:
     target_path.parent.mkdir(parents=True, exist_ok=True)
     if overwrite:
@@ -1500,6 +1560,12 @@ def main(argv: list[str] | None = None) -> int:
             continue
         dedup_corpus.add(row["fingerprint"])
         written_rows.append(row)
+
+    # Deterministic post-reduce signal stamping (composite-eligibility §3.8):
+    # runs AFTER finalize_proposal() computed every fingerprint (above) and
+    # BEFORE write_proposals(), so the stamped fields provably cannot perturb
+    # any fingerprint.
+    stamp_proposal_signals(written_rows, bundles)
 
     write_proposals(written_rows, target_path, overwrite=bool(args.force_day))
 
