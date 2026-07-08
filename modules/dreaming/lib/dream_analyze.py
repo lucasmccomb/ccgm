@@ -82,6 +82,13 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 import transcript_miner as tm  # noqa: E402  (sibling module, same lib/ dir)
+# eligibility.py (composite-eligibility Epic E1) is the single owner of the
+# eligibility config contract -- DEFAULT_ELIGIBILITY + validate_eligibility_
+# config() (adrev2-005). load_config() below imports and seeds them; the
+# constant/validator are NEVER hand-copied here. This is a top-level sibling
+# import (resolved via the sys.path.insert above), so it requires eligibility.py
+# to exist -- E2 depends on merged E1 at its acceptance boundary (adrev3-001).
+import eligibility  # noqa: E402  (sibling module, same lib/ dir; owned by Epic E1)
 
 # learnings_store lives in a DIFFERENT module's lib/ dir (self-improving).
 # Reuse transcript_miner's own cross-module import helper rather than
@@ -280,6 +287,17 @@ def load_config() -> dict[str, Any]:
     # is the same object as DEFAULT_OPTIMISTIC_INTEGRATION -- a caller
     # mutating the returned config can never corrupt the shared default.
     cfg["optimistic_integration"] = dict(DEFAULT_OPTIMISTIC_INTEGRATION)
+    # Seed the eligibility sub-block defaults one level deeper (composite-
+    # eligibility plan.md §3.6) with the SAME re-copy-then-overlay pattern as
+    # the outer block above: a user's partial `eligibility` override must fill
+    # in over these defaults, not wipe the siblings it did not set (arch-C1,
+    # decisions.md #19). The defaults are owned by eligibility.py (E1 single
+    # owner, adrev2-005) -- imported + seeded here, never hand-copied. Seeded
+    # via the default_eligibility() FACTORY, not dict(DEFAULT_ELIGIBILITY):
+    # the shallow copy would alias the nested `weights` dict, so a consumer
+    # mutating the seed's weights in place would corrupt the module global
+    # process-wide (E1 post-review fix; see the factory's docstring).
+    cfg["optimistic_integration"]["eligibility"] = eligibility.default_eligibility()
     path = config_path()
     if path.is_file():
         try:
@@ -291,7 +309,15 @@ def load_config() -> dict[str, Any]:
             optimistic_overlay = overlay.pop("optimistic_integration", None)
             cfg.update(overlay)
             if isinstance(optimistic_overlay, dict):
+                # Deep-merge the eligibility sub-block one level deeper (§3.6):
+                # pop the user's `eligibility` overlay BEFORE the shallow outer
+                # update so it merges onto the seeded defaults instead of
+                # replacing them wholesale (arch-C1, decisions.md #19).
+                optimistic_overlay = dict(optimistic_overlay)
+                eligibility_overlay = optimistic_overlay.pop("eligibility", None)
                 cfg["optimistic_integration"].update(optimistic_overlay)
+                if isinstance(eligibility_overlay, dict):
+                    cfg["optimistic_integration"]["eligibility"].update(eligibility_overlay)
             elif optimistic_overlay is None and cfg.get("auto_apply_counters") is True:
                 # Legacy-flag migration (optimistic-memory plan.md §3.5 / §5
                 # Epic 8). A config.json written before this block existed
@@ -330,6 +356,22 @@ def load_config() -> dict[str, Any]:
                     "block to config.json to override or opt back out.",
                     file=sys.stderr,
                 )
+
+    # Validate the merged eligibility block AFTER defaulting (composite-
+    # eligibility plan.md §3.6). Fail-closed (decision principle 1): ANY
+    # validation failure disables the feature (forced enabled:false) plus
+    # exactly one stderr line. The digest banner is a later epic. The
+    # validator is E1-owned and takes the whole merged optimistic_integration
+    # dict so it can run its cross-field checks (e.g. MIN_STATIC_FLOOR <=
+    # static_floor <= confidence_floor_content).
+    elig_ok, elig_errors = eligibility.validate_eligibility_config(cfg["optimistic_integration"])
+    if not elig_ok:
+        cfg["optimistic_integration"]["eligibility"]["enabled"] = False
+        print(
+            "dream_analyze: optimistic_integration.eligibility config invalid -> "
+            "eligibility disabled (" + "; ".join(elig_errors) + ")",
+            file=sys.stderr,
+        )
     return cfg
 
 

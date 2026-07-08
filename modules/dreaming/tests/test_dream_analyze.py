@@ -479,6 +479,109 @@ class ConfigMigrationTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# load_config() eligibility nested deep-merge + fail-closed validation
+# (composite-eligibility plan.md §3.6 / §5 E2 subtask 4). The defaults and
+# validate_eligibility_config() are imported from eligibility.py (Epic E1,
+# merged as #834 -- adrev2-005 single owner). Seeds MUST come from the
+# default_eligibility() factory, never dict(DEFAULT_ELIGIBILITY): the shallow
+# copy aliases the nested weights dict (E1 post-review fix; see the factory's
+# docstring).
+# ---------------------------------------------------------------------------
+
+class ConfigEligibilityMergeTests(unittest.TestCase):
+    def _write_config(self, tmp: Path, payload: dict) -> None:
+        (tmp / "config.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_no_config_seeds_full_eligibility_defaults(self):
+        _isolate_env(self)  # no config.json written -> pure defaults
+        cfg = da.load_config()
+        self.assertEqual(
+            cfg["optimistic_integration"]["eligibility"],
+            da.eligibility.default_eligibility(),
+        )
+
+    def test_single_key_override_preserves_sibling_defaults(self):
+        tmp = _isolate_env(self)
+        self._write_config(tmp, {"optimistic_integration": {"eligibility": {"threshold": 0.7}}})
+        cfg = da.load_config()
+        elig = cfg["optimistic_integration"]["eligibility"]
+        self.assertEqual(elig["threshold"], 0.7)
+        # Every sibling default survives the one-key override (arch-C1).
+        defaults = da.eligibility.DEFAULT_ELIGIBILITY
+        for key, value in defaults.items():
+            if key == "threshold":
+                continue
+            self.assertEqual(elig[key], value, f"sibling default {key!r} was wiped by the override")
+
+    def test_outer_optimistic_override_does_not_wipe_eligibility(self):
+        # An operator overriding an OUTER optimistic key (not eligibility)
+        # must still get the full seeded eligibility defaults.
+        tmp = _isolate_env(self)
+        self._write_config(tmp, {"optimistic_integration": {"dwell_hours": 6}})
+        cfg = da.load_config()
+        self.assertEqual(cfg["optimistic_integration"]["dwell_hours"], 6)
+        self.assertEqual(
+            cfg["optimistic_integration"]["eligibility"],
+            da.eligibility.default_eligibility(),
+        )
+
+    def test_valid_enabled_eligibility_block_stays_enabled(self):
+        tmp = _isolate_env(self)
+        self._write_config(tmp, {"optimistic_integration": {"eligibility": {"enabled": True}}})
+        cfg = da.load_config()
+        self.assertTrue(cfg["optimistic_integration"]["eligibility"]["enabled"])
+
+    def test_malformed_eligibility_block_disables_fail_closed(self):
+        import contextlib
+        import io
+
+        tmp = _isolate_env(self)
+        # Weights that do not sum to 1 -> validate_eligibility_config() fails.
+        self._write_config(tmp, {
+            "optimistic_integration": {
+                "eligibility": {
+                    "enabled": True,
+                    "weights": {"confidence": 0.9, "prevalence": 0.9, "recency": 0.9, "novelty": 0.9},
+                }
+            }
+        })
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            cfg = da.load_config()
+        self.assertFalse(cfg["optimistic_integration"]["eligibility"]["enabled"])
+        stderr = buf.getvalue()
+        disable_lines = [ln for ln in stderr.splitlines() if "eligibility disabled" in ln]
+        self.assertEqual(len(disable_lines), 1, f"expected exactly one disable line, got: {stderr!r}")
+
+    def test_legacy_auto_apply_migration_still_intact_with_eligibility_seeded(self):
+        # The legacy auto_apply_counters migration still fires (block absent),
+        # and the eligibility defaults are seeded alongside it.
+        tmp = _isolate_env(self)
+        self._write_config(tmp, {"auto_apply_counters": True})
+        cfg = da.load_config()
+        self.assertTrue(cfg["optimistic_integration"]["enabled"])
+        self.assertEqual(
+            cfg["optimistic_integration"]["eligibility"],
+            da.eligibility.default_eligibility(),
+        )
+
+    def test_mutating_seeded_weights_does_not_corrupt_module_default(self):
+        # E1 post-review fix: the seed comes from default_eligibility(), so
+        # the nested weights dict is a fresh copy -- a caller mutating a
+        # returned config's weights in place must never corrupt
+        # eligibility.DEFAULT_ELIGIBILITY process-wide.
+        _isolate_env(self)
+        cfg = da.load_config()
+        original_confidence = da.eligibility.DEFAULT_ELIGIBILITY["weights"]["confidence"]
+        cfg["optimistic_integration"]["eligibility"]["weights"]["confidence"] = 0.99
+        self.assertEqual(
+            da.eligibility.DEFAULT_ELIGIBILITY["weights"]["confidence"],
+            original_confidence,
+            "seeded weights alias the module-global default (should be a fresh copy)",
+        )
+
+
+# ---------------------------------------------------------------------------
 # stamp_proposal_signals(): deterministic post-reduce signal stamping
 # (composite-eligibility plan.md §3.8). Digest aids only; never trusted by the
 # apply-time gate. Runs after fingerprint computation, so it must never change
