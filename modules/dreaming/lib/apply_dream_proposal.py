@@ -129,12 +129,16 @@ import contextlib
 import datetime as _dt
 import fcntl
 import json
+import math
 import os
+import re
+import signal
 import subprocess
 import sys
 import time
 import traceback
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -150,6 +154,16 @@ import dream_analyze as da  # noqa: E402  (sibling module, same lib/ dir)
 # self-improving module's store library").
 learnings_store = da.learnings_store
 GLOBAL_SLUG = learnings_store.GLOBAL_SLUG
+
+# Reuse dream_analyze.py's already-resolved sibling imports (single source of
+# truth for "where does the miner / the pure scoring core live"), exactly as
+# `learnings_store = da.learnings_store` above reuses its store resolution.
+# `eligibility` is Epic E1's frozen pure core (SignalBundle/EligibilityDecision
+# + evaluate_eligibility + the similarity/normalization text helpers this file
+# calls but NEVER duplicates). `tm` is the deterministic transcript miner whose
+# human-origin-filtered correction extractor E3 re-runs at apply time (§3.3).
+eligibility = da.eligibility
+tm = da.tm
 
 dreaming_dir = da.dreaming_dir
 proposals_dir = da.proposals_dir
@@ -1391,10 +1405,523 @@ def record_review_reversal(
     return record
 
 
+# ===========================================================================
+# Composite eligibility gate -- apply-time I/O (composite-eligibility plan.md
+# §3.2-§3.4, §3.7). The PURE scoring lives in eligibility.py (Epic E1); this
+# section is the impure seam that gathers the four signals from the transcripts
+# + live store, re-verifying EVERYTHING at apply time so no model-stamped field
+# is ever trusted (decisions.md #20). It sits beside the other apply-time
+# helpers (`_live_head_count`, `_raw_op_events`); the pure/impure boundary is
+# "already-computed scalars in (SignalBundle), decision out".
+# ===========================================================================
+
+# Anti-coincidence guard (ii) tuning (plan.md §3.4, adrev2-003 / adrev3-002).
+# A tolerant excerpt match takes MAX over many windows, so for a large
+# transcript a short common-token excerpt can coincidentally clear the
+# similarity threshold. Guard (ii) additionally requires that a matched window
+# contain a MINIMUM ABSOLUTE count of the excerpt's distinct content-bearing,
+# non-placeholder tokens. The requirement scales with the excerpt's own
+# content-token count but never drops below the absolute floor -- so a
+# 1-2-content-token excerpt can never be corroborated by coincidence, while a
+# heavily-redacted BUT substantial excerpt (placeholders excluded from the
+# denominator) clears a proportionally lower bar (the two-sided reconciliation
+# of adrev3-002). The constants are pinned by the two-sided test in
+# test_eligibility_gate.py; changing either without re-running both arms is a
+# defect.
+_EXCERPT_GUARD_MIN_ABS_TOKENS = 3
+_EXCERPT_GUARD_FRACTION = 0.5
+
+# Excerpt sliding-window bounds. Guard (i): the comparison window is sized to
+# the excerpt's OWN normalized length (contiguous), so a larger transcript adds
+# candidate windows but never per-window laxity. The step keeps the number of
+# window evaluations bounded; the exact-substring fast path short-circuits the
+# common verbatim case at O(n).
+_EXCERPT_WINDOW_STEP_DIVISOR = 8
+_EXCERPT_MAX_WINDOW_EVALS = 20000
+_EXCERPT_STREAM_BUFFER_MIN = 8192
+
+# Near-duplicate supersede advisory flag (plan.md §3.7, decisions.md #30/#39):
+# a supersede whose content is >= this similar to its target AND changes the
+# fact-token set is flagged for human review. Never blocks; not a score term.
+_NEAR_DUP_SUPERSEDE_SIMILARITY = 0.9
+
+# Session-citation concentration signal (decisions.md #37): a single evidence
+# session cited by this many or more scored proposals in one batch is recorded
+# as an anomaly feeding the SAME windowed circuit breaker as the existing
+# eviction-concentration check -- without touching that (eviction-only) check.
+# Default high enough that a legitimate topically-focused night never trips it.
+_SESSION_CITATION_ANOMALY_MIN = 8
+
+# Miner redaction placeholders ([REDACTED:kind]) are inserted by
+# transcript_miner.make_excerpt() over secrets/PII; the RAW transcript carries
+# the un-redacted text instead, so a placeholder in the cited excerpt must be
+# stripped before any comparison (it can never match its raw source) AND
+# excluded from guard (ii)'s required-token denominator (plan.md §3.3/§3.4).
+_REDACTION_RE = re.compile(r"\[REDACTED:[^\]]*\]", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class SessionVerification:
+    """Per-session apply-time verification, cached once per distinct
+    session_id across a whole batch (plan.md §3.4). Building this is the ONLY
+    expensive I/O (resolve + full read + miner re-run); a session cited by N
+    proposals is built once and reused N times."""
+
+    session_id: str
+    resolved: bool                  # step 1: resolve_session_transcript() found it
+    cwd: str | None
+    slug: str | None                # step 2 input: detect_project_slug(cwd)
+    tier: str                       # "user-corrected" | "inferred" (miner re-run)
+    tier_source: dict | None        # {session_id, line, origin_kind} when user-corrected
+    newest_ts_epoch: float | None   # newest embedded per-line timestamp (recency)
+    oversized: bool                 # > max_transcript_bytes: tier inferred, recency 0
+    path: str | None
+    normalized_text: str | None     # cached normalized transcript text (None if oversized/unresolved)
+
+
+@dataclass(frozen=True)
+class _EligibilityEval:
+    """The full apply-time evaluation of one add/supersede proposal: the pure
+    EligibilityDecision plus the audit-only context (§3.7) that the pure core
+    cannot see (verified/unresolved session ids, tier source, citations, the
+    near-duplicate-supersede flag)."""
+
+    decision: Any                       # eligibility.EligibilityDecision
+    verified_session_ids: list
+    unresolved_session_ids: list
+    evidence_tier: str
+    tier_source: dict | None
+    cited_session_ids: list
+    near_dup_supersede: bool
+
+
+def _prep_excerpt(excerpt: str) -> str:
+    """Normalize a cited excerpt for comparison against raw transcript text
+    (plan.md §3.3/§3.4): strip [REDACTED:...] placeholders (the raw transcript
+    has the un-redacted text there, so the placeholder can only HURT the
+    match), then run eligibility.normalize_content() (which also strips
+    [neutralized] wrappers, lowercases, and collapses whitespace)."""
+    if not excerpt:
+        return ""
+    return eligibility.normalize_content(_REDACTION_RE.sub(" ", excerpt))
+
+
+def _excerpt_content_tokens(excerpt: str) -> set:
+    """Guard (ii)'s denominator: distinct content-bearing, NON-placeholder,
+    non-stop tokens of the excerpt (plan.md §3.4). Placeholders are already
+    removed by `_prep_excerpt`, so a redacted excerpt is scored on a
+    proportionally lower bar rather than penalized for the redacted tokens."""
+    return eligibility._tokens(_prep_excerpt(excerpt))  # noqa: SLF001 -- reuse E1's tokenizer, never duplicate (plan.md §3.3)
+
+
+def _extract_line_text(obj: dict[str, Any]) -> str:
+    """Human/agent-readable text of one transcript line: message text blocks,
+    tool_result content, tool-use input strings, and any top-level `text`. This
+    is the surface a redacted proposal excerpt corroborates against; a superset
+    is deliberate (fail toward MORE corroboration coverage, never less)."""
+    parts: list[str] = []
+    msg = obj.get("message")
+    if isinstance(msg, dict):
+        content = msg.get("content")
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if isinstance(block.get("text"), str):
+                    parts.append(block["text"])
+                if isinstance(block.get("content"), str):
+                    parts.append(block["content"])
+                inp = block.get("input")
+                if isinstance(inp, dict):
+                    for v in inp.values():
+                        if isinstance(v, str):
+                            parts.append(v)
+    if isinstance(obj.get("text"), str):
+        parts.append(obj["text"])
+    return " ".join(parts)
+
+
+def _read_transcript_normalized(path: str) -> str:
+    """Read a transcript once and return its normalized readable text
+    (one string). Used for the cached, non-oversized excerpt-match path."""
+    segs: list[str] = []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                txt = _extract_line_text(obj)
+                if txt:
+                    segs.append(txt)
+    except OSError:
+        return ""
+    return eligibility.normalize_content(" ".join(segs))
+
+
+def _corroborate_in_text(
+    prepped: str, tokens: set, window_len: int, threshold: float, required: int, text: str,
+) -> bool:
+    """Return True iff SOME excerpt-sized window of `text` clears BOTH the
+    similarity threshold (guard i, tolerant match) AND the minimum-distinct-
+    token requirement (guard ii). Fail-closed only after BOTH arms are computed
+    (adrev3-002): the token requirement is never a shortcut that biases against
+    a legitimate redacted excerpt."""
+    if not text or window_len <= 0:
+        return False
+
+    def _window_ok(window: str) -> bool:
+        if eligibility.similarity(prepped, window) < threshold:
+            return False
+        present = len(tokens & eligibility._tokens(window))  # noqa: SLF001 -- reuse E1's tokenizer
+        return present >= required
+
+    # Exact-substring fast path (the common verbatim/redaction-stripped case):
+    # ratio is 1.0, so only guard (ii) can still reject it.
+    idx = text.find(prepped)
+    if idx != -1 and _window_ok(text[idx:idx + window_len]):
+        return True
+
+    n = len(text)
+    if n <= window_len:
+        return _window_ok(text)
+
+    step = max(1, window_len // _EXCERPT_WINDOW_STEP_DIVISOR)
+    last = n - window_len
+    evals = 0
+    pos = 0
+    while pos <= last:
+        if _window_ok(text[pos:pos + window_len]):
+            return True
+        evals += 1
+        if evals >= _EXCERPT_MAX_WINDOW_EVALS:
+            break
+        pos += step
+    return False
+
+
+def _corroborate_streaming(
+    prepped: str, tokens: set, window_len: int, threshold: float, required: int, path: str,
+) -> bool:
+    """Bounded-memory excerpt corroboration for an oversized transcript: stream
+    normalized text into a rolling buffer, scanning excerpt-sized windows and
+    retaining a `window_len - 1` tail so windows spanning an append boundary are
+    still seen (plan.md §3.4: "the excerpt check still streams")."""
+    cap = max(4 * window_len, _EXCERPT_STREAM_BUFFER_MIN)
+    buf = ""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                seg = eligibility.normalize_content(_extract_line_text(obj))
+                if not seg:
+                    continue
+                buf = (buf + " " + seg) if buf else seg
+                if len(buf) >= cap:
+                    if _corroborate_in_text(prepped, tokens, window_len, threshold, required, buf):
+                        return True
+                    buf = buf[-(window_len - 1):] if window_len > 1 else ""
+    except OSError:
+        return False
+    return _corroborate_in_text(prepped, tokens, window_len, threshold, required, buf)
+
+
+def _excerpt_corroborated(excerpt: str, sv: SessionVerification, elig_cfg: dict[str, Any]) -> bool:
+    """§3.4 check 3: does the cited excerpt verifiably correspond to text in the
+    resolved transcript? Tolerant similarity match (adrev-001) with the
+    anti-coincidence guards (adrev2-003/adrev3-002)."""
+    if not sv.resolved:
+        return False
+    prepped = _prep_excerpt(excerpt)
+    if not prepped:
+        return False
+    tokens = _excerpt_content_tokens(excerpt)
+    # Guard (i) sizes the window to the excerpt's OWN normalized length -- but
+    # sized to the length WITH redaction placeholders KEPT, not the stripped
+    # length. A redacted excerpt is SHORTER than its raw transcript source
+    # (the placeholder replaces a longer secret), so a window sized to the
+    # stripped excerpt would be too small to span the raw source's tokens. The
+    # kept-placeholder length is comparable to the raw span, so the window can
+    # cover it -- while still being excerpt-derived (no "best of all sizes"
+    # laxity that would degrade with transcript size, adrev2-003).
+    window_len = max(len(prepped), len(eligibility.normalize_content(excerpt)))
+    threshold = float(elig_cfg["excerpt_match_min"])
+    required = max(_EXCERPT_GUARD_MIN_ABS_TOKENS, math.ceil(_EXCERPT_GUARD_FRACTION * len(tokens)))
+    if sv.normalized_text is not None:
+        return _corroborate_in_text(prepped, tokens, window_len, threshold, required, sv.normalized_text)
+    if sv.path is not None:
+        return _corroborate_streaming(prepped, tokens, window_len, threshold, required, sv.path)
+    return False
+
+
+def _build_session_verification(session_id: str, elig_cfg: dict[str, Any]) -> SessionVerification:
+    """The per-session I/O (plan.md §3.4). REUSES
+    learnings_store.resolve_session_transcript() (the exact glob
+    promote_to_global's origin binding uses -- never reimplemented) and re-runs
+    the miner's human-origin-filtered correction extractor for the tier. Built
+    at most ONCE per distinct session_id per batch (see `_verify_session`)."""
+    resolved = learnings_store.resolve_session_transcript(session_id)
+    if not resolved:
+        return SessionVerification(
+            session_id=session_id, resolved=False, cwd=None, slug=None,
+            tier="inferred", tier_source=None, newest_ts_epoch=None,
+            oversized=False, path=None, normalized_text=None,
+        )
+    path = str(resolved["path"])
+    cwd = resolved.get("cwd")
+    slug = learnings_store.detect_project_slug(cwd) if cwd else None
+
+    max_bytes = int(elig_cfg["max_transcript_bytes"])
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    if size > max_bytes:
+        # Oversized: tier forced "inferred", recency 0, no cached text
+        # (the excerpt check still streams on demand) -- fail toward weakest.
+        return SessionVerification(
+            session_id=session_id, resolved=True, cwd=cwd, slug=slug,
+            tier="inferred", tier_source=None, newest_ts_epoch=None,
+            oversized=True, path=path, normalized_text=None,
+        )
+
+    normalized_text = _read_transcript_normalized(path)
+
+    tier = "inferred"
+    tier_source: dict | None = None
+    newest_ts: float | None = None
+    try:
+        mined = tm.mine(path)
+    except Exception:  # noqa: BLE001 -- a malformed transcript must fail toward weakest, never crash the batch
+        mined = None
+    if mined:
+        corrections = mined.get("user_corrections") or []
+        if corrections:
+            tier = "user-corrected"
+            c0 = corrections[0] if isinstance(corrections[0], dict) else {}
+            tier_source = {"session_id": session_id, "line": c0.get("line"), "origin_kind": "human"}
+        newest_iso = mined.get("ended_at") or mined.get("started_at")
+        if newest_iso:
+            parsed = learnings_store._parse_iso(newest_iso)  # noqa: SLF001 -- cross-module ISO parser reuse (mirrors this file's own precedent at _rolling_auto_add_supersede_count)
+            if parsed:
+                newest_ts = parsed
+    return SessionVerification(
+        session_id=session_id, resolved=True, cwd=cwd, slug=slug,
+        tier=tier, tier_source=tier_source, newest_ts_epoch=newest_ts,
+        oversized=False, path=path, normalized_text=normalized_text,
+    )
+
+
+def _verify_session(
+    session_id: str, cache: dict[str, SessionVerification], elig_cfg: dict[str, Any],
+) -> SessionVerification:
+    """Memoized `_build_session_verification` -- the per-batch cache (§3.4)."""
+    sv = cache.get(session_id)
+    if sv is None:
+        sv = _build_session_verification(session_id, elig_cfg)
+        cache[session_id] = sv
+    return sv
+
+
+def _live_head_contents(heads: dict[str, dict[str, Any]]) -> list:
+    """Content strings of a slug's currently-live heads (not deprecated, not
+    superseded) -- novelty's comparison set for `learning_add`."""
+    return [
+        h.get("content") or ""
+        for h in heads.values()
+        if not h.get("deprecated") and not h.get("superseded_by")
+    ]
+
+
+def gather_eligibility_signals(
+    row: dict[str, Any], *, slug: str, cache: dict[str, SessionVerification],
+    heads: dict[str, dict[str, Any]], elig_cfg: dict[str, Any],
+) -> tuple[Any, dict[str, Any]]:
+    """Recompute all four signals deterministically at apply time (plan.md
+    §3.3/§3.4) and return (SignalBundle, audit_context).
+
+    Inputs are the BARE row (evidence session_id/excerpt pairs + row scalars)
+    plus the live-store heads -- NEVER the row's stamped `evidence_tier`/
+    `stamped_signals` (those are digest aids; this signature carries no
+    parameter for them, so a future edit cannot wire trust in by accident,
+    decisions.md #20)."""
+    kind = row.get("kind")
+    conf = _confidence_of(row)
+    content = row.get("content") or ""
+    target_id = row.get("target_id")
+
+    verified: list = []
+    unresolved: list = []
+    cited: list = []
+    seen: set = set()
+    tier = "inferred"
+    tier_source: dict | None = None
+    newest_ts: float | None = None
+
+    for ev in row.get("evidence") or []:
+        if not isinstance(ev, dict):
+            continue
+        sid = ev.get("session_id")
+        if not sid:
+            # Null/empty session_id: excluded from counts AND recency (§3.4,
+            # decisions.md #36).
+            continue
+        cited.append(sid)
+        sv = _verify_session(sid, cache, elig_cfg)
+        if not sv.resolved:
+            if sid not in unresolved:
+                unresolved.append(sid)
+            continue
+        if sv.slug != slug:
+            # Slug mismatch: resolved but not this project -- not counted.
+            continue
+        if not _excerpt_corroborated(ev.get("excerpt") or "", sv, elig_cfg):
+            continue
+        if sid in seen:
+            continue
+        seen.add(sid)
+        verified.append(sid)
+        if sv.tier == "user-corrected" and tier != "user-corrected":
+            tier = "user-corrected"
+            tier_source = sv.tier_source
+        if sv.newest_ts_epoch is not None and (newest_ts is None or sv.newest_ts_epoch > newest_ts):
+            newest_ts = sv.newest_ts_epoch
+
+    age_days = None if newest_ts is None else max(0.0, (time.time() - newest_ts) / 86400.0)
+
+    if kind == "learning_supersede":
+        target = heads.get(target_id)
+        if target is None or target.get("deprecated") or target.get("superseded_by"):
+            # Unresolvable/dead target -> novelty 0 (fail-closed; the row would
+            # fail CAS/liveness at apply anyway, §3.3, decisions.md #39).
+            novelty = 0.0
+        else:
+            novelty = eligibility.novelty_vs(content, [target.get("content") or ""])
+    else:  # learning_add: novelty vs live heads; empty store -> 1.0 (§3.3)
+        novelty = eligibility.novelty_vs(content, _live_head_contents(heads))
+
+    bundle = eligibility.SignalBundle(
+        kind=kind, confidence=conf, verified_sessions=len(verified),
+        evidence_tier=tier, newest_evidence_age_days=age_days, novelty=novelty,
+    )
+    context = {
+        "verified_session_ids": verified,
+        "unresolved_session_ids": unresolved,
+        "cited_session_ids": cited,
+        "evidence_tier": tier,
+        "tier_source": tier_source,
+    }
+    return bundle, context
+
+
+def evaluate_proposal_eligibility(
+    row: dict[str, Any], *, slug: str, cache: dict[str, SessionVerification],
+    heads: dict[str, dict[str, Any]], cfg: dict[str, Any], elig_cfg: dict[str, Any],
+) -> _EligibilityEval:
+    """Full apply-time eligibility evaluation for one add/supersede proposal:
+    the §3.2 static-floor short-circuit (before I/O), signal gathering, the pure
+    `eligibility.evaluate_eligibility` verdict, and the near-duplicate-supersede
+    advisory flag. Writes NOTHING -- the caller writes the audit (real path) or
+    prints the breakdown (dry-run). Any exception propagates to the caller's
+    outer fail-closed handler (never eligible)."""
+    kind = row.get("kind")
+    conf = _confidence_of(row)
+    threshold = float(elig_cfg["threshold"])
+
+    # Step 2 STATIC FLOOR before step 3 GATHER (plan.md §3.2): a sub-floor row
+    # never pays the transcript I/O. eligibility.evaluate_eligibility() re-checks
+    # this internally, so this is purely an I/O-saving short-circuit.
+    if conf < int(elig_cfg["static_floor"]):
+        decision = eligibility.EligibilityDecision(
+            eligible=False, outcome="skipped_floor", decision_basis=None,
+            score=None, threshold=threshold, margin=None, signals={}, weakest_signal=None,
+        )
+        return _EligibilityEval(
+            decision=decision, verified_session_ids=[], unresolved_session_ids=[],
+            evidence_tier="inferred", tier_source=None, cited_session_ids=[], near_dup_supersede=False,
+        )
+
+    bundle, ctx = gather_eligibility_signals(row, slug=slug, cache=cache, heads=heads, elig_cfg=elig_cfg)
+    decision = eligibility.evaluate_eligibility(bundle, cfg)
+
+    near_dup = False
+    if kind == "learning_supersede":
+        target = heads.get(row.get("target_id"))
+        if target is not None:
+            target_content = target.get("content") or ""
+            content = row.get("content") or ""
+            if eligibility.similarity(content, target_content) >= _NEAR_DUP_SUPERSEDE_SIMILARITY:
+                # "changed fact-token set" via the same machinery compact_
+                # preserves_facts uses (plan.md §3.7, decisions.md #30).
+                if learnings_store._extract_fact_tokens(content) != learnings_store._extract_fact_tokens(target_content):  # noqa: SLF001
+                    near_dup = True
+
+    return _EligibilityEval(
+        decision=decision,
+        verified_session_ids=ctx["verified_session_ids"],
+        unresolved_session_ids=ctx["unresolved_session_ids"],
+        evidence_tier=ctx["evidence_tier"],
+        tier_source=ctx["tier_source"],
+        cited_session_ids=ctx["cited_session_ids"],
+        near_dup_supersede=near_dup,
+    )
+
+
+def _eligibility_audit_record(
+    *, batch_id: str, proposal_id: Any, kind: Any, project: Any, row: dict[str, Any], ev: _EligibilityEval,
+) -> dict[str, Any]:
+    """Build the §3.7 audit record for a scored (eligible or skipped) row. No
+    `ok` field -- an eligibility record must never be miscounted as a store
+    application by the scorecard's `ok is True`/`outcome == "applied"` rule."""
+    d = ev.decision
+    record: dict[str, Any] = {
+        "audit_kind": "eligibility",
+        "outcome": d.outcome,
+        "decision_basis": d.decision_basis,
+        "score": d.score,
+        "threshold": d.threshold,
+        "margin": d.margin,
+        "signals": d.signals,
+        "weakest_signal": d.weakest_signal,
+        "verified_sessions": len(ev.verified_session_ids),
+        "evidence_tier": ev.evidence_tier,
+        "unresolved_session_ids": ev.unresolved_session_ids,
+        "type": row.get("type"),
+        "batch_id": batch_id,
+        "proposal_id": proposal_id,
+        "kind": kind,
+        "project": project,
+    }
+    if ev.evidence_tier == "user-corrected" and ev.tier_source:
+        record["evidence_tier_source"] = ev.tier_source
+    if kind == "learning_supersede":
+        record["near_duplicate_supersede"] = ev.near_dup_supersede
+    return record
+
+
 def _process_one_proposal(
     row: dict[str, Any], *, slug: str, cfg: dict[str, Any], live_count: int,
     anomaly_slugs: set[str], add_supersede_counts: dict[str, int],
     eviction_counts: dict[str, int], batch_id: str,
+    heads: dict[str, dict[str, Any]] | None = None,
+    session_cache: dict[str, SessionVerification] | None = None,
+    session_citation_counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Per-proposal posture/floor/cap/anomaly gate, then apply via the SAME
     `apply_proposal()` human accepts use (so the human-race lock and
@@ -1426,26 +1953,57 @@ def _process_one_proposal(
             })
             return {"outcome": "skipped_gated", "proposal_id": proposal_id}
 
-        floor_key = posture.get("confidence_floor")
-        floor = int(cfg.get(floor_key, 0)) if floor_key else 0
-        conf = _confidence_of(row)
-        if conf < floor:
-            _write_audit({
-                "outcome": "skipped_floor", "batch_id": batch_id, "proposal_id": proposal_id,
-                "kind": kind, "project": project, "detail": f"confidence {conf} < floor {floor}",
-            })
-            return {"outcome": "skipped_floor", "proposal_id": proposal_id}
-
-        if kind == "learning_add":
-            prevalence = row.get("prevalence") or {}
-            sessions = prevalence.get("sessions") if isinstance(prevalence, dict) else None
-            min_sessions = int(cfg.get("add_min_sessions", 2))
-            if not isinstance(sessions, int) or isinstance(sessions, bool) or sessions < min_sessions:
+        # ENABLED-mode composite waterfall (plan.md §3.2), for learning_add /
+        # learning_supersede ONLY. Every other kind (verify/contradict/
+        # deprecate) -- and eligibility disabled OR config-invalid (load_config
+        # resets the block to disabled on any validation failure) -- takes the
+        # legacy path below, bit-for-bit. The eligibility module is not touched
+        # at all on the legacy path (spy-testable, plan.md §5 E3).
+        elig_cfg = cfg.get("eligibility")
+        eligibility_on = isinstance(elig_cfg, dict) and elig_cfg.get("enabled") is True
+        if eligibility_on and kind in ("learning_add", "learning_supersede"):
+            cache = session_cache if session_cache is not None else {}
+            ev = evaluate_proposal_eligibility(
+                row, slug=slug, cache=cache, heads=heads or {}, cfg=cfg, elig_cfg=elig_cfg,
+            )
+            # Session-citation counter -> batch-anomaly input (decisions.md #37):
+            # a cheap per-batch counter keyed on each cited evidence session_id.
+            if session_citation_counts is not None:
+                for sid in ev.cited_session_ids:
+                    session_citation_counts[sid] = session_citation_counts.get(sid, 0) + 1
+            _write_audit(_eligibility_audit_record(
+                batch_id=batch_id, proposal_id=proposal_id, kind=kind, project=project, row=row, ev=ev,
+            ))
+            if not ev.decision.eligible:
+                # skipped_floor / skipped_origin / skipped_composite: the row
+                # stays `pending` (reachable via /dream-apply), never dropped.
+                return {"outcome": ev.decision.outcome, "proposal_id": proposal_id}
+            # ELIGIBLE: fall through to the SHARED downstream (compaction guard,
+            # per-run cap, dwell, apply) -- §3.2 step 7 "downstream unchanged".
+            # The legacy floor + model-claimed prevalence checks are DELIBERATELY
+            # skipped on this path (verified origin gate replaced them,
+            # decisions.md #26).
+        else:
+            floor_key = posture.get("confidence_floor")
+            floor = int(cfg.get(floor_key, 0)) if floor_key else 0
+            conf = _confidence_of(row)
+            if conf < floor:
                 _write_audit({
-                    "outcome": "skipped_prevalence", "batch_id": batch_id, "proposal_id": proposal_id,
-                    "kind": kind, "project": project, "detail": f"sessions={sessions!r} < {min_sessions}",
+                    "outcome": "skipped_floor", "batch_id": batch_id, "proposal_id": proposal_id,
+                    "kind": kind, "project": project, "detail": f"confidence {conf} < floor {floor}",
                 })
-                return {"outcome": "skipped_prevalence", "proposal_id": proposal_id}
+                return {"outcome": "skipped_floor", "proposal_id": proposal_id}
+
+            if kind == "learning_add":
+                prevalence = row.get("prevalence") or {}
+                sessions = prevalence.get("sessions") if isinstance(prevalence, dict) else None
+                min_sessions = int(cfg.get("add_min_sessions", 2))
+                if not isinstance(sessions, int) or isinstance(sessions, bool) or sessions < min_sessions:
+                    _write_audit({
+                        "outcome": "skipped_prevalence", "batch_id": batch_id, "proposal_id": proposal_id,
+                        "kind": kind, "project": project, "detail": f"sessions={sessions!r} < {min_sessions}",
+                    })
+                    return {"outcome": "skipped_prevalence", "proposal_id": proposal_id}
 
         if kind == "learning_supersede" and row.get("compaction_guard_failed"):
             _write_audit({
@@ -1503,6 +2061,66 @@ def _process_one_proposal(
             "outcome": "internal_error", "batch_id": batch_id, "proposal_id": proposal_id, "detail": detail,
         })
         return {"outcome": "internal_error", "proposal_id": proposal_id, "detail": detail}
+
+
+def _learnings_tree_dirty() -> bool:
+    """True iff the learnings-store git tree has uncommitted changes at the
+    start of a run (composite-eligibility plan.md §9.3). A prior batch killed
+    mid-transaction (e.g. by E3's `timeout 600` before a hard SIGKILL, or any
+    crash between the per-row store writes and the single end-of-batch commit)
+    leaves live/dwelling rows written to disk but uncommitted; detecting that
+    here lets a chronic-timeout condition trip the breaker rather than silently
+    repeating. Fail-OPEN (returns False) on any error -- a broken git state
+    must never block or crash the batch. Best-effort: no repo / no git -> not
+    dirty (the common test/fresh-install case)."""
+    root = getattr(learnings_store, "LEARNINGS_ROOT", None)
+    if root is None or not (Path(root) / ".git").exists():
+        return False
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain"],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0 and bool(proc.stdout.strip())
+
+
+@contextlib.contextmanager
+def _sigterm_soft_stop():
+    """Install a SIGTERM handler that requests a graceful stop instead of an
+    immediate exit (adrev2-002). When `dream-daily.sh`'s `timeout 600` fires,
+    the default SIGTERM would kill `run_optimistic_integrate` between its
+    per-row store writes and its single end-of-batch commit, leaving live but
+    UN-committed dwelling rows (no sha to `revert`) and a dirty learnings tree.
+    Instead, the flag lets the batch loop finish the in-flight row, stop
+    accepting new ones, record a `timeout` anomaly, and run its normal
+    commit-what-it-has path.
+
+    Yields a one-key dict whose `["received"]` the loop polls. Only installable
+    from the main thread (`signal.signal` raises otherwise, e.g. under pytest in
+    a worker thread) -- in that case this is a no-op and the flag simply never
+    fires, which is correct (a threaded test is not the timeout scenario)."""
+    flag = {"received": False}
+
+    def _handler(signum, frame):  # noqa: ARG001
+        flag["received"] = True
+
+    previous = None
+    installed = False
+    try:
+        previous = signal.signal(signal.SIGTERM, _handler)
+        installed = True
+    except (ValueError, OSError, RuntimeError):
+        installed = False
+    try:
+        yield flag
+    finally:
+        if installed:
+            try:
+                signal.signal(signal.SIGTERM, previous)
+            except (ValueError, OSError, RuntimeError):
+                pass
 
 
 def run_optimistic_integrate(day: str) -> dict[str, Any]:
@@ -1601,16 +2219,44 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
                 "project": slug, "detail": f"{len(eviction_rows)} eviction proposal(s) concentrated",
             })
 
+    # Dirty-tree anomaly (plan.md §9.3, adrev2-002): a prior batch killed
+    # mid-transaction (e.g. a fired timeout) leaves uncommitted rows; record it
+    # so chronic timeouts trip the breaker rather than silently repeating.
+    if _learnings_tree_dirty():
+        run_anomaly_timestamps.append(_utc_now_iso())
+        summary["anomalies"].append({"kind": "dirty_learnings_tree"})
+        _write_audit({
+            "outcome": "dirty_learnings_tree", "batch_id": batch_id,
+            "detail": "uncommitted learnings-store changes at run start (possible prior timeout kill)",
+        })
+
     add_supersede_counts: dict[str, int] = {slug: 0 for slug in by_slug}
     eviction_counts: dict[str, int] = {slug: 0 for slug in by_slug}
 
-    with _suppressed_autocommit():  # adrev-opt-013: one commit for the whole batch, not one per write
+    # Per-batch session-verification cache (§3.4) + citation counter
+    # (decisions.md #37), shared across every proposal so a session cited by N
+    # proposals is resolved/read/mined exactly ONCE.
+    session_cache: dict[str, SessionVerification] = {}
+    session_citation_counts: dict[str, int] = {}
+
+    timed_out = False
+    with _sigterm_soft_stop() as sigterm, _suppressed_autocommit():  # adrev-opt-013: one commit for the whole batch
         for slug, slug_rows in by_slug.items():
+            if sigterm["received"]:
+                break
             for row in slug_rows:
+                if sigterm["received"]:
+                    # adrev2-002: stop accepting NEW proposals on SIGTERM; the
+                    # in-flight row (if any) already completed atomically. Fall
+                    # through to the normal commit-what-it-has path below.
+                    timed_out = True
+                    break
                 outcome = _process_one_proposal(
                     row, slug=slug, cfg=cfg, live_count=live_counts[slug],
                     anomaly_slugs=anomaly_slugs, add_supersede_counts=add_supersede_counts,
                     eviction_counts=eviction_counts, batch_id=batch_id,
+                    heads=heads_by_slug[slug], session_cache=session_cache,
+                    session_citation_counts=session_citation_counts,
                 )
                 summary["results"].append(outcome)
                 if outcome.get("applied"):
@@ -1619,6 +2265,34 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
                     summary["failed"] += 1
                 else:
                     summary["skipped"] += 1
+            if sigterm["received"]:
+                timed_out = True
+                break
+
+    if timed_out:
+        # Record a `timeout` breaker anomaly BEFORE the commit so a fired
+        # timeout is durably attributed and chronic timeouts trip the breaker.
+        run_anomaly_timestamps.append(_utc_now_iso())
+        summary["anomalies"].append({"kind": "timeout"})
+        summary["timed_out"] = True
+        _write_audit({
+            "outcome": "timeout", "batch_id": batch_id,
+            "detail": "SIGTERM received mid-batch; committing rows already applied",
+        })
+
+    # Session-citation concentration signal (decisions.md #37): a single
+    # session cited by many scored proposals in one batch is anomalous. Feeds
+    # the SAME windowed breaker as eviction concentration, without touching the
+    # (eviction-only) `_batch_anomaly_fires` check.
+    if session_citation_counts:
+        top_sid, top_count = max(session_citation_counts.items(), key=lambda kv: kv[1])
+        if top_count >= _SESSION_CITATION_ANOMALY_MIN:
+            run_anomaly_timestamps.append(_utc_now_iso())
+            summary["anomalies"].append({"kind": "session_citation_concentration", "count": top_count})
+            _write_audit({
+                "outcome": "session_citation_concentration", "batch_id": batch_id,
+                "detail": f"session cited {top_count} times in one batch",
+            })
 
     # Cross-night accumulation signal (§3.8) -- derived AFTER applying, so
     # it reflects tonight's own contribution too. Feeds the breaker for
@@ -1663,6 +2337,89 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
         summary["commit"] = commit_result
 
     return summary
+
+
+# ---------------------------------------------------------------------------
+# eligibility-dry-run CLI: score a day's pending add/supersede proposals and
+# print the §3.7 per-signal breakdown, applying NOTHING and writing NO audit
+# (composite-eligibility plan.md §5 E3). This is the H1 what-if inspector --
+# it force-scores the composite even when eligibility is DISABLED in config, so
+# the operator can preview a day's proposals before opting in.
+# ---------------------------------------------------------------------------
+
+
+def run_eligibility_dry_run(day: str) -> dict[str, Any]:
+    """Read-only: score every pending add/supersede proposal for `day` and
+    return their per-signal breakdowns. Writes nothing (no audit, no status
+    change, no store write). Non-scored kinds and gated postures are reported
+    with a note rather than a composite score."""
+    result: dict[str, Any] = {"day": day, "proposals": []}
+    path = proposals_dir() / f"{day}.jsonl"
+    if not path.is_file():
+        return result
+
+    rows = _read_jsonl(path)
+    pending = [r for r in rows if r.get("status") == "pending"]
+    cfg = da.load_config().get("optimistic_integration") or {}
+    elig_cfg = cfg.get("eligibility") or {}
+
+    slugs = {r.get("project") for r in pending if isinstance(r.get("project"), str) and r.get("project")}
+    heads_by_slug: dict[str, dict[str, dict[str, Any]]] = {
+        s: {h["id"]: h for h in learnings_store.load_all(s)} for s in slugs
+    }
+    cache: dict[str, SessionVerification] = {}
+
+    for row in pending:
+        pid = row.get("id")
+        kind = row.get("kind")
+        project = row.get("project")
+        entry: dict[str, Any] = {
+            "proposal_id": pid, "kind": kind, "project": project,
+            "confidence": _confidence_of(row), "type": row.get("type"),
+        }
+        posture = da.resolve_posture(kind, project)
+        if posture["posture"] == "gated":
+            entry["outcome"] = "skipped_gated"
+            entry["note"] = "gated posture (e.g. _global) -- never composite-scored"
+            result["proposals"].append(entry)
+            continue
+        if kind not in ("learning_add", "learning_supersede"):
+            entry["outcome"] = "legacy_path"
+            entry["note"] = f"kind {kind!r} is not composite-scored (legacy floor applies)"
+            result["proposals"].append(entry)
+            continue
+        try:
+            ev = evaluate_proposal_eligibility(
+                row, slug=project, cache=cache,
+                heads=heads_by_slug.get(project) or {}, cfg=cfg, elig_cfg=elig_cfg,
+            )
+        except Exception:  # noqa: BLE001 -- dry-run must never crash on one bad row
+            entry["outcome"] = "internal_error"
+            entry["note"] = traceback.format_exc()
+            result["proposals"].append(entry)
+            continue
+        d = ev.decision
+        entry.update({
+            "outcome": d.outcome,
+            "decision_basis": d.decision_basis,
+            "score": d.score,
+            "threshold": d.threshold,
+            "margin": d.margin,
+            "signals": d.signals,
+            "weakest_signal": d.weakest_signal,
+            "verified_sessions": len(ev.verified_session_ids),
+            "evidence_tier": ev.evidence_tier,
+            "unresolved_session_ids": ev.unresolved_session_ids,
+        })
+        if not elig_cfg.get("enabled"):
+            entry["note"] = "eligibility disabled in config -- this is a what-if preview only"
+        if ev.evidence_tier == "user-corrected" and ev.tier_source:
+            entry["evidence_tier_source"] = ev.tier_source
+        if kind == "learning_supersede":
+            entry["near_duplicate_supersede"] = ev.near_dup_supersede
+        result["proposals"].append(entry)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1892,6 +2649,13 @@ def _cmd_eval_refresh(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_eligibility_dry_run(args: argparse.Namespace) -> int:
+    day = args.date or today_iso()
+    result = run_eligibility_dry_run(day)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="CCGM dreaming: human-gated apply path (Epic 6).")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1962,6 +2726,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     refresh_p.add_argument("--day", help="defaults to today (UTC, or CCGM_DREAMING_TODAY)")
     refresh_p.set_defaults(func=_cmd_eval_refresh)
+
+    dry_p = sub.add_parser(
+        "eligibility-dry-run",
+        help="score a day's pending learning_add/learning_supersede proposals through the composite "
+             "eligibility gate and print the per-signal breakdown, applying NOTHING (composite-"
+             "eligibility plan.md §5 E3; the H1 what-if inspector -- scores even when eligibility is "
+             "disabled in config)",
+    )
+    dry_p.add_argument("--date", help="proposals/{date}.jsonl; defaults to today (UTC, or CCGM_DREAMING_TODAY)")
+    dry_p.set_defaults(func=_cmd_eligibility_dry_run)
 
     return p
 
