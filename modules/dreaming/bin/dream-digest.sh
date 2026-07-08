@@ -29,11 +29,11 @@
 #   - the DURABLE canary state (~/.claude/dreaming/state/canary.json),
 #     read unconditionally regardless of which date is being rendered: a
 #     loud banner when any schema_canary incident is still active, or when
-#     any untested transcript-schema version has been observed
-#     (adrev-014 + the #753 handoff note -- both signals must stay visible
-#     even if a human misses the exact day they first appeared, since
-#     Epic 6's dream-daily.sh chain is exit-tolerant and can swallow a
-#     non-zero exit silently).
+#     a reduce-phase parse failure is unresolved (adrev-014 + the #753
+#     handoff note -- both signals must stay visible even if a human
+#     misses the exact day they first appeared, since Epic 6's
+#     dream-daily.sh chain is exit-tolerant and can swallow a non-zero
+#     exit silently).
 #   - yesterday's proposals, tallied by status (accepted/auto_applied vs
 #     rejected) -- forward-compatible with Epic 6's /dream-apply, which is
 #     the only future writer of any status other than "pending".
@@ -104,7 +104,7 @@ from pathlib import Path
 
 # Render-time defense-in-depth for evidence excerpts (#769 Stage-2 P1 #2):
 # reuse the SAME sanitizer the write path already applies, via the
-# module's established cross-module import helper, rather than
+# established cross-module import helper, rather than
 # re-deriving the injection patterns here. See finalize_proposal() in
 # lib/dream_analyze.py for the write-path sanitization this backstops.
 sys.path.insert(0, os.path.join(os.environ["CCGM_DIGEST_MODULE_ROOT"], "lib"))
@@ -149,7 +149,7 @@ yesterday_proposals = load_jsonl(os.environ["CCGM_DIGEST_YESTERDAY_PROPOSALS_FIL
 run_summary = load_json(os.environ["CCGM_DIGEST_RUN_SUMMARY_FILE"], None)
 canary = load_json(
     os.environ["CCGM_DIGEST_CANARY_FILE"],
-    {"active_incidents": {}, "untested_versions_observed": {}, "reduce_failures": {}},
+    {"active_incidents": {}, "reduce_failures": {}},
 )
 
 out = []
@@ -158,7 +158,6 @@ out.append("")
 
 # --- Durable canary banner (adrev-014 + #753 handoff) ----------------------
 active_incidents = canary.get("active_incidents") or {}
-untested_versions = canary.get("untested_versions_observed") or {}
 # Reduce-phase parse failures (#769 Stage-2 P1 #1): main() aborts without
 # writing proposals or advancing watermarks when the reduce model never
 # returns parseable JSON, even after the retry nudge. That abort is
@@ -167,7 +166,7 @@ untested_versions = canary.get("untested_versions_observed") or {}
 # durable file so it gets the same loud, persists-until-acknowledged
 # banner as a schema_canary incident.
 reduce_failures = canary.get("reduce_failures") or {}
-if active_incidents or untested_versions or reduce_failures:
+if active_incidents or reduce_failures:
     out.append("## ⚠️ Canary banner (durable — shown until acknowledged)")
     out.append("")
     if active_incidents:
@@ -175,12 +174,6 @@ if active_incidents or untested_versions or reduce_failures:
         out.append("")
         for slug, info in sorted(active_incidents.items()):
             out.append(f"- `{slug}` (first seen {info.get('date', '?')}): {info.get('detail', '')}")
-        out.append("")
-    if untested_versions:
-        out.append("**Untested transcript-schema versions observed:**")
-        out.append("")
-        for version, count in sorted(untested_versions.items()):
-            out.append(f"- `{version}` — {count} session(s)")
         out.append("")
     if reduce_failures:
         out.append("**Reduce-phase parse failures (mined evidence NOT consumed, watermark NOT advanced):**")
@@ -218,20 +211,20 @@ else:
 
 # --- Applied this run (auto) -- optimistic-memory plan.md Section 5 Epic 5.
 #
-# Epic 3's optimistic-integration engine writes status: "auto_applied" +
+# The Epic 3 optimistic-integration engine writes status: "auto_applied" +
 # batch_id + posture + (for dwell postures) dwell_until directly onto a
-# proposal row (apply_dream_proposal.py's apply_proposal()). The nightly
+# proposal row (apply_proposal() in apply_dream_proposal.py). The nightly
 # chain runs optimistic-integrate BEFORE this digest (dream-daily.sh), so
-# TODAY's own proposals file always carries the batch this section
+# the proposals file for TODAY always carries the batch this section
 # reports, with its dwell window still entirely ahead of it.
 #
 # "Already surfaced" dedup (plan.md: "the report shows a batch once, in
 # the report for its own day"): a marker file per batch_id
 # (state/surfaced/<batch_id>.json) is checked before rendering and written
 # after. This is the ONLY dedup mechanism -- there is no separate
-# same-day-vs-later-day special case: re-rendering the SAME day's digest a
-# second time (nothing new happened) and a batch_id that (defensively)
-# resurfaces in a LATER day's file are handled identically -- once a batch
+# same-day-vs-later-day special case: re-rendering the digest for the SAME
+# day a second time (nothing new happened) and a batch_id that (defensively)
+# resurfaces in the file for a LATER day are handled identically -- once a batch
 # has been shown, it is never shown again.
 #
 # Silent when nothing (new) was auto-applied (research: a digest that
@@ -273,7 +266,7 @@ applied_rows = [p for p in applied_all if p.get("batch_id") in new_batch_ids]
 if applied_rows:
     audit_records = load_jsonl(os.environ.get("CCGM_DIGEST_APPLY_AUDIT_FILE", ""))
     # Last write wins -- apply-audit.jsonl is append-only/chronological and
-    # (per apply_proposal()'s adrev-013 "refuse non-pending" rule) a given
+    # (per the adrev-013 "refuse non-pending" rule in apply_proposal()) a given
     # proposal_id is applied at most once, so in practice there is exactly
     # one matching record; this is a defensive tie-break, not a correctness
     # requirement.
@@ -303,7 +296,7 @@ if applied_rows:
         # The learnings-store id "its" undo command below actually names --
         # for add/supersede this is the NEW entry the proposal created
         # (never recorded on the proposal row itself, only in the audit
-        # trail); for contradict/deprecate it is the row's own target_id.
+        # trail); for contradict/deprecate it is the target_id already on that row.
         if p.get("kind") in ("learning_add", "learning_supersede"):
             return resolve_new_entry_id(p.get("id"))
         return p.get("target_id")
@@ -356,7 +349,7 @@ if applied_rows:
             lines.append(f"#### {project} — {kind}")
             lines.append("")
             for p in sorted(grouped[(project, kind)], key=lambda p: p.get("id", "")):
-                lines.append(f"##### `{p.get('id')}`")
+                lines.append(f'##### `{p.get("id")}`')
                 lines.append("")
                 lines.append(f"- **target**: `{row_target_id(p) or '(unknown)'}`")
                 lines.append(f"- **posture**: {p.get('posture', '?')}")
@@ -503,8 +496,8 @@ else:
             for p in rows:
                 out.append(render_proposal(p))
 
-# --- Yesterday's applied/rejected tally --------------------------------------
-out.append("## Yesterday's tally")
+# --- Prior-day applied/rejected tally ------------------------------------
+out.append("## Prior-day tally")
 out.append("")
 if not yesterday_proposals:
     out.append(f"_No proposals recorded for {yesterday}._")

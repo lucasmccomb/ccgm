@@ -38,8 +38,9 @@ exact contract):
   exemplars), then routine clusters (bare counts, no exemplars -- these are
   NOT proposal-worthy on their own; a routine cluster's `count` being large
   is normal noise, not a signal).
-- `canary` -- observed/untested transcript-schema versions. Informational;
-  never propose anything about this field itself.
+- `canary` -- observed transcript-schema versions (informational only;
+  drift is a hard failure that never reaches this prompt). Never propose
+  anything about this field itself.
 
 Weight friction clusters heavily. A cluster that recurs across multiple
 distinct `sample_session_ids` is a much stronger signal than a single

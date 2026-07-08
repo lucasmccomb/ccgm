@@ -565,7 +565,7 @@ def _write_json_atomic(path: Path, obj: Any) -> None:
 
 
 def _default_canary_state() -> dict[str, Any]:
-    return {"active_incidents": {}, "untested_versions_observed": {}, "reduce_failures": {}}
+    return {"active_incidents": {}, "reduce_failures": {}}
 
 
 def record_canary_incident(slug: str, date: str, detail: str) -> None:
@@ -577,17 +577,6 @@ def record_canary_incident(slug: str, date: str, detail: str) -> None:
     state = _read_json(canary_state_path(), _default_canary_state())
     state.setdefault("active_incidents", {})
     state["active_incidents"][slug] = {"date": date, "detail": detail}
-    state["last_updated"] = _utc_now_iso()
-    _write_json_atomic(canary_state_path(), state)
-
-
-def record_untested_versions(untested_versions: list[str]) -> None:
-    if not untested_versions:
-        return
-    state = _read_json(canary_state_path(), _default_canary_state())
-    state.setdefault("untested_versions_observed", {})
-    for v in untested_versions:
-        state["untested_versions_observed"][v] = int(state["untested_versions_observed"].get(v, 0)) + 1
     state["last_updated"] = _utc_now_iso()
     _write_json_atomic(canary_state_path(), state)
 
@@ -682,7 +671,6 @@ def mine_due_slugs(
             skipped[slug] = "evidence bundle schema validation failed"
             continue
 
-        record_untested_versions(bundle.get("canary", {}).get("untested_versions", []))
         bundles[slug] = bundle
 
     return bundles, skipped
@@ -1582,7 +1570,6 @@ def main(argv: list[str] | None = None) -> int:
             "cost_breakdown": cost_breakdown,
             "actual_input_tokens": total_input_tokens,
             "actual_output_tokens": total_output_tokens,
-            "untested_versions": [],
         }
         runs_dir().mkdir(parents=True, exist_ok=True)
         _write_json_atomic(runs_dir() / f"{today}.json", run_summary)
@@ -1627,10 +1614,6 @@ def main(argv: list[str] | None = None) -> int:
         if timestamps:
             tm.write_watermark(slug, max(timestamps))
 
-    untested_versions = sorted({
-        v for slug in planned_slugs for v in bundles[slug].get("canary", {}).get("untested_versions", [])
-    })
-
     run_summary = {
         "date": today,
         "generated_at": _utc_now_iso(),
@@ -1647,7 +1630,6 @@ def main(argv: list[str] | None = None) -> int:
         "cost_breakdown": cost_breakdown,
         "actual_input_tokens": total_input_tokens,
         "actual_output_tokens": total_output_tokens,
-        "untested_versions": untested_versions,
     }
     runs_dir().mkdir(parents=True, exist_ok=True)
     _write_json_atomic(runs_dir() / f"{today}.json", run_summary)

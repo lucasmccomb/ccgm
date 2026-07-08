@@ -99,6 +99,26 @@
             "type": "integer",
             "minimum": 0,
             "description": "Count of times a recognized friction-bearing field (is_error/hookErrors/preventedContinuation/toolUseResult) was structurally present, regardless of value. Distinguishes a genuinely quiet session (fields present, no problems) from schema drift (fields absent) -- see schema_canary()."
+          },
+          "turn_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count of parsed turns (user + assistant) in this session. Feeds the turn_structure invariant in validate_structure()/schema_canary()."
+          },
+          "assistant_turn_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count of assistant turns in this session. Gates the token_economics invariant in validate_structure()/schema_canary(): message.usage is read on every assistant line regardless of tool_use, so this gate is a strict superset of tool_use_count."
+          },
+          "usage_field_presence": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count of times a recognized token/cache usage field (message.usage.{input,output,cache_creation,cache_read}_tokens) was structurally present, regardless of value. Feeds the token_economics invariant in validate_structure()/schema_canary()."
+          },
+          "parsed_line_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count of successfully parsed JSON lines in this session's transcript. Gates the turn_structure invariant in validate_structure()/schema_canary(): a rename of the top-level `type` envelope field would otherwise zero tool_use_count too, so this invariant is gated on parsed lines instead."
           }
         }
       }
