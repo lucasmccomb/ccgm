@@ -120,9 +120,11 @@ detect_project_slug = _learnings_store.detect_project_slug
 
 
 class SchemaDriftError(RuntimeError):
-    """Raised by schema_canary() when the transcript schema appears to
-    have drifted (recognized friction fields are structurally absent
-    despite tool_use activity being present). See schema_canary()."""
+    """Raised by schema_canary() when the field-level structural contract
+    (see validate_structure()) is violated -- a whole family of expected
+    fields (friction, token-economics, or turn-structure) is structurally
+    absent from the mined batch despite its corroborating signal being
+    present. See schema_canary()."""
 
 
 # ---------------------------------------------------------------------------

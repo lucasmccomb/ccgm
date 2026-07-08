@@ -473,6 +473,61 @@ class MineCounterTests(unittest.TestCase):
         self.assertEqual(mined["assistant_turn_count"], 2)
         self.assertEqual(mined["usage_field_presence"], 0)
 
+    def test_usage_field_presence_counts_present_but_all_zero_tokens(self):
+        # Structural presence regardless of value -- mirrors how
+        # friction_field_presence counts an is_error:false. A usage block
+        # whose four *_tokens keys are all present but zero still counts as
+        # present (usage_field_presence == 1), so I2 does NOT fire. Locks
+        # the key-membership check (`key in usage`) against a future
+        # refactor to value-truthiness (`usage.get(key)`), which would
+        # wrongly read an all-zero-but-present usage as absent and mask the
+        # real drift signal it exists to detect.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "zero-usage.jsonl"
+            lines = [
+                json.dumps(
+                    {
+                        "type": "user",
+                        "sessionId": "fixture-zerousage-0001",
+                        "uuid": "u1",
+                        "parentUuid": None,
+                        "timestamp": "2026-01-02T09:00:00.000Z",
+                        "cwd": "/Users/fixtureuser/code/tidy-app",
+                        "version": "2.1.198",
+                        "message": {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "sessionId": "fixture-zerousage-0001",
+                        "uuid": "a1",
+                        "parentUuid": "u1",
+                        "timestamp": "2026-01-02T09:00:01.000Z",
+                        "cwd": "/Users/fixtureuser/code/tidy-app",
+                        "version": "2.1.198",
+                        "message": {
+                            "role": "assistant",
+                            "usage": {
+                                "input_tokens": 0,
+                                "output_tokens": 0,
+                                "cache_creation_input_tokens": 0,
+                                "cache_read_input_tokens": 0,
+                            },
+                            "content": [{"type": "text", "text": "hello"}],
+                        },
+                    }
+                ),
+            ]
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            mined = tm.mine(path)
+        self.assertEqual(mined["assistant_turn_count"], 1)
+        # present-but-zero counts as structural presence -> I2 stays silent
+        self.assertEqual(mined["usage_field_presence"], 1)
+        self.assertEqual(tm.validate_structure([mined]), [])
+        # the zero values are genuinely read (value extraction still works)
+        self.assertEqual(mined["token_totals"]["input_tokens"], 0)
+
     def test_turn_count_zero_when_envelope_type_renamed(self):
         mined = tm.mine(_fixture("drift-type.jsonl"))
         self.assertEqual(mined["turn_count"], 0)
