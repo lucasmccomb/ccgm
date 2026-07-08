@@ -86,6 +86,10 @@
           "excerpt": {
             "type": "string",
             "description": "Sourced from the transcript miner's already-redacted (secrets + PII), <=400-char excerpt; never re-derived from raw transcript text at this layer. The map/reduce prompts instruct the model to reuse it verbatim rather than paraphrase (unlike content/justification), but that is a prompt instruction, not a code-enforced guarantee across the reduce phase's own re-emission of this field -- dream_analyze.py also passes it through learnings_store.sanitize_content() at the proposal write path (sec-3), the same as content/justification, since a two-model-hop re-emission is not independently verified to be byte-identical to its source."
+          },
+          "started_at": {
+            "type": "string",
+            "description": "OPTIONAL. ISO 8601 UTC start timestamp of the cited evidence session, stamped post-reduce by stamp_proposal_signals() from the deterministic evidence bundle (composite-eligibility plan.md §3.8), NOT emitted by the reduce model. A digest aid only -- gather_eligibility_signals() re-derives recency from the transcript itself at apply time and never reads this field (arch-C3, decisions.md #20). Absent when the cited session was not in this run's bundle."
           }
         }
       }
@@ -135,6 +139,26 @@
       "type": "string",
       "enum": ["optimistic-immediate", "optimistic-dwell", "dwell-quarantine", "gated"],
       "description": "OPTIONAL. The posture string resolve_posture(kind, project) returned for this proposal at apply time (optimistic-memory plan.md §3.3/§3.4). Recorded for audit/report purposes; absent for proposals produced before Epic 3 or never routed through the optimistic-integration engine."
+    },
+    "evidence_tier": {
+      "type": "string",
+      "enum": ["user-corrected", "inferred"],
+      "description": "OPTIONAL. Deterministically stamped post-reduce by stamp_proposal_signals() (composite-eligibility plan.md §3.8): 'user-corrected' iff a cited evidence session in this run's bundle carries a miner-detected, human-origin user-correction; otherwise 'inferred'. The reduce model CANNOT set it -- it is written from the bundle, never from model output. A digest aid only: the enabled-mode eligibility gate (Epic E3) re-mines the cited transcript and recomputes the tier from scratch, never trusting this field (arch-C3, decisions.md #15/#20). Absent on rows produced before this field existed."
+    },
+    "stamped_signals": {
+      "type": "object",
+      "description": "OPTIONAL. Deterministic digest-aid summary of the signals stamped post-reduce (composite-eligibility plan.md §3.8). Written from the evidence bundle by stamp_proposal_signals(), never by the reduce model, and never read by the eligibility gate (which re-derives every signal at apply time -- arch-C3, decisions.md #20). Absent on rows produced before this field existed.",
+      "properties": {
+        "evidence_tier": {
+          "type": "string",
+          "enum": ["user-corrected", "inferred"],
+          "description": "Same value as the top-level evidence_tier, duplicated here so the digest can read the whole stamped summary from one object."
+        },
+        "newest_evidence_started_at": {
+          "type": ["string", "null"],
+          "description": "ISO 8601 UTC start timestamp of the newest cited evidence session present in this run's bundle, or null when no cited session resolved to a bundle session with a start timestamp."
+        }
+      }
     }
   }
 }

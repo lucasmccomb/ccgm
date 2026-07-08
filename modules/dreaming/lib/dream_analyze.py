@@ -82,6 +82,13 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 import transcript_miner as tm  # noqa: E402  (sibling module, same lib/ dir)
+# eligibility.py (composite-eligibility Epic E1) is the single owner of the
+# eligibility config contract -- DEFAULT_ELIGIBILITY + validate_eligibility_
+# config() (adrev2-005). load_config() below imports and seeds them; the
+# constant/validator are NEVER hand-copied here. This is a top-level sibling
+# import (resolved via the sys.path.insert above), so it requires eligibility.py
+# to exist -- E2 depends on merged E1 at its acceptance boundary (adrev3-001).
+import eligibility  # noqa: E402  (sibling module, same lib/ dir; owned by Epic E1)
 
 # learnings_store lives in a DIFFERENT module's lib/ dir (self-improving).
 # Reuse transcript_miner's own cross-module import helper rather than
@@ -280,6 +287,17 @@ def load_config() -> dict[str, Any]:
     # is the same object as DEFAULT_OPTIMISTIC_INTEGRATION -- a caller
     # mutating the returned config can never corrupt the shared default.
     cfg["optimistic_integration"] = dict(DEFAULT_OPTIMISTIC_INTEGRATION)
+    # Seed the eligibility sub-block defaults one level deeper (composite-
+    # eligibility plan.md §3.6) with the SAME re-copy-then-overlay pattern as
+    # the outer block above: a user's partial `eligibility` override must fill
+    # in over these defaults, not wipe the siblings it did not set (arch-C1,
+    # decisions.md #19). The defaults are owned by eligibility.py (E1 single
+    # owner, adrev2-005) -- imported + seeded here, never hand-copied. Seeded
+    # via the default_eligibility() FACTORY, not dict(DEFAULT_ELIGIBILITY):
+    # the shallow copy would alias the nested `weights` dict, so a consumer
+    # mutating the seed's weights in place would corrupt the module global
+    # process-wide (E1 post-review fix; see the factory's docstring).
+    cfg["optimistic_integration"]["eligibility"] = eligibility.default_eligibility()
     path = config_path()
     if path.is_file():
         try:
@@ -291,7 +309,15 @@ def load_config() -> dict[str, Any]:
             optimistic_overlay = overlay.pop("optimistic_integration", None)
             cfg.update(overlay)
             if isinstance(optimistic_overlay, dict):
+                # Deep-merge the eligibility sub-block one level deeper (§3.6):
+                # pop the user's `eligibility` overlay BEFORE the shallow outer
+                # update so it merges onto the seeded defaults instead of
+                # replacing them wholesale (arch-C1, decisions.md #19).
+                optimistic_overlay = dict(optimistic_overlay)
+                eligibility_overlay = optimistic_overlay.pop("eligibility", None)
                 cfg["optimistic_integration"].update(optimistic_overlay)
+                if isinstance(eligibility_overlay, dict):
+                    cfg["optimistic_integration"]["eligibility"].update(eligibility_overlay)
             elif optimistic_overlay is None and cfg.get("auto_apply_counters") is True:
                 # Legacy-flag migration (optimistic-memory plan.md §3.5 / §5
                 # Epic 8). A config.json written before this block existed
@@ -330,6 +356,31 @@ def load_config() -> dict[str, Any]:
                     "block to config.json to override or opt back out.",
                     file=sys.stderr,
                 )
+
+    # Validate the merged eligibility block AFTER defaulting (composite-
+    # eligibility plan.md §3.6). Fail-closed (decision principle 1): ANY
+    # validation failure disables the feature plus exactly one stderr line.
+    # The digest banner is a later epic. The validator is E1-owned and takes
+    # the whole merged optimistic_integration dict so it can run its
+    # cross-field checks (e.g. MIN_STATIC_FLOOR <= static_floor <=
+    # confidence_floor_content).
+    elig_ok, elig_errors = eligibility.validate_eligibility_config(cfg["optimistic_integration"])
+    if not elig_ok:
+        # Reset the ENTIRE block to pristine defaults, not just enabled=False:
+        # leaving the user's invalid sibling values (bad weights, bad
+        # threshold, ...) in place would be a downstream trap -- E3 reads this
+        # dict to gate admission decisions, and a future edit reading a
+        # sibling before checking `enabled` would consume invalid values.
+        # `enabled` is then FORCED False explicitly so the disable guarantee
+        # rests on this line, not on the factory's default happening to be
+        # False.
+        cfg["optimistic_integration"]["eligibility"] = eligibility.default_eligibility()
+        cfg["optimistic_integration"]["eligibility"]["enabled"] = False
+        print(
+            "dream_analyze: optimistic_integration.eligibility config invalid -> "
+            "eligibility disabled, block reset to defaults (" + "; ".join(elig_errors) + ")",
+            file=sys.stderr,
+        )
     return cfg
 
 
@@ -1280,6 +1331,66 @@ def existing_fingerprints(exclude_path: Path | None = None) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+def stamp_proposal_signals(
+    written_rows: list[dict[str, Any]],
+    bundles: dict[str, dict[str, Any]],
+) -> None:
+    """Deterministic post-reduce signal-stamping pass (composite-eligibility
+    plan.md §3.8). Mutates `written_rows` IN PLACE, after finalize_proposal()
+    has already computed every fingerprint and before write_proposals() -- so
+    the stamped fields can never perturb a fingerprint (asserted by a test).
+
+    For each row it attaches, purely from the deterministic evidence bundle
+    (never from any model output):
+      * ``evidence[i]["started_at"]`` -- the cited session's bundle start
+        time, for evidence items whose session_id is present in this run's
+        bundle for the row's project slug.
+      * ``evidence_tier`` -- "user-corrected" iff any cited session present in
+        the bundle carries a user-correction (human-origin by construction of
+        the miner's own origin filter -- sec-C1), else "inferred".
+      * ``stamped_signals`` -- a compact digest-aid summary object.
+
+    These are digest aids ONLY. The enabled-mode eligibility gate (Epic E3)
+    re-derives every signal from the transcript files at apply time and its
+    gatherer takes NO stamped-field parameter, so a forged stamped value can
+    never influence a gate decision (arch-C3, decisions.md #20). A cited
+    session absent from this run's bundle contributes no started_at and does
+    not make the row user-corrected (fail toward the weaker "inferred").
+    """
+    # Per-slug {session_id: session} maps, built once from the bundles.
+    sessions_by_slug: dict[str, dict[str, dict[str, Any]]] = {}
+    for slug, bundle in bundles.items():
+        by_id: dict[str, dict[str, Any]] = {}
+        for session in bundle.get("sessions", []):
+            sid = session.get("session_id")
+            if isinstance(sid, str):
+                by_id[sid] = session
+        sessions_by_slug[slug] = by_id
+
+    for row in written_rows:
+        session_map = sessions_by_slug.get(row.get("project"), {})
+        newest_started_at: str | None = None
+        user_corrected = False
+        for item in row.get("evidence", []):
+            sid = item.get("session_id")
+            session = session_map.get(sid) if isinstance(sid, str) else None
+            if session is None:
+                continue
+            started_at = session.get("started_at")
+            if isinstance(started_at, str) and started_at:
+                item["started_at"] = started_at
+                if newest_started_at is None or started_at > newest_started_at:
+                    newest_started_at = started_at
+            if session.get("user_corrections"):
+                user_corrected = True
+        tier = "user-corrected" if user_corrected else "inferred"
+        row["evidence_tier"] = tier
+        row["stamped_signals"] = {
+            "evidence_tier": tier,
+            "newest_evidence_started_at": newest_started_at,
+        }
+
+
 def write_proposals(rows: list[dict[str, Any]], target_path: Path, *, overwrite: bool) -> None:
     target_path.parent.mkdir(parents=True, exist_ok=True)
     if overwrite:
@@ -1500,6 +1611,12 @@ def main(argv: list[str] | None = None) -> int:
             continue
         dedup_corpus.add(row["fingerprint"])
         written_rows.append(row)
+
+    # Deterministic post-reduce signal stamping (composite-eligibility §3.8):
+    # runs AFTER finalize_proposal() computed every fingerprint (above) and
+    # BEFORE write_proposals(), so the stamped fields provably cannot perturb
+    # any fingerprint.
+    stamp_proposal_signals(written_rows, bundles)
 
     write_proposals(written_rows, target_path, overwrite=bool(args.force_day))
 

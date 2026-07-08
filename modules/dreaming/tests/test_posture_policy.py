@@ -164,7 +164,14 @@ class LoadConfigOptimisticIntegrationTests(unittest.TestCase):
         (tmp / "config.json").write_text(json.dumps({"lookback_days": 3}), encoding="utf-8")
         cfg = da.load_config()
         self.assertEqual(cfg["lookback_days"], 3)
-        self.assertEqual(cfg["optimistic_integration"], da.DEFAULT_OPTIMISTIC_INTEGRATION)
+        # optimistic_integration now ALSO carries the seeded eligibility
+        # sub-block (composite-eligibility plan.md §3.6, Epic E2). The
+        # non-eligibility defaults still equal the constant; the eligibility
+        # block equals its own eligibility.py-owned default (adrev2-005).
+        oi = dict(cfg["optimistic_integration"])
+        elig = oi.pop("eligibility")
+        self.assertEqual(oi, da.DEFAULT_OPTIMISTIC_INTEGRATION)
+        self.assertEqual(elig, da.eligibility.default_eligibility())
 
 
 if __name__ == "__main__":

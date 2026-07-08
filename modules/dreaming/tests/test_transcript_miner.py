@@ -93,6 +93,40 @@ class UserCorrectionTests(unittest.TestCase):
         self.assertEqual(mined["user_corrections"], [])
 
 
+class CorrectionOriginFilterTests(unittest.TestCase):
+    """sec-C1 (decisions.md #15): user-corrections may only be minted from a
+    human-authored turn -- origin.kind=="human" OR promptSource=="typed" on
+    the turn carrying the negation phrase. A tool_result-only turn (no origin
+    signal) and a human-text turn missing BOTH signals are both fail-closed."""
+
+    def test_prompt_source_typed_turn_mints_correction(self):
+        # user-correction.jsonl's correction turn carries promptSource:"typed",
+        # so the origin filter accepts it and the correction is still minted.
+        mined = tm.mine(_fixture("user-correction.jsonl"))
+        self.assertEqual(len(mined["user_corrections"]), 1)
+        self.assertIn("wrong", mined["user_corrections"][0]["excerpt"].lower())
+
+    def test_origin_kind_human_turn_mints_correction(self):
+        # origin.kind == "human" is the alternative accepted signal.
+        mined = tm.mine(_fixture("correction-origin-human.jsonl"))
+        self.assertEqual(len(mined["user_corrections"]), 1)
+        self.assertIn("wrong", mined["user_corrections"][0]["excerpt"].lower())
+
+    def test_negation_in_tool_result_turn_is_not_a_correction(self):
+        # A negation phrase appearing INSIDE tool output (a tool_result-only
+        # user turn, which carries no human-origin signal) must never mint a
+        # user-correction, even though the friction event itself is detected.
+        mined = tm.mine(_fixture("correction-tool-result-negation.jsonl"))
+        self.assertEqual(len(mined["friction_events"]), 1)
+        self.assertEqual(mined["user_corrections"], [])
+
+    def test_missing_origin_fields_fail_closed(self):
+        # A human-text negation turn with NEITHER origin.kind nor promptSource
+        # is not treated as a correction (fail-closed).
+        mined = tm.mine(_fixture("correction-missing-origin.jsonl"))
+        self.assertEqual(mined["user_corrections"], [])
+
+
 class RedactionTests(unittest.TestCase):
     def setUp(self):
         self.mined = tm.mine(_fixture("friction.jsonl"))
