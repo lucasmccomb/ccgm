@@ -366,6 +366,77 @@ class GuardIITwoSidedTests(GateTestBase):
         self.assertEqual(red_ev.verified_session_ids, [red_sid],
                          "heavily-redacted legitimate excerpt must be accepted (adrev-001 preserved)")
 
+    def test_proportional_arm_binds_beyond_absolute_floor(self):
+        """Regression-lock for _EXCERPT_GUARD_FRACTION's DOWNWARD direction.
+
+        The two-sided test above only exercises the _EXCERPT_GUARD_MIN_ABS_TOKENS
+        floor (short excerpts), so it would still pass if the fraction were
+        silently gutted to 0.0. This test constructs a pair where ONLY the
+        proportional arm can reject: a 12-content-token excerpt (required =
+        max(3, ceil(0.5*12)) = 6 > the absolute floor of 3) against a
+        same-length transcript sentence sharing high character similarity
+        (~0.89 >= 0.85) but only 4 intact tokens.
+
+          * 4 >= 3  -> the absolute floor alone would ACCEPT it;
+          * 4 <  6  -> the shipped proportional arm REJECTS it.
+
+        Self-validation: with _EXCERPT_GUARD_FRACTION patched to 0.0 the SAME
+        pair is accepted, proving the rejection came from the proportional arm
+        (not similarity or the floor). Mirror positive: 10 intact tokens >= 6
+        -> accepted under the shipped constants, all else equal.
+        """
+        excerpt = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima"
+        # 8 of 12 tokens mutated by one SAME-POSITION character (length
+        # preserved so the excerpt-sized window covers the sentence exactly):
+        # token intersection = {india, juliet, kilo, lima} = 4.
+        low_overlap = "alphq bravp charlif deltq echp foxtrob golg hotep india juliet kilo lima"
+        # Only 2 mutated: intersection = 10.
+        high_overlap = "alphq bravp charlie delta echo foxtrot golf hotel india juliet kilo lima"
+
+        # Preconditions of the construction (fail loudly if fixtures drift).
+        tokens = adp._excerpt_content_tokens(excerpt)
+        self.assertEqual(len(tokens), 12)
+        required = max(adp._EXCERPT_GUARD_MIN_ABS_TOKENS,
+                       math.ceil(adp._EXCERPT_GUARD_FRACTION * len(tokens)))
+        self.assertGreater(required, adp._EXCERPT_GUARD_MIN_ABS_TOKENS,
+                           "construction must make the proportional arm the binding one")
+
+        slug = self._slug()
+        low_sid = f"sess-low-{uuid.uuid4().hex[:6]}"
+        high_sid = f"sess-high-{uuid.uuid4().hex[:6]}"
+        self._write_session(low_sid, slug=slug, turns=[tf.user_turn(low_overlap, human=True)])
+        self._write_session(high_sid, slug=slug, turns=[tf.user_turn(high_overlap, human=True)])
+
+        low_row = self._add_row(pid=self._pid("low"), slug=slug, session_id=low_sid,
+                                content=excerpt, excerpt=excerpt)
+        high_row = self._add_row(pid=self._pid("high"), slug=slug, session_id=high_sid,
+                                 content=excerpt, excerpt=excerpt)
+
+        low_ev = self._eval(low_row, slug=slug)
+        self.assertEqual(low_ev.verified_session_ids, [],
+                         "4 intact tokens < ceil(0.5*12)=6: the proportional arm must reject")
+
+        high_ev = self._eval(high_row, slug=slug)
+        self.assertEqual(high_ev.verified_session_ids, [high_sid],
+                         "10 intact tokens >= 6: accepted under the shipped constants")
+
+        # Self-validation: the SAME low-overlap pair is accepted once the
+        # fraction is gutted to 0.0 -- so the rejection above is attributable
+        # to the proportional arm alone (similarity and the absolute floor
+        # both pass). This is exactly the silent-downgrade this test locks out.
+        with mock.patch.object(adp, "_EXCERPT_GUARD_FRACTION", 0.0):
+            gutted_ev = self._eval(low_row, slug=slug)
+        self.assertEqual(gutted_ev.verified_session_ids, [low_sid],
+                         "with fraction=0.0 the pair must be accepted -- if this fails, the "
+                         "construction no longer isolates the proportional arm")
+
+        # Constant pin: 3/0.5 are the values the two-sided calibration
+        # (adrev3-002: short-common-token rejected AND redacted-legit accepted)
+        # and this proportional-arm lock were computed against. Changing either
+        # requires re-running BOTH arms of both tests.
+        self.assertEqual(adp._EXCERPT_GUARD_MIN_ABS_TOKENS, 3)
+        self.assertEqual(adp._EXCERPT_GUARD_FRACTION, 0.5)
+
 
 # ---------------------------------------------------------------------------
 # Tier re-mining (both directions) + spoofing.
