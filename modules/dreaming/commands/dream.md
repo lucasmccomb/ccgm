@@ -87,16 +87,25 @@ schema. Defaults: `enabled: true`, `auto_apply_counters: false`,
 `daily_cost_cap_usd: 10.00`, `promotion_min_sessions: 3`,
 `promotion_min_agents: 2`.
 
-`auto_apply_counters` stays `false` until a human deliberately edits
-`~/.claude/dreaming/config.json` — there is no toggle command for it yet
-(unlike autoheal's `/autoheal-toggle`); flipping it is a manual config edit,
-by design, so it is never accidentally enabled.
+`auto_apply_counters` is the **legacy** verify-only flag, kept only for
+backward compatibility — it is not the flag to set on a fresh config.
+`dream_analyze.load_config()` migrates a config that still has it set `true`
+to `optimistic_integration.enabled = true` (with the conservative defaults),
+in memory on read, so a prior opt-in survives the rename.
 
 `optimistic_integration.enabled` (a nested, more specific flag — see item 8
-above) is SEPARATELY `false` by default too (`DEFAULT_OPTIMISTIC_INTEGRATION`
-in `dream_analyze.py`). Epic 8 (not yet landed as of this command's own
-Epic 6) is what wires a surfaced activation prompt into `memory-setup.sh`;
-until then, flipping it is also a manual `config.json` edit.
+above) is SEPARATELY `false` by default (`DEFAULT_OPTIMISTIC_INTEGRATION`
+in `dream_analyze.py`). The activation prompt that offers it ships in
+`memory-setup.sh` (PR #824) — turning it on is a `y` at that prompt, never a
+hand-edit of `~/.claude/dreaming/config.json`, per
+`modules/dreaming/rules/dreaming.md`'s do-not-hand-edit rule.
+
+`optimistic_integration.eligibility.enabled` is a further, independent opt-in
+*beneath* the flag above (governs `learning_add`/`learning_supersede`
+admission only), also `false` by default. `memory-setup.sh` offers it as a
+separate prompt, only once optimistic integration itself is on. See
+`modules/dreaming/rules/dreaming.md` > "Eligibility composite" for the gate's
+full contract.
 
 ## When NOT to invoke
 
@@ -109,9 +118,11 @@ until then, flipping it is also a manual `config.json` edit.
 
 - `/dream-review [veto|revert]` — the optimistic model's post-hoc review
   and rollback surface (Epic 6).
-- Rule: `modules/dreaming/rules/dreaming.md` (Epic 8; not yet present in
-  this branch — see `modules/self-improving/rules/learnings-store.md` for
-  the store side of this system in the meantime).
+- Rule: `modules/dreaming/rules/dreaming.md` — the full dreaming +
+  optimistic-integration contract, including the "Eligibility composite"
+  subsection and the do-not-hand-edit rule for
+  `~/.claude/dreaming/config.json`. Store side:
+  `modules/self-improving/rules/learnings-store.md`.
 - Plan: `~/code/plans/ccgm-optimistic-memory/plan.md` §5 Epic 6 (this
   command's own update); `~/code/plans/ccgm-durable-memory-system/plan.md`
   §5 Epic 6 (the original `/dream`/`/dream-apply` this command predates).
