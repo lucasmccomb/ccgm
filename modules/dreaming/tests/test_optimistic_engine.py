@@ -38,6 +38,7 @@ import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 import uuid
 from pathlib import Path
 
@@ -54,12 +55,15 @@ sys.modules.pop("apply_dream_proposal", None)
 
 _TMP_LEARNINGS = tempfile.mkdtemp(prefix="ccgm-dreaming-test-optengine-learnings-")
 _TMP_DREAMING = tempfile.mkdtemp(prefix="ccgm-dreaming-test-optengine-dreaming-")
+_TMP_PROJECTS = tempfile.mkdtemp(prefix="ccgm-dreaming-test-optengine-projects-")
 _TMP_HOME = tempfile.mkdtemp(prefix="ccgm-dreaming-test-optengine-home-")
 _ORIG_LEARNINGS_DIR = os.environ.get("CCGM_LEARNINGS_DIR")
 _ORIG_DREAMING_DIR = os.environ.get("CCGM_DREAMING_DIR")
+_ORIG_PROJECTS_DIR = os.environ.get("CCGM_CLAUDE_PROJECTS_DIR")
 _ORIG_HOME = os.environ.get("HOME")
 os.environ["CCGM_LEARNINGS_DIR"] = _TMP_LEARNINGS
 os.environ["CCGM_DREAMING_DIR"] = _TMP_DREAMING
+os.environ["CCGM_CLAUDE_PROJECTS_DIR"] = _TMP_PROJECTS
 os.environ["HOME"] = _TMP_HOME
 
 import apply_dream_proposal as adp  # noqa: E402
@@ -74,6 +78,7 @@ def tearDownModule() -> None:
     for key, orig in (
         ("CCGM_LEARNINGS_DIR", _ORIG_LEARNINGS_DIR),
         ("CCGM_DREAMING_DIR", _ORIG_DREAMING_DIR),
+        ("CCGM_CLAUDE_PROJECTS_DIR", _ORIG_PROJECTS_DIR),
         ("HOME", _ORIG_HOME),
     ):
         if orig is not None:
@@ -124,6 +129,7 @@ class OptimisticEngineTestBase(unittest.TestCase):
         # (mirrors test_apply_dream_proposal.py's own rationale).
         self._pin_env("CCGM_LEARNINGS_DIR", str(ls.LEARNINGS_ROOT))
         self._pin_env("CCGM_DREAMING_DIR", _TMP_DREAMING)
+        self._pin_env("CCGM_CLAUDE_PROJECTS_DIR", str(ls.CLAUDE_PROJECTS_ROOT))
         self._pin_env("HOME", _TMP_HOME)
         adp.proposals_dir().mkdir(parents=True, exist_ok=True)
         # Clean, non-suspended breaker state before EVERY test (see module
@@ -1300,6 +1306,138 @@ class GatingTests(OptimisticEngineTestBase):
         self.assertTrue(any(
             a.get("outcome") == "anomaly_recorded" and a.get("reason") == "red_eval_gate" for a in audit
         ), audit)
+
+
+# ---------------------------------------------------------------------------
+# Composite-eligibility E3: eviction ops are UNTOUCHED by the gate.
+# ---------------------------------------------------------------------------
+
+
+class EvictionBitForBitTests(OptimisticEngineTestBase):
+    """learning_contradict / learning_deprecate must behave identically with
+    eligibility enabled=true and enabled=false: the composite is scoped to
+    add/supersede ONLY (plan.md §1.3, decisions.md #11)."""
+
+    def _run_eviction(self, *, eligibility_enabled: bool, kind: str) -> tuple[dict, str | None]:
+        slug = _unique_slug("evict")
+        target = self._seed_learning(slug, content="to be evicted", confidence=8)
+        self._write_config({"dwell_hours": 12, "eligibility": {"enabled": eligibility_enabled}})
+        day = _unique_day()
+        pid = f"e-{uuid.uuid4().hex[:8]}"
+        self._write_day(day, [_proposal_row(pid=pid, kind=kind, project=slug,
+                                            target_id=target, confidence=8)])
+        summary = adp.run_optimistic_integrate(day)
+        return summary, self._status_of(day, pid)
+
+    def test_contradict_identical_enabled_vs_disabled(self):
+        off_summary, off_status = self._run_eviction(eligibility_enabled=False, kind="learning_contradict")
+        on_summary, on_status = self._run_eviction(eligibility_enabled=True, kind="learning_contradict")
+        self.assertEqual(off_summary["applied"], 1)
+        self.assertEqual(on_summary["applied"], off_summary["applied"])
+        self.assertEqual(on_status, off_status)
+        self.assertEqual(on_status, "auto_applied")
+
+    def test_deprecate_identical_enabled_vs_disabled(self):
+        off_summary, off_status = self._run_eviction(eligibility_enabled=False, kind="learning_deprecate")
+        on_summary, on_status = self._run_eviction(eligibility_enabled=True, kind="learning_deprecate")
+        self.assertEqual(off_summary["applied"], 1)
+        self.assertEqual(on_summary["applied"], off_summary["applied"])
+        self.assertEqual(on_status, off_status)
+
+    def test_eviction_never_calls_eligibility(self):
+        slug = _unique_slug("evict-nocall")
+        target = self._seed_learning(slug, content="to be evicted", confidence=8)
+        self._write_config({"eligibility": {"enabled": True}})
+        day = _unique_day()
+        self._write_day(day, [_proposal_row(pid=f"e-{uuid.uuid4().hex[:8]}", kind="learning_contradict",
+                                            project=slug, target_id=target, confidence=8)])
+        with unittest.mock.patch.object(adp.eligibility, "evaluate_eligibility",
+                                        wraps=adp.eligibility.evaluate_eligibility) as spy:
+            adp.run_optimistic_integrate(day)
+        self.assertEqual(spy.call_count, 0)
+
+
+# ---------------------------------------------------------------------------
+# Composite-eligibility E3: SIGTERM-safe batch (adrev2-002) + dirty-tree
+# anomaly (§9.3).
+# ---------------------------------------------------------------------------
+
+
+class SigtermSafeTests(OptimisticEngineTestBase):
+    def test_soft_stop_breaks_batch_and_records_timeout(self):
+        import contextlib
+        slug = _unique_slug("sigterm")
+        self._write_config()
+        day = _unique_day()
+        rows = [_proposal_row(pid=f"s{i}", kind="learning_add", project=slug,
+                              content=f"c{i}", type_="pattern", confidence=9, sessions=5)
+                for i in range(3)]
+        self._write_day(day, rows)
+
+        control = {"received": False}
+
+        @contextlib.contextmanager
+        def _fake_soft_stop():
+            yield control
+
+        processed: list = []
+        real = adp._process_one_proposal
+
+        def _wrapper(row, **kw):
+            processed.append(row.get("id"))
+            # Simulate a SIGTERM arriving after the first row is handled.
+            control["received"] = True
+            return {"outcome": "applied", "proposal_id": row.get("id"), "applied": True}
+
+        with unittest.mock.patch.object(adp, "_sigterm_soft_stop", _fake_soft_stop), \
+                unittest.mock.patch.object(adp, "_process_one_proposal", _wrapper):
+            summary = adp.run_optimistic_integrate(day)
+
+        self.assertEqual(len(processed), 1, "batch must stop accepting new rows after SIGTERM")
+        self.assertTrue(summary.get("timed_out"))
+        self.assertTrue(any(a.get("kind") == "timeout" for a in summary["anomalies"]), summary)
+        # The one applied row still got its single batch commit path.
+        self.assertEqual(summary["applied"], 1)
+
+    def test_sigterm_handler_installed_and_restored(self):
+        import signal as _signal
+        import threading
+        if threading.current_thread() is not threading.main_thread():
+            self.skipTest("SIGTERM handler is only installable from the main thread")
+        before = _signal.getsignal(_signal.SIGTERM)
+        with adp._sigterm_soft_stop() as flag:
+            self.assertFalse(flag["received"])
+            handler = _signal.getsignal(_signal.SIGTERM)
+            self.assertTrue(callable(handler))
+            handler(_signal.SIGTERM, None)  # fire directly -- no real signal delivered
+            self.assertTrue(flag["received"])
+        self.assertEqual(_signal.getsignal(_signal.SIGTERM), before, "handler must be restored")
+
+
+class DirtyTreeTests(OptimisticEngineTestBase):
+    def test_dirty_tree_records_anomaly(self):
+        slug = _unique_slug("dirty")
+        self._write_config({"eligibility": {"enabled": True}})
+        day = _unique_day()
+        self._write_day(day, [_proposal_row(pid=f"d-{uuid.uuid4().hex[:8]}", kind="learning_add",
+                                            project=slug, content="x", type_="pattern",
+                                            confidence=9, sessions=5)])
+        with unittest.mock.patch.object(adp, "_learnings_tree_dirty", return_value=True):
+            summary = adp.run_optimistic_integrate(day)
+        self.assertTrue(any(a.get("kind") == "dirty_learnings_tree" for a in summary["anomalies"]), summary)
+
+    def test_learnings_tree_dirty_detects_real_git_state(self):
+        repo = Path(tempfile.mkdtemp(prefix="ccgm-dirty-tree-"))
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+        (repo / "a.txt").write_text("one\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "a.txt"], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "init"], check=True)
+        with unittest.mock.patch.object(adp.learnings_store, "LEARNINGS_ROOT", repo):
+            self.assertFalse(adp._learnings_tree_dirty())  # clean
+            (repo / "a.txt").write_text("two\n", encoding="utf-8")
+            self.assertTrue(adp._learnings_tree_dirty())   # dirty
 
 
 if __name__ == "__main__":

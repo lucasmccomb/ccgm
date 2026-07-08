@@ -101,6 +101,25 @@ log() {
     printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >>"${DAILY_LOG}"
 }
 
+# Bound a command's wall-clock (composite-eligibility plan.md §5 E3 / §9.3).
+# The optimistic-integrate step re-verifies transcripts at apply time, so a
+# pathologically large transcript could hang it under launchd; `timeout 600`
+# caps it. The default SIGTERM is caught by run_optimistic_integrate's
+# SIGTERM-safe handler (commit-what-it-has + record a timeout anomaly).
+# POSIX-clean + portable: prefer coreutils `timeout`, then macOS/brew
+# `gtimeout`; if neither exists, run the command directly (no bound rather
+# than a hard failure) so the step is never broken by a missing utility.
+_run_with_timeout() {
+    local secs="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "${secs}" "$@"
+    elif command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "${secs}" "$@"
+    else
+        "$@"
+    fi
+}
+
 run_step() {
     local label="$1"
     local path="$2"
@@ -258,7 +277,11 @@ run_optimistic_integrate_step() {
 
     log "optimistic-integrate: eval gate passed; running apply_dream_proposal.py optimistic-integrate for ${TODAY}"
     local integrate_out integrate_rc
-    integrate_out="$(python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" optimistic-integrate --day "${TODAY}" 2>&1)"
+    # timeout 600 bounds the apply-time re-verification cost (plan.md §5 E3);
+    # a fired timeout SIGTERMs the process, which its SIGTERM-safe handler turns
+    # into a clean commit-what-it-has + a recorded timeout anomaly (never a
+    # dirty tree). Exit-tolerance is preserved: this step always returns 0.
+    integrate_out="$(_run_with_timeout 600 python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" optimistic-integrate --day "${TODAY}" 2>&1)"
     integrate_rc=$?
     printf '%s\n' "${integrate_out}" >>"${DAILY_LOG}"
     if [ "${integrate_rc}" -ne 0 ]; then
