@@ -300,7 +300,6 @@ class AuthoredExpectationTests(ParityBase):
     def test_every_corpus_row_matches_its_authored_expectations(self):
         for row in _load_corpus():
             with self.subTest(case=row["case_id"]):
-                _, slug, _ = self.build_world(row)  # warm run not reused; rebuild per config for isolation
                 exp = row["expect"]
                 for label, cfg_fn, key in (
                     ("legacy", self.legacy_cfg, "legacy_admit"),
