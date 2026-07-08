@@ -359,17 +359,26 @@ def load_config() -> dict[str, Any]:
 
     # Validate the merged eligibility block AFTER defaulting (composite-
     # eligibility plan.md §3.6). Fail-closed (decision principle 1): ANY
-    # validation failure disables the feature (forced enabled:false) plus
-    # exactly one stderr line. The digest banner is a later epic. The
-    # validator is E1-owned and takes the whole merged optimistic_integration
-    # dict so it can run its cross-field checks (e.g. MIN_STATIC_FLOOR <=
-    # static_floor <= confidence_floor_content).
+    # validation failure disables the feature plus exactly one stderr line.
+    # The digest banner is a later epic. The validator is E1-owned and takes
+    # the whole merged optimistic_integration dict so it can run its
+    # cross-field checks (e.g. MIN_STATIC_FLOOR <= static_floor <=
+    # confidence_floor_content).
     elig_ok, elig_errors = eligibility.validate_eligibility_config(cfg["optimistic_integration"])
     if not elig_ok:
+        # Reset the ENTIRE block to pristine defaults, not just enabled=False:
+        # leaving the user's invalid sibling values (bad weights, bad
+        # threshold, ...) in place would be a downstream trap -- E3 reads this
+        # dict to gate admission decisions, and a future edit reading a
+        # sibling before checking `enabled` would consume invalid values.
+        # `enabled` is then FORCED False explicitly so the disable guarantee
+        # rests on this line, not on the factory's default happening to be
+        # False.
+        cfg["optimistic_integration"]["eligibility"] = eligibility.default_eligibility()
         cfg["optimistic_integration"]["eligibility"]["enabled"] = False
         print(
             "dream_analyze: optimistic_integration.eligibility config invalid -> "
-            "eligibility disabled (" + "; ".join(elig_errors) + ")",
+            "eligibility disabled, block reset to defaults (" + "; ".join(elig_errors) + ")",
             file=sys.stderr,
         )
     return cfg

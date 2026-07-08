@@ -549,6 +549,48 @@ class ConfigEligibilityMergeTests(unittest.TestCase):
         with contextlib.redirect_stderr(buf):
             cfg = da.load_config()
         self.assertFalse(cfg["optimistic_integration"]["eligibility"]["enabled"])
+        # The whole block is reset to pristine defaults (enabled forced
+        # False), not just enabled flipped -- see the review-fix rationale
+        # in load_config().
+        expected = da.eligibility.default_eligibility()
+        expected["enabled"] = False
+        self.assertEqual(cfg["optimistic_integration"]["eligibility"], expected)
+        stderr = buf.getvalue()
+        disable_lines = [ln for ln in stderr.splitlines() if "eligibility disabled" in ln]
+        self.assertEqual(len(disable_lines), 1, f"expected exactly one disable line, got: {stderr!r}")
+
+    def test_invalid_eligibility_values_do_not_survive_reset(self):
+        # Review fix (Stage-2, PR #842): on validation failure the ENTIRE
+        # eligibility block is replaced with pristine defaults -- the user's
+        # invalid sibling values (bad weights, bad threshold) must not
+        # survive ANYWHERE in cfg, or a future E3 edit reading a sibling
+        # before checking `enabled` would consume invalid values.
+        import contextlib
+        import io
+
+        tmp = _isolate_env(self)
+        # Distinctive invalid values (chosen not to collide with any real
+        # default): weights sum to 1.5, threshold > 1.
+        self._write_config(tmp, {
+            "optimistic_integration": {
+                "eligibility": {
+                    "enabled": True,
+                    "threshold": 2.5,
+                    "weights": {"confidence": 0.77, "prevalence": 0.33, "recency": 0.26, "novelty": 0.14},
+                }
+            }
+        })
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            cfg = da.load_config()
+        expected = da.eligibility.default_eligibility()
+        expected["enabled"] = False
+        self.assertEqual(cfg["optimistic_integration"]["eligibility"], expected)
+        # None of the distinctive invalid values survive anywhere in cfg.
+        blob = json.dumps(cfg)
+        for leaked in ("2.5", "0.77", "0.33", "0.26", "0.14"):
+            self.assertNotIn(leaked, blob, f"invalid user value {leaked} survived the reset")
+        # Exactly one stderr line, same as every other validation failure.
         stderr = buf.getvalue()
         disable_lines = [ln for ln in stderr.splitlines() if "eligibility disabled" in ln]
         self.assertEqual(len(disable_lines), 1, f"expected exactly one disable line, got: {stderr!r}")
