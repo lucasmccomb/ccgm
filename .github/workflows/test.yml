@@ -61,6 +61,22 @@ jobs:
             bash "$t"
           done
 
+      - name: Dreaming module tests (pytest + self-check + offline chain)
+        run: |
+          set -e
+          # System python3 on hosted runners is PEP 668 "externally
+          # managed" -- a venv sidesteps that entirely instead of gambling
+          # on --break-system-packages support across runner images.
+          python3 -m venv /tmp/ccgm-dreaming-test-venv
+          source /tmp/ccgm-dreaming-test-venv/bin/activate
+          python3 -m pip install --quiet pytest
+          python3 -m pytest modules/dreaming/tests/ -q
+          python3 modules/dreaming/lib/transcript_miner.py --self-check
+          CCGM_DREAMING_DIR=$(mktemp -d) CCGM_LEARNINGS_DIR=$(mktemp -d) \
+            bash modules/dreaming/bin/dream-daily.sh \
+              --offline modules/dreaming/tests/fixtures/offline-responses \
+              --force-day 2026-01-02
+
   test-macos:
     runs-on: macos-latest
     steps:
@@ -114,3 +130,19 @@ jobs:
             echo "=== Running $t ==="
             bash "$t"
           done
+
+      - name: Dreaming module tests (pytest + self-check + offline chain)
+        run: |
+          set -e
+          # System python3 on hosted runners is PEP 668 "externally
+          # managed" -- a venv sidesteps that entirely instead of gambling
+          # on --break-system-packages support across runner images.
+          python3 -m venv /tmp/ccgm-dreaming-test-venv
+          source /tmp/ccgm-dreaming-test-venv/bin/activate
+          python3 -m pip install --quiet pytest
+          python3 -m pytest modules/dreaming/tests/ -q
+          python3 modules/dreaming/lib/transcript_miner.py --self-check
+          CCGM_DREAMING_DIR=$(mktemp -d) CCGM_LEARNINGS_DIR=$(mktemp -d) \
+            bash modules/dreaming/bin/dream-daily.sh \
+              --offline modules/dreaming/tests/fixtures/offline-responses \
+              --force-day 2026-01-02

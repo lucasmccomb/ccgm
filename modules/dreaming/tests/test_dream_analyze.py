@@ -38,6 +38,7 @@ import dream_analyze as da  # noqa: E402
 OFFLINE_FIXTURES = HERE / "fixtures" / "offline-responses"
 BROKEN_REDUCE_FIXTURES = HERE / "fixtures" / "offline-responses-broken-reduce"
 FRICTION_FIXTURE = HERE / "fixtures" / "friction.jsonl"
+DRIFT_FIXTURE = HERE / "fixtures" / "drift.jsonl"
 
 
 def _isolate_env(test: unittest.TestCase) -> Path:
@@ -75,15 +76,15 @@ def _isolate_env(test: unittest.TestCase) -> Path:
     return Path(tmp)
 
 
-def _make_projects_root(tag: str) -> Path:
-    """Copy friction.jsonl into a fresh temp projects_root under a
-    subdirectory (discover() requires transcripts inside a subdir of the
-    root). Fresh cp -> fresh mtime, independent of the fixture's own
-    2026-01-01 content timestamps (mirrors test-dream-pipeline.sh)."""
+def _make_projects_root(tag: str, fixture: Path = FRICTION_FIXTURE) -> Path:
+    """Copy `fixture` into a fresh temp projects_root under a subdirectory
+    (discover() requires transcripts inside a subdir of the root). Fresh cp
+    -> fresh mtime, independent of the fixture's own 2026-01-01 content
+    timestamps (mirrors test-dream-pipeline.sh)."""
     root = Path(tempfile.mkdtemp(prefix=f"ccgm-dreaming-test-projects-{tag}-"))
     session_dir = root / "session-a"
     session_dir.mkdir(parents=True, exist_ok=True)
-    (session_dir / "friction.jsonl").write_text(FRICTION_FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+    (session_dir / fixture.name).write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
     return root
 
 
@@ -776,6 +777,44 @@ class MainIntegrationTests(unittest.TestCase):
             store_projection_token_estimate_fn=lambda scopes: 0,
         )
         self.assertEqual(planned, ["tidy-app"], "the never-dreamed slug (no watermark) must be planned before the recently-dreamed one, and the budget affords only one")
+
+
+# ---------------------------------------------------------------------------
+# Canary state: _default_canary_state() shape + SchemaDriftError ->
+# active_incidents recording (structural-canary plan.md Epic 2).
+# ---------------------------------------------------------------------------
+
+class CanaryStateTests(unittest.TestCase):
+    def test_default_canary_state_has_no_untested_versions_key(self):
+        # Epic 2: the version-allowlist toil signal (untested_versions_
+        # observed) is gone from the durable canary state -- only the two
+        # incident families remain.
+        self.assertEqual(da._default_canary_state(), {"active_incidents": {}, "reduce_failures": {}})
+
+    def test_schema_drift_error_records_active_incident_with_named_detail(self):
+        # drift.jsonl (Epic 1) renames every friction field while keeping
+        # type/usage/tool_use intact, so mining it trips validate_structure's
+        # friction_events invariant. mine_due_slugs() must catch the raised
+        # SchemaDriftError, durably record it via record_canary_incident()
+        # rather than crashing the whole run, and exclude the drifted slug
+        # from the bundles it returns for mining.
+        dreaming_dir = _isolate_env(self)
+        cwd_line = json.loads(DRIFT_FIXTURE.read_text(encoding="utf-8").splitlines()[0])
+        slug = da.tm.detect_project_slug(cwd_line["cwd"])
+
+        projects_root = _make_projects_root("driftcanary", fixture=DRIFT_FIXTURE)
+        self.addCleanup(lambda: __import__("shutil").rmtree(projects_root, ignore_errors=True))
+
+        bundles, skipped = da.mine_due_slugs(
+            [slug], cfg=dict(da.DEFAULT_CONFIG), projects_root=str(projects_root), today="2026-01-01",
+        )
+        self.assertEqual(bundles, {}, "the drifted slug must be excluded from the bundles returned for mining")
+        self.assertEqual(skipped.get(slug), "schema_canary fired")
+
+        canary = json.loads((dreaming_dir / "state" / "canary.json").read_text(encoding="utf-8"))
+        self.assertIn(slug, canary.get("active_incidents", {}))
+        detail = canary["active_incidents"][slug]["detail"]
+        self.assertIn("friction_events", detail, "the recorded detail must name the broken extraction")
 
 
 if __name__ == "__main__":

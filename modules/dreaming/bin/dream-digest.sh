@@ -29,11 +29,11 @@
 #   - the DURABLE canary state (~/.claude/dreaming/state/canary.json),
 #     read unconditionally regardless of which date is being rendered: a
 #     loud banner when any schema_canary incident is still active, or when
-#     any untested transcript-schema version has been observed
-#     (adrev-014 + the #753 handoff note -- both signals must stay visible
-#     even if a human misses the exact day they first appeared, since
-#     Epic 6's dream-daily.sh chain is exit-tolerant and can swallow a
-#     non-zero exit silently).
+#     a reduce-phase parse failure is unresolved (adrev-014 + the #753
+#     handoff note -- both signals must stay visible even if a human
+#     misses the exact day they first appeared, since Epic 6's
+#     dream-daily.sh chain is exit-tolerant and can swallow a non-zero
+#     exit silently).
 #   - yesterday's proposals, tallied by status (accepted/auto_applied vs
 #     rejected) -- forward-compatible with Epic 6's /dream-apply, which is
 #     the only future writer of any status other than "pending".
@@ -149,7 +149,7 @@ yesterday_proposals = load_jsonl(os.environ["CCGM_DIGEST_YESTERDAY_PROPOSALS_FIL
 run_summary = load_json(os.environ["CCGM_DIGEST_RUN_SUMMARY_FILE"], None)
 canary = load_json(
     os.environ["CCGM_DIGEST_CANARY_FILE"],
-    {"active_incidents": {}, "untested_versions_observed": {}, "reduce_failures": {}},
+    {"active_incidents": {}, "reduce_failures": {}},
 )
 
 out = []
@@ -158,7 +158,6 @@ out.append("")
 
 # --- Durable canary banner (adrev-014 + #753 handoff) ----------------------
 active_incidents = canary.get("active_incidents") or {}
-untested_versions = canary.get("untested_versions_observed") or {}
 # Reduce-phase parse failures (#769 Stage-2 P1 #1): main() aborts without
 # writing proposals or advancing watermarks when the reduce model never
 # returns parseable JSON, even after the retry nudge. That abort is
@@ -167,7 +166,7 @@ untested_versions = canary.get("untested_versions_observed") or {}
 # durable file so it gets the same loud, persists-until-acknowledged
 # banner as a schema_canary incident.
 reduce_failures = canary.get("reduce_failures") or {}
-if active_incidents or untested_versions or reduce_failures:
+if active_incidents or reduce_failures:
     out.append("## ⚠️ Canary banner (durable — shown until acknowledged)")
     out.append("")
     if active_incidents:
@@ -175,12 +174,6 @@ if active_incidents or untested_versions or reduce_failures:
         out.append("")
         for slug, info in sorted(active_incidents.items()):
             out.append(f"- `{slug}` (first seen {info.get('date', '?')}): {info.get('detail', '')}")
-        out.append("")
-    if untested_versions:
-        out.append("**Untested transcript-schema versions observed:**")
-        out.append("")
-        for version, count in sorted(untested_versions.items()):
-            out.append(f"- `{version}` — {count} session(s)")
         out.append("")
     if reduce_failures:
         out.append("**Reduce-phase parse failures (mined evidence NOT consumed, watermark NOT advanced):**")

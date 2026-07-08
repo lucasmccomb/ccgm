@@ -426,5 +426,78 @@ class IdempotentAndSurfacedDedupTest(DailyReportTestBase):
         self.assertNotIn("## Applied this run (auto)", day2_body)
 
 
+class CanaryBannerTests(DailyReportTestBase):
+    """Structural-canary plan.md Epic 2 (adrev-003): grep-cleanliness of
+    dream-digest.sh alone proves the removed code path is gone, not the
+    rendered behavior -- the healthy offline chain never trips the
+    drift->record_canary_incident->banner path, and a stray leftover branch
+    could keep rendering the removed "untested transcript-schema versions"
+    block. Both halves are asserted here against real rendered digest text.
+    """
+
+    def _write_canary(self, state: dict) -> None:
+        canary_path = self.dreaming_dir / "state" / "canary.json"
+        canary_path.parent.mkdir(parents=True, exist_ok=True)
+        canary_path.write_text(json.dumps(state), encoding="utf-8")
+
+    def test_active_incident_renders_loud_banner_with_named_detail(self) -> None:
+        date = "2026-04-01"
+        detail = (
+            "schema_canary: structural drift detected -- friction_events "
+            "(is_error/toolUseResult/hookErrors/preventedContinuation): 4 "
+            "tool_use block(s) observed across 1 session(s) but zero "
+            "recognized friction-bearing fields were found anywhere in the "
+            "window."
+        )
+        self._write_canary({
+            "active_incidents": {"futureversion-app": {"date": date, "detail": detail}},
+            "reduce_failures": {},
+        })
+
+        proc = self._run_digest(date)
+        self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
+
+        body = self._digest_path(date).read_text(encoding="utf-8")
+        self.assertIn("## ⚠️ Canary banner (durable — shown until acknowledged)", body)
+        self.assertIn("**schema_canary fired for:**", body)
+        self.assertIn("`futureversion-app`", body)
+        self.assertIn(detail, body, "the loud banner must render the incident's full named-extraction detail")
+
+    def test_no_untested_version_banner_ever_renders(self) -> None:
+        # (a) the post-Epic-2 shape (no untested_versions_observed key at
+        # all) must never produce an untested-version block.
+        date_a = "2026-04-03"
+        self._write_canary({"active_incidents": {}, "reduce_failures": {}})
+
+        proc_a = self._run_digest(date_a)
+        self.assertEqual(proc_a.returncode, 0, msg=f"stdout={proc_a.stdout}\nstderr={proc_a.stderr}")
+        body_a = self._digest_path(date_a).read_text(encoding="utf-8")
+        self.assertNotIn("Untested transcript-schema versions observed", body_a)
+        self.assertNotIn("untested_versions_observed", body_a)
+        self.assertNotIn("## ⚠️ Canary banner", body_a, "no incidents at all must render no banner")
+
+        # (b) defensive: a STALE canary.json left over from a pre-Epic-2
+        # install that still carries a populated legacy
+        # untested_versions_observed key must ALSO never render the block --
+        # the digest no longer reads that key at all, so leftover on-disk
+        # state from before this upgrade cannot resurrect the toil banner.
+        date_b = "2026-04-04"
+        self._write_canary({
+            "active_incidents": {},
+            "untested_versions_observed": {"2.1.153": 4, "2.1.201": 2},
+            "reduce_failures": {},
+        })
+
+        proc_b = self._run_digest(date_b)
+        self.assertEqual(proc_b.returncode, 0, msg=f"stdout={proc_b.stdout}\nstderr={proc_b.stderr}")
+        body_b = self._digest_path(date_b).read_text(encoding="utf-8")
+        self.assertNotIn("Untested transcript-schema versions observed", body_b)
+        self.assertNotIn("2.1.153", body_b)
+        self.assertNotIn(
+            "## ⚠️ Canary banner", body_b,
+            "an empty active_incidents + reduce_failures alongside a legacy-only key must render no banner at all",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
