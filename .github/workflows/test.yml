@@ -62,6 +62,22 @@ jobs:
           done
 
       - name: Dreaming module tests (pytest + self-check + offline chain)
+        env:
+          # Some dreaming tests exercise real git repos via subprocess
+          # (ccgm-learnings-sync init, ad-hoc `git commit`) without an
+          # explicit env= override, so they inherit whatever identity is
+          # ambient. Every dev machine has a global git identity already
+          # configured; a fresh hosted runner has none, and its service
+          # account's blank GECOS name makes git's own auto-derived
+          # fallback fail with "empty ident name ... not allowed". Git
+          # env vars are the highest-priority identity source (override
+          # config files and any HOME redirection a test performs), so
+          # setting them here fixes every such call site without editing
+          # the test files themselves.
+          GIT_AUTHOR_NAME: CCGM CI
+          GIT_AUTHOR_EMAIL: ci@ccgm.invalid
+          GIT_COMMITTER_NAME: CCGM CI
+          GIT_COMMITTER_EMAIL: ci@ccgm.invalid
         run: |
           set -e
           # System python3 on hosted runners is PEP 668 "externally
@@ -132,6 +148,22 @@ jobs:
           done
 
       - name: Dreaming module tests (pytest + self-check + offline chain)
+        env:
+          # Some dreaming tests exercise real git repos via subprocess
+          # (ccgm-learnings-sync init, ad-hoc `git commit`) without an
+          # explicit env= override, so they inherit whatever identity is
+          # ambient. Every dev machine has a global git identity already
+          # configured; a fresh hosted runner has none, and its service
+          # account's blank GECOS name makes git's own auto-derived
+          # fallback fail with "empty ident name ... not allowed". Git
+          # env vars are the highest-priority identity source (override
+          # config files and any HOME redirection a test performs), so
+          # setting them here fixes every such call site without editing
+          # the test files themselves.
+          GIT_AUTHOR_NAME: CCGM CI
+          GIT_AUTHOR_EMAIL: ci@ccgm.invalid
+          GIT_COMMITTER_NAME: CCGM CI
+          GIT_COMMITTER_EMAIL: ci@ccgm.invalid
         run: |
           set -e
           # System python3 on hosted runners is PEP 668 "externally
