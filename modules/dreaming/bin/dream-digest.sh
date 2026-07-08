@@ -152,6 +152,26 @@ canary = load_json(
     {"active_incidents": {}, "reduce_failures": {}},
 )
 
+# --- Composite-eligibility audit index (composite-eligibility plan.md §3.7,
+# Epic E6). The optimistic-integrate engine writes ONE audit record per SCORED
+# learning_add / learning_supersede row (audit_kind == "eligibility") into
+# apply-audit.jsonl, carrying the full per-signal breakdown -- for eligible
+# AND skipped rows. Index them by proposal_id so the Proposals section below
+# can show WHY each scored row was admitted or held back, rejections
+# (skipped_composite / skipped_origin / skipped_floor) especially
+# (decisions.md #28). Last write wins -- a proposal is scored at most once per
+# batch, so in practice there is exactly one record per proposal_id.
+#
+# This surface carries NO excerpt / transcript text: the eligibility record
+# holds only the score, threshold, margin, the four normalized signals,
+# session COUNTS and session ids, the evidence tier + its (id/line/origin)
+# source, and unresolved session ids (§3.7 audit contract). It is therefore
+# safe to render verbatim without the render_evidence() sanitizer pass.
+eligibility_by_proposal = {}
+for _rec in load_jsonl(os.environ.get("CCGM_DIGEST_APPLY_AUDIT_FILE", "")):
+    if _rec.get("audit_kind") == "eligibility" and _rec.get("proposal_id"):
+        eligibility_by_proposal[_rec["proposal_id"]] = _rec
+
 out = []
 out.append(f"# Dreaming digest — {target_date}")
 out.append("")
@@ -435,6 +455,79 @@ def render_evidence(evidence):
     return lines
 
 
+def _fmt_margin(margin):
+    # margin = S - θ. Positive => admitted with headroom ("over"); negative =>
+    # held back short of the bar ("short", by θ - S). Mirrors the plan.md §3.7
+    # digest example: "S=0.541 (θ=0.58, short 0.039; weakest: novelty)".
+    if margin is None:
+        return None
+    if margin >= 0:
+        return f"over {margin:.3f}"
+    return f"short {-margin:.3f}"
+
+
+def render_eligibility(rec):
+    """Render the §3.7 "Composite eligibility" subsection for one scored
+    (learning_add / learning_supersede) proposal, from its eligibility audit
+    record. Shown for eligible AND skipped rows. Renders only scalar
+    signal/session data -- never excerpt or transcript text."""
+    if not rec:
+        return []
+    outcome = rec.get("outcome", "?")
+    basis = rec.get("decision_basis")
+    score = rec.get("score")
+    threshold = rec.get("threshold")
+    margin = rec.get("margin")
+    weakest = rec.get("weakest_signal")
+    signals = rec.get("signals") or {}
+
+    lines = ["- **Composite eligibility**:"]
+    head = f"  - `{outcome}`"
+    if basis:
+        head += f" (basis: {basis})"
+    if score is not None and threshold is not None:
+        # Composite ran (eligible via composite, or skipped_composite).
+        head += f" — S={score:.3f} (θ={threshold}"
+        margin_str = _fmt_margin(margin)
+        if margin_str:
+            head += f", {margin_str}"
+        if weakest:
+            head += f"; weakest: {weakest}"
+        head += ")"
+    else:
+        # No composite score: skipped_floor, skipped_origin, or the legacy-floor
+        # escape (decision_basis="legacy_floor") -- all admit/reject before S.
+        head += f" — score not computed (θ={threshold})"
+    lines.append(head)
+
+    if signals:
+        sig_str = ", ".join(
+            f"{name}={signals[name]:.2f}"
+            for name in ("confidence", "prevalence", "recency", "novelty")
+            if name in signals
+        )
+        lines.append(f"  - signals: {sig_str}")
+
+    tier_line = f"  - evidence tier: {rec.get('evidence_tier', '?')}"
+    src = rec.get("evidence_tier_source")
+    if isinstance(src, dict):
+        # {session_id, line, origin_kind} -- ids/line-number/origin only, no text.
+        tier_line += f" (from `{src.get('session_id', '?')}`"
+        if src.get("line") is not None:
+            tier_line += f" line {src.get('line')}"
+        if src.get("origin_kind"):
+            tier_line += f", origin={src.get('origin_kind')}"
+        tier_line += ")"
+    lines.append(tier_line)
+
+    unresolved = rec.get("unresolved_session_ids") or []
+    lines.append(f"  - verified sessions: {rec.get('verified_sessions', '?')}; "
+                 f"unresolved: {len(unresolved)}")
+    if rec.get("near_duplicate_supersede"):
+        lines.append("  - ⚠️ near-duplicate supersede with changed facts — review")
+    return lines
+
+
 def render_proposal(p):
     pid = p.get("id", "(no-id)")
     confidence = p.get("confidence", "?")
@@ -460,6 +553,11 @@ def render_proposal(p):
     if ev_lines:
         lines.append("- **evidence**:")
         lines.extend(ev_lines)
+    # Composite-eligibility breakdown (composite-eligibility plan.md §3.7, E6):
+    # present only for scored add/supersede rows when the optimistic engine ran
+    # (an eligibility audit record exists for this proposal_id). Absent for
+    # legacy/disabled-mode nights, non-scored kinds, and gated rows.
+    lines.extend(render_eligibility(eligibility_by_proposal.get(pid)))
     lines.append("")
     lines.append(f"Apply: `/dream-apply {pid}`")
     lines.append("")

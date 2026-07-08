@@ -1,0 +1,70 @@
+name: Module tests (dreaming + self-improving)
+
+# Composite-eligibility plan.md §8.3 / §8.4: a required, blocking PR check that
+# runs the dreaming + self-improving pytest suites AND the offline chain smokes
+# in BOTH modes -- the certainty oracle for every surface this plan touches.
+# Runs on ubuntu-latest AND macos-latest (repo memory: macOS is ground truth;
+# green-locally != green-on-runner). Kept POSIX-clean (no grep-pipeline logic;
+# the enabled-mode smoke does its parsing in python).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  module-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      # The chain smokes drive dream-daily.sh -> optimistic-integrate ->
+      # ccgm-learnings-sync commit, and some pytest tests init real git repos,
+      # without an explicit identity. A fresh hosted runner has none and git's
+      # auto-derived fallback fails with "empty ident name ... not allowed".
+      # Git env vars are the highest-priority identity source, so setting them
+      # here fixes every such call site without editing test files.
+      GIT_AUTHOR_NAME: CCGM CI
+      GIT_AUTHOR_EMAIL: ci@ccgm.invalid
+      GIT_COMMITTER_NAME: CCGM CI
+      GIT_COMMITTER_EMAIL: ci@ccgm.invalid
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y jq
+
+      - name: Install jq (macOS)
+        if: runner.os == 'macOS'
+        run: brew install jq
+
+      - name: "(a) pytest: dreaming + self-improving suites"
+        run: |
+          set -e
+          # System python3 on hosted runners is PEP 668 "externally managed" --
+          # a venv sidesteps that entirely instead of gambling on
+          # --break-system-packages across runner images.
+          python3 -m venv /tmp/ccgm-module-test-venv
+          . /tmp/ccgm-module-test-venv/bin/activate
+          # pyyaml backs test_module_tests_workflow.py's lint fallback when
+          # actionlint is not pre-installed on the runner.
+          python3 -m pip install --quiet pytest pyyaml
+          python3 -m pytest modules/dreaming/tests/ modules/self-improving/tests/ -q
+
+      - name: "(b) disabled-mode chain smoke (legacy path)"
+        run: |
+          set -e
+          CCGM_DREAMING_DIR="$(mktemp -d)" CCGM_LEARNINGS_DIR="$(mktemp -d)" \
+            bash modules/dreaming/bin/dream-daily.sh \
+              --offline modules/dreaming/tests/fixtures/offline-responses \
+              --force-day 2026-01-02
+
+      - name: "(c) enabled-mode chain smoke (composite proven, §8.3 preconditions)"
+        run: bash modules/dreaming/tests/test-eligibility-enabled-chain.sh
+
+      - name: "(d) offline eval harness"
+        run: bash modules/dreaming/bin/dream-eval.sh --offline modules/dreaming/tests/fixtures/offline-responses

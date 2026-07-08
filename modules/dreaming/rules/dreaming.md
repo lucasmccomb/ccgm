@@ -34,13 +34,21 @@ When enabled, every pending proposal is resolved to a **posture** (`dream_analyz
 | Op-kind | Posture | Dwell? | Confidence floor | Per-run cap |
 |---|---|---|---|---|
 | `learning_verify` | `optimistic-immediate` | no | 7 | none |
-| `learning_add` | `optimistic-dwell` | yes | 8 + prevalence ≥ 2 sessions | `max_add_supersede_per_run` (default 10) |
-| `learning_supersede` | `optimistic-dwell` | yes | 8 + compaction guard must pass | shared with `learning_add` |
+| `learning_add` | `optimistic-dwell` | yes | composite eligibility gate (see below); **default OFF → flat floor 8 + prevalence ≥ 2 verified sessions** | `max_add_supersede_per_run` (default 10) |
+| `learning_supersede` | `optimistic-dwell` | yes | composite eligibility gate (see below); **default OFF → flat floor 8** + compaction guard must pass | shared with `learning_add` |
 | `learning_contradict` | `dwell-quarantine` | yes (mandatory) | 8 | `min(max_eviction_absolute, fraction × live slug heads)` |
 | `learning_deprecate` | `dwell-quarantine` | yes (mandatory) | 8 | shared with `learning_contradict` |
 | any → `_global` | `gated` | n/a | n/a | n/a — `promote_to_global()` human accept stays required, unchanged |
 
 Anything that misses its posture's floor/cap, targets `_global`, or arrives on a run where the batch-anomaly check or circuit breaker fired **falls back to `pending`** — never silently dropped, always surfaced in the digest for a human `/dream-apply`.
+
+### Eligibility composite (add/supersede only, default OFF)
+
+`optimistic_integration.eligibility.enabled` is **`false` by default** — a second, independent opt-in *beneath* the outer engine, offered by `memory-setup.sh` only when you turn optimistic integration on (enabling it can never leave the outer flag off; an eligibility opt-in with the outer engine disabled is inert, since the nightly skips `optimistic-integrate` entirely on the outer gate). While disabled, `learning_add`/`learning_supersede` keep the exact flat floors above (8 + prevalence ≥ 2 verified sessions for add; 8 for supersede) — bit-for-bit today's behavior, and an invalid eligibility config fails closed to this same disabled path.
+
+When enabled, those two op-kinds pass through a **deterministic composite gate** (composite-eligibility plan.md §3.2) — no LLM anywhere in the write decision. In waterfall order: a hard **static floor** (`static_floor`, default 5, never below the hard-coded `MIN_STATIC_FLOOR = 4` a config edit cannot hollow out); a **legacy escape** (a conf ≥ 8 add with ≥ 2 *verified* sessions — or conf ≥ 8 supersede — still admits, so enabling only *widens* what admits, never narrows it); a non-compensatory **origin gate** (admit only if the evidence tier is user-corrected OR ≥ 2 transcript-verified sessions — no soft signal rescues a weak origin); then a **composite score** `S = Σ wᵢ·signalᵢ ≥ θ` (θ default 0.58) over four signals — `confidence` .40 (the only model-assigned input), `prevalence` .30 (distinct transcript-verified sessions), `recency` .20 (evidence age, 30-day half-life), `novelty` .10 — all re-derived from the transcripts and live store at apply time, never trusted from the proposal row.
+
+The point is admitting the useful conf-5–7 memories the flat floor held back (user-corrected or seen-across-sessions) while making every newly-admitted class *harder* to forge than confidence inflation. Every scored row — eligible or skipped — writes its full per-signal breakdown + margin to the audit trail, rendered per-row by `/dream-digest` and `/dream-review` (§3.7). **Evictions (`learning_contradict`/`learning_deprecate`) and `learning_verify` are untouched** — they keep their flat floors and dwell-quarantine rails bit-for-bit; the composite gates adds/supersedes only.
 
 **The dwell window** (`dwell_hours`, default 24) is the mechanism, not just a `learning_add`/`supersede`/`contradict`/`deprecate` label: a row is written (committed) immediately, but carries a `dwell_until` timestamp that excludes it from `search()` — and therefore from SessionStart injection and the mining reduce projection — until the window elapses. `learning_verify` alone skips it (`optimistic-immediate`): it is purely additive (bounded `+0.25/use`, capped `+2.0`) and reversible by a later contradict, so there is nothing to dwell.
 
