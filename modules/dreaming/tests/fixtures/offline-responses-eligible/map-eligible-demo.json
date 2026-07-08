@@ -1,0 +1,17 @@
+{
+  "id": "msg_fixture_eligible",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-fixture-map",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 500,
+    "output_tokens": 150
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"candidates\": [{\"type\": \"pitfall\", \"content\": \"The Edit tool does not follow symlinks so read the workspace path first before editing the file\", \"evidence\": [{\"session_id\": \"sess-eligible-demo-0001\", \"excerpt\": \"The Edit tool does not follow symlinks so read the workspace path first before editing the file\"}], \"occurrence_count\": 1, \"notes\": \"Operator-corrected symlink read-gate confusion; single session so far.\"}]}"
+    }
+  ]
+}
