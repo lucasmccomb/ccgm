@@ -1084,11 +1084,25 @@ def write_watermark(slug: str, iso_timestamp: str) -> None:
     that reads without taking the lock (read_watermark() is
     intentionally unlocked -- see its own docstring) never observes a
     partially written file.
+
+    The lock is taken on a STABLE sidecar file (`<path>.lock`), never on
+    the watermark file itself. The watermark file's inode is discarded on
+    every write by os.replace(); a lock held on that inode stops
+    serializing the instant a later writer opens the *new* post-replace
+    inode and flocks it without contention, so two writers can both hold
+    "the lock" on different inodes, both read the same version, and clobber
+    each other's read-modify-write -- dropping a DIFFERENT slug's advance
+    under parallel load (#776). The sidecar's inode is never replaced or
+    unlinked, so every writer contends on the one fd and the whole
+    read-merge-write-replace section is genuinely serialized. The sidecar
+    is created on demand (O_CREAT); a leftover lock file is harmless
+    (flock releases on close), so it is never cleaned up.
     """
     path = watermark_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    lock_fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    lock_path = path.with_name(path.name + ".lock")
+    lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
         try:

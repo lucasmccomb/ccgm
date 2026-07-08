@@ -17,6 +17,7 @@ Run with: python3 -m pytest modules/dreaming/tests/test_transcript_miner.py -q
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import subprocess
@@ -648,36 +649,111 @@ class WatermarkTests(unittest.TestCase):
         self.assertEqual(tm.read_watermark()["slug-precision-2"], "2026-01-01T10:00:00.500Z")
 
     def test_concurrent_writers_on_distinct_slugs_all_land(self):
-        # Regression guard for the unlocked read-modify-write race:
-        # without the fcntl lock, a writer that reads the file before
-        # another writer's update lands can clobber that update when it
-        # writes last, silently dropping a DIFFERENT slug's watermark.
-        # Threads genuinely race at the OS I/O level here -- fcntl.flock()
-        # and file I/O release the GIL during the blocking syscall -- so
-        # a Barrier-released burst of writers is a real concurrency test,
-        # not just an interleaving simulation.
-        n_workers = 16
-        barrier = threading.Barrier(n_workers)
+        # Stochastic regression guard for #776's lost-update race: without
+        # a correctly-scoped fcntl lock, a writer that reads the file
+        # before another writer's update lands clobbers that update when it
+        # writes last, silently dropping a DIFFERENT slug's watermark. The
+        # pre-fix code flocked the watermark file's own inode, which
+        # os.replace() discards on every write, so mutual exclusion broke
+        # across the replace boundary and slugs were lost under Linux CI
+        # parallelism (manifested as "13 != 16"). Threads genuinely race at
+        # the OS I/O level here -- fcntl.flock() and file I/O release the
+        # GIL during the blocking syscall -- so a Barrier-released burst is
+        # a real concurrency test, not just an interleaving simulation.
+        #
+        # Strengthened from the original 16 workers to 32 x several
+        # repetitions: the emergent lost-update is probabilistic (it needs
+        # a writer to open the file across another writer's replace), so
+        # more workers and repeats raise the odds of surfacing a regression
+        # on any single CI run. The deterministic mechanism guard lives in
+        # test_write_watermark_serializes_on_stable_sidecar_lock below.
+        n_workers = 32
+        for _ in range(5):
+            # Clear between repetitions so each round asserts a clean set.
+            wm = tm.watermark_path()
+            if wm.exists():
+                wm.unlink()
+
+            barrier = threading.Barrier(n_workers)
+            errors: list[BaseException] = []
+
+            def worker(i: int) -> None:
+                try:
+                    barrier.wait(timeout=5)
+                    tm.write_watermark(f"slug-{i}", f"2026-01-01T00:00:{i:02d}.000Z")
+                except BaseException as exc:  # noqa: BLE001 -- surfaced via `errors`, not swallowed
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_workers)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+
+            self.assertEqual(errors, [])
+            result = tm.read_watermark()
+            self.assertEqual(len(result), n_workers)
+            for i in range(n_workers):
+                self.assertEqual(result[f"slug-{i}"], f"2026-01-01T00:00:{i:02d}.000Z")
+
+    def test_write_watermark_serializes_on_stable_sidecar_lock(self):
+        # Deterministic regression guard for #776. The fix flocks a STABLE
+        # sidecar lock file (`<path>.lock`) that os.replace() never swaps
+        # out, instead of the watermark file's own inode (which every write
+        # discards, breaking mutual exclusion across the replace boundary
+        # and losing slugs under parallel load). Hold that sidecar lock
+        # from another fd and assert write_watermark() blocks until it is
+        # released -- proving the whole read-merge-write-replace section is
+        # serialized against the stable inode.
+        #
+        # This is RED against the pre-fix code and GREEN against the fix:
+        # the old code flocked the json file itself, so holding the sidecar
+        # would NOT have blocked write_watermark(), and the "still blocked"
+        # assertion below would fail.
+        tm.write_watermark("seed", "2026-01-01T00:00:00.000Z")  # ensure dir + file exist
+
+        wm = tm.watermark_path()
+        lock_path = wm.with_name(wm.name + ".lock")
+        held_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+
+        completed = threading.Event()
         errors: list[BaseException] = []
 
-        def worker(i: int) -> None:
+        def writer() -> None:
             try:
-                barrier.wait(timeout=5)
-                tm.write_watermark(f"slug-{i}", f"2026-01-01T00:00:{i:02d}.000Z")
+                tm.write_watermark("slug-blocked", "2026-01-02T00:00:00.000Z")
+                completed.set()
             except BaseException as exc:  # noqa: BLE001 -- surfaced via `errors`, not swallowed
                 errors.append(exc)
 
-        threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_workers)]
-        for t in threads:
+        t = threading.Thread(target=writer)
+        try:
+            fcntl.flock(held_fd, fcntl.LOCK_EX)
             t.start()
-        for t in threads:
-            t.join(timeout=10)
+            # While the sidecar lock is held, the writer's flock() must
+            # block -- it cannot complete no matter how fast the machine is.
+            self.assertFalse(
+                completed.wait(timeout=1.0),
+                "write_watermark() did not serialize on the stable sidecar lock",
+            )
+            # Release the sidecar; the writer must now proceed promptly.
+            fcntl.flock(held_fd, fcntl.LOCK_UN)
+            self.assertTrue(
+                completed.wait(timeout=5),
+                "write_watermark() did not proceed after the sidecar lock was released",
+            )
+        finally:
+            t.join(timeout=5)
+            os.close(held_fd)
 
         self.assertEqual(errors, [])
-        result = tm.read_watermark()
-        self.assertEqual(len(result), n_workers)
-        for i in range(n_workers):
-            self.assertEqual(result[f"slug-{i}"], f"2026-01-01T00:00:{i:02d}.000Z")
+        self.assertEqual(
+            tm.read_watermark(),
+            {
+                "seed": "2026-01-01T00:00:00.000Z",
+                "slug-blocked": "2026-01-02T00:00:00.000Z",
+            },
+        )
 
 
 class DiscoverTests(unittest.TestCase):
