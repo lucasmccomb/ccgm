@@ -191,6 +191,63 @@ class DigestEligibilityTest(unittest.TestCase):
         self.assertIn("add-legacy", md)
         self.assertNotIn("**Composite eligibility**", md)
 
+    def test_poisoned_record_never_crashes_digest_or_banner(self) -> None:
+        """Stage-2 review fix: a malformed eligibility audit record (fields
+        breaking the §3.7 shape -- here a non-numeric score and a string
+        signal value) must NOT crash the day's digest. The bad row renders as
+        a one-line inline note; every other section -- including the durable
+        canary banner, which this same heredoc renders -- still appears."""
+        proposals = [
+            _proposal(pid="add-good", kind="learning_add", project="proj-a",
+                      confidence=6, content="a healthy proposal"),
+            _proposal(pid="add-poisoned", kind="learning_add", project="proj-a",
+                      confidence=6, content="proposal with a poisoned audit row"),
+        ]
+        _write_jsonl(self.dreaming_dir / "proposals" / f"{DAY}.jsonl", proposals)
+
+        good = _elig_audit(
+            proposal_id="add-good", kind="learning_add", project="proj-a",
+            outcome="eligible", decision_basis="composite",
+            score=0.791, threshold=0.58, margin=0.211,
+            signals={"confidence": 0.60, "prevalence": 1.00,
+                     "recency": 0.955, "novelty": 0.60},
+            weakest_signal="confidence", verified_sessions=1,
+            evidence_tier="inferred", unresolved_session_ids=[],
+        )
+        poisoned = _elig_audit(
+            proposal_id="add-poisoned", kind="learning_add", project="proj-a",
+            outcome="eligible", decision_basis="composite",
+            score="not-a-number",  # breaks the :.3f format
+            threshold=0.58, margin=0.211,
+            signals={"confidence": "high"},  # breaks the :.2f format
+            weakest_signal="confidence", verified_sessions=1,
+            evidence_tier="inferred", unresolved_session_ids=[],
+        )
+        _write_jsonl(self.dreaming_dir / "state" / "apply-audit.jsonl",
+                     [good, poisoned])
+
+        # A live canary incident: the banner is rendered by the SAME heredoc,
+        # so a renderer crash would have silenced it too.
+        canary_path = self.dreaming_dir / "state" / "canary.json"
+        canary_path.parent.mkdir(parents=True, exist_ok=True)
+        canary_path.write_text(json.dumps({
+            "active_incidents": {"proj-a": {"date": DAY, "detail": "schema drift test"}},
+            "reduce_failures": {},
+        }), encoding="utf-8")
+
+        md = self._run_digest(DAY)  # asserts exit 0 internally
+
+        # Banner survived.
+        self.assertIn("Canary banner", md)
+        self.assertIn("schema drift test", md)
+        # Good record rendered fully.
+        self.assertIn("`eligible` (basis: composite) — S=0.791", md)
+        # Poisoned record degraded to the inline note, not a crash.
+        self.assertIn("1 eligibility record unrenderable — see audit file", md)
+        # Both proposals still present.
+        self.assertIn("add-good", md)
+        self.assertIn("add-poisoned", md)
+
     def test_near_duplicate_supersede_flag_renders(self) -> None:
         proposals = [
             _proposal(pid="sup-1", kind="learning_supersede", project="proj-a",

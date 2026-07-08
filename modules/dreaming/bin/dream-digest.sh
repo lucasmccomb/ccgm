@@ -470,9 +470,25 @@ def render_eligibility(rec):
     """Render the §3.7 "Composite eligibility" subsection for one scored
     (learning_add / learning_supersede) proposal, from its eligibility audit
     record. Shown for eligible AND skipped rows. Renders only scalar
-    signal/session data -- never excerpt or transcript text."""
+    signal/session data -- never excerpt or transcript text.
+
+    Malformed-record tolerance (Stage-2 review fix): this heredoc renders the
+    WHOLE day's digest -- including the durable canary banner -- so one audit
+    record whose fields break the §3.7 shape (e.g. a non-numeric `score`
+    hitting the `:.3f` format) must never raise and take the entire digest
+    down. Same per-record discipline load_jsonl() applies per line
+    (JSONDecodeError -> skip), applied at the render layer: the bad record
+    renders as a one-line inline note pointing at the audit file, everything
+    else renders normally."""
     if not rec:
         return []
+    try:
+        return _render_eligibility_lines(rec)
+    except Exception:  # noqa: BLE001 -- render-layer tolerance, never fail the digest
+        return ["- **Composite eligibility**: ⚠️ 1 eligibility record unrenderable — see audit file"]
+
+
+def _render_eligibility_lines(rec):
     outcome = rec.get("outcome", "?")
     basis = rec.get("decision_basis")
     score = rec.get("score")
