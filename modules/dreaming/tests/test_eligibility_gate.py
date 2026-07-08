@@ -713,6 +713,147 @@ class NoveltyTests(GateTestBase):
 
 
 # ---------------------------------------------------------------------------
+# Session-citation concentration anomaly (decisions.md #37).
+#
+# Pinned semantics: the counter increments once per evidence CITATION (per
+# non-null session_id entry on a scored add/supersede row) in ENABLED mode
+# only; rows short-circuited below the static floor never reach the counter.
+# When one session accumulates >= adp._SESSION_CITATION_ANOMALY_MIN citations
+# in a batch, exactly ONE anomaly is recorded via the SAME windowed-breaker
+# anomaly-timestamp path the eviction-concentration check uses (observable in
+# summary["anomalies"], the apply-audit log, and state/optimistic.json's
+# anomaly_log). The anomaly NEVER changes any per-row outcome in the firing
+# run -- it only accumulates toward a future breaker trip.
+# ---------------------------------------------------------------------------
+
+
+class SessionCitationAnomalyTests(GateTestBase):
+    def _state_anomaly_log(self) -> list:
+        path = adp.optimistic_state_path()
+        if not path.is_file():
+            return []
+        return json.loads(path.read_text(encoding="utf-8")).get("anomaly_log", [])
+
+    def _citation_batch(self, *, n_rows: int, slug: str, sid: str, confidence: int = 6) -> list:
+        # One citation per proposal; content varies so store keys never collide.
+        return [
+            self._add_row(pid=self._pid(f"cit{i}"), slug=slug, session_id=sid,
+                          excerpt=_LONG_SENTENCE, content=f"{_LONG_SENTENCE} variant {i}",
+                          confidence=confidence)
+            for i in range(n_rows)
+        ]
+
+    def _citation_anomalies(self, summary: dict) -> list:
+        return [a for a in summary["anomalies"] if a.get("kind") == "session_citation_concentration"]
+
+    def test_at_threshold_fires_and_feeds_breaker_path(self):
+        slug = self._slug()
+        sid = f"sess-{uuid.uuid4().hex[:8]}"
+        # Session deliberately UNRESOLVABLE: citations count regardless of
+        # whether verification succeeds (padding to fake sessions is exactly
+        # the shape the signal watches).
+        self._write_config({"eligibility": {"enabled": True}})
+        day = self._day()
+        self._write_day(day, self._citation_batch(
+            n_rows=adp._SESSION_CITATION_ANOMALY_MIN, slug=slug, sid=sid))
+        log_before = len(self._state_anomaly_log())
+
+        summary = adp.run_optimistic_integrate(day)
+
+        fired = self._citation_anomalies(summary)
+        self.assertEqual(len(fired), 1, summary)
+        self.assertEqual(fired[0]["count"], adp._SESSION_CITATION_ANOMALY_MIN)
+        # Breaker anomaly-timestamp path received it: state anomaly_log grew.
+        self.assertEqual(len(self._state_anomaly_log()), log_before + 1)
+        # And the audit trail carries the record.
+        self.assertTrue(any(
+            rec.get("outcome") == "session_citation_concentration" and rec.get("batch_id") == summary["batch_id"]
+            for rec in self._audit()
+        ))
+
+    def test_below_threshold_does_not_fire(self):
+        slug = self._slug()
+        sid = f"sess-{uuid.uuid4().hex[:8]}"
+        self._write_config({"eligibility": {"enabled": True}})
+        day = self._day()
+        self._write_day(day, self._citation_batch(
+            n_rows=adp._SESSION_CITATION_ANOMALY_MIN - 1, slug=slug, sid=sid))
+        log_before = len(self._state_anomaly_log())
+
+        summary = adp.run_optimistic_integrate(day)
+
+        self.assertEqual(self._citation_anomalies(summary), [], summary)
+        self.assertEqual(len(self._state_anomaly_log()), log_before)
+        self.assertFalse(any(
+            rec.get("outcome") == "session_citation_concentration" and rec.get("batch_id") == summary["batch_id"]
+            for rec in self._audit()
+        ))
+
+    def test_disabled_mode_never_counts_citations(self):
+        # Strongest form: conf-9/sessions-5 rows that fully APPLY on the legacy
+        # path -- even a fully-applying disabled-mode batch citing one session
+        # >= threshold times records NO citation anomaly (the counter is only
+        # fed on the enabled composite path, which disabled mode never enters).
+        slug = self._slug()
+        sid = f"sess-{uuid.uuid4().hex[:8]}"
+        self._write_config({"eligibility": {"enabled": False}})
+        day = self._day()
+        self._write_day(day, self._citation_batch(
+            n_rows=adp._SESSION_CITATION_ANOMALY_MIN, slug=slug, sid=sid, confidence=9))
+        log_before = len(self._state_anomaly_log())
+
+        summary = adp.run_optimistic_integrate(day)
+
+        self.assertEqual(summary["applied"], adp._SESSION_CITATION_ANOMALY_MIN, summary)
+        self.assertEqual(self._citation_anomalies(summary), [], summary)
+        self.assertEqual(len(self._state_anomaly_log()), log_before)
+        self.assertFalse(any(
+            rec.get("outcome") == "session_citation_concentration" and rec.get("batch_id") == summary["batch_id"]
+            for rec in self._audit()
+        ))
+
+    def test_firing_anomaly_does_not_change_per_row_outcomes(self):
+        # A RESOLVABLE, user-corrected session cited by >= threshold eligible
+        # rows: every row still scores/applies normally in the SAME run the
+        # anomaly fires in -- the anomaly only accumulates toward the breaker
+        # (one anomaly < circuit_breaker_max_anomalies=2, so no trip either).
+        slug = self._slug()
+        sid = f"sess-{uuid.uuid4().hex[:8]}"
+        self._write_session(sid, slug=slug, turns=self._corroborating_turns(correction=True), days_ago=1)
+        self._write_config({"eligibility": {"enabled": True}})
+        day = self._day()
+        rows = self._citation_batch(n_rows=adp._SESSION_CITATION_ANOMALY_MIN, slug=slug, sid=sid)
+        self._write_day(day, rows)
+
+        summary = adp.run_optimistic_integrate(day)
+
+        self.assertEqual(len(self._citation_anomalies(summary)), 1, summary)
+        # Every row applied normally despite the anomaly firing in this run.
+        self.assertEqual(summary["applied"], adp._SESSION_CITATION_ANOMALY_MIN, summary)
+        for row in rows:
+            self.assertEqual(self._status(day, row["id"]), "auto_applied")
+            rec = self._elig_audit_for(row["id"])
+            self.assertEqual(rec["outcome"], "eligible")
+        # Breaker not tripped/suspended by a single anomaly.
+        self.assertNotIn(summary.get("circuit_breaker"), ("tripped", "suspended"))
+        state = json.loads(adp.optimistic_state_path().read_text(encoding="utf-8"))
+        self.assertFalse(state.get("suspended"), state)
+
+    def test_static_floor_rows_do_not_feed_counter(self):
+        # Rows short-circuited at the static floor never gather signals, so
+        # their citations are NOT counted: threshold-many sub-floor rows citing
+        # one session record no anomaly.
+        slug = self._slug()
+        sid = f"sess-{uuid.uuid4().hex[:8]}"
+        self._write_config({"eligibility": {"enabled": True}})
+        day = self._day()
+        self._write_day(day, self._citation_batch(
+            n_rows=adp._SESSION_CITATION_ANOMALY_MIN, slug=slug, sid=sid, confidence=4))
+        summary = adp.run_optimistic_integrate(day)
+        self.assertEqual(self._citation_anomalies(summary), [], summary)
+
+
+# ---------------------------------------------------------------------------
 # eligibility-dry-run CLI: scores, prints, mutates nothing.
 # ---------------------------------------------------------------------------
 
