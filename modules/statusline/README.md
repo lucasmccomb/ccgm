@@ -11,8 +11,8 @@ Consumes the statusline JSON Claude Code pipes to the script on stdin and render
 | **Model + effort** | `.model.display_name`, `.effort.level` | `🧠 O-4.8 Max`, `🐢 S-4.6`, `⚠️ H-4.5`. Family/version parsed generically — new model versions need no edits. |
 | **Clone identity** | `.env.clone` in cwd | `⛓ agent-2` when the working dir is a multi-clone checkout (reads `AGENT_ID`). Omitted otherwise. |
 | **Dir + branch** | `.cwd`, git | Immediate directory name plus the current git branch. |
-| **Context used** | `.context_window.remaining_percentage` | `ctx:42%` (green/yellow/red by usage). |
-| **Compaction warning** | derived | `⚠ COMPACT SOON` appears when ≤15% context remains, so you can `/compact` before an auto-compaction truncates the session. |
+| **Context used** | `.context_window.total_input_tokens` ÷ auto-compact budget | `ctx:42%` (green/yellow/red by usage), measured against the compaction budget — `min(context_window_size, 500000)` — not the full window, so it reaches 100% as auto-compaction fires. Falls back to `.context_window.remaining_percentage` on older Claude Code. |
+| **Compaction warning** | derived | `⚠ COMPACT SOON` appears at ≥90% of the auto-compact budget, so you can `/compact` before an auto-compaction truncates the session. Override the budget via `CCGM_CTX_COMPACT_BUDGET` if you changed it with `/autocompact`. |
 | **Session cost** | `.cost.total_cost_usd` | `$1.23` for the current session. Omitted when Claude Code does not supply it. |
 | **Rate limits** | `.rate_limits.five_hour`, `.rate_limits.seven_day` | `5h:30% █░░░░ 2h14m` and `7d:…` bars with reset countdowns. |
 

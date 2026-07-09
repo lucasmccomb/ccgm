@@ -931,7 +931,7 @@ A compact, dependency-free single-line Claude Code statusline.
 
 **Installs**: `statusline.sh` (script), `settings.partial.json` (wires the `statusLine` setting)
 
-**What it does**: Consumes the statusline JSON Claude Code pipes on stdin and renders, separated by ` | `: model + effort (`🧠 O-4.8 Max`), multi-clone identity (`⛓ agent-2`, read from `.env.clone`), directory + git branch, context-used percentage (`ctx:42%`), a `⚠ COMPACT SOON` warning when ≤15% context remains, session cost (`$1.23`, from `.cost.total_cost_usd`), and 5h/7d rate-limit bars with reset countdowns. Every field is optional — a missing JSON key drops its section, so the bar degrades gracefully on older Claude Code versions.
+**What it does**: Consumes the statusline JSON Claude Code pipes on stdin and renders, separated by ` | `: model + effort (`🧠 O-4.8 Max`), multi-clone identity (`⛓ agent-2`, read from `.env.clone`), directory + git branch, context-used percentage measured against the auto-compact budget (`ctx:42%`), a `⚠ COMPACT SOON` warning when nearing that budget, session cost (`$1.23`, from `.cost.total_cost_usd`), and 5h/7d rate-limit bars with reset countdowns. Every field is optional — a missing JSON key drops its section, so the bar degrades gracefully on older Claude Code versions.
 
 Unlike the statusline script bundled in `commands-utility` (which is never wired to the `statusLine` setting), this module ships the script *and* a settings partial, so `--add statusline` produces a working statusline with no manual `settings.json` editing. It is a superset of that script — it adds clone identity, session cost, and the compaction warning. Depends only on `jq`.
 
