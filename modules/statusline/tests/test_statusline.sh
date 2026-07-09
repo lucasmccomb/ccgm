@@ -76,8 +76,33 @@ contains "cost rendered" "$OUT" '$1.50'
 absent "no cost when field absent" "$(render "$(printf '{"model":{"display_name":"Opus 4.8"},"cwd":"%s"}' "$TMPHOME")" "$TMPHOME")" '$'
 
 echo ""
-echo "=== statusline: compaction warning ==="
-# 10% remaining -> warning fires.
+echo "=== statusline: context vs auto-compact budget ==="
+# 1M-context model: budget is capped at 500k, so 460k used = 92% (NOT 46% of 1M),
+# which is the whole point — the bar reflects true pressure to auto-compaction.
+OUT="$(render "$(printf '{"model":{"display_name":"Opus 4.8"},"cwd":"%s","context_window":{"total_input_tokens":460000,"context_window_size":1000000}}' "$TMPHOME")" "$TMPHOME")"
+contains "1M model 460k -> 92%% of 500k budget" "$OUT" "ctx:92%"
+contains "1M model 460k -> compact warning" "$OUT" "COMPACT SOON"
+# 1M-context model at 250k -> 50% of budget, no warning.
+OUT="$(render "$(printf '{"model":{"display_name":"Opus 4.8"},"cwd":"%s","context_window":{"total_input_tokens":250000,"context_window_size":1000000}}' "$TMPHOME")" "$TMPHOME")"
+contains "1M model 250k -> 50%%" "$OUT" "ctx:50%"
+absent "1M model 250k -> no warning" "$OUT" "COMPACT SOON"
+# 200k model: budget == full window (min(200k,500k)); 180k = 90% -> warning.
+OUT="$(render "$(printf '{"model":{"display_name":"Sonnet 4.6"},"cwd":"%s","context_window":{"total_input_tokens":180000,"context_window_size":200000}}' "$TMPHOME")" "$TMPHOME")"
+contains "200k model 180k -> 90%%" "$OUT" "ctx:90%"
+contains "200k model 180k -> compact warning" "$OUT" "COMPACT SOON"
+# 200k model at 100k -> 50%, no warning.
+absent "200k model 100k -> no warning" "$(render "$(printf '{"model":{"display_name":"Sonnet 4.6"},"cwd":"%s","context_window":{"total_input_tokens":100000,"context_window_size":200000}}' "$TMPHOME")" "$TMPHOME")" "COMPACT SOON"
+# Over-budget clamps to 100%.
+OUT="$(render "$(printf '{"model":{"display_name":"Opus 4.8"},"cwd":"%s","context_window":{"total_input_tokens":540000,"context_window_size":1000000}}' "$TMPHOME")" "$TMPHOME")"
+contains "over-budget clamps to 100%%" "$OUT" "ctx:100%"
+# Raw tokens take precedence over remaining_percentage (budget path, not fallback).
+OUT="$(render "$(printf '{"model":{"display_name":"Opus 4.8"},"cwd":"%s","context_window":{"total_input_tokens":460000,"context_window_size":1000000,"remaining_percentage":54}}' "$TMPHOME")" "$TMPHOME")"
+contains "raw tokens beat remaining_percentage" "$OUT" "ctx:92%"
+absent "does not fall back to full-window 46%%" "$OUT" "ctx:46%"
+
+echo ""
+echo "=== statusline: compaction warning (fallback: remaining_percentage only) ==="
+# Older Claude Code without raw token fields -> full-window %. 10% remaining fires.
 OUT="$(render "$(printf '{"model":{"display_name":"Opus 4.8"},"cwd":"%s","context_window":{"remaining_percentage":10}}' "$TMPHOME")" "$TMPHOME")"
 contains "compact warning at 10%% remaining" "$OUT" "COMPACT SOON"
 contains "ctx shown at 90%% used" "$OUT" "ctx:90%"

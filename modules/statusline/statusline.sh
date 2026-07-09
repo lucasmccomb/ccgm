@@ -3,7 +3,8 @@
 #
 # Consumes the statusline JSON on stdin and renders, separated by " | ":
 #   model (+effort)  |  clone identity (if .env.clone)  |  dir + git branch
-#   |  context used %  |  ⚠ COMPACT SOON warning when context is low
+#   |  context used % (vs auto-compact budget)  |  ⚠ COMPACT SOON warning
+#      when nearing that budget
 #   |  session cost ($)  |  5h & 7d rate-limit bars
 #
 # Dependency-free beyond jq (already required by every CCGM tool). Portable to
@@ -81,7 +82,14 @@ if [ -d "$cwd/.git" ] || git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
     || git -C "$cwd" -c core.fsmonitor=false rev-parse --short HEAD 2>/dev/null)
 fi
 
-# --- Context remaining (inverted to "used" for display)
+# --- Context. Prefer raw token counts so "used %" can be measured against the
+# auto-compact budget rather than the full window. Claude Code's statusline JSON
+# exposes total_input_tokens (input + cache_creation + cache_read, i.e. what is
+# in context now) and context_window_size (200k, or 1M for extended-context
+# models) — but NOT the auto-compact threshold itself. remaining_percentage is a
+# full-window figure, kept only as a fallback for older Claude Code builds.
+ctx_used_tokens=$(echo "$input" | jq -r '.context_window.total_input_tokens // empty')
+ctx_window_size=$(echo "$input" | jq -r '.context_window.context_window_size // empty')
 remaining=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty')
 
 # --- Session cost (USD). Claude Code exposes this under .cost.total_cost_usd.
@@ -155,10 +163,30 @@ if [ -n "$git_branch" ]; then
 fi
 sections+=("$dir_part")
 
-# Context used (100 - remaining) + compaction warning when low.
-if [ -n "$remaining" ]; then
+# Context used %, measured against the AUTO-COMPACT budget — the point where
+# Claude Code auto-compacts — not the full window. For extended-context (1M)
+# models that budget is capped far below capacity (500k "auto window" by
+# default), so a full-window % reads ~half of true pressure and the compaction
+# warning never fires before the surprise compaction. We model the budget as
+# min(context_window_size, CAP): for a 200k model min() is the full window (it
+# compacts near the top, so nothing changes); for a 1M model it becomes 500k, so
+# the bar hits 100% exactly when compaction fires. CAP is overridable for anyone
+# who changes it via /autocompact, since the JSON does not expose the threshold.
+COMPACT_BUDGET_CAP=${CCGM_CTX_COMPACT_BUDGET:-500000}
+used_int=""
+if [ -n "$ctx_used_tokens" ] && [ -n "$ctx_window_size" ] && [ "$ctx_window_size" -gt 0 ] 2>/dev/null; then
+  used_tokens=$(printf '%.0f' "$ctx_used_tokens")
+  budget=$ctx_window_size
+  [ "$budget" -gt "$COMPACT_BUDGET_CAP" ] && budget=$COMPACT_BUDGET_CAP
+  used_int=$(( used_tokens * 100 / budget ))
+  [ "$used_int" -gt 100 ] && used_int=100
+elif [ -n "$remaining" ]; then
+  # Fallback: older Claude Code without raw token fields — full-window %.
   remaining_int=$(printf '%.0f' "$remaining")
   used_int=$((100 - remaining_int))
+fi
+
+if [ -n "$used_int" ]; then
   if [ "$used_int" -lt 60 ]; then
     ctx_color="$GREEN"
   elif [ "$used_int" -lt 85 ]; then
@@ -167,9 +195,9 @@ if [ -n "$remaining" ]; then
     ctx_color="$RED"
   fi
   sections+=("$(printf "${ctx_color}ctx:${used_int}%%${RESET}")")
-  # Compaction warning: when little context remains, flag it loudly so the user
-  # can /compact or wrap up before an auto-compaction truncates the session.
-  if [ "$remaining_int" -le 15 ]; then
+  # Compaction warning: flag loudly as we near the auto-compact budget so the
+  # user can /compact or wrap up deliberately before an auto-compaction fires.
+  if [ "$used_int" -ge 90 ]; then
     sections+=("$(printf "${RED}⚠ COMPACT SOON${RESET}")")
   fi
 fi
