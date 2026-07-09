@@ -110,10 +110,18 @@ you):
   "type": "pattern" | "pitfall" | "preference" | "architecture" | "tool" | "operational" | null,
   "confidence": <1-10 integer: your confidence THIS ACTION is warranted>,
   "prevalence": {"sessions": <distinct session ids in evidence>, "agents": <distinct writer identities the evidence spans, usually 1>},
-  "evidence": [{"session_id": "<from a map candidate>", "excerpt": "<reuse the candidate's excerpt verbatim -- already redacted>"}],
+  "evidence": [{"session_id": "<from a map candidate>", "excerpt": "<reuse the candidate's excerpt verbatim -- already redacted>"}, ...],
   "justification": "<why this action is warranted, paraphrased, <=500 chars>"
 }
 ```
+
+`evidence` MUST carry one item per distinct supporting session -- if a
+candidate's evidence spans two sessions, cite BOTH (so the number of distinct
+`session_id`s in `evidence` matches `prevalence.sessions`). Do not collapse a
+multi-session pattern down to a single citation; the runtime verifies each
+cited session independently, so an unstated supporting session goes
+uncredited. (The runtime also deterministically back-fills any supporting
+session you omit when it can, but cite them yourself -- do not rely on it.)
 
 Field rules by kind:
 - `learning_add` / `learning_supersede`: `content` and `type` are

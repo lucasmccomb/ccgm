@@ -1319,6 +1319,171 @@ def existing_fingerprints(exclude_path: Path | None = None) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Multi-session citation enrichment (#853). The reduce model reliably emits
+# exactly ONE evidence item per proposal even when it claims
+# prevalence.sessions > 1 (the map/reduce prompt's evidence example shows a
+# single item). That caps the composite eligibility gate's verified_sessions
+# at 1 (apply_dream_proposal.gather_eligibility_signals counts only distinct
+# CITED sessions that resolve + slug-match + corroborate), so the origin gate's
+# "verified_sessions >= add_min_sessions" arm is unreachable on real data and a
+# genuinely multi-session mid-confidence memory can never auto-admit.
+#
+# This deterministic post-reduce pass attaches the OTHER supporting sessions'
+# (session_id, excerpt) pairs, associating the proposal to its source map
+# candidate and pulling each missing session's excerpt from the deterministic
+# evidence bundle -- never from any model output:
+#   * Association is via the MAP CANDIDATE, not the model's prose: the unique
+#     map candidate whose cited-session set is a superset of the proposal's
+#     already-cited sessions. Zero or several matches -> no enrichment (fail
+#     toward none; never guess which candidate, never mis-attribute a session
+#     that supports a different learning).
+#   * Every attached excerpt is miner output (a redacted, contiguous span of
+#     that session's transcript, from a friction cluster exemplar or a
+#     user-correction), so it corroborates against the cited session's
+#     transcript BY CONSTRUCTION at apply time. A session with no bundle
+#     excerpt is never attached (a session absent from this run's bundle can
+#     never be invented), and the excerpt is sanitize_content()'d at attach
+#     time, identical to every other written free-text field (sec-3).
+# ---------------------------------------------------------------------------
+
+# Only learning_add / learning_supersede feed the composite eligibility gate's
+# verified_sessions signal (composite-eligibility plan.md §3.3, "for
+# learning_add and learning_supersede"), and their fingerprint is CONTENT-based
+# (content_sha256), never evidence-based -- so enriching their evidence is
+# provably fingerprint-neutral. verify/contradict/deprecate are deliberately
+# left untouched: their fingerprint DOES vary with the cited evidence session
+# ids (see finalize_proposal's key_basis), so their evidence must stay exactly
+# as the reduce phase emitted it or a re-run would compute a different
+# fingerprint from the same reduce output.
+ENRICHABLE_KINDS = frozenset({"learning_add", "learning_supersede"})
+
+
+def _bundle_verifiable_excerpts(bundle: dict[str, Any]) -> dict[str, str]:
+    """session_id -> one transcript-derived, redacted excerpt for that session,
+    drawn ONLY from the deterministic evidence bundle (friction cluster
+    exemplars + per-session user_corrections). Every value is miner output
+    (transcript_miner.make_excerpt() over real transcript text), so it
+    corroborates against the cited session's transcript by construction at
+    apply time. When a session has several candidate excerpts, the longest
+    wins (more content tokens -> more robust corroboration; ties broken
+    lexicographically so the choice is deterministic)."""
+    by_session: dict[str, list[str]] = {}
+
+    def _offer(sid: Any, excerpt: Any) -> None:
+        if isinstance(sid, str) and sid and isinstance(excerpt, str) and excerpt.strip():
+            by_session.setdefault(sid, []).append(excerpt)
+
+    for cluster in bundle.get("clusters", []) or []:
+        if not isinstance(cluster, dict):
+            continue
+        for ex in cluster.get("exemplars", []) or []:
+            if isinstance(ex, dict):
+                _offer(ex.get("session_id"), ex.get("excerpt"))
+    for session in bundle.get("sessions", []) or []:
+        if not isinstance(session, dict):
+            continue
+        for corr in session.get("user_corrections", []) or []:
+            if isinstance(corr, dict):
+                _offer(corr.get("session_id"), corr.get("excerpt"))
+
+    return {sid: max(excerpts, key=lambda e: (len(e), e)) for sid, excerpts in by_session.items()}
+
+
+def _candidate_session_sets(candidates: list[dict[str, Any]]) -> list[frozenset[str]]:
+    """The non-null cited-session set of every map candidate for one slug --
+    the association key enrich_proposal_evidence() matches proposals against."""
+    sets: list[frozenset[str]] = []
+    for cand in candidates or []:
+        if not isinstance(cand, dict):
+            continue
+        sids = {
+            e.get("session_id")
+            for e in (cand.get("evidence") or [])
+            if isinstance(e, dict) and isinstance(e.get("session_id"), str) and e.get("session_id")
+        }
+        if sids:
+            sets.append(frozenset(sids))
+    return sets
+
+
+def enrich_proposal_evidence(
+    written_rows: list[dict[str, Any]],
+    map_results: dict[str, list[dict[str, Any]]],
+    bundles: dict[str, dict[str, Any]],
+) -> None:
+    """Deterministic multi-session citation enrichment (#853). Mutates
+    `written_rows` IN PLACE, AFTER finalize_proposal() computed every
+    fingerprint and BEFORE stamp_proposal_signals()/write_proposals() -- so it
+    can never perturb a fingerprint (only learning_add/learning_supersede rows
+    are touched, whose fingerprint is content-based, AND the pass runs
+    post-fingerprint; asserted by a test). Runs before stamp_proposal_signals()
+    so a newly-attached session also gets its started_at/tier stamped from the
+    bundle, keeping the two passes consistent.
+
+    See the module comment above for the association + verifiability contract.
+    """
+    excerpt_index_cache: dict[str, dict[str, str]] = {}
+    candidate_sets_cache: dict[str, list[frozenset[str]]] = {}
+
+    def excerpt_index(slug: str) -> dict[str, str]:
+        if slug not in excerpt_index_cache:
+            excerpt_index_cache[slug] = _bundle_verifiable_excerpts(bundles.get(slug) or {})
+        return excerpt_index_cache[slug]
+
+    def candidate_sets(slug: str) -> list[frozenset[str]]:
+        if slug not in candidate_sets_cache:
+            candidate_sets_cache[slug] = _candidate_session_sets(map_results.get(slug) or [])
+        return candidate_sets_cache[slug]
+
+    for row in written_rows:
+        if row.get("kind") not in ENRICHABLE_KINDS:
+            continue
+        project = row.get("project")
+        if not isinstance(project, str):
+            continue
+        evidence = row.get("evidence") or []
+        cited = [
+            e.get("session_id")
+            for e in evidence
+            if isinstance(e, dict) and isinstance(e.get("session_id"), str) and e.get("session_id")
+        ]
+        cited_set = set(cited)
+        if not cited_set:
+            # No session to associate against -- never guess a source candidate
+            # from content alone.
+            continue
+
+        # Associate to the UNIQUE map candidate that is a superset of the row's
+        # already-cited sessions. Zero or multiple -> ambiguous -> no
+        # enrichment (fail toward none: an over-attached session that supports a
+        # DIFFERENT learning would still corroborate at the gate and silently
+        # inflate this proposal's verified prevalence).
+        supersets = [s for s in candidate_sets(project) if cited_set <= s]
+        if len(supersets) != 1:
+            continue
+        missing = supersets[0] - cited_set
+        if not missing:
+            continue
+
+        index = excerpt_index(project)
+        present = set(cited_set)
+        for sid in sorted(missing):
+            if sid in present:
+                continue
+            excerpt = index.get(sid)
+            if not excerpt:
+                # Supporting session with no transcript-derived bundle excerpt:
+                # attaching an unverifiable citation is worse than none, so skip.
+                continue
+            evidence.append({
+                "session_id": sid,
+                "excerpt": learnings_store.sanitize_content(excerpt),
+            })
+            present.add(sid)
+        row["evidence"] = evidence
+
+
 def stamp_proposal_signals(
     written_rows: list[dict[str, Any]],
     bundles: dict[str, dict[str, Any]],
@@ -1598,6 +1763,14 @@ def main(argv: list[str] | None = None) -> int:
             continue
         dedup_corpus.add(row["fingerprint"])
         written_rows.append(row)
+
+    # Deterministic multi-session citation enrichment (#853): attach the other
+    # supporting sessions' verifiable excerpts from the bundle BEFORE signal
+    # stamping (so a newly-cited session also gets started_at/tier stamped) and
+    # BEFORE write. Like the stamping pass below, it runs AFTER every
+    # fingerprint is computed, and only ever touches content-fingerprinted
+    # add/supersede rows -- so it provably cannot perturb any fingerprint.
+    enrich_proposal_evidence(written_rows, map_results, bundles)
 
     # Deterministic post-reduce signal stamping (composite-eligibility §3.8):
     # runs AFTER finalize_proposal() computed every fingerprint (above) and
