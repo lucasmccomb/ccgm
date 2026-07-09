@@ -11,7 +11,7 @@
   "content": [
     {
       "type": "text",
-      "text": "{\"proposals\": [{\"kind\": \"learning_add\", \"project\": \"eligible-demo\", \"target_id\": null, \"content\": \"The Edit tool does not follow symlinks so read the workspace path first before editing the file\", \"type\": \"pitfall\", \"confidence\": 6, \"prevalence\": {\"sessions\": 1, \"agents\": 1}, \"evidence\": [{\"session_id\": \"sess-eligible-demo-0001\", \"excerpt\": \"The Edit tool does not follow symlinks so read the workspace path first before editing the file\"}], \"justification\": \"The operator corrected a symlink read-gate confusion in this session; the fix generalizes.\"}]}"
+      "text": "{\"proposals\": [{\"kind\": \"learning_add\", \"project\": \"eligible-demo\", \"target_id\": null, \"content\": \"The Edit tool does not follow symlinks so read the workspace path first before editing the file\", \"type\": \"pitfall\", \"confidence\": 6, \"prevalence\": {\"sessions\": 2, \"agents\": 1}, \"evidence\": [{\"session_id\": \"sess-eligible-demo-0001\", \"excerpt\": \"The Edit tool does not follow symlinks so read the workspace path first before editing the file\"}], \"justification\": \"The operator corrected a symlink read-gate confusion across sessions; the fix generalizes.\"}]}"
     }
   ]
 }
