@@ -118,6 +118,22 @@ for field in ("score", "threshold", "margin", "weakest_signal", "verified_sessio
         print(f"eligible record missing field: {field}", file=sys.stderr)
         sys.exit(1)
 
+# Multi-session citation enrichment (#853) must have fired: the fixture claims
+# prevalence.sessions=2 but the reduce fixture cites ONE session, so BOTH cited
+# sessions verifying here proves dream_analyze.enrich_proposal_evidence()
+# attached the second session's bundle excerpt AND the gate corroborated it.
+# Without this assertion a silent enrichment regression would stay green -- the
+# fixture's user-corrected tier passes the origin gate with a single session.
+vs = rec.get("verified_sessions")
+if not isinstance(vs, int) or vs < 2:
+    print(
+        f"eligible record has verified_sessions={vs!r}, expected >= 2 -- the #853 "
+        "multi-session citation enrichment did not produce a second verifiable "
+        "citation (or the gate could not verify it)",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 # the cited proposal must have actually applied (status auto_applied) -- the row
 # flowed stamp -> origin gate -> composite -> apply.
 proposals = read_jsonl(proposals_path)
