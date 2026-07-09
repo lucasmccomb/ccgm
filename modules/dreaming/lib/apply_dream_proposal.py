@@ -1459,6 +1459,28 @@ _SESSION_CITATION_ANOMALY_MIN = 8
 # excluded from guard (ii)'s required-token denominator (plan.md §3.3/§3.4).
 _REDACTION_RE = re.compile(r"\[REDACTED:[^\]]*\]", re.IGNORECASE)
 
+# Placeholder-aware excerpt-window slack (issue #846). Each [REDACTED:kind]
+# placeholder in a cited excerpt stands in for a secret/PII token whose
+# UN-redacted text in the raw transcript can be far LONGER than the ~14-25-char
+# placeholder literal. Guard (i) sizes the corroboration window to the excerpt,
+# so a window sized to the placeholder length under-spans the raw source and a
+# legitimate redacted excerpt under-scores against similarity (a SAFE
+# false-negative -- the row stays pending for /dream-apply -- but a utility
+# loss; the pre-#846 window over-fit sub-placeholder-length secrets only). Each
+# placeholder therefore contributes up to _MAX_REDACTED_SECRET_LEN chars of
+# BOUNDED, per-placeholder window slack so the window can span the raw source's
+# full surrounding context around the secret. 200 is chosen from the miner's
+# actual redaction targets (hook_utils.SECRET_PATTERNS + transcript_miner PII):
+# realistic API keys/tokens are <=200 chars (Anthropic ~108, GitHub PAT ~40,
+# AWS/Google/Stripe/Slack/Supabase all <100). The unbounded-upper outliers
+# (authorization_bearer JWTs, env_var_kv values) can exceed 200; the whole
+# excerpt is capped at transcript_miner.EXCERPT_MAX_CHARS (400) and this slack
+# is a plausible-length allowance, not a guarantee -- an above-200-char secret
+# keeps the pre-#846 SAFE under-count (see the poisoning doc's #846 residual).
+# Bounded + per-placeholder => never transcript-proportional, so guard (i)'s
+# size-independence (adrev2-003) is preserved.
+_MAX_REDACTED_SECRET_LEN = 200
+
 
 @dataclass(frozen=True)
 class SessionVerification:
@@ -1652,15 +1674,26 @@ def _excerpt_corroborated(excerpt: str, sv: SessionVerification, elig_cfg: dict[
     if not prepped:
         return False
     tokens = _excerpt_content_tokens(excerpt)
-    # Guard (i) sizes the window to the excerpt's OWN normalized length -- but
-    # sized to the length WITH redaction placeholders KEPT, not the stripped
-    # length. A redacted excerpt is SHORTER than its raw transcript source
-    # (the placeholder replaces a longer secret), so a window sized to the
-    # stripped excerpt would be too small to span the raw source's tokens. The
-    # kept-placeholder length is comparable to the raw span, so the window can
-    # cover it -- while still being excerpt-derived (no "best of all sizes"
-    # laxity that would degrade with transcript size, adrev2-003).
-    window_len = max(len(prepped), len(eligibility.normalize_content(excerpt)))
+    # Guard (i) sizes the comparison window to the excerpt's OWN normalized
+    # length, so a larger transcript adds candidate windows but never per-window
+    # laxity (size-independence, adrev2-003). For a PLACEHOLDER-FREE excerpt the
+    # window is EXACTLY the stripped-excerpt length -- byte-identical to the
+    # common-case behavior, untouched by #846.
+    #
+    # A redacted excerpt is SHORTER than its raw transcript source: each
+    # [REDACTED:kind] placeholder replaced a secret whose raw text can be far
+    # longer than the placeholder literal, so a window sized to the placeholder
+    # length under-spans the raw source and the excerpt under-scores (issue
+    # #846). When placeholders are present, extend the window by a bounded,
+    # per-placeholder slack of _MAX_REDACTED_SECRET_LEN chars each, so the
+    # window can span the raw source's full context around the secret. The slack
+    # is per-placeholder and constant (never proportional to transcript size)
+    # and applies ONLY for redacted excerpts; scoring (ratio/jaccard/threshold)
+    # and guard (ii)'s placeholder-excluded token denominator are unchanged.
+    window_len = len(prepped)
+    n_placeholders = len(_REDACTION_RE.findall(excerpt))
+    if n_placeholders:
+        window_len += n_placeholders * _MAX_REDACTED_SECRET_LEN
     threshold = float(elig_cfg["excerpt_match_min"])
     required = max(_EXCERPT_GUARD_MIN_ABS_TOKENS, math.ceil(_EXCERPT_GUARD_FRACTION * len(tokens)))
     if sv.normalized_text is not None:

@@ -439,6 +439,124 @@ class GuardIITwoSidedTests(GateTestBase):
 
 
 # ---------------------------------------------------------------------------
+# Placeholder-aware window slack (issue #846): a redacted excerpt whose raw
+# secret is LONGER than the placeholder literal must still corroborate, WITHOUT
+# opening a coincidence bypass and WITHOUT touching the placeholder-free path.
+# ---------------------------------------------------------------------------
+
+# A synthetic, 170-char, single-token stand-in for a long secret. Deliberately
+# matches NO real vendor pattern (hook_utils.redact_secrets leaves it intact),
+# so writing it into a fixture transcript can never trip GitHub push protection
+# or tests/test-no-personal-data.sh -- yet it dilutes similarity EXACTLY like a
+# real 170-char high-entropy key would (the window-sizing math is identical).
+_LONG_SECRET_STANDIN = "opaquesecrettoken" * 10
+# Substantial surrounding context on BOTH sides of the secret, so a window that
+# under-spans the raw source (the pre-#846 bug) loses one side and under-scores,
+# while a placeholder-slack-widened window covers the whole span and clears.
+_REDACT_CTX_PRE = (
+    "the operator explained that the anthropic production api key used by the "
+    "nightly dreaming analyzer chain is the credential "
+)
+_REDACT_CTX_POST = (
+    " and it must be exported into the shell environment before the launchd job "
+    "runs the analyze and reduce steps otherwise the whole pipeline silently "
+    "fails every night"
+)
+
+
+class RedactionWindowSlackTests(GateTestBase):
+    def test_long_redacted_secret_now_corroborates(self):
+        # The motivating case (#846): the excerpt's [REDACTED:anthropic]
+        # placeholder stands in for a 170-char secret in the raw transcript. The
+        # pre-#846 window (sized to the ~20-char placeholder literal) under-spans
+        # the raw source and under-scores; the placeholder-slack window spans it
+        # and corroborates.
+        slug = self._slug()
+        sid = f"sess-{uuid.uuid4().hex[:8]}"
+        raw = _REDACT_CTX_PRE + _LONG_SECRET_STANDIN + _REDACT_CTX_POST
+        excerpt = _REDACT_CTX_PRE + "[REDACTED:anthropic]" + _REDACT_CTX_POST
+        self._write_session(sid, slug=slug, turns=[tf.user_turn(raw, human=True)])
+        row = self._add_row(pid=self._pid("longred"), slug=slug, session_id=sid,
+                            content=raw, excerpt=excerpt)
+        ev = self._eval(row, slug=slug)
+        self.assertEqual(ev.verified_session_ids, [sid],
+                         "a redacted excerpt whose raw secret is longer than the "
+                         "placeholder must corroborate (issue #846)")
+
+    def test_long_redacted_secret_rejected_without_slack(self):
+        # Attribution lock: the SAME fixture is REJECTED once the slack is
+        # neutralized (cap patched to 0), proving the acceptance above comes from
+        # the #846 placeholder slack and not from some other window path.
+        slug = self._slug()
+        sid = f"sess-{uuid.uuid4().hex[:8]}"
+        raw = _REDACT_CTX_PRE + _LONG_SECRET_STANDIN + _REDACT_CTX_POST
+        excerpt = _REDACT_CTX_PRE + "[REDACTED:anthropic]" + _REDACT_CTX_POST
+        self._write_session(sid, slug=slug, turns=[tf.user_turn(raw, human=True)])
+        row = self._add_row(pid=self._pid("longred0"), slug=slug, session_id=sid,
+                            content=raw, excerpt=excerpt)
+        with mock.patch.object(adp, "_MAX_REDACTED_SECRET_LEN", 0):
+            ev = self._eval(row, slug=slug)
+        self.assertEqual(ev.verified_session_ids, [],
+                         "with the slack cap at 0 the pre-#846 under-count returns "
+                         "-- the acceptance is attributable to the slack alone")
+
+    def test_placeholder_free_window_unaffected_by_slack(self):
+        # Property (1): the slack applies ONLY when placeholders are present. A
+        # placeholder-free excerpt's accept/reject is byte-identical regardless
+        # of the slack cap -- patching _MAX_REDACTED_SECRET_LEN to a wild value
+        # changes NOTHING for the common case (the `if n_placeholders:` branch is
+        # never entered), so guard (i)'s size-independence is untouched.
+        slug = self._slug()
+        # Accept fixture (a clean paraphrase-free excerpt) and reject fixture
+        # (garbage), both PLACEHOLDER-FREE, exercised at cap 200 vs a wild cap.
+        acc_sid = f"sess-acc-{uuid.uuid4().hex[:6]}"
+        rej_sid = f"sess-rej-{uuid.uuid4().hex[:6]}"
+        self._write_session(acc_sid, slug=slug, turns=self._corroborating_turns(correction=False))
+        self._write_session(rej_sid, slug=slug, turns=self._corroborating_turns(correction=False))
+        acc_row = self._add_row(pid=self._pid("pfacc"), slug=slug, session_id=acc_sid,
+                                excerpt=_LONG_SENTENCE)
+        rej_row = self._add_row(pid=self._pid("pfrej"), slug=slug, session_id=rej_sid,
+                                excerpt="completely unrelated zzzqqq wubwub content nowhere present")
+        # Shipped cap.
+        self.assertEqual(self._eval(acc_row, slug=slug).verified_session_ids, [acc_sid])
+        self.assertEqual(self._eval(rej_row, slug=slug).verified_session_ids, [])
+        # Wild cap: identical outcomes -- proves the placeholder-free window
+        # never sees the slack term.
+        with mock.patch.object(adp, "_MAX_REDACTED_SECRET_LEN", 99999):
+            self.assertEqual(self._eval(acc_row, slug=slug).verified_session_ids, [acc_sid],
+                             "placeholder-free ACCEPT must not depend on the slack cap")
+            self.assertEqual(self._eval(rej_row, slug=slug).verified_session_ids, [],
+                             "placeholder-free REJECT must not depend on the slack cap")
+
+    def test_slack_cannot_clear_coincidence_guard_ii_still_binds(self):
+        # Adversarial (adrev2-003): the slack widens the window, but it must not
+        # let a SHORT excerpt clear guard (ii). A 2-content-token excerpt WITH a
+        # placeholder, against a LARGE transcript that literally contains the
+        # phrase, is still REJECTED -- required=3 > the 2 tokens the excerpt has,
+        # regardless of how wide the placeholder slack makes the window.
+        slug = self._slug()
+        big_sid = f"sess-bigred-{uuid.uuid4().hex[:6]}"
+        big_line = (("the file was " + _LONG_SECRET_STANDIN + " changed here today and then "
+                     "again after that ") * 50) + "the file was changed"
+        self._write_session(big_sid, slug=slug, turns=[tf.user_turn(big_line, human=True)])
+        # 2 content tokens after placeholder exclusion -> guard (ii) floor (3) binds.
+        excerpt = "the file was [REDACTED:anthropic] changed"
+        self.assertEqual(len(adp._excerpt_content_tokens(excerpt)), 2)
+        row = self._add_row(pid=self._pid("advred"), slug=slug, session_id=big_sid,
+                            content=excerpt, excerpt=excerpt)
+        ev = self._eval(row, slug=slug)
+        self.assertEqual(ev.verified_session_ids, [],
+                         "placeholder slack must NOT bypass guard (ii)'s content-token floor")
+
+    def test_slack_cap_pinned(self):
+        # Unbounding this cap (or making it transcript-proportional) would erode
+        # guard (i)'s size-independence. 200 is the plausible-max-secret-length
+        # allowance justified in apply_dream_proposal.py's _MAX_REDACTED_SECRET_LEN
+        # comment; a future edit that silently changes it must fail here.
+        self.assertEqual(adp._MAX_REDACTED_SECRET_LEN, 200)
+
+
+# ---------------------------------------------------------------------------
 # Tier re-mining (both directions) + spoofing.
 # ---------------------------------------------------------------------------
 
