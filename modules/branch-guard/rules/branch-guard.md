@@ -30,6 +30,7 @@ where `<type>` is one of `feature | fix | chore | docs` (e.g. `feature/add-login
 - **Unborn HEAD** (fresh `git init` before the first commit) — a new repo's first commit legitimately lands on the default branch; bootstrap must work.
 - **Repos with no `origin` remote** — the loss scenario this guard exists for is work destroyed when the default branch is hard-reset to origin. A local-only repo has nothing to sync from, so scratch `git init` repos and local journals stay frictionless. (An origin that exists but was never fetched is still guarded, via the local main/master fallback.)
 - **Direct-to-main allowlisted repos** (`~/.claude/git-flow-direct-to-main-repos.json`, matched as substrings of the origin URL) — the same allowlist `enforce-git-workflow.py` honors, e.g. agent-log repos that commit tracking data straight to main.
+- **Gitignored target paths** (file tools only) — a gitignored file can never be committed to the default branch, so it sits outside the loss scenario entirely (e.g. `.audit/` coordination state written by `/audit` workers, `.env` files, local caches). Verified with `git check-ignore`, which never reports **tracked** files as ignored — so a tracked file that happens to match an ignore pattern is still blocked. **This check fails CLOSED** (git error → treated as not-ignored → block stands), a deliberate exception to the guard's usual fail-open convention: the exemption widens the gate, and a broken git state must never be what opens it. Added after a 2026-07-10 `/audit` run, where blocked workers routed around the guard with shell writes — the exact red-flag pattern this rule forbids.
 - **Read-only git** (`status`, `log`, `diff`, `fetch`, `pull`, `checkout`, `switch`, branch creation) — the escape route must never be blocked.
 - **`git push`** — already owned by `enforce-git-workflow.py`; the guard does not double-handle it.
 
@@ -51,7 +52,7 @@ The advisory reminder stays — it teaches the workflow. This hook enforces it. 
 
 - Raw shell writes (`echo > file`, `sed -i`, `tee`) are not detectable from the command string. The Edit/Write gate is the primary defense; write files through the file tools.
 - `cd <other-repo> && git add .` is checked against the session cwd, not the `cd` target. Use `git -C <path>` (which IS resolved) when operating on another repo.
-- The guard fails OPEN on git errors (cannot determine the branch → allow) so a broken git state never bricks the session.
+- The guard fails OPEN on git errors (cannot determine the branch → allow) so a broken git state never bricks the session. The one exception is the gitignored-path check, which fails CLOSED (see above) — failing open there would widen the gate exactly when git can't be trusted.
 
 ## Red Flags
 

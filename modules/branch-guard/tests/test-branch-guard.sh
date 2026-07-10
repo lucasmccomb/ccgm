@@ -119,6 +119,23 @@ git -C "${R_LOCAL}" config user.email a@b
 git -C "${R_LOCAL}" config user.name a
 git -C "${R_LOCAL}" config core.hooksPath /dev/null
 (cd "${R_LOCAL}" && touch seed && git add seed && git commit -q -m init)
+# Repo on main with ignore rules: an ignored dir (mirrors /audit's .audit/),
+# plus a TRACKED file that matches an ignore pattern (git still commits it,
+# so the guard must still block it — check-ignore never reports tracked
+# files as ignored).
+R_IGN="${TMP}/repo-ignored";         make_repo "${R_IGN}" main
+printf '.audit/\ntracked-ignored.txt\n' > "${R_IGN}/.gitignore"
+touch "${R_IGN}/tracked-ignored.txt"
+git -C "${R_IGN}" add -f .gitignore tracked-ignored.txt
+git -C "${R_IGN}" commit -q -m ignores
+mkdir -p "${R_IGN}/.audit"
+echo x > "${R_IGN}/.audit/existing.json"
+# Same ignore rules, checked out on a feature branch.
+R_IGN_FEAT="${TMP}/repo-ignored-feat"; make_repo "${R_IGN_FEAT}" main
+printf '.audit/\n' > "${R_IGN_FEAT}/.gitignore"
+git -C "${R_IGN_FEAT}" add -f .gitignore
+git -C "${R_IGN_FEAT}" commit -q -m ignores
+git -C "${R_IGN_FEAT}" checkout -q -b feature/w
 # Origin remote configured but never fetched (no origin/* refs): the guard
 # must still fire using the local default-branch fallback.
 R_STALE="${TMP}/repo-stale-origin"
@@ -256,13 +273,47 @@ assert_eq "$?" "0" "git add in local-only repo (no origin) is allowed"
 run_hook Edit "{'file_path': '${R_STALE}/seed', 'old_string': 'a', 'new_string': 'b'}" "${R_STALE}"
 assert_eq "$?" "2" "Edit on main with stale (unfetched) origin is hard-blocked"
 
+# ─── Gitignored-path exemption (#862) ────────────────────────────────
+# Gitignored files can never be committed to the default branch, so they sit
+# outside the loss scenario the guard protects against (2026-07-10 /audit run:
+# workers were blocked from writing .audit/current/results/worker-N.json and
+# routed around the guard with shell writes).
+
+# 29. Write to a gitignored NEW nested path on main → allowed (the /audit
+# worker results-file case: dirs may not exist yet at first write).
+run_hook Write "{'file_path': '${R_IGN}/.audit/current/results/worker-0.json', 'content': 'x'}" "${R_IGN}"
+assert_eq "$?" "0" "Write to gitignored new nested path on main is allowed"
+
+# 30. Edit of an EXISTING gitignored file on main → allowed.
+run_hook Edit "{'file_path': '${R_IGN}/.audit/existing.json', 'old_string': 'x', 'new_string': 'y'}" "${R_IGN}"
+assert_eq "$?" "0" "Edit of existing gitignored file on main is allowed"
+
+# 31. Tracked file on main in the same repo → still hard-blocked.
+run_hook Edit "{'file_path': '${R_IGN}/seed', 'old_string': 'a', 'new_string': 'b'}" "${R_IGN}"
+assert_eq "$?" "2" "Edit of tracked file on main is still hard-blocked"
+
+# 32. Untracked-but-NOT-ignored file on main → still hard-blocked (it is
+# trackable: nothing stops it being committed to main).
+run_hook Write "{'file_path': '${R_IGN}/untracked-new.txt', 'content': 'x'}" "${R_IGN}"
+assert_eq "$?" "2" "Write of untracked-but-not-ignored file on main is hard-blocked"
+
+# 33. TRACKED file matching an ignore pattern on main → still hard-blocked:
+# git commits tracked files regardless of ignore rules, and check-ignore
+# never reports tracked files as ignored.
+run_hook Edit "{'file_path': '${R_IGN}/tracked-ignored.txt', 'old_string': 'a', 'new_string': 'b'}" "${R_IGN}"
+assert_eq "$?" "2" "Edit of tracked-but-ignore-matching file on main is hard-blocked"
+
+# 34. Gitignored path in a repo on a FEATURE branch → allowed.
+run_hook Write "{'file_path': '${R_IGN_FEAT}/.audit/current/results/worker-1.json', 'content': 'x'}" "${R_IGN_FEAT}"
+assert_eq "$?" "0" "Write to gitignored path on feature branch is allowed"
+
 # ─── Robustness ──────────────────────────────────────────────────────
 
-# 27. Malformed stdin → allow (fail-open, never wedge the session).
+# 35. Malformed stdin → allow (fail-open, never wedge the session).
 printf 'not json' | python3 "${HOOK}" >/dev/null 2>&1
 assert_eq "$?" "0" "malformed stdin fails open"
 
-# 28. Unknown tool → allow.
+# 36. Unknown tool → allow.
 run_hook Glob "{'pattern': '*.py'}" "${R_MAIN}"
 assert_eq "$?" "0" "unrelated tool is ignored"
 

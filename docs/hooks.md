@@ -296,7 +296,7 @@ Scope-locks file edits to a frozen directory. When `~/.claude/freeze-dir.txt` co
 
 Hard gate against work on a repo's default branch (main/master, per `origin/HEAD` with fallbacks). Blocks file edits whose target file lives in a repo checked out on its default branch (symlinks resolved; the file's repo is checked, not the session cwd), and mutating git commands — `git commit`/`add`/`stage`/`apply` — in any `&&`/`;`/`|` segment, honoring `git -C <path>`. Fires before the first edit so uncommitted work can never be stranded on main and destroyed by a later origin sync. The denial teaches the fix: `git fetch origin && git checkout -b <type>/<short-desc> origin/<default>` (type: feature/fix/chore/docs).
 
-**Exemptions**: `ALLOW_MAIN_COMMIT=1` (env or inline), in-progress rebase/merge/cherry-pick/revert/bisect, unborn HEAD, repos with no origin remote, and `~/.claude/git-flow-direct-to-main-repos.json` entries.
+**Exemptions**: `ALLOW_MAIN_COMMIT=1` (env or inline), in-progress rebase/merge/cherry-pick/revert/bisect, unborn HEAD, repos with no origin remote, `~/.claude/git-flow-direct-to-main-repos.json` entries, and gitignored target paths (file tools only; `git check-ignore`-verified, fails closed on git errors — gitignored files can never be committed to main, e.g. `.audit/` coordination state).
 
 ---
 

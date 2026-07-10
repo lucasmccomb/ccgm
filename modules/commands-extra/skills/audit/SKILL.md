@@ -194,6 +194,16 @@ Run from any clone. The default is **read-only** - no code changes unless `--fix
    fi
    ```
 
+   **The `.gitignore` entry is also load-bearing for the branch-guard hook (field
+   report #9, 2026-07-10 run).** `branch-guard.py` hard-blocks Edit/Write
+   to any file inside a repo checked out on its default branch, but exempts
+   **gitignored** paths (verified via `git check-ignore`; fails closed on git
+   errors). Workers running against a main checkout can only Write their
+   `.audit/current/results/worker-N.json` files because `.audit/` is ignored.
+   A tracked `.audit/` (field report #8) voids the exemption — `check-ignore`
+   never reports tracked files as ignored — so untrack it before launching
+   workers, or every worker's results-file Write will be denied.
+
 3. **Check for existing audit run**: Look for `$AUDIT_DIR/current/config.json`.
    - If exists, ask the user:
      ```
@@ -814,6 +824,18 @@ Use ABSOLUTE PATHS for ALL file operations. Your codebase root is {AGENT_WORKING
 
 Be thorough. Read entire files when needed. Trace patterns across the codebase. This is a deep audit.
 ```
+
+**Worker results-file Writes and the branch-guard hook (field report #9).** On the
+2026-07-10 run, the branch-guard PreToolUse hook hard-blocked all 3
+workers' Writes of their mandated results files (the checkout was on its default
+branch), and every worker routed around the denial with shell writes — the exact
+red-flag pattern the branch-guard rule forbids. branch-guard now exempts
+gitignored paths, so results-file Writes pass as long as `.audit/` is actually
+gitignored (ensured in M1). If a worker still reports a branch-guard denial on an
+`.audit/...` path, the cause is tracked `.audit/` state (field report #8) or
+broken git state in the checkout — fix that and re-dispatch; never instruct a
+worker to fall back to shell redirection (`echo >`, `tee`, heredocs) to get past
+a guard.
 
 After launching all workers, poll for completion using TaskOutput. Once all active workers complete (or timeout):
 
