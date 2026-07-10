@@ -34,6 +34,12 @@ ALLOWS:
     scenario cannot occur; scratch repos and local journals stay frictionless
   - Repos allowlisted in ~/.claude/git-flow-direct-to-main-repos.json (the
     same allowlist enforce-git-workflow.py honors, e.g. agent-log repos)
+  - GITIGNORED target paths (file tools only) — a gitignored file can never
+    be committed to the default branch, so it is outside the loss scenario
+    (e.g. .audit/ coordination state, .env files, local caches). Verified via
+    `git check-ignore`; tracked files are never reported ignored, so
+    tracked-but-pattern-matched paths stay blocked. This check FAILS CLOSED
+    (git error => not ignored) — see is_gitignored() for why
   - Files outside any git repo; non-git Bash commands; unknown tools
 
 KNOWN GAPS (see rules/branch-guard.md): raw shell redirection writes
@@ -233,25 +239,59 @@ def target_paths(tool_name: str, tool_input: dict) -> list[str]:
     return []
 
 
-def existing_anchor_dir(raw_path: str, cwd: str) -> str | None:
-    """Canonicalize raw_path (~, env vars, symlinks) and return its nearest
-    EXISTING ancestor directory — the directory whose repo owns the file.
-    Symlinks are resolved on purpose: editing an installed symlink must be
-    attributed to the repo the real file lives in."""
+def resolve_path(raw_path: str, cwd: str) -> Path | None:
+    """Canonicalize raw_path (~, env vars, symlinks). Symlinks are resolved on
+    purpose: editing an installed symlink must be attributed to the repo the
+    real file lives in."""
     expanded = os.path.expandvars(os.path.expanduser(raw_path))
     path = Path(expanded)
     if not path.is_absolute():
         path = Path(cwd or os.getcwd()) / path
     try:
-        path = path.resolve()
+        return path.resolve()
     except (OSError, RuntimeError):
         return None
+
+
+def existing_anchor_dir(path: Path) -> str | None:
+    """Nearest EXISTING ancestor directory of a canonicalized path — the
+    directory whose repo owns the file."""
     directory = path if path.is_dir() else path.parent
     while not directory.exists():
         if directory.parent == directory:
             return None
         directory = directory.parent
     return str(directory)
+
+
+def is_gitignored(path: Path, check_dir: str) -> bool:
+    """True iff git POSITIVELY reports `path` as ignored in check_dir's repo.
+
+    A gitignored file can never be committed to the default branch, so it is
+    outside the loss scenario this guard exists for (uncommitted work destroyed
+    when main is hard-reset to origin) — e.g. .audit/ coordination state, .env
+    files, local caches. `git check-ignore` never reports TRACKED files as
+    ignored (even when they match an ignore pattern), so a tracked-but-
+    pattern-matched file — which IS committable — stays blocked.
+
+    DELIBERATE EXCEPTION to this hook's fail-open convention: this exemption
+    WIDENS the gate, so on any git error it returns False (not ignored) and
+    the block stands. Failing open on the branch determination keeps a broken
+    repo usable; failing open here would open the gate exactly when git state
+    is too broken to trust the answer.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "check-ignore", "-q", "--", str(path)],
+            cwd=check_dir,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    # 0 = ignored; 1 = not ignored; 128 = error → fail closed (not ignored).
+    return proc.returncode == 0
 
 
 # ─── Bash ────────────────────────────────────────────────────────────
@@ -317,11 +357,16 @@ def main() -> None:
 
     if tool_name in FILE_TOOLS:
         for raw in target_paths(tool_name, tool_input):
-            anchor = existing_anchor_dir(raw, cwd)
+            target = resolve_path(raw, cwd)
+            if target is None:
+                continue
+            anchor = existing_anchor_dir(target)
             if not anchor:
                 continue
             violation = default_branch_violation(anchor)
-            if violation:
+            # check-ignore runs only on an actual violation (feature-branch
+            # edits — the common case — never pay for the extra subprocess).
+            if violation and not is_gitignored(target, anchor):
                 deny(f"{tool_name} of {raw}", *violation)
         sys.exit(0)
 

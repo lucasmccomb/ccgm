@@ -22,6 +22,7 @@ Default-branch detection: `origin/HEAD` → `origin/main`/`origin/master` → (o
 | Unborn HEAD (fresh `git init`) | A new repo's first commit legitimately lands on the default branch. |
 | No `origin` remote | Nothing to sync from — the loss scenario cannot occur. Scratch repos and local journals stay frictionless. (Origin present but unfetched is still guarded via the local fallback.) |
 | Repos in `~/.claude/git-flow-direct-to-main-repos.json` | Same allowlist the commit-time hook honors (e.g. agent-log repos). |
+| Gitignored target paths (file tools only) | A gitignored file can never be committed to the default branch — outside the loss scenario (e.g. `.audit/` coordination state, `.env` files). Verified via `git check-ignore`; tracked files are never reported ignored, so tracked-but-pattern-matched paths stay blocked. Fails CLOSED on git errors (deliberate exception to the guard's fail-open convention — the exemption widens the gate, so a broken git state must never open it). |
 | Detached HEAD, any non-default branch | Not the default branch. |
 
 ## Relationship to the `hooks` Module
@@ -48,7 +49,7 @@ The hook is dependency-free (no `hook_utils` import) so it works under both the 
 bash modules/branch-guard/tests/test-branch-guard.sh
 ```
 
-Covers: deny on main / allow on feature branch (Edit, Write-to-new-path, NotebookEdit, MCP write), master-default and origin/HEAD detection, `git add`/`commit`/`stage`/`apply` denial, `-C` targeting, compound commands, inline + env `ALLOW_MAIN_COMMIT=1`, merge/rebase/detached/unborn exemptions, non-repo files, fail-open on malformed input.
+Covers: deny on main / allow on feature branch (Edit, Write-to-new-path, NotebookEdit, MCP write), master-default and origin/HEAD detection, `git add`/`commit`/`stage`/`apply` denial, `-C` targeting, compound commands, inline + env `ALLOW_MAIN_COMMIT=1`, merge/rebase/detached/unborn exemptions, the gitignored-path exemption (ignored new/existing paths allowed on main; tracked, untracked-not-ignored, and tracked-but-pattern-matched paths still blocked; ignored paths on feature branches unaffected), non-repo files, fail-open on malformed input.
 
 ## Manual Installation
 
