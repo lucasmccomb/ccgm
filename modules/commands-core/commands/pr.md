@@ -94,17 +94,11 @@ git push --force-with-lease -u origin "$BRANCH"
 
 ### 6. Check for PR Template
 
-Look for a PR template in this order:
+One local check — if a template file is in the repo, use it; otherwise write a value-first body (do NOT query the org's `.github` repo or create a template):
 
 ```bash
-# 1. Repo root
-ls pull_request_template.md PULL_REQUEST_TEMPLATE.md 2>/dev/null
-
-# 2. .github directory
-ls .github/pull_request_template.md .github/PULL_REQUEST_TEMPLATE.md 2>/dev/null
-
-# 3. Organization .github repo (if applicable)
-# gh api repos/{org}/.github/contents/.github/PULL_REQUEST_TEMPLATE.md 2>/dev/null
+ls pull_request_template.md PULL_REQUEST_TEMPLATE.md \
+   .github/pull_request_template.md .github/PULL_REQUEST_TEMPLATE.md 2>/dev/null
 ```
 
 If a template is found, read it and structure the PR body using the template's sections and headings.

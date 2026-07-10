@@ -42,4 +42,5 @@ If any of these are true, do NOT use this template - the skill should have detec
 
 - A file named `pull_request_template.md` or `PULL_REQUEST_TEMPLATE.md` exists in the repo root
 - A file exists under `.github/` with either casing
-- The org's `.github` repo ships a default template (rare; check only if repo-level search returns nothing)
+
+The check is local-only: do not query the org's `.github` repo over the API. A missing repo-level template means use this default, not that you should hunt further.

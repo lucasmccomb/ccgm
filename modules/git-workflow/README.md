@@ -1,13 +1,13 @@
 # git-workflow
 
-Git workflow rules: sync before history changes, rebase by default, post-merge cleanup, PR template detection, no AI attribution in commits.
+Git workflow rules: sync before history changes, rebase by default, post-merge cleanup, follow a repo's PR template if it has one (local check only), no AI attribution in commits.
 
 ## What It Does
 
 This module installs a rules file that instructs Claude to:
 
 - Never add AI attribution (Co-Authored-By, "Generated with Claude Code") to commits or PRs
-- Check for and use PR templates when creating pull requests
+- Follow a repo's PR template when one is present (a single local check); otherwise write a value-first body without hunting the org's `.github` repo or creating a template
 - Always sync with remote before running history-altering git commands
 - Use rebase by default when updating feature branches from main
 - Return to a clean main branch state after PR merges
