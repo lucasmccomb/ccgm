@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How CCGM's Memory System Works</title>
+<meta name="description" content="A plain-language walkthrough of CCGM's durable, cross-session memory: the local read path, the nightly dreaming write path, the safeguards against hallucinated memories, and how the weekly scorecard proves it's working.">
+<style>
+  :root {
+    --bg: #faf9f7;
+    --bg-soft: #f2f0ec;
+    --card: #ffffff;
+    --ink: #1b1b2b;
+    --ink-soft: #4a4a5e;
+    --ink-faint: #74748a;
+    --line: #e6e3dd;
+    --line-strong: #d6d2ca;
+    --read: #0d9488;        /* read path = teal: local, free, always-on */
+    --read-soft: #ecfdf9;
+    --read-line: #a7f0e2;
+    --write: #7c3aed;       /* write path = violet: nightly, opt-in, dreaming */
+    --write-soft: #f5f0ff;
+    --write-line: #d8c7ff;
+    --amber: #b45309;
+    --amber-soft: #fef6ec;
+    --amber-line: #f3d9ad;
+    --code-bg: #f4f2ee;
+    --shadow: 0 1px 2px rgba(20,20,40,.05), 0 8px 24px -12px rgba(20,20,40,.14);
+    --radius: 16px;
+    --maxw: 880px;
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0d17;
+      --bg-soft: #14141f;
+      --card: #16161f;
+      --ink: #e9e9f2;
+      --ink-soft: #b7b7c8;
+      --ink-faint: #8686a0;
+      --line: #262636;
+      --line-strong: #33334a;
+      --read: #2dd4bf;
+      --read-soft: #0e211f;
+      --read-line: #1c4f49;
+      --write: #a78bfa;
+      --write-soft: #1a1330;
+      --write-line: #3d2d66;
+      --amber: #fbbf24;
+      --amber-soft: #241b0d;
+      --amber-line: #4d3b17;
+      --code-bg: #1c1c28;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 30px -14px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #faf9f7; --bg-soft: #f2f0ec; --card: #fff; --ink: #1b1b2b; --ink-soft: #4a4a5e;
+    --ink-faint: #74748a; --line: #e6e3dd; --line-strong: #d6d2ca; --read: #0d9488;
+    --read-soft: #ecfdf9; --read-line: #a7f0e2; --write: #7c3aed; --write-soft: #f5f0ff;
+    --write-line: #d8c7ff; --amber: #b45309; --amber-soft: #fef6ec; --amber-line: #f3d9ad;
+    --code-bg: #f4f2ee; --shadow: 0 1px 2px rgba(20,20,40,.05), 0 8px 24px -12px rgba(20,20,40,.14);
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d0d17; --bg-soft: #14141f; --card: #16161f; --ink: #e9e9f2; --ink-soft: #b7b7c8;
+    --ink-faint: #8686a0; --line: #262636; --line-strong: #33334a; --read: #2dd4bf;
+    --read-soft: #0e211f; --read-line: #1c4f49; --write: #a78bfa; --write-soft: #1a1330;
+    --write-line: #3d2d66; --amber: #fbbf24; --amber-soft: #241b0d; --amber-line: #4d3b17;
+    --code-bg: #1c1c28; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 30px -14px rgba(0,0,0,.6);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  /* ---- top bar ---- */
+  .topbar {
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    position: sticky; top: 0; z-index: 10;
+    backdrop-filter: saturate(1.2) blur(8px);
+  }
+  .topbar .wrap { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+  .brand { font-weight: 700; letter-spacing: -.01em; font-size: 15px; display: flex; align-items: center; gap: 9px; }
+  .brand .dot { width: 10px; height: 10px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--read), var(--write)); box-shadow: 0 0 12px -2px var(--write); }
+  .brand small { color: var(--ink-faint); font-weight: 500; }
+  .themebtn {
+    font: inherit; font-size: 13px; color: var(--ink-soft); cursor: pointer;
+    background: var(--card); border: 1px solid var(--line-strong); border-radius: 999px;
+    padding: 5px 13px; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .themebtn:hover { border-color: var(--write); color: var(--ink); }
+
+  /* ---- hero ---- */
+  header.hero { padding: 72px 0 40px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12.5px; font-weight: 650; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--write); background: var(--write-soft); border: 1px solid var(--write-line);
+    padding: 5px 12px; border-radius: 999px;
+  }
+  h1 {
+    font-size: clamp(32px, 6vw, 52px); line-height: 1.06; letter-spacing: -.025em;
+    margin: 22px 0 0; font-weight: 800;
+  }
+  .lede { font-size: clamp(18px, 2.4vw, 21px); color: var(--ink-soft); margin: 20px 0 0; max-width: 40ch; }
+  .lede strong { color: var(--ink); font-weight: 650; }
+
+  .halfchips { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-size: 14px; font-weight: 600; padding: 9px 15px; border-radius: 12px;
+    border: 1px solid var(--line-strong); background: var(--card);
+  }
+  .chip .tag { font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 2px 7px; border-radius: 6px; text-transform: uppercase; }
+  .chip.read .tag { color: var(--read); background: var(--read-soft); border: 1px solid var(--read-line); }
+  .chip.write .tag { color: var(--write); background: var(--write-soft); border: 1px solid var(--write-line); }
+  .chip .meta { color: var(--ink-faint); font-weight: 500; font-size: 13px; }
+
+  /* ---- sections ---- */
+  section { padding: 30px 0; }
+  .sectlabel {
+    font-size: 12.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 6px;
+  }
+  h2 { font-size: clamp(24px, 4vw, 31px); letter-spacing: -.02em; margin: 0 0 6px; font-weight: 750; }
+  h2 + .sub { color: var(--ink-soft); margin: 0 0 22px; font-size: 17px; max-width: 62ch; }
+  h3 { font-size: 18px; margin: 0 0 8px; letter-spacing: -.01em; }
+  p { margin: 0 0 16px; }
+  a { color: var(--write); text-decoration-color: color-mix(in srgb, var(--write) 40%, transparent); text-underline-offset: 2px; }
+  hr.div { border: 0; border-top: 1px solid var(--line); margin: 8px 0; }
+  code {
+    font-family: var(--mono); font-size: .86em; background: var(--code-bg);
+    padding: 1.5px 6px; border-radius: 6px; border: 1px solid var(--line);
+  }
+
+  /* ---- two-half cards ---- */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .pathcard {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 24px; box-shadow: var(--shadow); position: relative; overflow: hidden;
+  }
+  .pathcard::before { content:""; position: absolute; inset: 0 auto 0 0; width: 4px; }
+  .pathcard.read::before { background: var(--read); }
+  .pathcard.write::before { background: var(--write); }
+  .pathcard .head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .pathcard .head .name { font-weight: 750; font-size: 19px; letter-spacing: -.01em; }
+  .pathcard.read .name { color: var(--read); }
+  .pathcard.write .name { color: var(--write); }
+  .pathcard .oneline { color: var(--ink-soft); font-size: 15.5px; margin: 0 0 16px; }
+  .facts { list-style: none; padding: 0; margin: 0; display: grid; gap: 9px; }
+  .facts li { display: flex; gap: 10px; font-size: 14.5px; color: var(--ink-soft); }
+  .facts li b { color: var(--ink); font-weight: 650; min-width: 78px; display: inline-block; }
+  .facts .k { color: var(--ink-faint); font-weight: 600; min-width: 74px; }
+
+  /* ---- flow ---- */
+  .flow { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding: 4px 2px 12px; }
+  .flow .step {
+    flex: 1 0 0; min-width: 132px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 13px; padding: 15px 15px 14px; position: relative;
+  }
+  .flow.read .step { border-top: 3px solid var(--read); }
+  .flow.write .step { border-top: 3px solid var(--write); }
+  .flow .step + .step { margin-left: 26px; }
+  .flow .step + .step::before {
+    content: "→"; position: absolute; left: -22px; top: 50%; transform: translateY(-50%);
+    color: var(--ink-faint); font-size: 18px; font-weight: 700;
+  }
+  .flow .n { font-size: 11px; font-weight: 800; letter-spacing: .06em; color: var(--ink-faint); }
+  .flow.read .n { color: var(--read); }
+  .flow.write .n { color: var(--write); }
+  .flow .t { font-weight: 700; font-size: 15px; margin: 3px 0 4px; letter-spacing: -.01em; }
+  .flow .d { font-size: 13px; color: var(--ink-soft); line-height: 1.45; }
+  .flowcap { font-size: 13.5px; color: var(--ink-faint); margin: 2px 0 0; }
+
+  /* ---- type pills ---- */
+  .types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .type {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 15px;
+  }
+  .type .name { font-weight: 700; font-size: 14.5px; font-family: var(--mono); color: var(--read); letter-spacing: -.01em; }
+  .type .ex { font-size: 13px; color: var(--ink-soft); margin-top: 3px; line-height: 1.4; }
+
+  /* ---- callout ---- */
+  .callout {
+    border: 1px solid var(--line); border-left: 4px solid var(--write);
+    background: var(--card); border-radius: 12px; padding: 18px 20px; margin: 6px 0 18px;
+  }
+  .callout.amber { border-left-color: var(--amber); background: var(--amber-soft); border-color: var(--amber-line); }
+  .callout.read { border-left-color: var(--read); }
+  .callout .ct { font-weight: 700; font-size: 15px; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; }
+  .callout p { margin: 0; font-size: 15px; color: var(--ink-soft); }
+  .callout p + p { margin-top: 10px; }
+
+  /* ---- safeguards ---- */
+  .guards { display: grid; gap: 14px; margin-top: 4px; }
+  .guard {
+    display: grid; grid-template-columns: 40px 1fr; gap: 15px; align-items: start;
+    background: var(--card); border: 1px solid var(--line); border-radius: 13px; padding: 17px 18px;
+  }
+  .guard .ico {
+    width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center;
+    font-size: 19px; background: var(--write-soft); border: 1px solid var(--write-line);
+  }
+  .guard h3 { margin: 2px 0 4px; font-size: 16px; }
+  .guard p { margin: 0; font-size: 14.5px; color: var(--ink-soft); }
+  .guard code { font-size: .82em; }
+
+  /* ---- scorecard sample ---- */
+  .scorecard {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); overflow: hidden;
+  }
+  .scorecard .sc-head {
+    padding: 16px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .scorecard .sc-head .title { font-weight: 750; font-size: 16px; display: flex; align-items: center; gap: 9px; }
+  .scorecard .sc-head .win { font-size: 12.5px; color: var(--ink-faint); font-family: var(--mono); }
+  .sc-metrics { display: grid; grid-template-columns: repeat(4, 1fr); }
+  .sc-metric { padding: 20px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .sc-metric:nth-child(4n) { border-right: 0; }
+  .sc-metric .lab { font-size: 11.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-faint); }
+  .sc-metric .val { font-size: 34px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .sc-metric .cap { font-size: 12.5px; color: var(--ink-soft); margin-top: 1px; }
+  .sc-metric.key { background: var(--read-soft); }
+  .sc-metric.key .val { color: var(--read); }
+  .sc-metric.key .lab { color: var(--read); }
+  .sc-foot { padding: 15px 20px; font-size: 13.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 10px; }
+  .sc-foot .bar { flex: 1; height: 8px; border-radius: 999px; background: var(--bg-soft); overflow: hidden; display: flex; }
+  .sc-foot .bar span { height: 100%; }
+  .sc-foot .hi { background: var(--read); }
+  .sc-foot .mid { background: color-mix(in srgb, var(--read) 45%, var(--bg-soft)); }
+  .sc-foot .lo { background: var(--line-strong); }
+
+  .note { font-size: 13.5px; color: var(--ink-faint); margin-top: 10px; }
+
+  /* ---- footer ---- */
+  footer { border-top: 1px solid var(--line); margin-top: 30px; padding: 28px 0 60px; }
+  footer .refs { display: grid; gap: 6px; font-size: 14px; }
+  footer .refs a { color: var(--ink-soft); }
+  footer .fine { color: var(--ink-faint); font-size: 13px; margin-top: 18px; }
+
+  @media (max-width: 720px) {
+    body { font-size: 16px; }
+    .grid2 { grid-template-columns: 1fr; }
+    .types { grid-template-columns: 1fr 1fr; }
+    .sc-metrics { grid-template-columns: 1fr 1fr; }
+    .sc-metric:nth-child(4n) { border-right: 1px solid var(--line); }
+    .sc-metric:nth-child(2n) { border-right: 0; }
+    header.hero { padding: 48px 0 28px; }
+  }
+  @media (max-width: 460px) {
+    .types { grid-template-columns: 1fr; }
+    .guard { grid-template-columns: 1fr; }
+    .guard .ico { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap">
+    <div class="brand"><span class="dot"></span> CCGM <small>· Memory System</small></div>
+    <button class="themebtn" id="themebtn" aria-label="Toggle theme">◐ Theme</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <header class="hero">
+    <span class="eyebrow">◑ Durable memory</span>
+    <h1>How CCGM remembers what it learns</h1>
+    <p class="lede">A cross-session memory that <strong>surfaces what you've learned</strong> at the start of every session — and a nightly job that mines your own transcripts to grow it, <strong>behind a human gate</strong>.</p>
+
+    <div class="halfchips">
+      <div class="chip read"><span class="tag">Read path</span> self-improving <span class="meta">· local · free · always on</span></div>
+      <div class="chip write"><span class="tag">Write path</span> dreaming <span class="meta">· nightly · opt-in · human-gated</span></div>
+    </div>
+  </header>
+
+  <!-- ============ THE TWO HALVES ============ -->
+  <section>
+    <p class="sectlabel">The shape of it</p>
+    <h2>Two halves, one store</h2>
+    <p class="sub">The memory system splits cleanly into a <em>read path</em> that never leaves your machine and does the valuable work, and an optional <em>write path</em> that automates capture. The read path is complete on its own — you never need the write path to benefit from memory.</p>
+
+    <div class="grid2">
+      <div class="pathcard read">
+        <div class="head"><span class="name">Read path</span></div>
+        <p class="oneline">Stores learnings and surfaces the top-ranked ones at each fresh session start.</p>
+        <ul class="facts">
+          <li><span class="k">Module</span> <span><code>self-improving</code></span></li>
+          <li><span class="k">Storage</span> <span><code>~/.claude/learnings/</code> — a local git repo of append-only JSONL</span></li>
+          <li><span class="k">Cost</span> <span>Free. No network calls.</span></li>
+          <li><span class="k">Trigger</span> <span><code>SessionStart</code> hook injects; <code>/reflect</code> &amp; the CLI capture</span></li>
+        </ul>
+      </div>
+      <div class="pathcard write">
+        <div class="head"><span class="name">Write path</span></div>
+        <p class="oneline">A nightly analyzer mines your session transcripts and <em>proposes</em> new learnings for you to accept.</p>
+        <ul class="facts">
+          <li><span class="k">Module</span> <span><code>dreaming</code></span></li>
+          <li><span class="k">Storage</span> <span><code>~/.claude/dreaming/</code> — proposals, digests, scorecards</span></li>
+          <li><span class="k">Cost</span> <span>Opt-in. Spends Anthropic API tokens (analyzer only).</span></li>
+          <li><span class="k">Trigger</span> <span>Nightly <code>launchd</code> job → review via <code>/dream-apply</code></span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ THE LOOP ============ -->
+  <section>
+    <p class="sectlabel">The loop</p>
+    <h2>How a memory travels</h2>
+    <p class="sub">The read path is a four-step cycle: capture once, and it resurfaces itself at the right moment ever after. Reuse feeds back and strengthens it.</p>
+
+    <div class="flow read" role="list" aria-label="Read path steps">
+      <div class="step" role="listitem"><div class="n">01 · CAPTURE</div><div class="t">Log a learning</div><div class="d"><code>/reflect</code>, <code>/consolidate</code> or the CLI write a pattern, pitfall, preference, or fact.</div></div>
+      <div class="step" role="listitem"><div class="n">02 · STORE</div><div class="t">Rank &amp; decay</div><div class="d">Lands in append-only JSONL, scored by confidence with time-decay and staleness.</div></div>
+      <div class="step" role="listitem"><div class="n">03 · INJECT</div><div class="t">Surface at start</div><div class="d">The next fresh session gets the project's top-ranked learnings, token-budgeted.</div></div>
+      <div class="step" role="listitem"><div class="n">04 · REUSE</div><div class="t">Reinforce</div><div class="d">When a learning pays off again, a <code>verify</code> raises its confidence and freshness.</div></div>
+    </div>
+    <p class="flowcap">Injection is frozen into the session's prompt prefix at start — so a memory is picked up by the <em>next</em> fresh session, not the one that logged it.</p>
+
+    <div style="height:20px"></div>
+
+    <div class="flow write" role="list" aria-label="Write path steps">
+      <div class="step" role="listitem"><div class="n">01 · MINE</div><div class="t">Read transcripts</div><div class="d">A deterministic Python miner extracts friction, corrections &amp; PR links — no LLM yet.</div></div>
+      <div class="step" role="listitem"><div class="n">02 · ANALYZE</div><div class="t">Map → reduce</div><div class="d">One API call per project + one across all of them turns evidence into candidate deltas.</div></div>
+      <div class="step" role="listitem"><div class="n">03 · PROPOSE</div><div class="t">Pending deltas</div><div class="d">Each proposal is a per-change delta, written <code>pending</code>, tagged with its evidence.</div></div>
+      <div class="step" role="listitem"><div class="n">04 · APPLY</div><div class="t">Human accepts</div><div class="d">You review the digest and <code>/dream-apply</code> — the default path from proposal to store.</div></div>
+    </div>
+    <p class="flowcap">Accepted proposals become ordinary learnings and feed the same read path above.</p>
+  </section>
+
+  <!-- ============ WHAT GETS REMEMBERED ============ -->
+  <section>
+    <p class="sectlabel">What gets remembered</p>
+    <h2>Six kinds of learning</h2>
+    <p class="sub">Every entry is one idea, actionably phrased, ideally anchored to real files so staleness detection can flag drift.</p>
+
+    <div class="types">
+      <div class="type"><div class="name">pattern</div><div class="ex">An approach that worked and should be reused.</div></div>
+      <div class="type"><div class="name">pitfall</div><div class="ex">A known trap to avoid next time.</div></div>
+      <div class="type"><div class="name">preference</div><div class="ex">A taste call — how you like things done.</div></div>
+      <div class="type"><div class="name">architecture</div><div class="ex">A durable fact about how the codebase fits together.</div></div>
+      <div class="type"><div class="name">tool</div><div class="ex">A tool or framework gotcha.</div></div>
+      <div class="type"><div class="name">operational</div><div class="ex">An ops fact — deploys, CLIs, infra timing.</div></div>
+    </div>
+
+    <div style="height:22px"></div>
+
+    <div class="callout amber">
+      <p class="ct">⚖︎ &nbsp;“Only log human-validated decisions” — the honest version</p>
+      <p>The store legitimately holds <em>observed</em> patterns, not just decisions a human explicitly ratified. But the integrity property you actually care about is real and enforced two ways: <strong>every memory is grounded in real, on-disk session evidence</strong> (nothing is invented), and <strong>every model-<em>proposed</em> memory passes a human gate before it is stored</strong>. Manual capture via <code>/reflect</code> is human-confirmed; automated capture via <code>dreaming</code> is human-accepted. A model never writes to the store on its own.</p>
+    </div>
+  </section>
+
+  <!-- ============ THE NIGHTLY JOB ============ -->
+  <section>
+    <p class="sectlabel">The background job</p>
+    <h2>What “dreaming” does at night</h2>
+    <p class="sub">Once a day a <code>launchd</code> LaunchAgent runs a chain — analyze → eval-refresh → optimistic-integrate → digest → reconcile → retention. Each step is exit-tolerant, so one failure never kills the rest of the chain. (Digest runs <em>after</em> integrate, so tonight's just-integrated batch is reported while its dwell window is still ahead of it.)</p>
+
+    <div class="guards">
+      <div class="guard">
+        <div class="ico" style="background:var(--read-soft);border-color:var(--read-line)">🔎</div>
+        <div>
+          <h3>Deterministic mining, no model</h3>
+          <p>Pure-Python <code>transcript_miner</code> reads the JSONL every session already writes and pulls out friction events (tool/hook errors), user-correction sequences, PR links, and token economics. A <em>schema canary</em> fails loud if Claude Code's transcript format drifts, rather than silently mining nothing.</p>
+        </div>
+      </div>
+      <div class="guard">
+        <div class="ico">🧠</div>
+        <div>
+          <h3>Map → reduce over a direct API call</h3>
+          <p>The evidence bundle goes to the Anthropic Messages API over <code>curl</code> — <strong>no nested agent runtime</strong>, which removes the exec-escape attack surface. One map call per project, one reduce call across all of them, produces per-change proposals validated against a schema before touching disk.</p>
+        </div>
+      </div>
+      <div class="guard">
+        <div class="ico" style="background:var(--amber-soft);border-color:var(--amber-line)">🛡️</div>
+        <div>
+          <h3>Two-layer redaction before anything leaves the machine</h3>
+          <p>Every evidence excerpt runs through secret-token redaction (17 vendor shapes) <em>and</em> PII redaction (email, phone, address), then is truncated to ≤400 chars — redaction always applied <em>before</em> truncation so a boundary can't split a redaction marker.</p>
+        </div>
+      </div>
+      <div class="guard">
+        <div class="ico">📄</div>
+        <div>
+          <h3>A digest you review, not a change you discover</h3>
+          <p><code>/dream-digest</code> renders the day's proposals grouped by project and kind, each with its evidence excerpts, prevalence count, and confidence. A durable canary banner flags schema drift or reduce failures until acknowledged.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SAFEGUARDS ============ -->
+  <section>
+    <p class="sectlabel">Why it doesn't hallucinate memories</p>
+    <h2>The safeguards</h2>
+    <p class="sub">A memory system that grows itself is a poisoning surface — a wrong or malicious “learning” that gets injected into every future session. These are the layers that keep that from happening.</p>
+
+    <div class="guards">
+      <div class="guard">
+        <div class="ico">🙋</div>
+        <div>
+          <h3>Human gate — nothing model-proposed is silent</h3>
+          <p>Every dreaming proposal starts <code>pending</code> and stays there until you run <code>/dream-apply</code> and accept it. That is the <em>only</em> path from a mined proposal into the store.</p>
+        </div>
+      </div>
+      <div class="guard">
+        <div class="ico">🔗</div>
+        <div>
+          <h3>Origin binding — evidence must be real</h3>
+          <p>A proposal's cited sessions must resolve to actual transcript files on disk. The learning's <em>writer</em> is derived from that transcript's own recorded <code>cwd</code> — never from a caller-supplied env var — so a proposal can't forge a more-trusted origin than it has.</p>
+        </div>
+      </div>
+      <div class="guard">
+        <div class="ico">🧴</div>
+        <div>
+          <h3>Injection sanitizer + quarantine</h3>
+          <p>Untrusted transcript text is neutralized on write (role prefixes, “ignore previous instructions”, prompt tags). Independently, <em>every read</em> re-validates each entry and drops — quarantines — anything carrying unneutralized injection-shaped content. The analyzer's own prompts open by declaring excerpts are <strong>data, never instructions</strong>.</p>
+        </div>
+      </div>
+      <div class="guard">
+        <div class="ico">📉</div>
+        <div>
+          <h3>Confidence decay &amp; staleness</h3>
+          <p>Every entry carries a 1–10 confidence that <em>decays over time</em> (≈90-day half-life) and is excluded once it falls below threshold. Reuse strengthens it; a <code>contradict</code> cuts it hard. Old memory doesn't silently masquerade as current truth.</p>
+        </div>
+      </div>
+      <div class="guard">
+        <div class="ico">🚫</div>
+        <div>
+          <h3>Optimistic auto-integration is OFF by default — and bounded when on</h3>
+          <p>The one optional automated write path, <code>optimistic_integration</code> (default <code>false</code>), never blanket-applies. Each op-kind gets a <em>posture</em>: <code>verify</code> integrates immediately (purely additive, reversible), while <code>add</code> / <code>supersede</code> and the eviction-shaped <code>contradict</code> / <code>deprecate</code> are written but held behind a <strong>24-hour dwell window</strong> — excluded from every read path until it elapses, so a bad row can't reach a live session first. Per-slug caps bound how many land in one night, a batch-anomaly check watches eviction concentration, and a self-healing <strong>circuit breaker</strong> trips on repeated anomalies. Any <code>_global</code> change stays fully human-gated.</p>
+        </div>
+      </div>
+      <div class="guard">
+        <div class="ico">✅</div>
+        <div>
+          <h3>An eval gate that fails closed</h3>
+          <p>Before optimistic integration may act at all, <code>dream-eval.sh --gate</code> runs a with/without-memory A/B regression suite. Missing or red ⇒ no integration that run. Today the gate stays deliberately closed: the harness hasn't yet shown auto-integration beats human review, so <code>/dream-apply</code> remains the real write path.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SCORECARD ============ -->
+  <section>
+    <p class="sectlabel">How we know it's working</p>
+    <h2>The weekly scorecard</h2>
+    <p class="sub">Run <code>/dream-scorecard</code> for a deterministic, read-only weekly report — every number is a count of something already on disk. It's the honest answer to “is this memory system actually paying off?”</p>
+
+    <div class="scorecard" aria-label="Sample scorecard">
+      <div class="sc-head">
+        <div class="title">◑ &nbsp;Memory scorecard</div>
+        <div class="win">7 days ending 2026-07-04 · read-only</div>
+      </div>
+      <div class="sc-metrics">
+        <div class="sc-metric">
+          <div class="lab">Captured</div>
+          <div class="val">—</div>
+          <div class="cap">new learnings added</div>
+        </div>
+        <div class="sc-metric">
+          <div class="lab">Injected</div>
+          <div class="val">—</div>
+          <div class="cap">sessions given memory</div>
+        </div>
+        <div class="sc-metric key">
+          <div class="lab">Reused ★</div>
+          <div class="val">—</div>
+          <div class="cap">learnings that paid off</div>
+        </div>
+        <div class="sc-metric">
+          <div class="lab">Applied</div>
+          <div class="val">—</div>
+          <div class="cap">proposals accepted</div>
+        </div>
+      </div>
+      <div class="sc-foot">
+        <span>Store health · effective-confidence bands</span>
+        <span class="bar"><span class="hi" style="width:46%"></span><span class="mid" style="width:34%"></span><span class="lo" style="width:20%"></span></span>
+      </div>
+    </div>
+    <p class="note">The sample above shows the <em>shape</em> of the report, not live numbers. <strong>Reused</strong> is the metric that matters most — a reuse (<code>verify</code>) means a stored learning actually helped in a later session, which is the whole point. Captured and injected show the pipeline is flowing; store-health bands show it isn't rotting.</p>
+
+    <div class="callout read">
+      <p class="ct">📊 &nbsp;What each section counts</p>
+      <p><strong>Captured</strong> — new <code>add</code> events, by type and project (in-window <code>supersede</code> refinements shown separately). &nbsp;<strong>Injected</strong> — sessions that received memory, from per-machine injection telemetry (IDs + counts only, never content). &nbsp;<strong>Reused</strong> — <code>verify</code> events, the key value signal. &nbsp;<strong>Applied</strong> — proposals applied, by kind. &nbsp;<strong>Store health</strong> — active count and effective-confidence bands, plus deprecated / superseded tallies.</p>
+    </div>
+  </section>
+
+  <!-- ============ PRIVACY ============ -->
+  <section>
+    <p class="sectlabel">Where your memory lives</p>
+    <h2>Local by default</h2>
+    <p class="sub">The read path is entirely on-machine. Opting into anything that leaves it is deliberate and explicit.</p>
+    <div class="guards">
+      <div class="guard">
+        <div class="ico" style="background:var(--read-soft);border-color:var(--read-line)">💾</div>
+        <div>
+          <h3>Learnings never leave the machine</h3>
+          <p><code>~/.claude/learnings/</code> is a local git repo with no remote by default. Cross-machine sync is opt-in — add your own <em>private</em> remote and <code>ccgm-learnings-sync push</code>. Never point it at a public repo.</p>
+        </div>
+      </div>
+      <div class="guard">
+        <div class="ico" style="background:var(--read-soft);border-color:var(--read-line)">🔕</div>
+        <div>
+          <h3>Telemetry records counts, not content</h3>
+          <p>Injection telemetry logs memory IDs, counts, and a token estimate — never the memory text. It's per-machine, lives outside the synced store, and is best-effort: any failure is swallowed and never alters the injected block.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p class="sectlabel">Read the source</p>
+    <div class="refs">
+      <a href="../modules/self-improving/rules/learnings-store.md">learnings-store.md — schema, confidence decay, supersede chains, git sync</a>
+      <a href="../modules/self-improving/rules/self-improving.md">self-improving.md — the reflection loop &amp; capture triggers</a>
+      <a href="../modules/dreaming/rules/dreaming.md">dreaming.md — the nightly pipeline &amp; the proposal / evidence / gate contract</a>
+      <a href="./memory-system.md">memory-system.md — the operator guide this page distills</a>
+    </div>
+    <p class="fine">CCGM — Claude Code God Mode · Memory system overview · Read path local &amp; free · Write path opt-in &amp; human-gated.</p>
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    var btn = document.getElementById('themebtn');
+    var root = document.documentElement;
+    btn.addEventListener('click', function () {
+      var cur = root.getAttribute('data-theme');
+      var isDark = cur ? cur === 'dark'
+        : window.matchMedia('(prefers-color-scheme: dark)').matches;
+      root.setAttribute('data-theme', isDark ? 'light' : 'dark');
+    });
+  })();
+</script>
+</body>
+</html>

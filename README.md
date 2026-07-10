@@ -256,15 +256,22 @@ The installer sets up SearXNG, Ollama, the Python environment, and copies the co
 
 ## Memory System
 
-CCGM has a durable, cross-session memory system in two halves: a **read path** (the `self-improving` learnings store, which surfaces what you've learned at the start of each new session) and an opt-in **write path** (the `dreaming` module, which mines your session transcripts nightly and proposes new learnings). The read path is local and free; `dreaming` is opt-in and spends Anthropic API tokens. Every proposal is human-reviewed via `/dream-apply` by default; an opt-in `optimistic_integration` mode (default off) auto-integrates instead, behind a 24h dwell window, per-slug blast caps, and a circuit breaker, with post-hoc review and rollback via `/dream-review`.
+CCGM has a durable, cross-session memory: a store that learns from your work and surfaces what it knows at the start of each new session. It comes in two halves that share one store:
 
-Activate it with:
+| Half | Module | What it does | Cost |
+|------|--------|--------------|------|
+| **Read path** | `self-improving` | Stores learnings and injects the project's top-ranked ones into each fresh session, ranked by confidence with time-decay and staleness. | Local, free, no network |
+| **Write path** | `dreaming` | A nightly analyzer mines your session transcripts into evidence-tagged *proposals* for new learnings, behind a human gate. | Opt-in; spends Anthropic API tokens |
+
+The read path is the valuable, always-safe half and works on its own — you never need the write path to benefit from memory. A learning is captured (via `/reflect` or the CLI), stored as an append-only op-event, injected at the *next* fresh session start, and reinforced when it pays off again (`verify`). Dreaming's proposals are human-reviewed via `/dream-apply` by default; an opt-in `optimistic_integration` mode (default off) can auto-integrate instead, behind a 24h dwell window, per-slug blast caps, and a self-healing circuit breaker, with post-hoc review and rollback via `/dream-review`.
+
+Activate it with the idempotent setup script, which enables session-start injection, initializes the learnings git store, and (if `dreaming` is installed) offers to configure the nightly analyzer and, separately, optimistic auto-integration:
 
 ```bash
 bash ~/.claude/bin/memory-setup.sh
 ```
 
-The setup script enables session-start injection, initializes the learnings git store, and (if `dreaming` is installed) offers to configure the nightly analyzer and, separately, optimistic auto-integration. Injection applies to new sessions only. See **[Memory System](docs/memory-system.md)** for the full guide.
+**→ See [docs/memory-system.md](docs/memory-system.md) for the comprehensive technical reference** — the op-event data model, the projection and confidence-decay math, the integrity/quarantine layers, cross-machine git sync, the full dreaming pipeline, and the safety gates. A visual overview lives in [docs/memory-system.html](docs/memory-system.html).
 
 ## Customization
 
