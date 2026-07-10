@@ -15,17 +15,17 @@ This also applies to:
 
 ---
 
-# CRITICAL: Use PR Templates When Creating Pull Requests
+# Follow a Repo's PR Template If It Has One
 
-**Before creating any pull request**, check for a PR template in this order:
+When creating a PR, if a template file is **already sitting in the repo** — `pull_request_template.md` or `PULL_REQUEST_TEMPLATE.md` in the root or under `.github/` — structure the PR body using its sections and headings. Detecting it is a single local `ls` (`ls pull_request_template.md PULL_REQUEST_TEMPLATE.md .github/pull_request_template.md .github/PULL_REQUEST_TEMPLATE.md 2>/dev/null`); do it only when you are actually opening a PR.
 
-1. **Check the repo root**: Look for `pull_request_template.md` or `PULL_REQUEST_TEMPLATE.md` in the repository root
-2. **Check `.github/`**: Look for `.github/PULL_REQUEST_TEMPLATE.md` or `.github/pull_request_template.md`
-3. **Check the org**: If no repo-level template exists, check the org's `.github` repo (e.g., `gh api repos/{org}/.github/contents/.github/PULL_REQUEST_TEMPLATE.md`)
-4. **Use the template**: If a template is found, structure the PR description using the template's sections and headings exactly
-5. **No template found**: Fall back to a standard Summary / Changes / Test Plan format
+If there is **no** template file in the repo, do NOT hunt for one:
 
-**Why**: Teams use PR templates to ensure consistent review processes. Ignoring the template creates extra work for reviewers and may miss required fields (ticket links, QA steps, etc.).
+- Do **not** query the org's `.github` repo over the API (`gh api …`). Most repos have no template; the network round-trip is wasted ceremony.
+- Do **not** create a template file. A missing template is the normal case, not a gap to fill.
+- Just write a value-first PR body: lead with what the PR does for the user, then the concrete changes, then how it was verified. (`Closes #N` first if it closes an issue.)
+
+**Why**: honoring a committed template keeps team repos consistent, and a single local `ls` catches that for free. But the real goal is a clear, value-first body — not the template search. Don't let template-hunting become mandatory ritual on every PR.
 
 ---
 
