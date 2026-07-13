@@ -460,7 +460,7 @@
     },
     {
       "category": "workflow",
-      "description": "Solo-agent worktree-based isolation for feature work. Lighter alternative to multi-clone setup when only one agent is active.",
+      "description": "Git worktrees as the default isolation for parallel sub-agent delegation on one machine, with a safe janitor that enforces teardown so worktrees never silently fill the disk.",
       "name": "git-worktrees",
       "source": "./git-worktrees",
       "tags": [

@@ -70,6 +70,7 @@ Autonomous mode is where these four plan tenets matter most: there is no human i
 - It does NOT skip the four execution tenets above. The adversarial review enforces minimal edge-bucketed human work (T1), a follow-up-completion contract (T2), enough decision context to direct unplanned work without a human (T3), and a comprehensive autonomous E2E suite over all testable surfaces (T4) — expanding the plan when any is missing.
 - It does NOT skip the final execution gate. 6.5 is non-bypassable.
 - It does NOT automatically proceed to execution. The default recommendation at 6.5 in autonomous mode leans toward "save plan, don't execute yet" so the user can review before committing to multi-agent work.
+- It does NOT leave a worktree behind on that gate-stop path. When `--repo` is set, Phase 0.4.0 creates a temp anchor worktree; because autonomous mode usually stops at the 6.5 gate *without* executing, run the Phase 8.7 worktree teardown on exit anyway (it is explicitly early-exit-safe). If any execution worktrees were created, `/worktree-sweep` reclaims the leaks. Nothing worktree-shaped outlives the run — see `git-worktrees.md`.
 
 For the fast path (reduced depth, minimal interaction), use `/xplan --light` instead.
 

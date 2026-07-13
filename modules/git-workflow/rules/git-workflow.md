@@ -109,3 +109,16 @@ git fetch origin && git checkout -b <type>/<short-desc> origin/main
 with `<type>` one of `feature | fix | chore | docs`. Uncommitted work on main is destroyed the next time main is synced to origin — branch first, then work.
 
 When the **branch-guard** module is installed, this is not advisory: a PreToolUse hook hard-blocks Edit/Write/NotebookEdit and `git commit`/`add`/`stage`/`apply` while HEAD is on the default branch (escape hatch for intentional main-only ops: `ALLOW_MAIN_COMMIT=1`; rebase/merge/cherry-pick states are exempt). See `branch-guard.md` for the full contract.
+
+---
+
+# Worktrees: Ephemeral Isolation With Mandatory Teardown
+
+For **parallel sub-agent delegation on one machine**, the default isolation is a git worktree (`isolation: "worktree"`), not an extra permanent clone. A worktree is a second working tree from the same `.git` with its own index and HEAD, so parallel agents build, test, and commit without colliding. Reserve permanent clones for the cases a worktree cannot serve: per-branch dev-server ports (worktrees share `.env`), hook-driven per-branch `tracking.csv`, multiple long-lived independent agents, or cross-machine dispatch. Full contract in `git-worktrees.md`.
+
+**Branch-guard compatibility.** A worktree is always created on a feature branch off `origin/main`, never the default branch — so the branch-guard hook never fires inside it, and all the git rules above (rebase by default, no stash, no AI attribution, sync before history changes) apply unchanged. Worktrees change *where* the working tree lives, not how branches, commits, or PRs are managed.
+
+**The lifecycle — and why teardown is mandatory.** Every worktree is created for exactly one unit of work and has one owner (the delegator). The lifecycle is: create one worktree per unit → sub-agent implements and opens a PR → PR merges → **the delegator removes that worktree** → any orphans are swept as a backstop. That fourth step is load-bearing: the harness's `isolation: "worktree"` auto-removes a worktree **only if it is unchanged**, and a worktree an agent built in is "changed" and lingers forever. On 2026-07-13, forgotten built-in worktrees consumed ~237 GB on one repo. So:
+
+- **Remove each worktree the moment its PR merges** — `git worktree remove <path>` (non-force) then `git worktree prune`. Removing a clean worktree never deletes its branch or committed work; the branch ref stays in `.git` and only the checkout (and its build tree) is removed.
+- **Cleanup must not depend on the happy path.** Run `/worktree-sweep` — the safe repo-wide janitor — after any delegation run and on early exits. It removes only clean worktrees, preserves any with uncommitted changes / untracked files / in-progress rebases, and never forces. For unattended machines, schedule it as a backstop so disk is reclaimed whether or not anyone remembers.

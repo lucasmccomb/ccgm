@@ -122,9 +122,17 @@ For epics that were in progress when interrupted:
    - Create the PR if work is complete
    - Continue the work if incomplete
 
-### 6. Sync All Clones
+### 6. Sync Isolation State
 
-Before resuming execution, ensure all clones are on latest main:
+If the run used **worktrees** (the single-machine default), reclaim any that leaked when the run was interrupted — a merged epic's worktree that was never removed, or a built-in `isolation:"worktree"` worktree the harness could not auto-reclaim — before resuming:
+
+```bash
+/worktree-sweep    # removes only clean worktrees; preserves any with unsaved in-flight work (see Section 5)
+```
+
+Run the sweep *after* Section 5 has recovered in-flight work, so a worktree holding uncommitted progress is preserved (the sweep never removes a worktree with unsaved changes) rather than swept.
+
+If the run used **clones**, ensure all clones are on latest main:
 ```bash
 for i in 0 1 2 3; do
   dir=~/code/{project-name}-repos/{project-name}-$i

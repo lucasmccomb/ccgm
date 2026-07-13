@@ -77,9 +77,9 @@ Total: 14 base labels (agent labels are not part of the standard set).
 
 ### D. Clone Setup (Multi-Agent Repos)
 
-Two models are available. See `~/.claude/multi-agent-system.md` for full details.
+Two models are available. See `~/.claude/multi-agent-system.md` for full details. Note that for single-machine parallel delegation, worktrees (`git-worktrees` module) are now the default isolation — provision permanent clones only when you need persistent per-clone ports, per-branch `tracking.csv`, long-lived independent agents, or cross-machine dispatch.
 
-**Workspace model** (preferred for delegated parallel work):
+**Workspace model** (the clone-based option for delegated parallel work):
 
 ```
 /workspace-setup {repo-name}

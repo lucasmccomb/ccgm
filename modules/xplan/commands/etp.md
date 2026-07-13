@@ -136,17 +136,17 @@ Group independent units into **waves** (parallel within a wave, sequential acros
 ### 1.3 Identify the target repo, isolation, and ceremony level
 
 - Find the target repo (from the plan, the issue's repo, or the cwd).
-- **Isolation**: detect the multi-agent setup - workspace (`~/code/{repo}-workspaces/...`), flat clones (`~/code/{repo}-repos/...`), or single clone. With clones, assign one unit per clone; otherwise give each implementation agent its own **git worktree** (`isolation: "worktree"`) so parallel agents never share a working tree.
-- **"As many agents as makes sense"** = `min(units in this wave, available isolation slots, --max-agents)`. Never spawn more agents than the wave has independent units.
+- **Isolation — worktrees are the default.** Give each parallel implementation agent its own **git worktree** (`isolation: "worktree"`) so they never share a working tree. Worktrees are ephemeral (one per unit, torn down on merge — see 4.4), share the parent `.git`, and reclaim disk automatically. **Do not provision extra permanent clones for parallelism.** Use clones only when the repo *already* has a multi-clone setup you should reuse, or a specific need forces it: per-branch dev-server ports (worktrees share `.env`), hook-driven per-branch `tracking.csv`, multiple long-lived independent agents, or cross-machine dispatch. When an existing workspace/flat-clone setup is present, assign one unit per clone; otherwise (the common case) use worktrees. See `git-worktrees.md`.
+- **"As many agents as makes sense"** = `min(units in this wave, available isolation slots, --max-agents)`. Never spawn more agents than the wave has independent units. With worktrees the "isolation slots" are effectively the concurrency cap (below), not a fixed clone count.
 - **Ceremony scales to the work.** Match the apparatus to the size:
 
   | Target | Waves | Isolation | Bring-up runbook | Checkpoint record |
   |--------|-------|-----------|------------------|-------------------|
-  | Single issue | none (1 unit) | one worktree/clone | only if the issue calls for it | the issue + its PR |
-  | Issue batch | group independents | one per parallel unit | per-issue if any call for it | live GitHub state (re-run reconciles) |
-  | Plan | from the plan | full clone/workspace setup | per the plan (Phase 4.5) | progress file beside the plan |
+  | Single issue | none (1 unit) | one worktree | only if the issue calls for it | the issue + its PR |
+  | Issue batch | group independents | one worktree per parallel unit | per-issue if any call for it | live GitHub state (re-run reconciles) |
+  | Plan | from the plan | worktrees (or an existing clone/workspace setup) | per the plan (Phase 4.5) | progress file beside the plan |
 
-  Do not impose plan-scale ceremony (multi-clone provisioning, wave checkpoints, bring-up runbooks) on a single issue. Do not skip it for a real multi-epic plan.
+  Do not impose plan-scale ceremony (multi-clone provisioning, wave checkpoints, bring-up runbooks) on a single issue. Do not skip it for a real multi-epic plan. Every worktree created here is torn down after its unit merges (4.4) and any leaks are swept at the end (Phase 8) — teardown is mandatory, not best-effort.
 
 ### 1.4 Surface prerequisites and human-only steps (bucket them to the edges)
 
@@ -217,7 +217,7 @@ For each wave, in order (a single issue is a wave of one). This is the core loop
 
 ### 4.1 Implement (parallel within a wave)
 
-Spawn one `implementer` agent per unit (model sonnet), each in its own clone or worktree. Each agent:
+Spawn one `implementer` agent per unit (model sonnet), each in its own **worktree** (`isolation: "worktree"`) — or its assigned clone when the repo uses the multi-clone setup (1.3). Each agent:
 
 > **Concurrency — avoid the 429 throttle.** `implementer` agents run on `sonnet` (light), so a wave of up to ~8 is safe. But the default `--max-agents` (widest wave, clamped to isolation slots) can exceed that in a workspace with many clones — **cap the live wave at 8 light agents, or 4 if you raise `implementer` to a heavier model / higher effort**. If a wave has more units than the cap, split it into sub-waves. Bursting too many heavy agents trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole wave; if you hit it, wait 30–60s and re-spawn only the unfinished units in smaller sub-waves. See `~/.claude/rules/concurrency-and-rate-limits.md`.
 - Branches from `origin/main` (`git checkout -b {issue#}-{desc} origin/main` for an issue unit, `{slug}-{desc}` for a plan unit).
@@ -279,9 +279,18 @@ Classify the result:
 
 A PR that cannot be driven green within the bound is treated exactly like a PR frozen at 4.3: blocked, recorded, escalated, and stepped around - not merged, not abandoned silently.
 
-### 4.4 Merge
+### 4.4 Merge and tear down the unit's worktree
 
 Merge a PR only when: it passed review (both stages, or Stage 1 under `--light-review`), CI is **green and mergeable** (verified fresh via 4.35, not assumed), and it does not conflict. Merge in dependency order within the wave. Squash merge (the repo default). Never merge a PR that failed adversarial review or has red/unresolved CI to "keep moving" - that defeats the entire loop.
+
+**Then immediately remove that unit's worktree** (when the unit ran in a worktree, the default). This is mandatory, not best-effort — a built-in worktree does **not** auto-remove, so a merged unit whose worktree lingers is exactly the leak that filled 237 GB in the incident:
+
+```bash
+git worktree remove <unit-worktree-path>   # non-force; the branch ref and its commits survive removal
+git worktree prune
+```
+
+Removing the worktree does not delete the branch or the merged work — only the checkout (and its build tree). If the non-force remove refuses (unexpected for a just-merged clean unit), do not force it blindly; leave it for the Phase 8 sweep to classify. A unit that ran in a reused clone (multi-clone setup) is not a worktree — reset that clone to `origin/main` instead of removing anything.
 
 ### 4.5 Bring-up & integration verification (when applicable)
 
@@ -331,6 +340,7 @@ Loop Phases 4-6 until every condition holds:
 - All PRs merged (or frozen-and-recorded as blocked); all target issues closed by their merged PRs.
 - Every merged PR reached CI-green via the bounded loop (4.35); any PR that could not be driven green within the bound is among the frozen-and-recorded blockers, not silently merged.
 - CI green, no uncommitted changes in any clone, no unexpected open PRs.
+- No merged unit's worktree left behind — each removed at 4.4, and `/worktree-sweep` (Phase 8) reclaimed any leak.
 - All layers confirmed live (where the work has runtime impact); the **autonomous E2E suite is green** against the running system (the plan's §8 suite, or the E2E tests covering a changed issue surface) — the certainty oracle, not a bare smoke test. Any surface a plan's §8.5 names as not-certified is the only acceptable manual residue.
 
 "Don't stop until everything is complete" means: do not stop while completable work remains. Blocked units are set aside with a clear notification; they do not end the run. The run ends when the only thing left is genuinely human-blocked, and the user has been told exactly what each blocker needs.
@@ -346,6 +356,14 @@ gh pr list --state open
 gh issue list --state open
 # per clone: git status; then run the project's test + build
 ```
+
+**Sweep leaked worktrees (mandatory teardown backstop).** Even with per-unit removal at 4.4, a worktree can leak — a unit that errored before its merge-and-remove, a `isolation:"worktree"` worktree the harness could not auto-reclaim because it was built in, an early exit. Run the safe sweep so no worktree outlives the run:
+
+```bash
+/worktree-sweep        # removes only clean worktrees; preserves any with unsaved work; prunes stale metadata
+```
+
+Report what it reclaimed and anything it preserved (a preserved worktree means unsaved work an implementer left behind — surface it, do not force it away). **Run this even when the run exits early** (a blocker halts a unit, a gate stops the run): teardown must not depend on reaching a clean completion — that is the whole lesson of the incident.
 
 ### 8.2 Report to the user
 
@@ -377,6 +395,8 @@ A plan run: mark the progress file `COMPLETE`, or `BLOCKED - WAITING ON HUMAN` w
 **The E2E suite is the completion oracle — no manual testing bounced to the user.** "Done" means the autonomous end-to-end suite is green against the running system, not "I believe it works" or "the user can check." Provision whatever the suite needs — testing agents for flows that can't be asserted programmatically, third-party compute (RunPod, cloud Mac, real devices) as a front-loaded prerequisite; there is no resource constraint on testing. A changed surface without an E2E test gets one before completion (adrev tenet T4 / plan §8). The only manual residue permitted is a surface a plan's §8.5 explicitly names as not-certified.
 
 **Safety on irreversible / outward actions.** Even in autonomous mode, anything destructive or externally-visible that the work did not clearly authorize - production deploys, resource deletion, force-pushing shared branches, sending external communications - requires notifying the user first. The work authorizes its own scope; it does not authorize off-scope irreversible acts.
+
+**Worktree teardown is mandatory.** Parallel units run in ephemeral worktrees by default (1.3). Each is removed the moment its PR merges (4.4), and Phase 8 sweeps any leak (`/worktree-sweep`) — including on early exit. A built-in worktree never auto-removes; leaving merged units' worktrees behind is the exact failure that consumed 237 GB in the incident. Removing a clean worktree never loses committed work (the branch ref survives). Do not force-remove worktrees with unsaved work — the sweep preserves those.
 
 **No AI attribution** in commits or PR bodies (per the git-workflow rule). Use the repo's PR template if one exists.
 

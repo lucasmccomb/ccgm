@@ -111,9 +111,13 @@ Collect all created issue numbers.
 
 ### Phase 4: Plan Agent Allocation
 
+**Isolation — worktrees by default.** Each parallel issue agent runs in its own **git worktree** (`isolation: "worktree"`) created from the current clone: ephemeral, sharing the parent `.git`, and torn down after its PR merges (Phase 5.3). The branch-creation tracking hook fires inside a worktree exactly as it does in a clone (worktrees share `.git/hooks`), so `tracking.csv` still works. Provision or reuse permanent clones only when the repo *already* has a multi-clone/workspace setup, or a specific need forces it (per-branch dev-server ports, multiple long-lived agents). See `git-worktrees.md`.
+
+The clone discovery + occupancy checks below apply **only when reusing an existing multi-clone setup**; for the default worktree path, the concurrency cap (Phase 5.1) — not a fixed clone count — bounds the wave.
+
 Determine how to allocate agents based on:
 
-1. **Available clones**: Check how many clones exist
+1. **Available clones** (only if reusing a multi-clone setup): Check how many clones exist
    ```bash
    # Detect model and discover clones
    WC_MATCH=$(basename "$PWD" | grep -oP 'w\d+-c\d+$')
@@ -200,19 +204,18 @@ For each wave:
 
 #### 5.1 Spawn Agents
 
-Use the Agent tool to launch one agent per assigned issue, each in its own clone directory:
+Use the Agent tool to launch one agent per assigned issue, each in its own **worktree** (`isolation: "worktree"`) by default — or its assigned clone directory when reusing a multi-clone setup (Phase 4):
 
-> **Concurrency — avoid the 429 throttle.** Wave size is naturally bounded by the number of clones, and execution agents run on `sonnet` — both keep this fan-out safe. If a workspace ever has more than ~8 clones, cap each wave at 8 light agents (or 4 if you escalate them to a heavier model). If a wave reports `Server is temporarily limiting requests · Rate limited`, wait 30–60s and re-launch only the failed issues. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+> **Concurrency — avoid the 429 throttle.** With worktrees the wave is bounded by the concurrency cap; with clones it is bounded by the clone count. Execution agents run on `sonnet` (light), so a wave of up to ~8 is safe. If a wave has more units than that (or you escalate agents to a heavier model, cap 4), split into sub-waves. If a wave reports `Server is temporarily limiting requests · Rate limited`, wait 30–60s and re-launch only the failed issues. See `~/.claude/rules/concurrency-and-rate-limits.md`.
 
 Each agent should:
-1. Navigate to its assigned clone directory
+1. Work in its own worktree (`isolation: "worktree"`) — or navigate to its assigned clone directory when reusing a multi-clone setup
 2. Run `/startup` to initialize the session
-3. Claim the issue by creating a branch (`git checkout -b {issue}-{desc} origin/main`). The PostToolUse hook auto-registers the claim in tracking.csv.
-4. Create a feature branch from `origin/main`
-5. Implement the work with tests
-6. Run verification (lint, type-check, test, build)
-7. Commit, push, and create a PR
-8. Report completion
+3. Claim the issue by creating a branch (`git checkout -b {issue}-{desc} origin/main`). The PostToolUse hook auto-registers the claim in tracking.csv (it fires inside a worktree too).
+4. Implement the work with tests
+5. Run verification (lint, type-check, test, build)
+6. Commit, push, and create a PR
+7. Report completion
 
 #### 5.2 Monitor Progress
 
@@ -226,7 +229,13 @@ Wait for all agents in the current wave to complete. Track:
 When all agents in a wave complete:
 1. Review all PRs (check CI status)
 2. Merge passing PRs: `gh pr merge --squash --delete-branch`
-3. Sync all clones to latest main:
+3. **Tear down each merged issue's worktree** (mandatory — a built-in worktree never auto-removes, and merged worktrees left behind are the leak that consumed 237 GB in the 2026-07-13 incident):
+   ```bash
+   git worktree remove <issue-worktree-path>   # non-force; branch + merged work survive removal
+   git worktree prune
+   ```
+   Or run `/worktree-sweep` once after the wave to reclaim every merged worktree at once (it removes only clean ones, preserves any with unsaved work). Issues that ran in a reused clone are synced instead (next step), not removed.
+4. Sync any reused clones to latest main:
    ```bash
    # Detect model and iterate clones
    WC_MATCH=$(basename "$PWD" | grep -oP 'w\d+-c\d+$')
@@ -253,11 +262,11 @@ When all agents in a wave complete:
      done
    fi
    ```
-4. Proceed to next wave
+5. Proceed to next wave
 
 #### 5.4 Continue Until Complete
 
-Repeat for each wave until all automatable issues are resolved.
+Repeat for each wave until all automatable issues are resolved. When all waves finish — or if the run exits early — run `/worktree-sweep` once as the teardown backstop, so no issue's worktree outlives the run (it removes only clean worktrees and preserves any with unsaved work). Teardown must not depend on every wave completing cleanly.
 
 ### Phase 6: Report
 

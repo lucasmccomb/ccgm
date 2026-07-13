@@ -5,6 +5,8 @@
 Multiple Claude Code agents work on the same repository in parallel using independent clones.
 Each agent runs in its own clone with full git isolation - independent branches, independent PRs.
 
+> **Worktrees are the default isolation for parallel sub-agent delegation on one machine** (see `git-worktrees.md`). This multi-clone system is the heavier alternative — reach for it when you genuinely need persistent per-clone dev-server ports, hook-driven per-branch `tracking.csv`, multiple long-lived independent agents, or cross-machine dispatch. For ordinary "fan out N units across N agents on this machine," use worktrees (ephemeral, shared `.git`, torn down on merge) instead of provisioning permanent clones.
+
 Two directory models are supported:
 
 | Model | Directory Pattern | Agent Identity | Use Case |
