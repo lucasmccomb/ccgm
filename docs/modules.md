@@ -831,11 +831,11 @@ One hostile lens against a plan or any entity, with automatic plan incorporation
 
 ### git-worktrees
 
-Solo-agent worktree-based isolation for feature work.
+Git worktrees as the default isolation for parallel sub-agent delegation on one machine, with a safe janitor that enforces teardown so worktrees never silently fill the disk.
 
-**Installs**: `rules/git-worktrees.md`, `commands/worktree-start.md`, `commands/worktree-finish.md`
+**Installs**: `rules/git-worktrees.md`, `commands/worktree-start.md`, `commands/worktree-finish.md`, `commands/worktree-sweep.md`, `lib/worktree-sweep.sh`
 
-**What it does**: Lighter alternative to the multi-clone setup when only one agent is active. `/worktree-start` creates a new worktree for a feature branch; `/worktree-finish` merges and cleans up. Uses git's native worktree command so the main checkout stays on whatever branch you want.
+**What it does**: Makes git worktrees the default isolation for parallel sub-agent delegation on a single machine (replacing extra permanent clones for that purpose) and makes teardown load-bearing. `/worktree-start` creates a worktree for a feature branch; `/worktree-finish` finishes one via a four-option gate; `/worktree-sweep` is the safe repo-wide janitor that removes clean worktrees, preserves any with unsaved work, and prunes stale metadata. Motivated by a 2026-07-13 incident where built-in worktrees the harness could not auto-reclaim consumed ~237 GB. Reserve permanent clones for per-branch dev-server ports, per-branch `tracking.csv`, long-lived independent agents, or cross-machine dispatch.
 
 **Dependencies**: None
 

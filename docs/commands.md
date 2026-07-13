@@ -1299,9 +1299,9 @@ Installed by the **git-worktrees** module.
 
 ### /worktree-start
 
-**Start a new worktree for solo-agent feature work.**
+**Create a worktree for feature work (hands-on).**
 
-Creates an isolated git worktree in `.worktrees/<branch-name>/` (or `~/code/worktrees/` as fallback), verifies `.worktrees/` is gitignored, detects project type, runs install and a baseline test, and copies local `.env` files from the main checkout. For solo-agent parallel branch work - for multi-agent, use the `multi-agent` module's clone setup.
+Creates an isolated git worktree in `.claude/worktrees/<branch-name>/` (or `~/code/worktrees/` as fallback), verifies the parent is gitignored, detects project type, runs install and a baseline test, and copies local `.env` files from the main checkout. This is the hands-on single-worktree creator; parallel sub-agent delegation uses `isolation: "worktree"` automatically (worktrees are the default isolation — see the git-worktrees module).
 
 **Usage**:
 ```
@@ -1321,6 +1321,22 @@ Ends feature work in a worktree without silently merging, pushing, or discarding
 ```
 /worktree-finish                    # Current directory if it is a worktree
 /worktree-finish <worktree-path>
+```
+
+---
+
+### /worktree-sweep
+
+**Safe repo-wide worktree janitor — the enforced-teardown backstop.**
+
+Enumerates every worktree of the current repo, removes the clean ones with a non-force `git worktree remove` (git's own refusal is a second safety gate), preserves anything with uncommitted changes / untracked files / an in-progress rebase / a detached HEAD whose commits are on no ref, prunes already-gone entries, and reports. Covers `.claude/worktrees/` (harness default) and legacy `.worktrees/`. Removing a clean on-branch worktree never deletes its branch or committed work.
+
+**Usage**:
+```
+/worktree-sweep                 # report + remove clean worktrees in managed dirs
+/worktree-sweep --dry-run       # classify only; remove nothing
+/worktree-sweep --conservative  # also preserve clean worktrees with commits not on the default branch
+/worktree-sweep --all           # also sweep clean worktrees outside the managed dirs
 ```
 
 ---
