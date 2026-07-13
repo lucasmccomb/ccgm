@@ -215,7 +215,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **compound-knowledge** | workflow | Team-shared learnings in `docs/solutions/`. After solving a non-trivial problem, capture the pattern in a versioned schema | - |
 | **document-review** | workflow | Seven-lens plan-quality gate. /document-review fans out to 7 role-specific reviewers (coherence, feasibility, product, scope, design, security, adversarial) with structured JSON findings | skill-authoring, subagent-patterns |
 | **adversarial-review** | workflow | /adrev - adversarial review of a plan or any entity (file, PR, issue, dir, concept). Separate reviewer agent attacks premises and failure modes; plan targets get findings incorporated automatically and four autonomous-execution tenets enforced (minimal human work, follow-up completion, decision context, comprehensive E2E coverage) unless told not to | subagent-patterns |
-| **git-worktrees** | workflow | Solo-agent worktree-based isolation for feature work. Lighter alternative to multi-clone | - |
+| **git-worktrees** | workflow | Git worktrees as the default isolation for parallel sub-agent delegation on one machine, with a safe janitor (/worktree-sweep) that enforces teardown so worktrees never silently fill the disk | - |
 | **pr-feedback** | workflow | /resolve-pr-feedback - fetches unresolved PR review threads via GraphQL, clusters 3+ items by category, dispatches parallel resolver agents | skill-authoring, subagent-patterns |
 | **todos** | workflow | File-based review-finding tracker. Review findings, PR nitpicks, and tech debt tracked with structured YAML | - |
 | **code-quality** | patterns | Code standards, testing requirements, error handling, security, build verification | - |
