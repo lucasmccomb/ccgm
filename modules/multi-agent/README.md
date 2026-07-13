@@ -6,6 +6,8 @@ Multi-clone architecture for running parallel Claude Code agents on the same rep
 
 Enables multiple Claude Code agents to work on the same repository simultaneously using independent git clones. Each agent runs in its own clone directory with full git isolation - independent branches, independent PRs, no conflicts.
 
+> For **single-machine** parallel sub-agent delegation, the default isolation is a git worktree, not an extra clone (see the `git-worktrees` module). This multi-clone architecture is the heavier alternative — use it for persistent per-clone dev-server ports, hook-driven per-branch `tracking.csv`, long-lived independent agents, or cross-machine dispatch.
+
 Key capabilities:
 
 - **Parallel work**: Multiple agents work on different issues simultaneously

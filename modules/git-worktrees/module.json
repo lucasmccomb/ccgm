@@ -1,7 +1,7 @@
 {
   "name": "git-worktrees",
   "displayName": "Git Worktrees",
-  "description": "Solo-agent worktree-based isolation for feature work. Lighter alternative to multi-clone setup when only one agent is active.",
+  "description": "Git worktrees as the default isolation for parallel sub-agent delegation on one machine, with a safe janitor that enforces teardown so worktrees never silently fill the disk.",
   "category": "workflow",
   "scope": ["global"],
   "dependencies": [],
@@ -19,6 +19,16 @@
     "commands/worktree-finish.md": {
       "target": "commands/worktree-finish.md",
       "type": "command",
+      "template": false
+    },
+    "commands/worktree-sweep.md": {
+      "target": "commands/worktree-sweep.md",
+      "type": "command",
+      "template": false
+    },
+    "lib/worktree-sweep.sh": {
+      "target": "lib/worktree-sweep.sh",
+      "type": "lib",
       "template": false
     }
   },

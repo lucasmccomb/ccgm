@@ -1788,8 +1788,10 @@ options:
    gh repo create {username}/{project-name} --private --description "{description}"
    ```
 
-2. **Create local clones** based on Phase 2.7 decision:
+2. **Provision isolation** based on the Phase 2.7 decision. **On a single machine, worktrees are the default** — each parallel epic gets its own `isolation: "worktree"` worktree (ephemeral, shared `.git`, torn down after its PR merges at 7.3.4). Provision permanent clones only for the cases that actually need them (a large multi-epic plan run under the workspace model, per-branch dev-server ports, hook-driven per-branch `tracking.csv`, or long-lived independent agents). When execution runs via `/etp`, it already applies this worktree-default-with-mandatory-teardown model. See `git-worktrees.md`.
+
    ```bash
+   # Only when Phase 2.7 chose clones (heavier multi-clone plans):
    # Flat clone model:
    mkdir -p ~/code/{project-name}-repos
    for i in 0 1 2 3; do
@@ -1869,6 +1871,7 @@ When all wave agents complete:
 - Verify all PRs are created and passing CI
 - Verify all tests pass, no conflicts between PRs
 - Merge all PRs for the wave
+- **Tear down each merged epic's worktree** (when epics ran in worktrees — the single-machine default; see 7.1). Removal is mandatory: a built-in worktree never auto-removes, and a merged epic whose worktree lingers is the leak that consumed 237 GB in the 2026-07-13 incident. `git worktree remove <path>` (non-force) then `git worktree prune`; the branch ref and merged work survive removal, only the checkout goes. Epics that ran in a reused clone are reset to `origin/main` instead.
 - **Execute the wave's Bring-Up Runbook (plan.md Section 9.1)**: run migrations in order, install new deps, regenerate types, set new env vars/secrets, restart local dev servers, trigger/verify deploys, invalidate caches, load seed data. Do not declare the wave done until every step has run and passed.
 - **Run the full autonomous E2E suite (plan.md Section 8) against the reactivated system** — this supersedes a bare smoke test. Every PR in the wave already passed the E2E suite as a blocking CI check before merge; now the full suite must be green against the integrated system. A wave is NOT done while the E2E suite is red.
 
@@ -2049,16 +2052,25 @@ README structure:
 
 Update agent log with full session summary. Mark progress.md as COMPLETE with final statistics and link to retro.md.
 
-### 8.7 Source Freshness Teardown
+### 8.7 Worktree Teardown
 
-If Phase 0.4.0 created a temp anchor worktree (`--repo` with a remote), remove it now so it does not linger:
+Two kinds of worktree can be left behind; reclaim both here. **Run this whenever the command exits, including early exits** (the user stopped at the Phase 6.5 gate, a blocker halted execution, a gate rejected the plan) — teardown must not depend on reaching a clean completion.
+
+**Execution worktrees** — if the execution phase ran epics in worktrees (the single-machine default, 7.1), each should already have been removed at 7.3.4 when its PR merged. Sweep any that leaked (an errored epic, an early exit, a built-in `isolation:"worktree"` worktree the harness could not auto-reclaim):
+
+```bash
+/worktree-sweep    # removes only clean worktrees, preserves any with unsaved work, prunes stale metadata
+```
+
+**The temp anchor worktree** — if Phase 0.4.0 created one (`--repo` with a remote), remove it explicitly so it does not linger:
 
 ```bash
 git -C "$REPO" worktree remove --force "$WORKTREE" 2>/dev/null
 rmdir "$(dirname "$WORKTREE")" 2>/dev/null
+git -C "$REPO" worktree prune 2>/dev/null   # also reclaims a leaked anchor worktree if this teardown was skipped on a prior early exit
 ```
 
-This is safe to run even if planning ended early (e.g., the user stopped at the Phase 6.5 gate) — run the teardown whenever the command exits after a guard ran. Removing the worktree does not touch the user's clone, branches, or working tree.
+The anchor lives in a temp dir outside the two managed worktree locations, so `/worktree-sweep` will not remove it directly — but its `git worktree prune` step *does* clear the metadata once the temp dir is gone. Removing either kind of worktree does not touch the user's clone, branches, or committed work — only the throwaway checkout.
 
 ---
 

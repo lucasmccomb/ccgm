@@ -60,6 +60,10 @@ Agent 3: "Write shared validation helpers in src/utils/validate.ts"
 
 Note: If agents share dependencies (Agent 3's output is needed by 1 and 2), run the dependency first, then the dependents in parallel.
 
+### Isolate Parallel Implementers in Worktrees
+
+When parallel implementers modify files, give each its own **git worktree** (`isolation: "worktree"`) — the default isolation for parallel sub-agent delegation on one machine. Each worktree has its own index and HEAD, so agents editing, building, and committing at the same time never collide; this is the structural enforcement of the "no shared state" coordination rule below. Worktrees are ephemeral — created per unit, removed when the unit's PR merges, with `/worktree-sweep` as the orphan backstop. Do **not** spin up extra permanent clones just for parallelism; reserve clones for long-lived independent agents, per-branch dev-server ports, hook-driven per-branch `tracking.csv`, or cross-machine dispatch. **Teardown is mandatory**: a worktree an agent built in does not auto-remove, and forgetting to remove merged worktrees is what filled 237 GB on one repo (2026-07-13). See `git-worktrees.md` and `multi-agent.md`.
+
 **Throttle heavy fan-outs.** Launching too many heavy agents at once (whether via the Workflow tool's `parallel()`/`pipeline()` or multiple Agent calls in one message) trips a server-side 429 throttle that fails the entire burst. Cap simultaneous heavy agents to 4 (never exceed 5), launch in waves, and default fan-out agents to cheaper models / lower effort unless thoroughness is explicitly requested. See `concurrency-and-rate-limits.md` for the defaults, the exact error, and the throttled-mid-run recovery procedure.
 
 ## Pass Paths, Not Contents

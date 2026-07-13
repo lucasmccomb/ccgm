@@ -1,11 +1,15 @@
 ---
-description: Create a new git worktree for solo-agent feature work with gitignore verification and project setup
+description: Create a new git worktree for feature work with gitignore verification and project setup
 allowed-tools: Bash, Read, Edit, Write
 ---
 
 # /worktree-start - Start a New Worktree
 
-Creates an isolated git worktree in a sibling directory so feature work does not disturb the main checkout. Use this for solo-agent parallel branch work. For multi-agent parallel work, use the `multi-agent` module's clone setup instead.
+Creates an isolated git worktree so feature work does not disturb the main checkout. This is the **hands-on** single-worktree creator (you, working a branch directly).
+
+For **parallel sub-agent delegation**, you usually do not run this by hand — the delegating command (`/etp`, `/mawf`, `/xplan`) or the Agent/Workflow `isolation: "worktree"` option creates one worktree per unit automatically, and removes it when the unit merges. Worktrees are the default isolation for that; see `git-worktrees.md`. Reach for a permanent clone only for long-lived independent agents, per-branch dev-server ports, per-branch `tracking.csv`, or cross-machine dispatch.
+
+Whichever path creates the worktree, its lifecycle ends the same way: removed when its PR merges, with `/worktree-sweep` as the orphan backstop.
 
 ## Usage
 
@@ -28,34 +32,34 @@ Creates an isolated git worktree in a sibling directory so feature work does not
 
 4. **Check branch uniqueness**: `git branch --list <branch-name>`. If the branch already exists and the user did not pass `[existing-branch]` as the base, ask whether they meant to check out the existing branch in a worktree.
 
-5. **Verify `.worktrees/` is gitignored**: read `.gitignore` and check for a line matching `.worktrees/` or `.worktrees`. If missing, add it:
+5. **Verify the worktree parent is gitignored**: the canonical location is `.claude/worktrees/`. Check `git check-ignore .claude/worktrees` — if it exits 0, the path is already ignored (the harness usually gitignores `.claude/`) and there is nothing to do. If not, add it:
 
    ```bash
-   echo ".worktrees/" >> .gitignore
+   echo ".claude/worktrees/" >> .gitignore
    git add .gitignore
-   git commit -m "chore: ignore .worktrees directory"
+   git commit -m "chore: ignore .claude/worktrees directory"
    ```
 
-   Do this BEFORE creating the worktree. Creating `.worktrees/` without gitignoring it risks committing the entire worktree back into the repo on a careless `git add .`.
+   Do this BEFORE creating the worktree. Creating a worktree under a non-gitignored path risks committing the entire worktree back into the repo on a careless `git add .`.
 
 ### Phase 2: Create the Worktree
 
 Choose the directory:
 
-- Preferred: `<repo-root>/.worktrees/<branch-name>/`
-- Fallback if `.worktrees/` gitignore cannot be added: `~/code/worktrees/<repo-name>-<branch-name>/` (create this directory first, mkdir -p)
+- Canonical: `<repo-root>/.claude/worktrees/<branch-name>/` — the same tree the harness's `isolation: "worktree"` uses, so `/worktree-sweep` reclaims everything from one place.
+- Fallback if `.claude/worktrees/` gitignore cannot be added: `~/code/worktrees/<repo-name>-<branch-name>/` (create this directory first, mkdir -p).
 
 Create the worktree:
 
 ```bash
 # New branch off base-branch (default: origin/main)
-git worktree add -b <branch-name> .worktrees/<branch-name> <base-branch>
+git worktree add -b <branch-name> .claude/worktrees/<branch-name> <base-branch>
 ```
 
 If the branch already exists and the user confirmed reuse:
 
 ```bash
-git worktree add .worktrees/<branch-name> <branch-name>
+git worktree add .claude/worktrees/<branch-name> <branch-name>
 ```
 
 ### Phase 3: Project Setup (Auto-Detect)
@@ -77,12 +81,12 @@ Run only the FIRST match. If the project uses a lockfile, respect it. If the ins
 
 ### Phase 4: Copy Non-Tracked Local Config
 
-Worktrees do not inherit `.env` or other gitignored local config. Offer to copy them from the main checkout:
+Worktrees do not inherit `.env` or other gitignored local config. Offer to copy them from the main checkout. Locate the main checkout root robustly (do not hard-code `../../` — the depth depends on the worktree path):
 
 ```bash
-# Examples - adjust to what exists in the main checkout
-cp ../../.env .env 2>/dev/null || true
-cp ../../.env.local .env.local 2>/dev/null || true
+ROOT="$(git rev-parse --git-common-dir)/.."   # main checkout root, from anywhere inside the worktree
+cp "$ROOT/.env"       .env       2>/dev/null || true
+cp "$ROOT/.env.local" .env.local 2>/dev/null || true
 ```
 
 Only copy files that are gitignored. Never copy a file that could be committed back.
