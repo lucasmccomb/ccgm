@@ -95,20 +95,25 @@ The procedure that worked in the incident, stated exactly:
 2. **PRESERVE** — never remove — any worktree that has:
    - **uncommitted tracked changes** (work not yet committed), or
    - **untracked non-ignored files** (new files not yet added), or
-   - an **in-progress rebase / merge / cherry-pick / revert / bisect** (a paused operation, whether or not it currently shows a conflict).
+   - an **in-progress rebase / merge / cherry-pick / revert / bisect** (a paused operation, whether or not it currently shows a conflict), or
+   - a **detached HEAD carrying commits reachable from no ref** (removing it would orphan those commits — a detached HEAD has no branch ref to survive on; see the KEY FACT).
 3. **Force-remove only the verified-safe ones**, and only if a non-force remove unexpectedly refuses a worktree you have already classified clean. A sweep should default to *never* forcing — let git's refusal protect unsaved work.
 4. **Then `git worktree prune`** to clear metadata for worktrees whose directories are already gone.
 5. **Always report what was preserved and why**, so a preserved worktree is a visible decision, not a silent skip.
 
-### KEY FACT: removing a clean worktree never loses work
+One accepted footgun: a non-force remove also discards a clean worktree's **gitignored** local files — that is what makes it useful (the multi-GB `.build` goes with the checkout), but it also means a worktree-local `.env` or secret that is gitignored is removed too. Those are normally copied from the main checkout (`/worktree-start` does this), so losing them is recoverable; do not keep unique un-committed secrets only inside a worktree.
 
-Removing a worktree does **not** delete its branch or any committed work. The branch ref stays in the parent `.git`; only the working-tree checkout (and its `.build`) is removed. You can always re-materialize the checkout later:
+### KEY FACT: removing a clean worktree never loses committed work
+
+Removing a worktree does **not** delete its branch or any committed work. For a worktree **on a branch**, the branch ref stays in the parent `.git`; only the working-tree checkout (and its `.build`) is removed. You can always re-materialize the checkout later:
 
 ```bash
 git worktree add .claude/worktrees/<branch-name> <branch-name>
 ```
 
-**Therefore a clean worktree is ALWAYS safe to remove** — its commits survive on the branch ref even though the checkout is gone. This is why a clean worktree on an unmerged feature branch is still safe to reclaim: you lose a re-creatable checkout, never the commits.
+**So a clean worktree on a branch is ALWAYS safe to remove** — its commits survive on the branch ref even though the checkout is gone. This is why a clean worktree on an unmerged feature branch is still safe to reclaim: you lose a re-creatable checkout, never the commits.
+
+The one exception is a **detached-HEAD** worktree. It has no branch ref, so commits made on top of a detached checkout (e.g. `git worktree add <path> <sha>` then a fixup commit) are reachable from *nothing* once the checkout is gone — removing it orphans them (gc-eligible). So a clean detached worktree is safe to remove **only if** its HEAD is already reachable from some other ref (the common "parked at an existing commit" case); if it carries ref-orphan commits, preserve it.
 
 ### The four cases, decided
 
@@ -117,7 +122,8 @@ git worktree add .claude/worktrees/<branch-name> <branch-name>
 | Clean worktree on a feature branch | **Remove** | Branch ref (and all its commits) preserved in `.git`; only the checkout goes |
 | Uncommitted tracked edits present | **Preserve** | The edits are not committed anywhere — removal would lose them |
 | Mid-rebase with an unresolved conflict | **Preserve** | An in-progress operation; removal discards the resolution-in-progress |
-| Clean detached-HEAD worktree | **Remove** | Nothing uncommitted; the commit is reachable from wherever it was based |
+| Clean detached HEAD, reachable from a ref | **Remove** | The commit survives on that other ref; only the checkout goes |
+| Clean detached HEAD, commits on no ref | **Preserve** | No ref survives removal — the commits would be orphaned |
 
 `/worktree-sweep` implements exactly this classification.
 

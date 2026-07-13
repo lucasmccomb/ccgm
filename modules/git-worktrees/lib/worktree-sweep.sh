@@ -8,10 +8,12 @@
 # a modified-or-untracked worktree is a second safety gate on top of the
 # classification. See modules/git-worktrees/rules/git-worktrees.md.
 #
-# KEY SAFETY FACT: removing a clean worktree never loses committed work - the
-# branch ref stays in the parent .git; only the working-tree checkout (and its
-# build artifacts) are removed. Re-create the checkout later with
-# `git worktree add <path> <branch>`. So a clean worktree is always safe.
+# KEY SAFETY FACT: removing a clean ON-BRANCH worktree never loses committed
+# work - the branch ref stays in the parent .git; only the working-tree checkout
+# (and its build artifacts) are removed. Re-create it later with
+# `git worktree add <path> <branch>`. A DETACHED worktree has no branch ref, so
+# if it carries commits reachable from no other ref, removal would orphan them -
+# those are preserved, not removed.
 #
 # By default it only touches worktrees under the two managed locations,
 # `.claude/worktrees/` (harness `isolation:"worktree"` default) and `.worktrees/`
@@ -60,6 +62,23 @@ fi
 if [ -z "$DEFAULT_REF" ] && git show-ref --verify --quiet refs/remotes/origin/master 2>/dev/null; then
   DEFAULT_REF="origin/master"
 fi
+# Local fallback for a repo with no origin, so --conservative still works there.
+if [ -z "$DEFAULT_REF" ] && git show-ref --verify --quiet refs/heads/main 2>/dev/null; then
+  DEFAULT_REF="main"
+fi
+if [ -z "$DEFAULT_REF" ] && git show-ref --verify --quiet refs/heads/master 2>/dev/null; then
+  DEFAULT_REF="master"
+fi
+
+# The main checkout (parent of the shared .git dir) must never be swept, no
+# matter which worktree we run from. Empty for a bare repo (it has no checkout).
+MAIN_CHECKOUT=""
+_common_dir="$(git rev-parse --git-common-dir 2>/dev/null)"
+if [ -n "$_common_dir" ] && [ "$(git rev-parse --is-bare-repository 2>/dev/null)" != "true" ]; then
+  # pwd -P resolves symlinks so this matches git's canonical porcelain paths
+  # (e.g. macOS /var -> /private/var), so the comparison in process_record holds.
+  MAIN_CHECKOUT="$(cd "$_common_dir/.." 2>/dev/null && pwd -P)"
+fi
 
 is_managed() {
   # True if the path lives under a managed worktree dir.
@@ -89,18 +108,18 @@ SKIPPED=0
 SKIPPED_LINES=""
 PRUNABLE=0
 
-# Walk `git worktree list --porcelain`. Records are blank-line separated. The
-# FIRST record is always the main checkout - skip it.
-FIRST=1
+# Walk `git worktree list --porcelain`. Records are blank-line separated.
 CUR_PATH=""
 CUR_BRANCH=""
 CUR_DETACHED=0
 CUR_LOCKED=0
 CUR_PRUNABLE=0
+CUR_BARE=0
 
 process_record() {
   [ -z "$CUR_PATH" ] && return 0
-  if [ "$FIRST" = "1" ]; then FIRST=0; return 0; fi   # main checkout
+  [ "$CUR_BARE" = "1" ] && return 0                                  # the bare repo itself is not a checkout
+  if [ -n "$MAIN_CHECKOUT" ] && [ "$CUR_PATH" = "$MAIN_CHECKOUT" ]; then return 0; fi   # main checkout
   local path="$CUR_PATH"
   local label="$path"
   if [ "$CUR_DETACHED" = "1" ]; then label="$label  (detached)"; else label="$label  [$CUR_BRANCH]"; fi
@@ -125,7 +144,20 @@ process_record() {
   if [ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]; then
     declare_preserved "  - $label -> PRESERVE (uncommitted or untracked changes)"; return 0
   fi
-  # From here the worktree is CLEAN.
+  # Preserve: a detached-HEAD worktree whose commit is reachable from NO ref.
+  # A branch worktree's commits survive removal on the branch ref, but a detached
+  # HEAD has no ref - removing it orphans any commits made on top (gc-eligible).
+  # If some branch/tag/remote already contains the tip (the common "parked at an
+  # existing commit" case), removal is safe and we fall through.
+  if [ "$CUR_DETACHED" = "1" ]; then
+    local head_sha reached
+    head_sha="$(git -C "$path" rev-parse HEAD 2>/dev/null)"
+    reached="$(git -C "$path" for-each-ref --contains "$head_sha" --format='%(refname)' 2>/dev/null | head -1)"
+    if [ -z "$reached" ]; then
+      declare_preserved "  - $label -> PRESERVE (detached HEAD; commits reachable from no ref would be orphaned)"; return 0
+    fi
+  fi
+  # From here the worktree is CLEAN and its committed work survives removal.
   local unmerged=""
   if [ -n "$DEFAULT_REF" ] && [ "$CUR_DETACHED" != "1" ]; then
     local n
@@ -159,12 +191,12 @@ process_record() {
 
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in
-    "worktree "*) process_record; CUR_PATH="${line#worktree }"; CUR_BRANCH=""; CUR_DETACHED=0; CUR_LOCKED=0; CUR_PRUNABLE=0 ;;
+    "worktree "*) process_record; CUR_PATH="${line#worktree }"; CUR_BRANCH=""; CUR_DETACHED=0; CUR_LOCKED=0; CUR_PRUNABLE=0; CUR_BARE=0 ;;
     "branch "*)   CUR_BRANCH="${line#branch refs/heads/}" ;;
     "detached")   CUR_DETACHED=1 ;;
     "locked"*)    CUR_LOCKED=1 ;;
     "prunable"*)  CUR_PRUNABLE=1 ;;
-    "bare")       CUR_PATH="" ;;   # never touch a bare repo entry
+    "bare")       CUR_BARE=1 ;;   # the bare repo entry has no checkout; skip it
   esac
 done <<EOF
 $(git worktree list --porcelain)

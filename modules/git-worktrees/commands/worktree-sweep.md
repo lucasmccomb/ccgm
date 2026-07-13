@@ -36,6 +36,7 @@ The script classifies each worktree (never the main checkout, never the one you 
 |----------------|--------|
 | Uncommitted tracked changes, or untracked non-ignored files | **PRESERVE** |
 | In-progress rebase / merge / cherry-pick / revert / bisect | **PRESERVE** |
+| Detached HEAD carrying commits reachable from no ref | **PRESERVE** (removal would orphan them) |
 | Locked | **PRESERVE** (report; run `git worktree unlock` if intended) |
 | Clean, in a managed location | **REMOVE** (non-force) |
 | Clean, outside managed locations | **SKIP** (unless `--all`) |
