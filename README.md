@@ -9,11 +9,10 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 ## Table of Contents
 
 - [What is CCGM?](#what-is-ccgm)
-- [Requirements](#requirements)
 - [Install via agent (paste this)](#install-via-agent-paste-this)
+- [Requirements](#requirements)
 - [Install](#install)
 - [Module Catalog](#module-catalog)
-  - [Companion module: /deepresearch](#companion-module-deepresearch)
 - [Memory System](#memory-system)
 - [Customization](#customization)
 - [Manual Installation](#manual-installation)
@@ -56,7 +55,7 @@ Steps:
 3. Read the available presets: ls ~/code/ccgm/presets/
    Available presets and what they include:
      - minimal  : global-claude-md, autonomy, git-workflow
-     - standard : the above + identity, hooks, settings, commands-core, commands-utility
+     - standard : the above + identity, hooks, branch-guard, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, statusline
      - team     : standard core + github-protocols, code-quality, systematic-debugging, verification
      - cloud-agent : large set for power users running autonomous agents
      - full     : every stable module
@@ -132,9 +131,10 @@ For a quick install with a preset:
 | Preset | Modules | Best For |
 |--------|---------|----------|
 | **minimal** | global-claude-md, autonomy, git-workflow | Getting started |
-| **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, settings, commands-core, commands-utility, output-formatting, statusline | Most users |
+| **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, statusline | Most users |
 | **full** | 70 modules | Power users |
-| **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, ce-review, pr-feedback, document-review, compound-knowledge (+ deps) | Teams |
+| **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, ce-review, pr-feedback, pr-review-toolkit, document-review, compound-knowledge (+ deps) | Teams |
+| **cloud-agent** | 54 modules | Autonomous/headless agents |
 
 ### Other install options
 
@@ -361,8 +361,8 @@ The `docs/` directory contains comprehensive documentation:
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
 | [Module Catalog](docs/modules.md) | Detailed reference for all 74 modules |
-| [Commands Reference](docs/commands.md) | All 74 slash commands with usage examples |
-| [Hooks Reference](docs/hooks.md) | All 18 hooks explained - what they do and when they fire |
+| [Commands Reference](docs/commands.md) | All 76 slash commands with usage examples |
+| [Hooks Reference](docs/hooks.md) | All 23 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |
 | [Configuration](docs/configuration.md) | Customization, template variables, settings overrides |

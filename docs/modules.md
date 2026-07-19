@@ -167,6 +167,18 @@ Security vetting gate for integrating any new AI model — open-weights or hoste
 
 ---
 
+### plugin-marketplace [BETA]
+
+Maintainer tooling that projects CCGM's modules into a native Claude Code plugin marketplace.
+
+**Installs**: `rules/plugin-marketplace.md`, `lib/gen_marketplace.py`, `lib/validate_marketplace.py`, `hooks/plugin-rule-inject.py`
+
+**What it does**: Generates `.claude-plugin/marketplace.json` plus a per-module `plugin.json` from every `modules/*/module.json`, additively — the bash installer remains the canonical full-fidelity install path. Ships the generator, a JSON-schema validator (CI runs `gen_marketplace.py --check` to fail on drift), and a SessionStart rule-injection hook that bridges the plugin-CLAUDE-md-not-loaded gap.
+
+**Dependencies**: None
+
+---
+
 ## Category: commands
 
 Slash commands that extend Claude Code with new capabilities.
@@ -453,6 +465,35 @@ A decision map for CCGM's overlapping command/skill clusters - answers "which on
 
 ---
 
+### youtube-transcripts
+
+`/transcript <url>` - extract a YouTube transcript AND analyze it against your project memory in one invocation.
+
+**Installs**: 1 command file, 1 rule file, 1 shell script (`lib/grab-transcript.sh`), 1 prompt template (`lib/analyze-transcript.md`)
+
+**What it does**: One slash command runs the full pipeline:
+
+- **Phase 1 (deterministic)**: `lib/grab-transcript.sh` calls `yt-dlp` to pull captions, then awk/sed clean the VTT into prose with `>>` speaker turns. Writes `~/code/docs/transcripts/<slug>-<upload_date>.md` with YAML frontmatter (title, source, url, uploader, upload_date, duration, type, caption_source, note).
+- **Phase 2 (latent)**: dispatches a subagent in headless mode that reads the saved transcript + your `MEMORY.md` + workspace `CLAUDE.md`, follows the analysis template, and writes an opinionated 6-section implications doc to `~/code/docs/transcript-analysis/<same-slug>-<upload_date>.md`.
+
+Both filenames share the same slug + upload-date so the pair correlates by name. The analysis is intentionally opinionated and project-specific — it names files, names projects from `MEMORY.md`, and explicitly flags low-confidence claims.
+
+`--no-analysis` skips Phase 2. `mode:headless` suppresses prompts and emits paths only.
+
+The Phase 1 script is callable directly from a shell (`~/.claude/lib/grab-transcript.sh <url>`) for extraction without analysis.
+
+Commands installed:
+
+| Command | Description |
+|---------|-------------|
+| `/transcript <url>` | Extract YouTube transcript + dispatch analysis subagent |
+
+**Requirements**: `yt-dlp` (`brew install yt-dlp` or `pipx install yt-dlp`)
+
+**Dependencies**: None
+
+---
+
 ## Category: workflow
 
 Development workflow patterns and coordination systems.
@@ -585,35 +626,6 @@ Commands installed:
 | Command | Description |
 |---------|-------------|
 | `/atdd` | Build app code to pass vision specs in `e2e/tests/{feature}/` |
-
-**Dependencies**: None
-
----
-
-### youtube-transcripts
-
-`/transcript <url>` - extract a YouTube transcript AND analyze it against your project memory in one invocation.
-
-**Installs**: 1 command file, 1 rule file, 1 shell script (`lib/grab-transcript.sh`), 1 prompt template (`lib/analyze-transcript.md`)
-
-**What it does**: One slash command runs the full pipeline:
-
-- **Phase 1 (deterministic)**: `lib/grab-transcript.sh` calls `yt-dlp` to pull captions, then awk/sed clean the VTT into prose with `>>` speaker turns. Writes `~/code/docs/transcripts/<slug>-<upload_date>.md` with YAML frontmatter (title, source, url, uploader, upload_date, duration, type, caption_source, note).
-- **Phase 2 (latent)**: dispatches a subagent in headless mode that reads the saved transcript + your `MEMORY.md` + workspace `CLAUDE.md`, follows the analysis template, and writes an opinionated 6-section implications doc to `~/code/docs/transcript-analysis/<same-slug>-<upload_date>.md`.
-
-Both filenames share the same slug + upload-date so the pair correlates by name. The analysis is intentionally opinionated and project-specific — it names files, names projects from `MEMORY.md`, and explicitly flags low-confidence claims.
-
-`--no-analysis` skips Phase 2. `mode:headless` suppresses prompts and emits paths only.
-
-The Phase 1 script is callable directly from a shell (`~/.claude/lib/grab-transcript.sh <url>`) for extraction without analysis.
-
-Commands installed:
-
-| Command | Description |
-|---------|-------------|
-| `/transcript <url>` | Extract YouTube transcript + dispatch analysis subagent |
-
-**Requirements**: `yt-dlp` (`brew install yt-dlp` or `pipx install yt-dlp`)
 
 **Dependencies**: None
 
