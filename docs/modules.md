@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 73 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 74 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -152,6 +152,18 @@ Hard PreToolUse gate that stops any work from being produced on a repo's default
 **What it does**: While a repo's HEAD is on its default branch (main/master, per `origin/HEAD` with fallbacks), hard-blocks (exit 2, survives bypass mode) Edit/MultiEdit/Write/NotebookEdit and filesystem-MCP writes targeting files in that repo, plus mutating git Bash commands (`git commit`, `git add`, `git stage`, `git apply`, with `git -C` resolved). Fires before the first edit — not at commit time — so uncommitted work can never be stranded on main and destroyed by a later sync. The denial teaches the fix: `git fetch origin && git checkout -b <type>/<short-desc> origin/<default>` (type: feature/fix/chore/docs). Exempts `ALLOW_MAIN_COMMIT=1` (env or inline), in-progress rebase/merge/cherry-pick states, unborn HEAD (fresh `git init`), repos with no origin remote (nothing to sync from), repos in `~/.claude/git-flow-direct-to-main-repos.json`, and gitignored target paths (file tools only; `git check-ignore`-verified, fails closed on git errors so a broken git state can never open the gate). Complements the `hooks` module: the advisory `<workflow-reminder>` stays, `enforce-git-workflow.py` still owns commit/push time; this closes the edit-time gap.
 
 **Dependencies**: settings
+
+---
+
+### model-vetting
+
+Security vetting gate for integrating any new AI model — open-weights or hosted — into the Claude Code harness or the local development system.
+
+**Installs**: `rules/model-vetting.md`
+
+**What it does**: Blocks "just wire it up" model integrations behind a verification checklist: weights provenance (the artifact must exist, come from the vendor's verified org, and be pinned to a revision hash — announced ≠ released ≠ verified), file-format safety (safetensors/GGUF only, no pickle loads, no `trust_remote_code`), license and hosted-API data terms (retention, training-on-inputs, jurisdiction), the serving path as supply chain (aggregators, upstream providers, and translation proxies all see plaintext traffic), and staged agentic access — a new backend model inherits every tool and credential the harness can reach, so access advances chat-only → sandboxed worktree → implementer-behind-two-stage-review → expanded roles, on tracked evidence only. Requires a written verification record next to the integration config, re-verified whenever that config changes.
+
+**Dependencies**: none
 
 ---
 

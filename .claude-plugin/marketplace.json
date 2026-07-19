@@ -575,6 +575,19 @@
       ]
     },
     {
+      "category": "core",
+      "description": "Security vetting gate for new AI models: before any open-weights or hosted model is integrated into the Claude Code harness or local dev system, verify weights provenance and integrity, file-format safety, license and data terms, the serving path, and stage its agentic access.",
+      "name": "model-vetting",
+      "source": "./model-vetting",
+      "tags": [
+        "models",
+        "provenance",
+        "security",
+        "supply-chain",
+        "vetting"
+      ]
+    },
+    {
       "category": "workflow",
       "description": "Multi-clone architecture for parallel agent work with issue claiming, port allocation, and the /mawf workflow command.",
       "name": "multi-agent",
