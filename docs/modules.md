@@ -1188,11 +1188,11 @@ Discipline for writing skills and slash commands that stay efficient, portable, 
 
 ### output-styles
 
-Packages CCGM's always-on tone rules as a Claude Code output style instead of always-loaded `rules/*.md`.
+Packages CCGM's always-on tone rules as Claude Code output styles instead of always-loaded `rules/*.md`.
 
-**Installs**: `output-styles/ccgm-terse.md` (the `CCGM Terse` output style)
+**Installs**: `output-styles/ccgm-terse.md` (the `CCGM Terse` output style), `output-styles/ccgm-adhd.md` (the `CCGM ADHD` output style)
 
-**What it does**: Consolidates three tone-shaping behaviors — terse, action-first communication (`identity`/`soul.md`), autonomous end-to-end execution (`autonomy`), and clean copy-paste output (`output-formatting`) — into a single output style. Claude Code applies output styles as a system-prompt layer **fixed at session start and prompt-cached**, rather than re-sending rule files as conversation context every turn, so stable always-on tone instructions cost fewer tokens there. Select it via `/config`.
+**What it does**: `CCGM Terse` consolidates three tone-shaping behaviors — terse, action-first communication (`identity`/`soul.md`), autonomous end-to-end execution (`autonomy`), and clean copy-paste output (`output-formatting`) — plus an actionability layer (numbered steps, state restated each turn, one concrete next action, testable win reporting, 5-item list cap). `CCGM ADHD` is the full-strength actionability style shaped for a reader with ADHD, adapted from `ayghri/i-have-adhd` (MIT): 10 rules, explicit override conditions, and a pre-send check. Claude Code applies output styles as a system-prompt layer **fixed at session start and prompt-cached**, rather than re-sending rule files as conversation context every turn, so stable always-on tone instructions cost fewer tokens there. Select one via `/config`.
 
 The module does **not** delete the source rules; it offers a styled alternative. The tradeoff (cached tokens vs. per-rule granularity and per-repo overrides) is documented in the module README, along with the recommendation to remove the redundant tone rules once the style is selected, to avoid sending the same guidance twice.
 
