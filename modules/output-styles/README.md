@@ -1,10 +1,12 @@
 # output-styles
 
-Delivers CCGM's always-on **tone** rules as a Claude Code *output style* — a system-prompt layer that is fixed at session start and prompt-cached — instead of always-loaded `rules/*.md`.
+Delivers CCGM's always-on **tone** rules as Claude Code *output styles* — a system-prompt layer that is fixed at session start and prompt-cached — instead of always-loaded `rules/*.md`.
 
 ## What It Does
 
-Installs one output style, `CCGM Terse` (`output-styles/ccgm-terse.md`), that consolidates the three tone-shaping behaviors CCGM otherwise spreads across always-loaded rules:
+Installs two output styles:
+
+**`CCGM Terse`** (`output-styles/ccgm-terse.md`) consolidates the three tone-shaping behaviors CCGM otherwise spreads across always-loaded rules, plus an Actionability layer (numbered steps, state restated each turn, one concrete next action, testable win reporting, concrete time estimates, 5-item list cap):
 
 | Behavior | Source rule (still shipped) |
 |----------|-----------------------------|
@@ -12,7 +14,9 @@ Installs one output style, `CCGM Terse` (`output-styles/ccgm-terse.md`), that co
 | Autonomous, end-to-end execution | `autonomy` → `rules/autonomy.md` |
 | Clean copy-paste output (fenced blocks, never blockquotes) | `output-formatting` → `rules/copy-paste-output.md` |
 
-Activate it with `/config` (output style is fixed per session for prompt caching; the older `/output-style` command is deprecated).
+**`CCGM ADHD`** (`output-styles/ccgm-adhd.md`) is the full-strength version of the actionability rules, shaped for a reader with ADHD: every response leads with the next doable action, multi-step work is numbered and its state restated every turn, wins are shown in testable terms, lists cap at 5, and a pre-send check strips announcing openers and recapping closers. Includes explicit override conditions (explanations, destructive actions, debug spirals, real ambiguity). Adapted from [`ayghri/i-have-adhd`](https://github.com/ayghri/i-have-adhd) (MIT), itself loosely based on *The Adult ADHD Tool Kit* (Ramsay & Rostain).
+
+Activate either with `/config` (output style is fixed per session for prompt caching; the older `/output-style` command is deprecated).
 
 ## Why an Output Style Instead of a Rule
 
@@ -38,15 +42,17 @@ This module **does not delete** the source rules in `identity`, `autonomy`, or `
 ```bash
 mkdir -p ~/.claude/output-styles
 cp output-styles/ccgm-terse.md ~/.claude/output-styles/ccgm-terse.md
+cp output-styles/ccgm-adhd.md ~/.claude/output-styles/ccgm-adhd.md
 ```
 
-Then select **CCGM Terse** via `/config` in Claude Code.
+Then select **CCGM Terse** or **CCGM ADHD** via `/config` in Claude Code.
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `output-styles/ccgm-terse.md` | The output style: terse tone + autonomy + copy-paste formatting, with frontmatter (`name`, `description`, `keep-coding-instructions: true`). |
+| `output-styles/ccgm-terse.md` | Terse tone + autonomy + actionability + copy-paste formatting, with frontmatter (`name`, `description`, `keep-coding-instructions: true`). |
+| `output-styles/ccgm-adhd.md` | Action-first output shaped for an ADHD reader: 10 rules, override conditions, and a pre-send check. Adapted from `ayghri/i-have-adhd` (MIT). |
 
 ## Dependencies
 

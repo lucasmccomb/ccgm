@@ -626,7 +626,7 @@
     },
     {
       "category": "patterns",
-      "description": "Packages the always-on TONE rules (terse communication, autonomous execution, copy-paste formatting) as a Claude Code output style — a system-prompt layer fixed at session start and prompt-cached — instead of always-loaded rules/*.md. Opt-in alternative; does not remove the source rules.",
+      "description": "Packages the always-on TONE rules (terse communication, autonomous execution, copy-paste formatting) as Claude Code output styles — a system-prompt layer fixed at session start and prompt-cached — instead of always-loaded rules/*.md. Ships CCGM Terse plus CCGM ADHD (action-first output shaped for an ADHD reader). Opt-in alternative; does not remove the source rules.",
       "name": "output-styles",
       "source": "./output-styles",
       "tags": [
