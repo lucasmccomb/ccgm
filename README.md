@@ -369,6 +369,7 @@ The `docs/` directory contains comprehensive documentation:
 | [Multi-Agent System](docs/multi-agent.md) | Parallel agent coordination, port allocation, issue tracking |
 | [Session Memory](docs/session-memory.md) | Native JSONL transcripts, `/recall`, `CLAUDE.md`/`MEMORY.md`, retired agent-log-repo |
 | [Memory System](docs/memory-system.md) | Durable cross-session memory: read path (learnings store + injection) and opt-in `dreaming` write path, activation, safety posture, troubleshooting |
+| [Project Story](docs/project-story.md) | Living knowledge base: development history, major systems, engineering decisions, incidents and lessons, iteration case studies |
 
 ## Contributing
 
