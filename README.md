@@ -23,7 +23,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 74 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 76 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 
@@ -55,7 +55,7 @@ Steps:
 3. Read the available presets: ls ~/code/ccgm/presets/
    Available presets and what they include:
      - minimal  : global-claude-md, autonomy, git-workflow
-     - standard : the above + identity, hooks, branch-guard, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline
+     - standard : the above + identity, hooks, branch-guard, ask-context, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline
      - team     : standard core + github-protocols, code-quality, systematic-debugging, verification
      - cloud-agent : large set for power users running autonomous agents
      - full     : every stable module
@@ -131,10 +131,10 @@ For a quick install with a preset:
 | Preset | Modules | Best For |
 |--------|---------|----------|
 | **minimal** | global-claude-md, autonomy, git-workflow | Getting started |
-| **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline | Most users |
-| **full** | 71 modules | Power users |
-| **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, writing-system, ce-review, pr-feedback, pr-review-toolkit, document-review, compound-knowledge (+ deps) | Teams |
-| **cloud-agent** | 54 modules | Autonomous/headless agents |
+| **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, ask-context, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline | Most users |
+| **full** | 72 modules | Power users |
+| **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, ask-context, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, writing-system, ce-review, pr-feedback, pr-review-toolkit, document-review, compound-knowledge (+ deps) | Teams |
+| **cloud-agent** | 55 modules | Autonomous/headless agents |
 
 ### Other install options
 
@@ -181,6 +181,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **settings** | core | Base settings.json with 800+ tool permissions, deny list, plugin config. Defaults to safe 'ask' mode | - |
 | **hooks** | core | Python hooks: issue-first workflow, commit format, branch protection, auto-approval for safe ops | settings |
 | **branch-guard** | core | Hard PreToolUse gate: no edits or git mutations while HEAD is on the default branch. Fires before the first edit | settings |
+| **ask-context** | core | Hard PreToolUse gate: no AskUserQuestion whose decision context is invisible to the user. Blocks deictic references, identical re-asks after pushback, and mid-workstream questions with no visible text | settings |
 | **model-vetting** | core | Security vetting gate for new AI models: weights provenance, format safety, license/data terms, serving path, staged agentic access | - |
 | **plugin-marketplace** [BETA] | core | Maintainer tooling that projects CCGM modules into a native Claude Code plugin marketplace. The bash installer stays canonical | - |
 | **commands-core** | commands | /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue) | - |
@@ -376,9 +377,9 @@ The `docs/` directory contains comprehensive documentation:
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 75 modules |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 76 modules |
 | [Commands Reference](docs/commands.md) | All 77 slash commands with usage examples |
-| [Hooks Reference](docs/hooks.md) | All 23 hooks explained - what they do and when they fire |
+| [Hooks Reference](docs/hooks.md) | All 24 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |
 | [Configuration](docs/configuration.md) | Customization, template variables, settings overrides |

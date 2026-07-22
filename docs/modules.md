@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 75 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 76 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -150,6 +150,18 @@ Hard PreToolUse gate that stops any work from being produced on a repo's default
 **Installs**: `hooks/branch-guard.py`, `rules/branch-guard.md`, settings.json fragment
 
 **What it does**: While a repo's HEAD is on its default branch (main/master, per `origin/HEAD` with fallbacks), hard-blocks (exit 2, survives bypass mode) Edit/MultiEdit/Write/NotebookEdit and filesystem-MCP writes targeting files in that repo, plus mutating git Bash commands (`git commit`, `git add`, `git stage`, `git apply`, with `git -C` resolved). Fires before the first edit — not at commit time — so uncommitted work can never be stranded on main and destroyed by a later sync. The denial teaches the fix: `git fetch origin && git checkout -b <type>/<short-desc> origin/<default>` (type: feature/fix/chore/docs). Exempts `ALLOW_MAIN_COMMIT=1` (env or inline), in-progress rebase/merge/cherry-pick states, unborn HEAD (fresh `git init`), repos with no origin remote (nothing to sync from), repos in `~/.claude/git-flow-direct-to-main-repos.json`, and gitignored target paths (file tools only; `git check-ignore`-verified, fails closed on git errors so a broken git state can never open the gate). Complements the `hooks` module: the advisory `<workflow-reminder>` stays, `enforce-git-workflow.py` still owns commit/push time; this closes the edit-time gap.
+
+**Dependencies**: settings
+
+---
+
+### ask-context
+
+Hard PreToolUse gate ensuring every AskUserQuestion the agent asks carries visible decision context.
+
+**Installs**: `hooks/ask-context-gate.py`, `rules/ask-context.md`, settings.json fragment
+
+**What it does**: At question time the user sees exactly two surfaces — the question payload itself and plain assistant text emitted since their last message; the agent's thinking and collapsed tool output are invisible. This hook hard-blocks (exit 2) AskUserQuestion calls that violate that model, with three gates: **deictic references** in the payload to context the user cannot see ("with that context", "as described above", "see above"); **identical re-asks** of a question the user answered in free text (Other), dismissed, or never answered — the "same question again" loop — while re-asks after a picked option stay allowed for approval loops; and **invisible context**, asking mid-workstream (≥1 tool call since the user's last message) with under 200 visible characters of text this turn (`ASK_CONTEXT_MIN_CHARS` overrides). Each denial message contains the recovery recipe: emit a visible context brief, then re-ask self-contained. Transcript gates fail open on unreadable transcripts; `CCGM_ASK_CONTEXT_OFF=1` escape hatch.
 
 **Dependencies**: settings
 

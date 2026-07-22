@@ -18,7 +18,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. The **self-improving** module installs 3 additional hooks and the **branch-guard** module 1. Total: 19 hooks across 3 modules (the **autoheal** module's observational hooks are documented in their own section below).
+The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. The **self-improving** module installs 3 additional hooks, the **branch-guard** module 1, and the **ask-context** module 1. Total: 20 hooks across 4 modules (the **autoheal** module's observational hooks are documented in their own section below).
 
 ---
 
@@ -297,6 +297,18 @@ Scope-locks file edits to a frozen directory. When `~/.claude/freeze-dir.txt` co
 Hard gate against work on a repo's default branch (main/master, per `origin/HEAD` with fallbacks). Blocks file edits whose target file lives in a repo checked out on its default branch (symlinks resolved; the file's repo is checked, not the session cwd), and mutating git commands — `git commit`/`add`/`stage`/`apply` — in any `&&`/`;`/`|` segment, honoring `git -C <path>`. Fires before the first edit so uncommitted work can never be stranded on main and destroyed by a later origin sync. The denial teaches the fix: `git fetch origin && git checkout -b <type>/<short-desc> origin/<default>` (type: feature/fix/chore/docs).
 
 **Exemptions**: `ALLOW_MAIN_COMMIT=1` (env or inline), in-progress rebase/merge/cherry-pick/revert/bisect, unborn HEAD, repos with no origin remote, `~/.claude/git-flow-direct-to-main-repos.json` entries, and gitignored target paths (file tools only; `git check-ignore`-verified, fails closed on git errors — gitignored files can never be committed to main, e.g. `.audit/` coordination state).
+
+---
+
+### ask-context-gate.py
+
+**Type**: PreToolUse:AskUserQuestion
+**Module**: ask-context
+**Can block**: Yes (exit 2)
+
+Hard gate ensuring every AskUserQuestion carries visible decision context. The user's screen shows only the question payload and plain assistant text emitted since their last message — thinking and collapsed tool output are invisible, so an agent that "analyzed it" has not necessarily shown it. Three gates: **deictic references** in the question text or option descriptions to context outside the payload ("with that context", "as described above", "see above"); **identical re-asks** of a question set the user answered in free text (Other), dismissed, or never answered — re-asks after a picked option label stay allowed for recurring approval loops; and **invisible context** — asking mid-workstream (≥1 tool call since the user's last real message) with fewer than 200 visible characters of text this turn (`ASK_CONTEXT_MIN_CHARS` overrides). Every denial message contains the recovery recipe: emit a visible context brief as plain text, then re-call with a self-contained question. Transcript-based gates fail open when the transcript is unreadable; the payload gate always runs.
+
+**Escape hatch**: `CCGM_ASK_CONTEXT_OFF=1` (debugging only).
 
 ---
 

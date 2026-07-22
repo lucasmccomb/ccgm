@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Hard PreToolUse gate on AskUserQuestion that blocks questions whose decision context is invisible to the user. Three deterministic gates: deictic references to unseen context ('with that context', 'see above'), identical re-asks after the user pushed back in free text, and mid-workstream questions asked with no visible text emitted this turn. Block messages teach the exact recovery (visible context brief, then a self-contained question). Fail-open on transcript errors; CCGM_ASK_CONTEXT_OFF=1 escape hatch.",
+  "displayName": "Ask Context Gate",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "context",
+    "enforcement",
+    "hooks",
+    "questions",
+    "ux"
+  ],
+  "license": "MIT",
+  "name": "ask-context"
+}

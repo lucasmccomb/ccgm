@@ -1,0 +1,28 @@
+{
+  "name": "ask-context",
+  "displayName": "Ask Context Gate",
+  "description": "Hard PreToolUse gate on AskUserQuestion that blocks questions whose decision context is invisible to the user. Three deterministic gates: deictic references to unseen context ('with that context', 'see above'), identical re-asks after the user pushed back in free text, and mid-workstream questions asked with no visible text emitted this turn. Block messages teach the exact recovery (visible context brief, then a self-contained question). Fail-open on transcript errors; CCGM_ASK_CONTEXT_OFF=1 escape hatch.",
+  "category": "core",
+  "scope": ["global"],
+  "dependencies": ["settings"],
+  "files": {
+    "hooks/ask-context-gate.py": {
+      "target": "hooks/ask-context-gate.py",
+      "type": "hook",
+      "template": false
+    },
+    "rules/ask-context.md": {
+      "target": "rules/ask-context.md",
+      "type": "rule",
+      "template": false
+    },
+    "settings.partial.json": {
+      "target": "settings.json",
+      "type": "config",
+      "merge": true,
+      "template": false
+    }
+  },
+  "tags": ["hooks", "enforcement", "ux", "questions", "context"],
+  "configPrompts": []
+}
