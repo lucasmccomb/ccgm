@@ -256,7 +256,7 @@ Miscellaneous utility commands for common workflow tasks.
 | Command | Description |
 |---------|-------------|
 | `/cws-submit` | Guided walkthrough for submitting a Chrome extension to the Chrome Web Store |
-| `/ccgm-sync` | Sync local Claude Code config changes back to CCGM and lem-deepresearch repos |
+| `/ccgm-sync` | Sync local Claude Code config changes back to the CCGM repo |
 | `/user-test` | Browser-based user testing simulation using Chrome automation tools |
 
 **Dependencies**: None

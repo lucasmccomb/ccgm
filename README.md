@@ -185,7 +185,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **plugin-marketplace** [BETA] | core | Maintainer tooling that projects CCGM modules into a native Claude Code plugin marketplace. The bash installer stays canonical | - |
 | **commands-core** | commands | /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue) | - |
 | **commands-extra** | commands | /audit (codebase audit), /pwv (Playwright verify), /walkthrough, /promote-rule | - |
-| **commands-utility** | commands | /cws-submit (Chrome Web Store walkthrough), /ccgm-sync (sync config to CCGM + lem-deepresearch), /user-test (browser user testing) | - |
+| **commands-utility** | commands | /cws-submit (Chrome Web Store walkthrough), /ccgm-sync (sync config back to the CCGM repo), /user-test (browser user testing) | - |
 | **ce-review** | commands | /ce-review unified code-review orchestrator. Composes scope-drift, learnings-researcher, tier-sharpener, and review-synthesizer with structured JSON findings | - |
 | **onboarding** | commands | /onboarding - analyzes a repository and generates a structured ONBOARDING.md for new contributors | - |
 | **pr-review-toolkit** | commands | Augments the external pr-review-toolkit plugin with scope-drift detection on top of the standard code/test/comment/silent-failure/type passes | - |
