@@ -74,6 +74,19 @@
       ]
     },
     {
+      "category": "core",
+      "description": "Hard PreToolUse gate on AskUserQuestion that blocks questions whose decision context is invisible to the user. Three deterministic gates: deictic references to unseen context ('with that context', 'see above'), identical re-asks after the user pushed back in free text, and mid-workstream questions asked with no visible text emitted this turn. Block messages teach the exact recovery (visible context brief, then a self-contained question). Fail-open on transcript errors; CCGM_ASK_CONTEXT_OFF=1 escape hatch.",
+      "name": "ask-context",
+      "source": "./ask-context",
+      "tags": [
+        "context",
+        "enforcement",
+        "hooks",
+        "questions",
+        "ux"
+      ]
+    },
+    {
       "category": "workflow",
       "description": "Spec-driven development where E2E vision specs define target behavior. /atdd reads Playwright specs, iteratively builds app code until all tests pass, then ships.",
       "name": "atdd",
