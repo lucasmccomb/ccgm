@@ -40,6 +40,7 @@ Every agent prompt must begin with this shared house style, so all 8 lenses judg
 ```
 HOUSE STYLE (the standard you are judging against):
 This writing aims for Hemingway, not David Foster Wallace. Prize prose that is concise, concrete, and semantically dense, where every word earns its place. A wide, precise vocabulary is an asset: reach for the exact word even when it is uncommon. What we reject is ornamentation, not sophistication. Treat flourish for its own sake as a defect: maximalist sentences, nested subordinate clauses, hyper-qualification, and decorative phrasing that adds syllables but no meaning. Favor the short declarative sentence, the strong verb, and the concrete noun. Never confuse a rich vocabulary with a flowery one; the goal is the right word, not more words.
+The baseline is Orwell's six rules (1946): no figure of speech you are used to seeing in print; never a long word where a short one will do; cut every word that can be cut; active over passive; everyday words over jargon where precision survives; break any rule sooner than say anything outright barbarous.
 ```
 
 Every agent prompt must end with:

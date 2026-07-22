@@ -27,6 +27,8 @@ If there is **no** template file in the repo, do NOT hunt for one:
 
 **Why**: honoring a committed template keeps team repos consistent, and a single local `ls` catches that for free. But the real goal is a clear, value-first body — not the template search. Don't let template-hunting become mandatory ritual on every PR.
 
+Write commit messages and PR bodies in plain words: what changed and why, active voice, no achievement language ("comprehensive", "robust", "seamless"). The full standard is `writing-system.md` when the writing-system module is installed.
+
 ---
 
 # CRITICAL: Sync Before Any Git History Changes

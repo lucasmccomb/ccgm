@@ -1,0 +1,14 @@
+{
+  "name": "writing-system",
+  "displayName": "Writing System",
+  "description": "Orwell's six writing rules (1946) as an always-on prose standard for docs, PR text, commit messages, reports, and copy, plus a /rewrite command that applies them to existing text. Governs prose only, never code or technical terms.",
+  "category": "patterns",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "rules/writing-system.md": { "target": "rules/writing-system.md", "type": "rule", "template": false },
+    "commands/rewrite.md": { "target": "commands/rewrite.md", "type": "command", "template": false }
+  },
+  "tags": ["writing", "prose", "style", "communication", "orwell"],
+  "configPrompts": []
+}
