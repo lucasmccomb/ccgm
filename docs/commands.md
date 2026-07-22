@@ -307,16 +307,15 @@ Walks through the process of packaging and submitting a Chrome extension to the 
 
 ### /ccgm-sync
 
-**Sync local Claude Code config changes back to the CCGM repo and lem-deepresearch repo.**
+**Sync local Claude Code config changes back to the CCGM repo.**
 
-When you've customized files in `~/.claude/` directly, this command syncs those changes back to your local CCGM clone and lem-deepresearch repo, keeping them as the source of truth.
+When you've customized files in `~/.claude/` directly, this command syncs those changes back to your local CCGM clone, keeping it as the source of truth.
 
 **What happens**:
 1. Identifies which CCGM-managed files have been modified locally
 2. Diffs the changes
 3. Copies modified files back into the appropriate `modules/` subdirectories
-4. Checks if deepresearch command or CLI script have changed and syncs to lem-deepresearch repo
-5. Prompts to commit the changes
+4. Prompts to commit the changes
 
 **Usage**:
 ```

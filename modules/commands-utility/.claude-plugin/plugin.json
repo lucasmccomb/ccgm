@@ -3,7 +3,7 @@
   "author": {
     "name": "CCGM"
   },
-  "description": "Utility commands and scripts: /cws-submit, /ccgm-sync (reverse-sync local config to CCGM + lem-deepresearch), /user-test, statusline, agent-team launcher.",
+  "description": "Utility commands and scripts: /cws-submit, /ccgm-sync (reverse-sync local config to CCGM), /user-test, statusline, agent-team launcher.",
   "displayName": "Utility Commands",
   "keywords": [
     "browser",

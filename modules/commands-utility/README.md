@@ -17,15 +17,15 @@ Handles: extension identification, prerequisites check, store assets preparation
 
 Note: Reads `docs/cws-submission-process.md` in the repo for step-by-step instructions.
 
-### `/ccgm-sync` - Sync Local Config to CCGM + lem-deepresearch
+### `/ccgm-sync` - Sync Local Config to CCGM
 
-Delegates to a Haiku agent to reverse-sync local `~/.claude/` changes back to source repos. Syncs CCGM-managed files to the CCGM repo and deepresearch files to the lem-deepresearch repo. Shows a dry run first, then applies changes.
+Delegates to a cheaper-model agent to reverse-sync local `~/.claude/` changes back to the CCGM repo. Shows a dry run first, then applies changes.
 
 ```
 /ccgm-sync
 ```
 
-Reads CCGM root from `~/.claude/.ccgm-manifest.json`. Checks `~/code/lem-deepresearch` for deepresearch sync.
+Reads CCGM root from `~/.claude/.ccgm-manifest.json`.
 
 ### `/user-test` - Browser-Based User Testing
 
