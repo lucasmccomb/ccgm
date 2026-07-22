@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 74 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 75 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -1055,6 +1055,18 @@ Formatting rules for user-facing output, starting with copy-pasteable content.
 **Installs**: `rules/copy-paste-output.md`
 
 **What it does**: When output is meant to be copy-pasted somewhere else (emails, texts, social posts, bios, form answers, prompts for other tools, config snippets), Claude delivers it in a fenced code block containing exactly the text that should land at the destination - never a blockquote, which renders as a vertical line in the terminal and copies dirty. Commentary stays outside the block; plain text by default, markdown source only when the destination renders markdown.
+
+**Dependencies**: None
+
+---
+
+### writing-system
+
+Orwell's six writing rules (1946) as the always-on prose standard, plus `/rewrite` to apply them to existing text.
+
+**Installs**: `rules/writing-system.md`, `commands/rewrite.md`
+
+**What it does**: Replaces one-word bans ("no delve", "no em dashes") with a writing system. The rule loads in every session and governs prose - docs, READMEs, PR descriptions, commit messages, issue comments, session reports, chat responses, marketing copy - never code, identifiers, or technical terms whose plain-word swap would change the meaning. It adds two workflow subsections: commit/PR prose (plain words, no achievement language, one-read test) and session reports (plain sentences, what changed / what failed / what comes next; no emoji checkmarks, no "Successfully"). `/rewrite [file] [mode:landing] [--apply]` lists every violation (stale phrase, long word with its short replacement, cuttable word, passive construction, jargon), then rewrites, keeping every fact, number, and name unchanged; `mode:landing` adds the swap test for marketing copy. `/editorial-critique` remains the deep multi-lens review; both judge against the same six rules.
 
 **Dependencies**: None
 
