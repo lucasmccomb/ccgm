@@ -55,7 +55,7 @@ Steps:
 3. Read the available presets: ls ~/code/ccgm/presets/
    Available presets and what they include:
      - minimal  : global-claude-md, autonomy, git-workflow
-     - standard : the above + identity, hooks, branch-guard, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, statusline
+     - standard : the above + identity, hooks, branch-guard, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline
      - team     : standard core + github-protocols, code-quality, systematic-debugging, verification
      - cloud-agent : large set for power users running autonomous agents
      - full     : every stable module
@@ -131,9 +131,9 @@ For a quick install with a preset:
 | Preset | Modules | Best For |
 |--------|---------|----------|
 | **minimal** | global-claude-md, autonomy, git-workflow | Getting started |
-| **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, statusline | Most users |
-| **full** | 70 modules | Power users |
-| **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, ce-review, pr-feedback, pr-review-toolkit, document-review, compound-knowledge (+ deps) | Teams |
+| **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline | Most users |
+| **full** | 71 modules | Power users |
+| **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, writing-system, ce-review, pr-feedback, pr-review-toolkit, document-review, compound-knowledge (+ deps) | Teams |
 | **cloud-agent** | 54 modules | Autonomous/headless agents |
 
 ### Other install options
@@ -180,6 +180,9 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **git-workflow** | core | Git rules: sync before history changes, rebase by default, post-merge cleanup, no AI attribution | - |
 | **settings** | core | Base settings.json with 800+ tool permissions, deny list, plugin config. Defaults to safe 'ask' mode | - |
 | **hooks** | core | Python hooks: issue-first workflow, commit format, branch protection, auto-approval for safe ops | settings |
+| **branch-guard** | core | Hard PreToolUse gate: no edits or git mutations while HEAD is on the default branch. Fires before the first edit | settings |
+| **model-vetting** | core | Security vetting gate for new AI models: weights provenance, format safety, license/data terms, serving path, staged agentic access | - |
+| **plugin-marketplace** [BETA] | core | Maintainer tooling that projects CCGM modules into a native Claude Code plugin marketplace. The bash installer stays canonical | - |
 | **commands-core** | commands | /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue) | - |
 | **commands-extra** | commands | /audit (codebase audit), /pwv (Playwright verify), /walkthrough, /promote-rule | - |
 | **commands-utility** | commands | /cws-submit (Chrome Web Store walkthrough), /ccgm-sync (sync config to CCGM + lem-deepresearch), /user-test (browser user testing) | - |
@@ -197,6 +200,8 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **brainstorm** | commands | /brainstorm - design-before-implementation gate: forbids code until a design spec with 2-3 approach tradeoffs is written and user-approved, then hands off to /xplan | - |
 | **research** | commands | /research - multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, Reddit. Zero dependencies.* | - |
 | **youtube-transcripts** | commands | /transcript - extracts a YouTube transcript via yt-dlp AND dispatches a subagent to write an opinionated implications doc against your project memory. One slug+date, two saved files | - |
+| **capability-router** | commands | /capabilities - decision map for CCGM's overlapping command clusters (research, review, planning, debugging, knowledge), plus a tight always-on pointer rule | - |
+| **deepresearch** | commands | /deepresearch - multi-query semantic research via the Exa MCP server: parallel query fan-out synthesized into a structured research.md | - |
 | **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
 | **startup-dashboard** | workflow | Plain-text `/startup` dashboard: git state, tracking claims, live sessions, recent activity (via session-history /recall) | session-history |
 | **session-history** | workflow | `/recall` for unified session transcript history across all clones of a repo; session-historian agent for deeper retrieval | - |
@@ -218,6 +223,13 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **git-worktrees** | workflow | Git worktrees as the default isolation for parallel sub-agent delegation on one machine, with a safe janitor (/worktree-sweep) that enforces teardown so worktrees never silently fill the disk | - |
 | **pr-feedback** | workflow | /resolve-pr-feedback - fetches unresolved PR review threads via GraphQL, clusters 3+ items by category, dispatches parallel resolver agents | skill-authoring, subagent-patterns |
 | **todos** | workflow | File-based review-finding tracker. Review findings, PR nitpicks, and tech debt tracked with structured YAML | - |
+| **argus** | workflow | /argus - closed-loop visual-ATDD harness: deterministic gates plus a separate judge agent score UI renders against a design spec until convergence | subagent-patterns |
+| **ccgm-doctor** | workflow | Audit tool for Claude Code installs: dangling hook/command refs, lexical overlap between command descriptions, and a routing eval | - |
+| **launch** | workflow | /launch - takes a one-page spec to a deployed Cloudflare Pages site, stopping only for the Connect-to-Git dashboard step | cloudflare, git-workflow, docs-for-agents |
+| **relevance-injection** [BETA] | workflow | Opt-in relevance-scoped rule injection with a tiered always-on safety core. Off by default | hooks |
+| **session-lifecycle** | workflow | /sds - autonomous session shutdown: commit dirty work, update issues, reflect, write a handoff, broadcast to sibling clones | multi-agent, self-improving, git-workflow |
+| **skillify** | workflow | /skillify - promotes an ad-hoc session capability into a durable skill with triggers, an optional helper script, and a pinning test | - |
+| **statusline** | workflow | Compact statusline: model + effort, clone identity, dir + branch, context %, session cost, rate-limit bars | - |
 | **code-quality** | patterns | Code standards, testing requirements, error handling, security, build verification | - |
 | **browser-automation** | patterns | Browser tool selection (Chrome, Playwright, WebMCP), verification priority, UI testing workflow | - |
 | **common-mistakes** | patterns | 8 battle-tested anti-patterns: shallow exploration, dependency blindness, ESLint Fast Refresh, more | - |
@@ -228,6 +240,10 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **make-interfaces-feel-better** | patterns | Design-engineering details that compound into polished interfaces. Model-invoked skill covering design direction, typography, surfaces, animations, performance | - |
 | **rule-authoring** | patterns | Discipline for writing rules that hold up under pressure. Treats rule authoring as a first-class skill with iron-law structure | - |
 | **skill-authoring** | patterns | Discipline for writing skills and slash commands that stay efficient, portable, and structured across models | - |
+| **docs-for-agents** | patterns | AGENTS.md rule + template: machine-readable docs with copy-pasteable command blocks alongside the human docs | - |
+| **output-formatting** | patterns | Copy-pasteable content goes in fenced code blocks, never blockquotes, so it pastes clean anywhere | - |
+| **output-styles** | patterns | Packages the always-on tone rules as Claude Code output styles - a prompt-cached system-prompt layer instead of per-turn rule files | - |
+| **writing-system** | patterns | Orwell's six rules as the global prose standard for docs, PR text, commits, and reports, plus /rewrite (violations list, then rewrite; mode:landing swap test) | - |
 | **cloudflare** | tech-specific | Pages vs Workers selection, deployment methods, Git integration requirements | - |
 | **supabase** | tech-specific | API key terminology, env var naming, migration validation, database workflow | - |
 | **mcp-development** | tech-specific | Building MCP servers: project structure, tool design, error handling, testing, evaluation patterns | - |
@@ -360,8 +376,8 @@ The `docs/` directory contains comprehensive documentation:
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 74 modules |
-| [Commands Reference](docs/commands.md) | All 76 slash commands with usage examples |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 75 modules |
+| [Commands Reference](docs/commands.md) | All 77 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 23 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |

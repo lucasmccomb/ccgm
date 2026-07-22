@@ -1341,6 +1341,27 @@ Enumerates every worktree of the current repo, removes the clean ones with a non
 
 ---
 
+## Writing system commands
+
+Installed by the **writing-system** module.
+
+---
+
+### /rewrite
+
+**Apply the six writing rules to existing text.**
+
+Single-pass rewrite under the Orwell rules in `rules/writing-system.md`. Lists every violation first - stale phrase, long word with its short replacement, cuttable word, passive construction, jargon - then produces the rewrite. Every fact, number, and name survives unchanged; code blocks, identifiers, and links stay byte-for-byte. `mode:landing` adds two checks for marketing copy: one concrete claim per line, and the swap test (a line a competitor could paste unchanged says nothing - rewrite or delete it). For deep multi-lens review use `/editorial-critique`; this is the cheap pass.
+
+**Usage**:
+```
+/rewrite path/to/file.md              # violations list + rewrite, asks before applying
+/rewrite path/to/file.md --apply      # apply the rewrite to the file
+/rewrite mode:landing hero.md         # add the one-claim-per-line and swap tests
+```
+
+---
+
 ## Skills
 
 Skills are packaged capabilities invokable by name (e.g. `/brainstorm`). Each skill installs to `~/.claude/skills/{name}/SKILL.md` and lives under `modules/<name>/skills/<skill>/SKILL.md` in the CCGM source.

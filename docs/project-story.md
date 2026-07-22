@@ -227,16 +227,17 @@ Highlights of the catalog:
 - **Change philosophy** — redesign as if the requirement had been foundational, rather than bolting on.
 - **Common mistakes** — a living record of recurring failure patterns (shallow monorepo exploration, branching without checking open PRs, platform-specific traps) with the concrete behavior change each demands.
 - **Model vetting** — the staged-access security gate for new models (provenance → format safety → license/terms → serving path → staged agentic access from chat-only to sandboxed to reviewed-implementer).
+- **Writing system** — Orwell's six rules (1946) as the always-on prose standard, added July 2026 after the observation that banning AI-tell words one at a time ("no delve", "no em dashes") treats symptoms while every README still ships in the same voice. The rule governs prose only (never code or technical terms), `/rewrite` applies it to existing text, and `/editorial-critique`'s detectors now cite the same six rules as their baseline — one standard, two enforcement points.
 
 ## Command Surface
 
-76 slash commands, grouped:
+77 slash commands, grouped:
 
 | Cluster | Commands |
 |---------|----------|
 | Git & GitHub | `/commit`, `/pr`, `/cpm`, `/gs`, `/ghi` |
 | Planning & execution | `/xplan`, `/xplana`, `/xplan-status`, `/xplan-resume`, `/etp`, `/mawf`, `/ideate`, `/brainstorm` |
-| Review & quality | `/adrev`, `/ce-review`, `/document-review`, `/audit`, `/design-review`, `/editorial-critique`, `/resolve-pr-feedback`, `/scope-drift`, `/ship-ready`, `/pwv` |
+| Review & quality | `/adrev`, `/ce-review`, `/document-review`, `/audit`, `/design-review`, `/editorial-critique`, `/rewrite`, `/resolve-pr-feedback`, `/scope-drift`, `/ship-ready`, `/pwv` |
 | Testing | `/atdd`, `/test-vision`, `/e2e`, `/argus`, `/user-test` |
 | Memory & learning | `/reflect`, `/consolidate`, `/retro`, `/dream`, `/dream-digest`, `/dream-apply`, `/dream-review`, `/dream-scorecard`, `/compound`, `/compound-refresh`, `/skillify` |
 | Autoheal | `/autoheal`, `/autoheal-digest`, `/autoheal-toggle`, `/autoheal-snooze`, `/autoheal-apply`, `/permission-fix`, `/permission-audit` |

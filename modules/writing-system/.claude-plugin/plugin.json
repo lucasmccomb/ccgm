@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Orwell's six writing rules (1946) as an always-on prose standard for docs, PR text, commit messages, reports, and copy, plus a /rewrite command that applies them to existing text. Governs prose only, never code or technical terms.",
+  "displayName": "Writing System",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "communication",
+    "orwell",
+    "prose",
+    "style",
+    "writing"
+  ],
+  "license": "MIT",
+  "name": "writing-system"
+}

@@ -971,6 +971,19 @@
       ]
     },
     {
+      "category": "patterns",
+      "description": "Orwell's six writing rules (1946) as an always-on prose standard for docs, PR text, commit messages, reports, and copy, plus a /rewrite command that applies them to existing text. Governs prose only, never code or technical terms.",
+      "name": "writing-system",
+      "source": "./writing-system",
+      "tags": [
+        "communication",
+        "orwell",
+        "prose",
+        "style",
+        "writing"
+      ]
+    },
+    {
       "category": "workflow",
       "description": "Deep research + planning + execution framework. Spawns parallel research/review agents, creates comprehensive plans, and executes via parallel agent waves.",
       "name": "xplan",
