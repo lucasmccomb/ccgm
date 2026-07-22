@@ -250,25 +250,21 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **shadcn** | tech-specific | shadcn/ui patterns: composition, semantic theming tokens, form architecture, accessibility | - |
 | **tailwind** | tech-specific | Tailwind CSS v4 design system: CSS-first config, design tokens, CVA variants, dark mode, responsive grids | - |
 
-*\* `/research` works out of the box with no setup. For higher-quality results, install [/deepresearch](#companion-module-deepresearch) - a local pipeline that's faster, cheaper, and more reliable, but requires additional infrastructure.*
+*\* `/research` works out of the box with no setup. For higher-quality results, install [/deepresearch](#companion-module-deepresearch) - the same fan-out backed by Exa semantic search with full page contents. Needs a free Exa API key.*
 
 ### Companion module: /deepresearch
 
-The `/deepresearch` command is a more powerful research pipeline that lives in its own repo: **[lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch)**. It replaces `/research`'s parallel subagent approach with a local-first pipeline that produces higher-quality, source-backed research documents.
+`/deepresearch` is the bundled `deepresearch` module: multi-query semantic research over the Exa MCP server. Claude generates diverse queries from your topic, fans them out as parallel Exa tool calls, and synthesizes a structured `research.md` from the full page contents Exa returns. `/xplan` delegates its research phase to it.
 
-**How it works:** Ollama (qwen2.5:72b) generates search queries and extracts facts, SearXNG (self-hosted Docker) runs parallel web searches across Google/Bing/DuckDuckGo, and Claude Code synthesizes everything into a structured research.md. The pipeline is fully local - no external API keys required beyond what Claude Code already uses.
-
-**Why it's separate:** It requires local infrastructure (Docker, Ollama with a ~40GB model, a Python venv) that not every CCGM user will want. But if you use `/xplan`, you'll want this - xplan delegates its research phase to `/deepresearch`.
-
-**Install:**
+**Setup:** an Exa account (free tier: 1000 searches/mo at [exa.ai](https://exa.ai)), `EXA_API_KEY` in your shell, and the Exa MCP server registered once:
 
 ```bash
-git clone https://github.com/lucasmccomb/lem-deepresearch.git
-cd lem-deepresearch
-./install.sh
+claude mcp add --scope user --env EXA_API_KEY="$EXA_API_KEY" -- exa npx -y exa-mcp-server
 ```
 
-The installer sets up SearXNG, Ollama, the Python environment, and copies the command files into `~/.claude/`. See the [lem-deepresearch README](https://github.com/lucasmccomb/lem-deepresearch) for manual setup and troubleshooting.
+Then restart Claude Code and verify with `claude mcp get exa`. Full walkthrough: [modules/deepresearch/README.md](modules/deepresearch/README.md).
+
+**History:** this module supersedes the standalone [lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch) repo (Ollama + self-hosted SearXNG, fully local). That pipeline degraded as SearXNG's scraped engines hit CAPTCHAs and rate limits; Exa's neural search returns reliable results without scraping.
 
 ## Memory System
 
