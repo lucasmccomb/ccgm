@@ -382,7 +382,7 @@ Installed by the **documentation** module.
 
 ## Research commands
 
-Installed by the **research** module.
+Installed by the **research** and **deepresearch** modules.
 
 ---
 
@@ -409,15 +409,36 @@ Spawns up to 7 parallel research agents that each investigate a topic from a dif
 /research "my topic" --extend ~/docs/research/prior/research.md
 ```
 
-For higher-quality results, install [/deepresearch](https://github.com/lucasmccomb/lem-deepresearch) - a local pipeline that's faster, cheaper, and more reliable.
+For higher-quality results, use `/deepresearch` (below) - the same fan-out backed by Exa semantic search with full page contents.
 
 **Installed by**: research module
 
 ---
 
+### /deepresearch
+
+**Multi-query semantic research over the Exa MCP server.**
+
+Claude generates diverse queries from your topic, fans them out as parallel Exa MCP tool calls (`web_search_exa` and friends), and synthesizes a structured `research.md` from the full page contents Exa returns. Supersedes the standalone lem-deepresearch repo (Ollama + SearXNG); the scraping pipeline degraded, Exa's neural search does not.
+
+**Requires**: an Exa API key (free tier: 1000 searches/mo) and the Exa MCP server registered via `claude mcp add`. Setup walkthrough in `modules/deepresearch/README.md`.
+
+**Depth presets**: Lite (3 queries), Standard (5, default), Full (7)
+
+**Usage**:
+```
+/deepresearch "dark mode browser extensions"
+/deepresearch "SaaS pricing strategies" --depth full
+/deepresearch "React vs Vue" --depth lite --output ~/notes/react-vue.md
+```
+
+**Installed by**: deepresearch module
+
+---
+
 ## Debugging commands
 
-Installed by the **debugging** module. For `/deepresearch`, see [lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch) (standalone repo, installed separately).
+Installed by the **debugging** module.
 
 ---
 
