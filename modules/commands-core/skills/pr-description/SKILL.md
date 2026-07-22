@@ -83,6 +83,8 @@ Examples:
 
 The body leads with what the PR enables, fixes, or changes in the user's world. File churn is supporting evidence, not the lead.
 
+Write it in plain words: state what changed and why, active voice, short words. No achievement language — no "comprehensive", no "robust", no "seamless", no "Successfully". A reviewer should know what the PR does in one read. The full standard is `~/.claude/rules/writing-system.md` when the writing-system module is installed.
+
 ### Structure (when no PR template exists)
 
 1. **Closes #N** - first line if the PR closes an issue. No other content on this line.
@@ -109,6 +111,7 @@ If a section in the template does not apply to this PR (e.g., "Screenshots" for 
 | "I refactored the review flow for cleanliness." | Cleanliness is not a user-visible outcome. What does the refactor enable? |
 | "Adds a new module." | Which module, what does it do, why does that matter? One sentence each. |
 | "Various improvements." | If you cannot name them, do not mention them. Delete the bullet. |
+| "Comprehensive error handling has been implemented..." | "Adds error handling to every API endpoint." State the change; drop the adjectives and the passive. |
 
 ## Output Format
 
