@@ -33,6 +33,13 @@ from pathlib import Path
 sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
 import hook_utils  # noqa: E402
 
+try:
+    # Installed by the multi-agent module. Optional so this hook still works
+    # in an install that does not have that module.
+    import clone_identity  # noqa: E402
+except ImportError:  # pragma: no cover - depends on installed module set
+    clone_identity = None
+
 REGISTRY_PATH = Path.home() / ".claude" / "port-registry.json"
 
 # Patterns that indicate a dev server is being launched
@@ -98,8 +105,47 @@ def get_env_clone() -> dict[str, str]:
     return env_clone
 
 
+def derive_identity(cwd: str | None = None):
+    """Canonical identity for this clone, derived from its own path.
+
+    Returns a clone_identity.Identity, or None when the multi-agent module is
+    absent or the directory is not a managed clone.
+    """
+    if clone_identity is None:
+        return None
+    try:
+        return clone_identity.derive_identity(cwd or Path.cwd())
+    except Exception:
+        return None
+
+
+def self_heal_env_clone(cwd: str | None = None) -> None:
+    """Rewrite a drifted `.env.clone` before a dev server reads it.
+
+    This hook fires immediately before a dev server launches, which is the
+    last moment a wrong port assignment can still be corrected. Silent and
+    best-effort: a failure here must never affect the launch.
+    """
+    if clone_identity is None:
+        return
+    try:
+        clone_identity.repair_clone(cwd or Path.cwd())
+    except Exception:
+        pass
+
+
 def get_port_offset(env_clone: dict[str, str]) -> int:
-    """Get port offset from .env.clone."""
+    """Resolve this clone's port offset.
+
+    The clone's own path is authoritative: it cannot drift from itself, while
+    `.env.clone` demonstrably can (a copied file made two clones claim one
+    port, and Vite then auto-incremented onto a third clone's port). So the
+    file is consulted only when the path is not a managed clone layout.
+    """
+    identity = derive_identity()
+    if identity is not None:
+        return identity.port_offset
+
     if "PORT_OFFSET" in env_clone:
         try:
             return int(env_clone["PORT_OFFSET"])
@@ -187,15 +233,21 @@ def main() -> None:
     else:
         tool_input = data
 
-    # Bypass mode: stay completely silent. The user has opted out of
-    # permission noise, and port checks are advisory not safety.
-    if hook_utils.is_bypass_mode(data):
-        return
-
     command = tool_input.get("command", "")
 
     # Only care about dev server commands
     if not is_dev_server_command(command):
+        return
+
+    # Repair a drifted `.env.clone` before the dev server reads it. Runs ahead
+    # of the bypass check on purpose: bypass mode suppresses *messages*, not
+    # correctness, and this is the last point at which a wrong port can still
+    # be fixed. It writes nothing when the file already agrees with the path.
+    self_heal_env_clone()
+
+    # Bypass mode: stay completely silent. The user has opted out of
+    # permission noise, and port checks are advisory not safety.
+    if hook_utils.is_bypass_mode(data):
         return
 
     registry = load_registry()
@@ -204,7 +256,10 @@ def main() -> None:
               "Cannot validate port allocation.", file=sys.stderr)
         return
 
-    repo_name = get_repo_name()
+    # Prefer the path-derived repo so the name matches the same source the
+    # offset came from; fall back to the git remote for standalone checkouts.
+    identity = derive_identity()
+    repo_name = identity.repo if identity is not None else get_repo_name()
     if not repo_name or repo_name not in registry.get("repos", {}):
         # Not a registered repo, skip
         return

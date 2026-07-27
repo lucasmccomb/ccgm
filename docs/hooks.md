@@ -127,12 +127,31 @@ Detects dev server launch commands and warns about port conflicts.
 **Commands detected**: `vite`, `wrangler dev`, `npm run dev`, `pnpm dev`, `next dev`, `npx vite`, and similar patterns.
 
 **How it works**:
-1. Reads port assignments from `~/.claude/port-registry.json` and `.env.clone`
-2. Checks if the expected port is already in use via `lsof`
-3. Warns if the command uses a port different from the clone's assigned port
-4. Warns if another process is already listening on the expected port
+1. Derives the clone's port from its own absolute path plus `~/.claude/port-registry.json` (via `clone_identity.py`), falling back to `.env.clone` only outside a clone layout
+2. Repairs `.env.clone` if it disagrees, before the dev server reads it
+3. Checks if the expected port is already in use via `lsof`
+4. Warns if the command uses a port different from the clone's assigned port
+5. Warns if another process is already listening on the expected port
 
 This hook is advisory only - it never blocks commands. It exists to prevent port collisions when multiple agents run dev servers simultaneously.
+
+Step 1 used to read `PORT_OFFSET` straight out of `.env.clone`. That made a copied `.env.clone` authoritative: two clones claimed one port, Vite auto-incremented onto a third clone's port, and the hook validated against the wrong number the whole time (issue #890). The path cannot misreport itself, so it wins.
+
+---
+
+### clone-identity-sync.py
+
+**Type**: SessionStart (matcher: `startup|resume`)
+**Module**: multi-agent
+**Can block**: No
+
+Keeps a clone's `.env.clone` true to its own path.
+
+Identity (`WORKSPACE_NUMBER`, `CLONE_NUMBER`, `AGENT_ID`) and ports (`PORT_OFFSET`, `FRONTEND_PORT`, `BACKEND_PORT`) are re-derived at every session start from the clone's absolute path plus `~/.claude/port-registry.json`. If the file disagrees, it is rewritten and the hook prints a one-line `<clone-identity-repaired>` note. A clone that already agrees starts silently.
+
+Deliberately narrow: it only touches `.env.clone`, only inside a directory matching the workspace or flat-clone layout, never for a repo missing from the port registry (writing a fallback base port would invent a colliding allocation), and it preserves keys the derivation does not own. Every failure path is a silent no-op — a session must never fail to start over a config file.
+
+Manual equivalents: `python3 ~/.claude/lib/clone_identity.py audit | repair [--all]`.
 
 ---
 

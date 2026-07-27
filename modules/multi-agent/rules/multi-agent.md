@@ -43,4 +43,26 @@ When a task involves multiple independent issues or work items, prefer spawning 
 
 **NEVER run `pnpm dev` or `wrangler dev` without clone-aware ports in a multi-clone repo.** Port collisions kill other agents' dev servers.
 
+**Never hand-edit `.env.clone`, and never write one with `echo` or a heredoc.**
+Its values are derived from the clone's absolute path plus the port registry —
+the two things that cannot drift — by `~/.claude/lib/clone_identity.py`, which
+is the only writer. A `SessionStart` hook re-derives the file every session and
+rewrites it on disagreement, so an edit is reverted, not honoured. The path is
+also what `port-check.py` and `agent_tracking.get_agent_id()` now trust; the
+file is a cache, not a source.
+
+Three commands cover everything:
+
+```bash
+python3 ~/.claude/lib/clone_identity.py show          # this clone's derived identity
+python3 ~/.claude/lib/clone_identity.py audit         # all clones; exit 1 on drift or port clash
+python3 ~/.claude/lib/clone_identity.py repair --all  # rewrite whatever disagrees
+```
+
+If `audit` reports `UNREG`, add the repo to `~/.claude/port-registry.json`
+before running dev servers — an unregistered repo has no allocation, and the
+old fallback of "just use 5173" is how two repos collided. If it reports
+`CLASH`, two clones derive the same port: fix the registry's base-port blocks,
+not the individual `.env.clone` files.
+
 See `~/.claude/multi-agent-system.md` for full details.
