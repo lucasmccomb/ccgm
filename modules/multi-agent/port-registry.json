@@ -1,7 +1,9 @@
 {
-  "_comment": "Port allocation registry for multi-agent development. Each repo gets a block of 16 ports per service type. Within a block, offset = (workspace * clones_per_workspace) + clone. For flat clone repos, offset = clone_number. The entries below are EXAMPLES showing the schema - replace them with your own repos. Keep each repo's base ports at least 16 apart so blocks do not overlap.",
+  "_comment": "Port allocation registry for multi-agent development. This file is the SOLE authority for port allocation - workspace CLAUDE.md tables and .env.clone files are both generated from it plus the clone's own path, and never hand-maintained. Each repo gets a block of 16 ports per service type. The entries below are EXAMPLES showing the schema - replace them with your own repos. Keep each repo's base ports at least 16 apart so blocks do not overlap.",
   "_block_size": 16,
-  "_formula": "port = base_port + PORT_OFFSET (from .env.clone)",
+  "_formula": "offset = workspace * clones_per_workspace + clone (workspace model) or clone_number (flat model); port = base_port + offset",
+  "_derivation": "Never hand-edit .env.clone. Run: python3 ~/.claude/lib/clone_identity.py audit | repair [--all]",
+  "_clones_per_workspace_note": "Optional per-repo, default 4. Set it when a repo's workspaces hold a different number of clones - inferring it by counting sibling directories is unstable, because one stray or missing directory would silently shift every port in the workspace.",
   "repos": {
     "example-app": {
       "frontend": 5173,
@@ -11,10 +13,11 @@
     "example-monorepo": {
       "frontend": 5189,
       "backend": 8803,
+      "clones_per_workspace": 3,
       "extra": {
         "docs": 4321
       },
-      "notes": "Frontend + worker + extra docs port (example entry)"
+      "notes": "Frontend + worker + extra docs port; 3 clones per workspace (example entry)"
     },
     "ccgm": {
       "frontend": 5301,

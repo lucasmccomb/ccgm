@@ -69,16 +69,14 @@ LOG_REPO_DIR = _find_log_repo()
 # ---------------------------------------------------------------------------
 
 def get_agent_id(working_dir: str | None = None) -> str:
-    """Derive agent ID from the working directory or .env.clone."""
-    wd = working_dir or os.getcwd()
+    """Derive agent ID from the working directory, falling back to .env.clone.
 
-    # Try .env.clone first
-    env_clone = os.path.join(wd, ".env.clone")
-    if os.path.isfile(env_clone):
-        with open(env_clone) as f:
-            for line in f:
-                if line.startswith("AGENT_ID="):
-                    return line.strip().split("=", 1)[1]
+    The path is checked BEFORE `.env.clone`. A copied `.env.clone` used to
+    make several clones report the same agent id, so work done in one clone
+    was recorded in tracking.csv under another clone's name. A directory
+    cannot misreport its own path.
+    """
+    wd = working_dir or os.getcwd()
 
     # Workspace model: directory name ends with w{N}-c{M}
     import re
@@ -91,6 +89,15 @@ def get_agent_id(working_dir: str | None = None) -> str:
     num = re.search(r"-(\d+)$", basename)
     if num:
         return f"agent-{num.group(1)}"
+
+    # Not a clone layout (standalone checkout, worktree): honour an explicit
+    # AGENT_ID if one was placed there deliberately.
+    env_clone = os.path.join(wd, ".env.clone")
+    if os.path.isfile(env_clone):
+        with open(env_clone) as f:
+            for line in f:
+                if line.startswith("AGENT_ID="):
+                    return line.strip().split("=", 1)[1]
 
     return "agent-0"
 

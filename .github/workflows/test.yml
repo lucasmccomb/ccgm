@@ -56,7 +56,11 @@ jobs:
           # assumption). Stage it before running.
           mkdir -p "$HOME/.claude/lib"
           cp modules/hooks/lib/*.py "$HOME/.claude/lib/"
-          for t in modules/hooks/tests/*.sh modules/branch-guard/tests/*.sh modules/ask-context/tests/*.sh; do
+          # port-check.py optionally imports clone_identity from the
+          # multi-agent module; stage it so the dispatched path matches
+          # a real install.
+          cp modules/multi-agent/lib/*.py "$HOME/.claude/lib/"
+          for t in modules/hooks/tests/*.sh modules/branch-guard/tests/*.sh modules/ask-context/tests/*.sh modules/multi-agent/tests/*.sh; do
             echo "=== Running $t ==="
             bash "$t"
           done
@@ -142,7 +146,11 @@ jobs:
           # assumption). Stage it before running.
           mkdir -p "$HOME/.claude/lib"
           cp modules/hooks/lib/*.py "$HOME/.claude/lib/"
-          for t in modules/hooks/tests/*.sh modules/branch-guard/tests/*.sh modules/ask-context/tests/*.sh; do
+          # port-check.py optionally imports clone_identity from the
+          # multi-agent module; stage it so the dispatched path matches
+          # a real install.
+          cp modules/multi-agent/lib/*.py "$HOME/.claude/lib/"
+          for t in modules/hooks/tests/*.sh modules/branch-guard/tests/*.sh modules/ask-context/tests/*.sh modules/multi-agent/tests/*.sh; do
             echo "=== Running $t ==="
             bash "$t"
           done

@@ -558,12 +558,13 @@ There are no agent-discipline logging rules, no log repo writes, and no triggers
 
 Multi-clone architecture for running multiple Claude agents in parallel on the same repo.
 
-**Installs**: `rules/multi-agent.md`, `multi-agent-system.md` (reference doc), `commands/mawf.md`, `commands/workspace-setup.md`, `commands/handoff.md`, `lib/handoff.py`, `port-registry.json`
+**Installs**: `rules/multi-agent.md`, `multi-agent-system.md` (reference doc), `commands/mawf.md`, `commands/workspace-setup.md`, `commands/handoff.md`, `lib/handoff.py`, `lib/clone_identity.py`, `hooks/clone-identity-sync.py`, `port-registry.json`
 
 **What it does**: Enables parallel development with multiple Claude Code instances:
 
 - **Clone organization**: Two models supported - workspace model (`{repo}-workspaces/{repo}-wX/{repo}-wX-cY/`) and flat model (`{repo}-repos/{repo}-N/`)
 - **Port allocation**: Each clone gets unique ports via `port-registry.json` and `.env.clone` to prevent dev server collisions
+- **Self-healing clone identity**: `lib/clone_identity.py` derives a clone's identity and ports from its own absolute path plus the port registry — the only two things that cannot drift — and is the only writer of `.env.clone`. A `SessionStart` hook re-derives and repairs the file every session, so a copied or hand-edited one is corrected instead of believed. `audit` also reports repos missing from the registry and clones deriving the same port.
 - **Issue claiming**: Agents claim issues via the tracking CSV, preventing duplicate work
 - **Workspace setup**: `/workspace-setup` creates isolated workspace directories with clones, labels, and agent identity files
 

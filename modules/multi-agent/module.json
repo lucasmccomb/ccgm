@@ -1,19 +1,66 @@
 {
   "name": "multi-agent",
   "displayName": "Multi-Agent Coordination",
-  "description": "Multi-clone architecture for parallel agent work with issue claiming, port allocation, and the /mawf workflow command.",
+  "description": "Multi-clone architecture for parallel agent work with issue claiming, self-healing per-clone identity and port allocation, and the /mawf workflow command.",
   "category": "workflow",
-  "scope": ["global"],
-  "dependencies": ["startup-dashboard"],
+  "scope": [
+    "global"
+  ],
+  "dependencies": [
+    "startup-dashboard"
+  ],
   "files": {
-    "rules/multi-agent.md": { "target": "rules/multi-agent.md", "type": "rule", "template": false },
-    "multi-agent-system.md": { "target": "multi-agent-system.md", "type": "doc", "template": false },
-    "commands/mawf.md": { "target": "commands/mawf.md", "type": "command", "template": false },
-    "commands/workspace-setup.md": { "target": "commands/workspace-setup.md", "type": "command", "template": false },
-    "commands/handoff.md": { "target": "commands/handoff.md", "type": "command", "template": false },
-    "lib/handoff.py": { "target": "lib/handoff.py", "type": "lib", "template": false },
-    "port-registry.json": { "target": "port-registry.json", "type": "config", "template": true }
+    "rules/multi-agent.md": {
+      "target": "rules/multi-agent.md",
+      "type": "rule",
+      "template": false
+    },
+    "multi-agent-system.md": {
+      "target": "multi-agent-system.md",
+      "type": "doc",
+      "template": false
+    },
+    "commands/mawf.md": {
+      "target": "commands/mawf.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/workspace-setup.md": {
+      "target": "commands/workspace-setup.md",
+      "type": "command",
+      "template": false
+    },
+    "commands/handoff.md": {
+      "target": "commands/handoff.md",
+      "type": "command",
+      "template": false
+    },
+    "lib/handoff.py": {
+      "target": "lib/handoff.py",
+      "type": "lib",
+      "template": false
+    },
+    "lib/clone_identity.py": {
+      "target": "lib/clone_identity.py",
+      "type": "lib",
+      "template": false
+    },
+    "hooks/clone-identity-sync.py": {
+      "target": "hooks/clone-identity-sync.py",
+      "type": "hook",
+      "template": false
+    },
+    "port-registry.json": {
+      "target": "port-registry.json",
+      "type": "config",
+      "template": true
+    }
   },
-  "tags": ["multi-agent", "parallel", "coordination", "workflow"],
+  "tags": [
+    "multi-agent",
+    "parallel",
+    "coordination",
+    "workflow"
+  ],
   "configPrompts": []
 }
