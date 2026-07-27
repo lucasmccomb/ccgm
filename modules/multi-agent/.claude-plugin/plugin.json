@@ -3,7 +3,7 @@
   "author": {
     "name": "CCGM"
   },
-  "description": "Multi-clone architecture for parallel agent work with issue claiming, port allocation, and the /mawf workflow command.",
+  "description": "Multi-clone architecture for parallel agent work with issue claiming, self-healing per-clone identity and port allocation, and the /mawf workflow command.",
   "displayName": "Multi-Agent Coordination",
   "hooks": {
     "SessionStart": [
