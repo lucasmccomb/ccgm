@@ -113,10 +113,10 @@ CCGM_NON_INTERACTIVE=1 \
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `CCGM_NON_INTERACTIVE` | Set to `1` to skip all prompts | - |
-| `CCGM_USERNAME` | GitHub username | auto-detected via `gh` |
 | `CCGM_CODE_DIR` | Code workspace directory | `~/code` |
+| `CCGM_NON_INTERACTIVE` | Set to `1` to skip all prompts | - |
 | `CCGM_TIMEZONE` | Timezone | auto-detected |
+| `CCGM_USERNAME` | GitHub username | auto-detected via `gh` |
 
 Restart Claude Code or start a new session after installation.
 
@@ -132,9 +132,9 @@ For a quick install with a preset:
 |--------|---------|----------|
 | **minimal** | global-claude-md, autonomy, git-workflow | Getting started |
 | **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, ask-context, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline | Most users |
-| **full** | 72 modules | Power users |
 | **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, ask-context, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, writing-system, ce-review, pr-feedback, pr-review-toolkit, document-review, compound-knowledge (+ deps) | Teams |
 | **cloud-agent** | 55 modules | Autonomous/headless agents |
+| **full** | 72 modules | Power users |
 
 ### Other install options
 
@@ -174,82 +174,82 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 
 | Module | Category | Description | Dependencies |
 |--------|----------|-------------|--------------|
-| **global-claude-md** | core | Slim global CLAUDE.md - the root config reference that points to rules, commands, hooks, and settings | - |
-| **autonomy** | core | Claude as a fully autonomous engineer - executes tasks end-to-end without unnecessary questions | - |
-| **identity** | core | Two foundational context files: soul.md (AI personality and philosophy) and human-context.md (who you are, your goals, how you work) | - |
-| **git-workflow** | core | Git rules: sync before history changes, rebase by default, post-merge cleanup, no AI attribution | - |
-| **settings** | core | Base settings.json with 800+ tool permissions, deny list, plugin config. Defaults to safe 'ask' mode | - |
-| **hooks** | core | Python hooks: issue-first workflow, commit format, branch protection, auto-approval for safe ops | settings |
-| **branch-guard** | core | Hard PreToolUse gate: no edits or git mutations while HEAD is on the default branch. Fires before the first edit | settings |
+| **adversarial-review** | workflow | /adrev - adversarial review of a plan or any entity (file, PR, issue, dir, concept). Separate reviewer agent attacks premises and failure modes; plan targets get findings incorporated automatically and four autonomous-execution tenets enforced (minimal human work, follow-up completion, decision context, comprehensive E2E coverage) unless told not to | subagent-patterns |
+| **agent-manager** | workflow | [DEPRECATED] Go-based terminal UI (/agents) for monitoring Claude Code agent processes via tmux. Unmaintained; not offered for new installs, kept in-repo for existing users | multi-agent |
+| **agent-native** | patterns | Principles, audit skill, and a self-eval / red-team rubric for building applications where an agent is a first-class client | - |
+| **argus** | workflow | /argus - closed-loop visual-ATDD harness: deterministic gates plus a separate judge agent score UI renders against a design spec until convergence | subagent-patterns |
 | **ask-context** | core | Hard PreToolUse gate: no AskUserQuestion whose decision context is invisible to the user. Blocks deictic references, identical re-asks after pushback, and mid-workstream questions with no visible text | settings |
-| **model-vetting** | core | Security vetting gate for new AI models: weights provenance, format safety, license/data terms, serving path, staged agentic access | - |
-| **plugin-marketplace** [BETA] | core | Maintainer tooling that projects CCGM modules into a native Claude Code plugin marketplace. The bash installer stays canonical | - |
+| **atdd** | workflow | Agentic Test-Driven Development. /atdd reads Playwright vision specs, iteratively builds app code until all tests pass, then ships | - |
+| **autoheal** | workflow | Self-healing observability loop: captures permission events, tool failures, and user-correction signals to a local JSONL log; daily analyzer (direct Anthropic API) surfaces a digest of proposed config fixes via `/autoheal-digest` and `/autoheal-apply`. Default-off opt-ins: `realtime_alerts_enabled` (mid-session security alerts), `auto_apply_enabled` (confidence-gated apply), `email_enabled` (Resend digest), `webhook_url` (future dev.lem.work seam). Bring-up: `bash start.sh --add autoheal` then `bash modules/autoheal/bin/autoheal-install.sh` | hooks |
+| **autonomy** | core | Claude as a fully autonomous engineer - executes tasks end-to-end without unnecessary questions | - |
+| **brainstorm** | commands | /brainstorm - design-before-implementation gate: forbids code until a design spec with 2-3 approach tradeoffs is written and user-approved, then hands off to /xplan | - |
+| **branch-guard** | core | Hard PreToolUse gate: no edits or git mutations while HEAD is on the default branch. Fires before the first edit | settings |
+| **brand-naming** | commands | /brand (full naming pipeline with word exploration, domain/trademark/app store checks) and /brand-check (single-name deep verification) | - |
+| **browser-automation** | patterns | Browser tool selection (Chrome, Playwright, WebMCP), verification priority, UI testing workflow | - |
+| **capability-router** | commands | /capabilities - decision map for CCGM's overlapping command clusters (research, review, planning, debugging, knowledge), plus a tight always-on pointer rule | - |
+| **ccgm-doctor** | workflow | Audit tool for Claude Code installs: dangling hook/command refs, lexical overlap between command descriptions, and a routing eval | - |
+| **ce-review** | commands | /ce-review unified code-review orchestrator. Composes scope-drift, learnings-researcher, tier-sharpener, and review-synthesizer with structured JSON findings | - |
+| **cloud-dispatch** | workflow | Delegate GitHub issues to autonomous Claude Code agents on Hetzner Cloud VMs. Includes /dispatch, /dispatch-status, /dispatch-stop, /vm-manage commands | - |
+| **cloudflare** | tech-specific | Pages vs Workers selection, deployment methods, Git integration requirements | - |
+| **code-quality** | patterns | Code standards, testing requirements, error handling, security, build verification | - |
 | **commands-core** | commands | /commit, /pr, /cpm (commit-PR-merge), /gs (git status), /ghi (create issue) | - |
 | **commands-extra** | commands | /audit (codebase audit), /pwv (Playwright verify), /walkthrough, /promote-rule | - |
+| **commands-preamble** | workflow | [EXPERIMENTAL] UserPromptSubmit hook that injects a compact preamble of iron-law principles into every prompt | - |
 | **commands-utility** | commands | /cws-submit (Chrome Web Store walkthrough), /ccgm-sync (sync config back to the CCGM repo), /user-test (browser user testing) | - |
-| **ce-review** | commands | /ce-review unified code-review orchestrator. Composes scope-drift, learnings-researcher, tier-sharpener, and review-synthesizer with structured JSON findings | - |
-| **onboarding** | commands | /onboarding - analyzes a repository and generates a structured ONBOARDING.md for new contributors | - |
-| **pr-review-toolkit** | commands | Augments the external pr-review-toolkit plugin with scope-drift detection on top of the standard code/test/comment/silent-failure/type passes | - |
-| **ship-readiness** | commands | /ship-ready - at-a-glance merge-gate dashboard for the current branch: checks, conflicts, diff size, reviewer state | - |
-| **documentation** | commands | /docupdate (comprehensive documentation audit: README, TOC, onboarding, packages, module coverage) | - |
+| **common-mistakes** | patterns | 8 battle-tested anti-patterns: shallow exploration, dependency blindness, ESLint Fast Refresh, more | - |
+| **compound-knowledge** | workflow | Team-shared learnings in `docs/solutions/`. After solving a non-trivial problem, capture the pattern in a versioned schema | - |
 | **copycat** | commands | /copycat (analyze external Claude Code config repos for CCGM improvements) | - |
 | **debugging** | commands | /debug (structured root-cause debugging with Opus) | - |
-| **brand-naming** | commands | /brand (full naming pipeline with word exploration, domain/trademark/app store checks) and /brand-check (single-name deep verification) | - |
-| **editorial-critique** | commands | /editorial-critique - 8-pass editorial review of long-form writing: prose craft, AI-tell detection, argument, conciseness, accuracy, structure, impact, grammar. Scored report with auto-fix | - |
-| **design-review** | commands | /design-review - 6-pass visual design review: spacing, typography, responsive, hierarchy, accessibility, consistency. Screenshots + CSS analysis with auto-fix | - |
-| **ideate** | commands | /ideate - structured ideation framework: Socratic interview to refine ideas to 95% clarity, then hand off to /deepresearch or /xplan | - |
-| **brainstorm** | commands | /brainstorm - design-before-implementation gate: forbids code until a design spec with 2-3 approach tradeoffs is written and user-approved, then hands off to /xplan | - |
-| **research** | commands | /research - multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, Reddit. Zero dependencies.* | - |
-| **youtube-transcripts** | commands | /transcript - extracts a YouTube transcript via yt-dlp AND dispatches a subagent to write an opinionated implications doc against your project memory. One slug+date, two saved files | - |
-| **capability-router** | commands | /capabilities - decision map for CCGM's overlapping command clusters (research, review, planning, debugging, knowledge), plus a tight always-on pointer rule | - |
 | **deepresearch** | commands | /deepresearch - multi-query semantic research via the Exa MCP server: parallel query fan-out synthesized into a structured research.md | - |
-| **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
-| **startup-dashboard** | workflow | Plain-text `/startup` dashboard: git state, tracking claims, live sessions, recent activity (via session-history /recall) | session-history |
-| **session-history** | workflow | `/recall` for unified session transcript history across all clones of a repo; session-historian agent for deeper retrieval | - |
-| **multi-agent** | workflow | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | startup-dashboard |
-| **atdd** | workflow | Agentic Test-Driven Development. /atdd reads Playwright vision specs, iteratively builds app code until all tests pass, then ships | - |
-| **test-vision** | workflow | Vision-driven e2e test suite generation. /test-vision for full repo analysis + parallel test suite creation. /e2e for single-feature spec generation | browser-automation, multi-agent |
-| **xplan** | workflow | Interactive planning framework: discovery interview, deep research, tech stack sign-off, constructive peer review + a 3-pass sequential adversarial review that enforces four plan-execution tenets (minimal/edge-bucketed human work, follow-up completion, autonomous decision context, comprehensive autonomous E2E test suite), parallel agent execution. Requires [/deepresearch](#companion-module-deepresearch) | multi-agent, adversarial-review |
-| **remote-server** | workflow | SSH access to a configured remote server with /onremote command for health checks and remote task execution | - |
-| **agent-manager** | workflow | [DEPRECATED] Go-based terminal UI (/agents) for monitoring Claude Code agent processes via tmux. Unmaintained; not offered for new installs, kept in-repo for existing users | multi-agent |
-| **cloud-dispatch** | workflow | Delegate GitHub issues to autonomous Claude Code agents on Hetzner Cloud VMs. Includes /dispatch, /dispatch-status, /dispatch-stop, /vm-manage commands | - |
-| **self-improving** | workflow | Meta-learning system: /reflect and /consolidate commands, PostToolUse hook (PR merge/issue close reminders), PreCompact hook (pre-compaction capture), prescriptive reflection triggers | - |
-| **autoheal** | workflow | Self-healing observability loop: captures permission events, tool failures, and user-correction signals to a local JSONL log; daily analyzer (direct Anthropic API) surfaces a digest of proposed config fixes via `/autoheal-digest` and `/autoheal-apply`. Default-off opt-ins: `realtime_alerts_enabled` (mid-session security alerts), `auto_apply_enabled` (confidence-gated apply), `email_enabled` (Resend digest), `webhook_url` (future dev.lem.work seam). Bring-up: `bash start.sh --add autoheal` then `bash modules/autoheal/bin/autoheal-install.sh` | hooks |
-| **dreaming** [BETA] | workflow | Nightly, cost-capped transcript-mining pipeline: deterministic miner extracts cross-session friction from session transcripts, map-reduce analyzer (direct Anthropic API) proposes evidence-tagged `self-improving` learnings-store changes, digest via `/dream-digest`, read-only reconciliation report against Claude Code's own auto-memory, a memory eval harness (with/without-memory A/B, four-bucket outcome classification), and a weekly observability scorecard (`/dream-scorecard`). Human-gated apply (`/dream-apply`) is always available; opt-in `optimistic_integration` (default off, activated via `memory-setup.sh`, never a hand JSON edit) auto-integrates per-op-kind instead — immediate for `verify`, a 24h dwell window for `add`/`supersede`/`contradict`/`deprecate` — bounded by per-slug blast caps, a batch-anomaly check, a windowed circuit breaker, and an opt-in composite eligibility gate (add/supersede only, default off) that scores admission on four transcript-verified signals, with post-hoc review + rollback via `/dream-review` and `ccgm-learnings-sync revert`. Bring-up: `bash start.sh --add dreaming` then `bash modules/dreaming/bin/dream-install.sh` | hooks, self-improving, session-history |
-| **subagent-patterns** | workflow | Subagent dispatch: task decomposition, spec-driven delegation, two-stage review, parallel coordination, concurrency/rate-limit throttling | - |
-| **commands-preamble** | workflow | [EXPERIMENTAL] UserPromptSubmit hook that injects a compact preamble of iron-law principles into every prompt | - |
-| **compound-knowledge** | workflow | Team-shared learnings in `docs/solutions/`. After solving a non-trivial problem, capture the pattern in a versioned schema | - |
-| **document-review** | workflow | Seven-lens plan-quality gate. /document-review fans out to 7 role-specific reviewers (coherence, feasibility, product, scope, design, security, adversarial) with structured JSON findings | skill-authoring, subagent-patterns |
-| **adversarial-review** | workflow | /adrev - adversarial review of a plan or any entity (file, PR, issue, dir, concept). Separate reviewer agent attacks premises and failure modes; plan targets get findings incorporated automatically and four autonomous-execution tenets enforced (minimal human work, follow-up completion, decision context, comprehensive E2E coverage) unless told not to | subagent-patterns |
-| **git-worktrees** | workflow | Git worktrees as the default isolation for parallel sub-agent delegation on one machine, with a safe janitor (/worktree-sweep) that enforces teardown so worktrees never silently fill the disk | - |
-| **pr-feedback** | workflow | /resolve-pr-feedback - fetches unresolved PR review threads via GraphQL, clusters 3+ items by category, dispatches parallel resolver agents | skill-authoring, subagent-patterns |
-| **todos** | workflow | File-based review-finding tracker. Review findings, PR nitpicks, and tech debt tracked with structured YAML | - |
-| **argus** | workflow | /argus - closed-loop visual-ATDD harness: deterministic gates plus a separate judge agent score UI renders against a design spec until convergence | subagent-patterns |
-| **ccgm-doctor** | workflow | Audit tool for Claude Code installs: dangling hook/command refs, lexical overlap between command descriptions, and a routing eval | - |
-| **launch** | workflow | /launch - takes a one-page spec to a deployed Cloudflare Pages site, stopping only for the Connect-to-Git dashboard step | cloudflare, git-workflow, docs-for-agents |
-| **relevance-injection** [BETA] | workflow | Opt-in relevance-scoped rule injection with a tiered always-on safety core. Off by default | hooks |
-| **session-lifecycle** | workflow | /sds - autonomous session shutdown: commit dirty work, update issues, reflect, write a handoff, broadcast to sibling clones | multi-agent, self-improving, git-workflow |
-| **skillify** | workflow | /skillify - promotes an ad-hoc session capability into a durable skill with triggers, an optional helper script, and a pinning test | - |
-| **statusline** | workflow | Compact statusline: model + effort, clone identity, dir + branch, context %, session cost, rate-limit bars | - |
-| **code-quality** | patterns | Code standards, testing requirements, error handling, security, build verification | - |
-| **browser-automation** | patterns | Browser tool selection (Chrome, Playwright, WebMCP), verification priority, UI testing workflow | - |
-| **common-mistakes** | patterns | 8 battle-tested anti-patterns: shallow exploration, dependency blindness, ESLint Fast Refresh, more | - |
-| **systematic-debugging** | patterns | 4-phase root cause investigation: investigate, analyze, test hypotheses, implement fix | - |
-| **test-driven-development** | patterns | Strict red-green-refactor TDD discipline. No production code without a failing test first | - |
-| **verification** | patterns | Evidence-before-claims: fresh execution of verification commands, read full output before asserting done | - |
-| **agent-native** | patterns | Principles, audit skill, and a self-eval / red-team rubric for building applications where an agent is a first-class client | - |
-| **make-interfaces-feel-better** | patterns | Design-engineering details that compound into polished interfaces. Model-invoked skill covering design direction, typography, surfaces, animations, performance | - |
-| **rule-authoring** | patterns | Discipline for writing rules that hold up under pressure. Treats rule authoring as a first-class skill with iron-law structure | - |
-| **skill-authoring** | patterns | Discipline for writing skills and slash commands that stay efficient, portable, and structured across models | - |
+| **design-review** | commands | /design-review - 6-pass visual design review: spacing, typography, responsive, hierarchy, accessibility, consistency. Screenshots + CSS analysis with auto-fix | - |
 | **docs-for-agents** | patterns | AGENTS.md rule + template: machine-readable docs with copy-pasteable command blocks alongside the human docs | - |
+| **document-review** | workflow | Seven-lens plan-quality gate. /document-review fans out to 7 role-specific reviewers (coherence, feasibility, product, scope, design, security, adversarial) with structured JSON findings | skill-authoring, subagent-patterns |
+| **documentation** | commands | /docupdate (comprehensive documentation audit: README, TOC, onboarding, packages, module coverage) | - |
+| **dreaming** [BETA] | workflow | Nightly, cost-capped transcript-mining pipeline: deterministic miner extracts cross-session friction from session transcripts, map-reduce analyzer (direct Anthropic API) proposes evidence-tagged `self-improving` learnings-store changes, digest via `/dream-digest`, read-only reconciliation report against Claude Code's own auto-memory, a memory eval harness (with/without-memory A/B, four-bucket outcome classification), and a weekly observability scorecard (`/dream-scorecard`). Human-gated apply (`/dream-apply`) is always available; opt-in `optimistic_integration` (default off, activated via `memory-setup.sh`, never a hand JSON edit) auto-integrates per-op-kind instead — immediate for `verify`, a 24h dwell window for `add`/`supersede`/`contradict`/`deprecate` — bounded by per-slug blast caps, a batch-anomaly check, a windowed circuit breaker, and an opt-in composite eligibility gate (add/supersede only, default off) that scores admission on four transcript-verified signals, with post-hoc review + rollback via `/dream-review` and `ccgm-learnings-sync revert`. Bring-up: `bash start.sh --add dreaming` then `bash modules/dreaming/bin/dream-install.sh` | hooks, self-improving, session-history |
+| **editorial-critique** | commands | /editorial-critique - 8-pass editorial review of long-form writing: prose craft, AI-tell detection, argument, conciseness, accuracy, structure, impact, grammar. Scored report with auto-fix | - |
+| **git-workflow** | core | Git rules: sync before history changes, rebase by default, post-merge cleanup, no AI attribution | - |
+| **git-worktrees** | workflow | Git worktrees as the default isolation for parallel sub-agent delegation on one machine, with a safe janitor (/worktree-sweep) that enforces teardown so worktrees never silently fill the disk | - |
+| **github-protocols** | workflow | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
+| **global-claude-md** | core | Slim global CLAUDE.md - the root config reference that points to rules, commands, hooks, and settings | - |
+| **hooks** | core | Python hooks: issue-first workflow, commit format, branch protection, auto-approval for safe ops | settings |
+| **ideate** | commands | /ideate - structured ideation framework: Socratic interview to refine ideas to 95% clarity, then hand off to /deepresearch or /xplan | - |
+| **identity** | core | Two foundational context files: soul.md (AI personality and philosophy) and human-context.md (who you are, your goals, how you work) | - |
+| **launch** | workflow | /launch - takes a one-page spec to a deployed Cloudflare Pages site, stopping only for the Connect-to-Git dashboard step | cloudflare, git-workflow, docs-for-agents |
+| **make-interfaces-feel-better** | patterns | Design-engineering details that compound into polished interfaces. Model-invoked skill covering design direction, typography, surfaces, animations, performance | - |
+| **mcp-development** | tech-specific | Building MCP servers: project structure, tool design, error handling, testing, evaluation patterns | - |
+| **model-vetting** | core | Security vetting gate for new AI models: weights provenance, format safety, license/data terms, serving path, staged agentic access | - |
+| **multi-agent** | workflow | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | startup-dashboard |
+| **onboarding** | commands | /onboarding - analyzes a repository and generates a structured ONBOARDING.md for new contributors | - |
 | **output-formatting** | patterns | Copy-pasteable content goes in fenced code blocks, never blockquotes, so it pastes clean anywhere | - |
 | **output-styles** | patterns | Packages the always-on tone rules as Claude Code output styles - a prompt-cached system-prompt layer instead of per-turn rule files | - |
-| **writing-system** | patterns | Orwell's six rules as the global prose standard for docs, PR text, commits, and reports, plus /rewrite (violations list, then rewrite; mode:landing swap test) | - |
-| **cloudflare** | tech-specific | Pages vs Workers selection, deployment methods, Git integration requirements | - |
-| **supabase** | tech-specific | API key terminology, env var naming, migration validation, database workflow | - |
-| **mcp-development** | tech-specific | Building MCP servers: project structure, tool design, error handling, testing, evaluation patterns | - |
+| **plugin-marketplace** [BETA] | core | Maintainer tooling that projects CCGM modules into a native Claude Code plugin marketplace. The bash installer stays canonical | - |
+| **pr-feedback** | workflow | /resolve-pr-feedback - fetches unresolved PR review threads via GraphQL, clusters 3+ items by category, dispatches parallel resolver agents | skill-authoring, subagent-patterns |
+| **pr-review-toolkit** | commands | Augments the external pr-review-toolkit plugin with scope-drift detection on top of the standard code/test/comment/silent-failure/type passes | - |
+| **relevance-injection** [BETA] | workflow | Opt-in relevance-scoped rule injection with a tiered always-on safety core. Off by default | hooks |
+| **remote-server** | workflow | SSH access to a configured remote server with /onremote command for health checks and remote task execution | - |
+| **research** | commands | /research - multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, Reddit. Zero dependencies.* | - |
+| **rule-authoring** | patterns | Discipline for writing rules that hold up under pressure. Treats rule authoring as a first-class skill with iron-law structure | - |
+| **self-improving** | workflow | Meta-learning system: /reflect and /consolidate commands, PostToolUse hook (PR merge/issue close reminders), PreCompact hook (pre-compaction capture), prescriptive reflection triggers | - |
+| **session-history** | workflow | `/recall` for unified session transcript history across all clones of a repo; session-historian agent for deeper retrieval | - |
+| **session-lifecycle** | workflow | /sds - autonomous session shutdown: commit dirty work, update issues, reflect, write a handoff, broadcast to sibling clones | multi-agent, self-improving, git-workflow |
+| **settings** | core | Base settings.json with 800+ tool permissions, deny list, plugin config. Defaults to safe 'ask' mode | - |
 | **shadcn** | tech-specific | shadcn/ui patterns: composition, semantic theming tokens, form architecture, accessibility | - |
+| **ship-readiness** | commands | /ship-ready - at-a-glance merge-gate dashboard for the current branch: checks, conflicts, diff size, reviewer state | - |
+| **skill-authoring** | patterns | Discipline for writing skills and slash commands that stay efficient, portable, and structured across models | - |
+| **skillify** | workflow | /skillify - promotes an ad-hoc session capability into a durable skill with triggers, an optional helper script, and a pinning test | - |
+| **startup-dashboard** | workflow | Plain-text `/startup` dashboard: git state, tracking claims, live sessions, recent activity (via session-history /recall) | session-history |
+| **statusline** | workflow | Compact statusline: model + effort, clone identity, dir + branch, context %, session cost, rate-limit bars | - |
+| **subagent-patterns** | workflow | Subagent dispatch: task decomposition, spec-driven delegation, two-stage review, parallel coordination, concurrency/rate-limit throttling | - |
+| **supabase** | tech-specific | API key terminology, env var naming, migration validation, database workflow | - |
+| **systematic-debugging** | patterns | 4-phase root cause investigation: investigate, analyze, test hypotheses, implement fix | - |
 | **tailwind** | tech-specific | Tailwind CSS v4 design system: CSS-first config, design tokens, CVA variants, dark mode, responsive grids | - |
+| **test-driven-development** | patterns | Strict red-green-refactor TDD discipline. No production code without a failing test first | - |
+| **test-vision** | workflow | Vision-driven e2e test suite generation. /test-vision for full repo analysis + parallel test suite creation. /e2e for single-feature spec generation | browser-automation, multi-agent |
+| **todos** | workflow | File-based review-finding tracker. Review findings, PR nitpicks, and tech debt tracked with structured YAML | - |
+| **verification** | patterns | Evidence-before-claims: fresh execution of verification commands, read full output before asserting done | - |
+| **writing-system** | patterns | Orwell's six rules as the global prose standard for docs, PR text, commits, and reports, plus /rewrite (violations list, then rewrite; mode:landing swap test) | - |
+| **xplan** | workflow | Interactive planning framework: discovery interview, deep research, tech stack sign-off, constructive peer review + a 3-pass sequential adversarial review that enforces four plan-execution tenets (minimal/edge-bucketed human work, follow-up completion, autonomous decision context, comprehensive autonomous E2E test suite), parallel agent execution. Also ships /xplana (same depth, zero mid-flow prompts, plan delivered as one artifact), /etp (execute a ready plan or issues end-to-end), /xplan-status, /xplan-resume. Requires [/deepresearch](#companion-module-deepresearch) | multi-agent, adversarial-review |
+| **youtube-transcripts** | commands | /transcript - extracts a YouTube transcript via yt-dlp AND dispatches a subagent to write an opinionated implications doc against your project memory. One slug+date, two saved files | - |
 
 *\* `/research` works out of the box with no setup. For higher-quality results, install [/deepresearch](#companion-module-deepresearch) - the same fan-out backed by Exa semantic search with full page contents. Needs a free Exa API key.*
 
@@ -300,11 +300,11 @@ Config files use placeholders that are expanded during installation:
 
 | Variable | Description | Used By |
 |----------|-------------|---------|
-| `__HOME__` | Home directory path | settings |
-| `__USERNAME__` | GitHub username | hooks |
 | `__CODE_DIR__` | Code workspace directory | settings |
-| `__TIMEZONE__` | Your timezone | - |
 | `__DEFAULT_MODE__` | Permission mode (ask/dontAsk) | settings |
+| `__HOME__` | Home directory path | settings |
+| `__TIMEZONE__` | Your timezone | - |
+| `__USERNAME__` | GitHub username | hooks |
 
 ## Manual Installation
 
@@ -374,7 +374,7 @@ The `docs/` directory contains comprehensive documentation:
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
 | [Module Catalog](docs/modules.md) | Detailed reference for all 76 modules |
-| [Commands Reference](docs/commands.md) | All 77 slash commands with usage examples |
+| [Commands Reference](docs/commands.md) | All 78 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 24 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |

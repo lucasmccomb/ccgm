@@ -194,6 +194,64 @@ else
   ok "no stale allowlist entries"
 fi
 
+# --- (f) README module catalog is alphabetical and complete -----------------
+# The catalog is a lookup table, so its row order is load-bearing: a module
+# appended at the bottom is a module nobody can find. Pull the rows bounded by
+# the catalog header separator (the presets and memory tables also start rows
+# with "| **", so an unbounded grep would sweep them in).
+
+CATALOG_NAMES=$(awk '
+  index($0, "|--------|----------|-------------|--------------|") == 1 { in_tbl = 1; next }
+  in_tbl && index($0, "| **") == 1 {
+    line = $0
+    sub(/^\| \*\*/, "", line)
+    sub(/\*\*.*$/, "", line)
+    print line
+    next
+  }
+  in_tbl { exit }
+' README.md)
+
+CATALOG_ROW_COUNT=$(printf '%s\n' "$CATALOG_NAMES" | grep -c . | tr -d ' ')
+
+if [ "$CATALOG_ROW_COUNT" != "$MODULE_COUNT" ]; then
+  fail "README module catalog has $CATALOG_ROW_COUNT rows, expected $MODULE_COUNT
+  -> add or remove the catalog row so it matches modules/*/module.json."
+else
+  ok "README module catalog has one row per module ($MODULE_COUNT)"
+fi
+
+if [ "$CATALOG_NAMES" = "$(printf '%s\n' "$CATALOG_NAMES" | sort -f)" ]; then
+  ok "README module catalog is sorted alphabetically"
+else
+  fail "README module catalog is not sorted alphabetically. First divergence:
+$(diff <(printf '%s\n' "$CATALOG_NAMES") <(printf '%s\n' "$CATALOG_NAMES" | sort -f) | head -6)
+  -> re-sort the catalog rows by module name."
+fi
+
+CATALOG_UNKNOWN=$(comm -13 <(printf '%s\n' "$ALL_MODULES") <(printf '%s\n' "$CATALOG_NAMES" | sort) || true)
+CATALOG_MISSING=$(comm -23 <(printf '%s\n' "$ALL_MODULES") <(printf '%s\n' "$CATALOG_NAMES" | sort) || true)
+
+if [ -n "$CATALOG_UNKNOWN" ] || [ -n "$CATALOG_MISSING" ]; then
+  fail "README module catalog does not match modules/ on disk.
+  listed but no such module:${CATALOG_UNKNOWN:- none}
+  module exists but unlisted:${CATALOG_MISSING:- none}"
+else
+  ok "README module catalog lists exactly the modules on disk"
+fi
+
+# --- (g) command + hook count claims track the reference docs ---------------
+# README advertises how many commands and hooks the reference docs cover. Derive
+# both from the docs themselves so the advertised number cannot go stale.
+
+COMMANDS_DOC_COUNT=$(grep -cE '^### /' docs/commands.md 2>/dev/null | tr -d ' ' || true)
+HOOKS_DOC_COUNT=$(grep -cE '^### .*\.py$' docs/hooks.md 2>/dev/null | tr -d ' ' || true)
+echo "Derived commands-doc count: $COMMANDS_DOC_COUNT"
+echo "Derived hooks-doc count: $HOOKS_DOC_COUNT"
+
+check_count_claim "README.md" "All __N__ slash commands" "$COMMANDS_DOC_COUNT"
+check_count_claim "README.md" "All __N__ hooks explained" "$HOOKS_DOC_COUNT"
+
 # --- Result -----------------------------------------------------------------
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
