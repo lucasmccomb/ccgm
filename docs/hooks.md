@@ -18,7 +18,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. The **self-improving** module installs 3 additional hooks, the **branch-guard** module 1, and the **ask-context** module 1. Total: 20 hooks across 4 modules (the **autoheal** module's observational hooks are documented in their own section below).
+The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. Seven other modules add the rest: **self-improving** 3, **subagent-patterns** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, **commands-preamble**, and **relevance-injection**. Total: 25 hooks across 8 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 31).
 
 ---
 
@@ -321,6 +321,127 @@ Hard gate ensuring every AskUserQuestion carries visible decision context. The u
 Experimental (OFF by default). Injects a rule-enforcement meta-instruction at fresh session start, reminding the agent to route through the discipline rules (TDD, systematic-debugging, verification) as real gates.
 
 **Opt in**: Set `CCGM_RULE_ENFORCEMENT=true` in `~/.claude/.ccgm.env`. Fires only on `source == "startup"`, not on resume or compaction.
+
+---
+
+### pretooluse-bash-dispatch.py
+
+**Type**: PreToolUse:Bash
+**Module**: hooks
+**Can block**: Yes (hard block, deny, allow, or ask)
+
+The default PreToolUse:Bash handler, and the single process every Bash command passes through. It replaces what used to be a six-process chain (`enforce-git-workflow` → `auto-approve-bash` → `port-check` → `agent-tracking-pre` → `check-migration-timestamps` → `check-careful`) with one process that runs the same checks in-process, by priority.
+
+Two things this buys over the old chain. Each command previously spawned six Python interpreters in sequence, each re-importing `hook_utils` and re-parsing stdin. And precedence was an emergent property of array order in `settings.json` across modules that knew nothing about each other; it is now declared.
+
+**Declarative manifest** (priority order mirrors the legacy registration order):
+
+| Priority | Check | Decisions | Runs in bypass | Short-circuit |
+|----------|-------|-----------|----------------|---------------|
+| 10 | `git_workflow_check` | hard_block / advisory | Yes | No |
+| 20 | `destructive_check` | hard_block | Yes | Yes |
+| 30 | `smart_rules_check` | hard_block / allow | Yes | Yes |
+| 40 | `port_advisory_check` | advisory | No | No |
+| 50 | `agent_tracking_check` | advisory | No | No |
+| 60 | `migration_timestamp_check` | hard_block | Yes | No |
+| 70 | `force_push_main_check` | hard_block | Yes | No |
+| 80 | `careful_check` | ask | No | No |
+| 90 | `pattern_check` | deny / allow | No | No |
+
+**Precedence**: `hard_block` > `deny` > `allow` > `ask`. The first `hard_block` wins and exits 2, the only signal Claude Code honors regardless of permission mode. Advisory output never affects the decision and is flushed for every check that produced it.
+
+**Bypass mode**: a check declaring `runs_in_bypass=False` is skipped in bypass mode, matching the legacy hooks that exited early there. The destructive set, data-integrity blocks, and protected-branch enforcement declare `runs_in_bypass=True` and run above that short-circuit.
+
+**Reverting**: the six standalone hooks stay installed and individually runnable. Restoring their six PreToolUse:Bash entries in `settings.json` returns the legacy path.
+
+**Equivalence**: `modules/hooks/tests/test-dispatcher.sh` runs both paths over an adversarial command battery across all four permission modes and asserts identical decisions on all 224 (command × mode) pairs. Run it through that script, not `equivalence_harness.py` directly - the harness needs the fixture `HOME` the script builds.
+
+---
+
+### sync-ccgm-canonical.py
+
+**Type**: PostToolUse:Bash
+**Module**: hooks
+**Can block**: No
+
+Keeps the canonical CCGM checkout current after a CCGM PR merges. `~/.claude/` symlinks point at one canonical clone; when PRs merge from workspace clones, that checkout drifts until something pulls it.
+
+**Fires when all three hold**:
+- The Bash command invokes `gh pr merge` in any segment (it is usually chained after a `cd`, so the hook scans segments rather than the first token)
+- The cwd's git remote points at a repo named `ccgm`, any owner
+- The canonical clone exists at `$CCGM_CANONICAL_DIR` (default `~/code/ccgm`)
+
+Runs `git fetch origin main && git pull --ff-only origin main` there, logs the result to stderr, and always exits 0. A failed sync never blocks the merge.
+
+---
+
+### auto-startup.py
+
+**Type**: SessionStart (matcher `startup|resume`)
+**Module**: startup-dashboard
+**Can block**: No (context injection only)
+
+Prompts Claude to run `/startup` on fresh sessions and surfaces recent handoffs left by other clones of the same repo.
+
+Fires only when `source == "startup"`. It stays silent on `resume` on purpose, so a resumed session picks up mid-task instead of being pushed into a dashboard render.
+
+**Also does**: prunes handoffs older than 30 days for the current repo, opportunistically.
+
+**Gated by**: `CCGM_AUTO_STARTUP` in `~/.claude/.ccgm.env`. Disable by setting it to `false` or removing it.
+
+---
+
+### inject-preamble.py
+
+**Type**: UserPromptSubmit
+**Module**: commands-preamble
+**Can block**: No (context injection only)
+
+Experimental, opt-in, off by default. Prepends a compact preamble of iron-law principles to slash-command prompts.
+
+Rules in `~/.claude/rules/` cover the main conversation thread, but a slash command expands into its own context and can drift from principles that should be active from the first token rather than whenever the agent next rereads `CLAUDE.md`. This hook puts a distilled version in front of the command at invocation time.
+
+**Enable**: `touch ~/.claude/preamble.enabled`. Remove that file to disable; without it the hook exits silently and the prompt is unchanged. Content lives at `~/.claude/preamble/preamble.md` and is read at runtime, so edits take effect with no rebuild.
+
+---
+
+### relevance-inject.py
+
+**Type**: SessionStart (matcher `startup`)
+**Module**: relevance-injection
+**Can block**: No (context injection only)
+
+Opt-in and off by default. CCGM installs every selected module's rules to `~/.claude/rules/`, where Claude Code auto-loads all of them every session. This hook offers an alternative: surface a pointer to the subset relevant to the current task profile, with a safety core that is always included.
+
+**Safety properties**, in the order they matter:
+- With `CCGM_RELEVANCE_INJECTION` unset in `~/.claude/.ccgm.env` — the default on every install — the hook reads stdin, finds no flag, and returns without emitting anything. The normal all-rules-loaded behavior is untouched.
+- It only ever adds a pointer. It never deletes a rule file and never suppresses the auto-load path.
+- The pointer is `additionalContext`, not authority. Every rule file stays on disk and stays loadable; the pointer biases attention, it does not gate access.
+- Fires only on `source == "startup"`, not resume or compaction.
+
+---
+
+### subagent-stop-check.py
+
+**Type**: SubagentStop
+**Module**: subagent-patterns
+**Can block**: Yes (one narrow case)
+
+Blocks only when a subagent's last assistant message is empty or whitespace-only. Allows everything else, and allows immediately when `stop_hook_active` is set, for loop protection.
+
+An earlier version called Haiku on every subagent stop to judge whether the agent had finished its task. It over-blocked, because the hook input carries too little transcript context for that judgment, and it added up to 15 seconds per stop event. Completion discipline belongs upstream, in the subagent-patterns rules (the DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT protocol) and in the reviewer agents — not in static analysis of a single message.
+
+---
+
+### task-completed-check.py
+
+**Type**: TaskCompleted
+**Module**: subagent-patterns
+**Can block**: No (always allows)
+
+Always allows completion. Writes a stderr warning when the task description is empty or placeholder-like (`todo`, `tbd`, `wip`, and similar), but never blocks on it.
+
+The slot is kept registered so deterministic logic can be added later — telemetry, description linting — without a new registration. Like `subagent-stop-check.py`, this replaced a Haiku-backed version that blocked legitimate completions from inputs (`task_subject`, `task_description`) that cannot support the judgment.
 
 ---
 

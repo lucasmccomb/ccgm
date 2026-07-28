@@ -882,6 +882,29 @@ Every plan is engineered to execute with minimal human involvement (human work b
 
 ---
 
+### /xplana
+
+**Autonomous xplan - the same pipeline with no mid-flow prompts.**
+
+Thin alias for `/xplan --autonomous`. Runs research, naming, tech stack, scope, multi-agent setup, plan creation, the full standard review, the self-review loop, and all three sequential adversarial review passes end to end, then presents the finished plan as a structured artifact at a single final gate.
+
+Depth is identical to `/xplan`. The difference is where you spend your attention: `/xplan` asks at each phase boundary, `/xplana` asks once, at the end. Use it when you would have approved every gate anyway, or when you want to start a plan and walk away. Use `/xplan` when you expect to redirect it mid-flight - once `/xplana` is running, the next decision point is the final artifact.
+
+**Flags**:
+- `--repo <path>` - Analyze and plan work for an existing repo
+- `--deepen [<plan-dir>]` - Load an existing plan and run targeted deepening passes instead of planning fresh
+
+**Usage**:
+```
+/xplana "Build a SaaS dashboard with auth, billing, and analytics"
+/xplana "Add offline sync" --repo ~/code/myapp
+/xplana --deepen ~/code/plans/my-feature
+```
+
+**Installed by**: xplan module
+
+---
+
 ### /xplan-status
 
 **Check progress on a running or completed xplan.**
@@ -1311,6 +1334,37 @@ Generates 5-10 adversarial scenarios targeting a rule's discipline, dispatches s
 
 ---
 
+## Skillify commands
+
+Installed by the **skillify** module.
+
+---
+
+### /skillify
+
+**Promote a session capability into a durable skill.**
+
+Takes a multi-step process that just worked in conversation and makes it permanent: a command file with triggers and rules, deterministic code for the parts that need no judgment, a test that pins the behavior, and a learnings-store entry so later sessions find it.
+
+The split between prose and code is the point. Steps that need judgment stay as instructions; steps with one right answer become a helper script the skill calls, with a test around it. A process that lives only in a transcript is gone next session.
+
+**Reach for it when**:
+- A multi-step process just worked and is likely to recur (an OAuth setup, a deploy sequence, a verification ritual)
+- The agent made a mistake that should be structurally impossible to repeat
+- You said some version of "remember this" or "make that a skill"
+
+Takes an optional kebab-case name for the new skill. With no argument it proposes one from what just happened and confirms before writing any files.
+
+**Usage**:
+```
+/skillify
+/skillify cloudflare-pages-setup
+```
+
+**Installed by**: skillify module
+
+---
+
 ## Git worktrees commands
 
 Installed by the **git-worktrees** module.
@@ -1482,6 +1536,35 @@ Walks every doc under `docs/solutions/**/*.md` and classifies each as Keep / Upd
 
 ---
 
+### /compound-reproject
+
+**Generate derived artifacts from existing `docs/solutions/` entries.**
+
+Reads the solutions already captured by `/compound` and projects them into a new shape without touching the source files. Four projection types:
+
+| Type | What it produces |
+|------|------------------|
+| `qa` | Question-and-answer pairs drawn from the entries |
+| `contradictions` | Entries that disagree with each other, made explicit |
+| `summary` | A restructured alternative summary of the set |
+| `outline` | A synthesized narrative outline across entries |
+
+Output lands in `docs/solutions/_reprojections/{type}-{timestamp}.md` with source IDs kept on every derived claim, so anything in a projection traces back to the entry it came from. Source entries are never mutated - a bad projection is deleted, not reverted.
+
+`type:` is required. `tag:` filters source entries by frontmatter tag (repeatable, any-match), `n:` caps how many entries are read (default 50), and `topic:` biases selection after the tag filter.
+
+**Usage**:
+```
+/compound-reproject type:qa tag:supabase
+/compound-reproject type:contradictions n:30
+/compound-reproject type:outline topic:authentication
+/compound-reproject type:summary tag:migrations tag:postgres
+```
+
+**Installed by**: compound-knowledge module
+
+---
+
 ### /argus
 
 **Visual-ATDD convergence loop.**
@@ -1566,6 +1649,26 @@ Takes a loose, half-formed idea and interviews you until the concept is sharp en
 
 ---
 
+### /launch
+
+**One-page spec to a deployed Cloudflare Pages site.**
+
+Ten phases, run end to end: pre-flight, parse the spec, create the GitHub repo, scaffold, implement the deliverables, push, create the Pages project via Connect-to-Git, provision secrets, optionally attach a custom domain, then verify and report. Default scaffold is Vite + React + TypeScript; the spec can override it.
+
+The skill stops exactly once, for the Cloudflare Connect-to-Git dashboard step, which needs your browser session. That stop is deliberate and not worked around: `/launch` never runs `wrangler pages deploy <new-name>` to create a project, because a direct-upload Pages project cannot be given Git integration afterward. Recovering from that mistake means deleting the project and migrating domains, env vars, and bindings to a replacement.
+
+**Modes**: interactive (default), `mode:dry-run`. Dry-run prints every `gh`, `git`, `npm`, `wrangler`, and `curl` command that would run, in order, with the inputs each would receive, and executes nothing - no repos created, no files written, no deployments. Use it to check the skill against a spec before spending a real Cloudflare project.
+
+**Usage**:
+```
+/launch path/to/spec.md
+/launch path/to/spec.md mode:dry-run
+```
+
+**Installed by**: launch module
+
+---
+
 ### /make-interfaces-feel-better
 
 **Design-engineering principles for polished interfaces.**
@@ -1578,6 +1681,27 @@ Reference skill for making interfaces feel polished. Covers concentric border ra
 ```
 
 **Installed by**: make-interfaces-feel-better module
+
+---
+
+### /pr-description
+
+**Write a PR title and body. Nothing else.**
+
+Takes a PR reference or the current branch, reads the diff, the commits, the linked issue, and the repo's PR template if one exists, and returns a structured `{title, body}` in CCGM voice: value first, then the concrete changes, then how it was verified.
+
+It does not call `gh pr create` or `gh pr edit`. That separation is what makes it composable - `/pr` and `/cpm` call it for the prose and keep the publishing to themselves, and any other caller can do the same without inheriting a side effect it did not ask for.
+
+Accepts a PR as a bare number, `#561`, `pr:561`, a full GitHub URL, or a branch name; with no argument it uses the current branch. Free-text is treated as a steering hint and can be combined with any of those, so `pr:561 emphasize the perf numbers` means "PR #561, lean on perf." When no PR exists yet it works off `origin/main...HEAD`, so a caller can preview the body before pushing.
+
+**Usage**:
+```
+/pr-description                              # current branch
+/pr-description 893                          # a specific PR
+/pr-description pr:561 emphasize the benchmarks
+```
+
+**Installed by**: commands-core module
 
 ---
 

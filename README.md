@@ -374,8 +374,8 @@ The `docs/` directory contains comprehensive documentation:
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
 | [Module Catalog](docs/modules.md) | Detailed reference for all 76 modules |
-| [Commands Reference](docs/commands.md) | All 78 slash commands with usage examples |
-| [Hooks Reference](docs/hooks.md) | All 24 hooks explained - what they do and when they fire |
+| [Commands Reference](docs/commands.md) | All 83 slash commands with usage examples |
+| [Hooks Reference](docs/hooks.md) | All 31 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |
 | [Configuration](docs/configuration.md) | Customization, template variables, settings overrides |
