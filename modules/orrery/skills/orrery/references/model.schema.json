@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OrreryModel",
+  "description": "Merged, screened model (plan section 3.3): the same element/relation shapes as fragment.schema.json plus run meta, after screening and dedupe. Elements gain source_packs[] provenance from the merge.",
+  "type": "object",
+  "required": ["meta", "elements", "relations"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["slug", "repo_title", "remote_url", "default_ref", "anchor_sha", "visibility", "generated_at", "source_links", "areas"],
+      "properties": {
+        "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+        "repo_title": { "type": "string" },
+        "remote_url": { "type": ["string", "null"], "description": "Stored ONLY after credential stripping (any user[:token]@ userinfo removed). Null for a no-remote repo." },
+        "default_ref": { "type": "string" },
+        "anchor_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "visibility": { "enum": ["public", "private", "unknown"] },
+        "generated_at": { "type": "string" },
+        "source_links": { "enum": ["github", "none (non-GitHub remote)"] },
+        "areas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "root_paths"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+              "title": { "type": "string" },
+              "root_paths": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "elements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "title", "summary"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "parent": { "type": ["string", "null"] },
+          "kind": { "enum": ["system", "actor", "container", "component", "datastore", "queue", "external_service", "cloud_provider", "package", "tool", "file"] },
+          "title": { "type": "string", "maxLength": 60 },
+          "summary": { "type": "string", "maxLength": 200 },
+          "description": { "type": "string", "maxLength": 2000 },
+          "technology": { "type": "string" },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path"],
+              "properties": {
+                "path": { "type": "string", "pattern": "^[^/]" },
+                "start_line": { "type": "integer", "minimum": 1 },
+                "end_line": { "type": "integer", "minimum": 1 }
+              }
+            }
+          },
+          "external_url": { "type": ["string", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "source_packs": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "summary"],
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "kind": { "enum": ["uses", "calls", "reads", "writes", "deploys_to", "depends_on", "triggers"] },
+          "summary": { "type": "string", "maxLength": 200 }
+        }
+      }
+    }
+  }
+}

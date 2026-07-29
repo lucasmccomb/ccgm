@@ -1,0 +1,28 @@
+// orrery house palette (plan section 3.4a, frozen v1 emission shape).
+// A raw hex literal is NOT valid inside a style block at likec4@1.59.2:
+// custom colors are declared once in the specification and referenced by name.
+specification {
+  color orrery_system    #4C6EF5
+  color orrery_actor     #845EF7
+  color orrery_container #3B5BDB
+  color orrery_component #5C7CFA
+  color orrery_datastore #0CA678
+  color orrery_queue     #0B7285
+  color orrery_cloud     #495057
+  color orrery_external  #868E96
+  color orrery_package   #ADB5BD
+  color orrery_tool      #CED4DA
+  color orrery_file      #748FFC
+
+  element system           { style { shape rectangle color orrery_system } }
+  element actor            { style { shape person    color orrery_actor } }
+  element container        { style { shape rectangle color orrery_container } }
+  element component        { style { shape rectangle color orrery_component } }
+  element datastore        { style { shape storage   color orrery_datastore } }
+  element queue            { style { shape queue     color orrery_queue } }
+  element cloud_provider   { style { shape rectangle color orrery_cloud } }
+  element external_service { style { shape rectangle color orrery_external } }
+  element package          { style { shape rectangle color orrery_package } }
+  element tool             { style { shape rectangle color orrery_tool } }
+  element file             { style { shape rectangle color orrery_file size sm } }
+}

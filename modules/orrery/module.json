@@ -1,0 +1,20 @@
+{
+  "name": "orrery",
+  "displayName": "Orrery: Codebase System Map",
+  "description": "/orrery - deep-dives any codebase with parallel read-only scout agents and generates an interactive, zoomable, embeddable system-design map as one self-contained HTML file: 4 zoom tiers (landscape to key files), file-level GitHub links pinned to an anchor SHA, external systems, and per-node product-context prose. /orrery update refreshes incrementally. Under construction: this release ships the scaffold - the lockfile-pinned LikeC4 render/validate toolchain, the fragment/model JSON contracts, the restricted orrery-scout agent, and deterministic fixtures; the full build flow lands in later epics.",
+  "category": "commands",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "skills/orrery/SKILL.md": { "target": "skills/orrery/SKILL.md", "type": "skill", "template": false },
+    "agents/orrery-scout.md": { "target": "agents/orrery-scout.md", "type": "agent", "template": false },
+    "skills/orrery/references/fragment.schema.json": { "target": "skills/orrery/references/fragment.schema.json", "type": "doc", "template": false },
+    "skills/orrery/references/model.schema.json": { "target": "skills/orrery/references/model.schema.json", "type": "doc", "template": false },
+    "skills/orrery/scripts/likec4.sh": { "target": "skills/orrery/scripts/likec4.sh", "type": "script", "template": false },
+    "skills/orrery/scripts/render_map.sh": { "target": "skills/orrery/scripts/render_map.sh", "type": "script", "template": false },
+    "skills/orrery/scripts/toolchain/package.json": { "target": "skills/orrery/scripts/toolchain/package.json", "type": "doc", "template": false },
+    "skills/orrery/scripts/toolchain/package-lock.json": { "target": "skills/orrery/scripts/toolchain/package-lock.json", "type": "doc", "template": false }
+  },
+  "tags": ["orrery", "system-map", "architecture", "diagram", "likec4", "c4", "visualization", "codebase-map", "portfolio", "embeddable"],
+  "configPrompts": []
+}

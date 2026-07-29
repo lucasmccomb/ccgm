@@ -1,0 +1,11 @@
+// Deliberately broken model for tests/e2e/test-validate-gate.sh.
+// The relation targets an element that does not exist, so
+// `likec4 validate --json` must exit 1 with structured errors while
+// `likec4 build` still exits 0 (documented, never used as a gate).
+specification {
+  element system
+}
+model {
+  sys = system 'Broken Fixture'
+  sys -> ghost 'points at a nonexistent element'
+}

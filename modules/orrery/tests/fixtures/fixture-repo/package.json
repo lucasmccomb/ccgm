@@ -1,0 +1,17 @@
+{
+  "name": "acme-shop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "stripe": "14.0.0"
+  },
+  "devDependencies": {
+    "vite": "5.0.0",
+    "wrangler": "3.0.0"
+  }
+}

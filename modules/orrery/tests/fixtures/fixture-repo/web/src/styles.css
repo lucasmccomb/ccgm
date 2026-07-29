@@ -1,0 +1,2 @@
+:root { --acme-accent: #4c6ef5; }
+.grid { display: grid; gap: 1rem; }

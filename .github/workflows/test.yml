@@ -93,6 +93,45 @@ jobs:
               --offline modules/dreaming/tests/fixtures/offline-responses \
               --force-day 2026-01-02
 
+      # --- orrery module (plan section 8.4: named steps in BOTH jobs) --------
+      - name: Orrery - setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Orrery - read pinned playwright version
+        id: orrery-pw
+        run: echo "version=$(python3 -c "import json; print(json.load(open('modules/orrery/skills/orrery/scripts/toolchain/package-lock.json'))['packages']['node_modules/playwright']['version'])")" >> "$GITHUB_OUTPUT"
+
+      - name: Orrery - cache npm store (keyed by lockfile hash)
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-orrery-npm-${{ hashFiles('modules/orrery/skills/orrery/scripts/toolchain/package-lock.json') }}
+
+      - name: Orrery - cache playwright browsers (keyed by playwright version)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-orrery-playwright-${{ steps.orrery-pw.outputs.version }}
+
+      - name: Orrery - install playwright chromium (via pinned toolchain)
+        # Retry once on a transient download failure (plan section 11 browser-
+        # provisioning row); a second failure fails the step.
+        run: |
+          bash modules/orrery/skills/orrery/scripts/likec4.sh playwright install chromium --with-deps \
+            || bash modules/orrery/skills/orrery/scripts/likec4.sh playwright install chromium --with-deps
+
+      - name: Orrery module tests (ORRERY_STRICT=1)
+        run: |
+          set -e
+          # pytest is not ambient on hosted runners (PEP 668) - venv-install it,
+          # same pattern as the dreaming step above.
+          python3 -m venv /tmp/ccgm-orrery-test-venv
+          source /tmp/ccgm-orrery-test-venv/bin/activate
+          python3 -m pip install --quiet pytest
+          ORRERY_STRICT=1 bash modules/orrery/tests/test-orrery.sh
+
   test-macos:
     runs-on: macos-latest
     steps:
@@ -178,3 +217,42 @@ jobs:
             bash modules/dreaming/bin/dream-daily.sh \
               --offline modules/dreaming/tests/fixtures/offline-responses \
               --force-day 2026-01-02
+
+      # --- orrery module (plan section 8.4: named steps in BOTH jobs) --------
+      - name: Orrery - setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Orrery - read pinned playwright version
+        id: orrery-pw
+        run: echo "version=$(python3 -c "import json; print(json.load(open('modules/orrery/skills/orrery/scripts/toolchain/package-lock.json'))['packages']['node_modules/playwright']['version'])")" >> "$GITHUB_OUTPUT"
+
+      - name: Orrery - cache npm store (keyed by lockfile hash)
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-orrery-npm-${{ hashFiles('modules/orrery/skills/orrery/scripts/toolchain/package-lock.json') }}
+
+      - name: Orrery - cache playwright browsers (keyed by playwright version)
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: ${{ runner.os }}-orrery-playwright-${{ steps.orrery-pw.outputs.version }}
+
+      - name: Orrery - install playwright chromium (via pinned toolchain)
+        # Retry once on a transient download failure (plan section 11 browser-
+        # provisioning row); a second failure fails the step.
+        run: |
+          bash modules/orrery/skills/orrery/scripts/likec4.sh playwright install chromium \
+            || bash modules/orrery/skills/orrery/scripts/likec4.sh playwright install chromium
+
+      - name: Orrery module tests (ORRERY_STRICT=1)
+        run: |
+          set -e
+          # pytest is not ambient on hosted runners (PEP 668) - venv-install it,
+          # same pattern as the dreaming step above.
+          python3 -m venv /tmp/ccgm-orrery-test-venv
+          source /tmp/ccgm-orrery-test-venv/bin/activate
+          python3 -m pip install --quiet pytest
+          ORRERY_STRICT=1 bash modules/orrery/tests/test-orrery.sh

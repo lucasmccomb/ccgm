@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS products (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  price_cents INTEGER NOT NULL
+);

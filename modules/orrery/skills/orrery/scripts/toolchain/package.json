@@ -1,0 +1,9 @@
+{
+  "name": "orrery-toolchain",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned LikeC4 render/validate toolchain for the orrery module. Installed via npm ci into a lockfile-hash-keyed cache dir by likec4.sh - never npx.",
+  "dependencies": {
+    "likec4": "1.59.2"
+  }
+}

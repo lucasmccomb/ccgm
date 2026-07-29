@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "/orrery - deep-dives any codebase with parallel read-only scout agents and generates an interactive, zoomable, embeddable system-design map as one self-contained HTML file: 4 zoom tiers (landscape to key files), file-level GitHub links pinned to an anchor SHA, external systems, and per-node product-context prose. /orrery update refreshes incrementally. Under construction: this release ships the scaffold - the lockfile-pinned LikeC4 render/validate toolchain, the fragment/model JSON contracts, the restricted orrery-scout agent, and deterministic fixtures; the full build flow lands in later epics.",
+  "displayName": "Orrery: Codebase System Map",
+  "keywords": [
+    "architecture",
+    "c4",
+    "codebase-map",
+    "diagram",
+    "embeddable",
+    "likec4",
+    "orrery",
+    "portfolio",
+    "system-map",
+    "visualization"
+  ],
+  "license": "MIT",
+  "name": "orrery"
+}

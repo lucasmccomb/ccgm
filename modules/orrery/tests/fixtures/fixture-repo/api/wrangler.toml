@@ -1,0 +1,8 @@
+name = "acme-shop-api"
+main = "src/worker.js"
+compatibility_date = "2026-01-01"
+
+[[d1_databases]]
+binding = "ORDERS_DB"
+database_name = "acme-orders"
+database_id = "00000000-0000-0000-0000-000000000000"
