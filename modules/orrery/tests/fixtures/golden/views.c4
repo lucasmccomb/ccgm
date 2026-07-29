@@ -1,0 +1,20 @@
+// Authored views cover L1-L3. The L4 tier (file elements under catalog) has NO
+// authored view on purpose: those drill-down views come from implicitViews
+// (likec4.config.json), which the differential detector in test-render-golden.sh
+// asserts on (plan section 3.7).
+views {
+  view index {
+    title 'acme-shop - system landscape'
+    include shopper, system, cloudflare, stripe, orders_db, fulfillment_queue
+  }
+
+  view system_containers of system {
+    title 'Acme Shop - containers'
+    include *
+  }
+
+  view web_components of system.web {
+    title 'Storefront Web - components'
+    include *
+  }
+}

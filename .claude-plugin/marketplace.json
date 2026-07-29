@@ -626,6 +626,24 @@
       ]
     },
     {
+      "category": "commands",
+      "description": "/orrery - deep-dives any codebase with parallel read-only scout agents and generates an interactive, zoomable, embeddable system-design map as one self-contained HTML file: 4 zoom tiers (landscape to key files), file-level GitHub links pinned to an anchor SHA, external systems, and per-node product-context prose. /orrery update refreshes incrementally. Under construction: this release ships the scaffold - the lockfile-pinned LikeC4 render/validate toolchain, the fragment/model JSON contracts, the restricted orrery-scout agent, and deterministic fixtures; the full build flow lands in later epics.",
+      "name": "orrery",
+      "source": "./orrery",
+      "tags": [
+        "architecture",
+        "c4",
+        "codebase-map",
+        "diagram",
+        "embeddable",
+        "likec4",
+        "orrery",
+        "portfolio",
+        "system-map",
+        "visualization"
+      ]
+    },
+    {
       "category": "patterns",
       "description": "Formatting rules for user-facing output: copy-pasteable content (drafts, messages, prompts, config snippets) is delivered in fenced code blocks, never blockquotes, so it pastes clean anywhere.",
       "name": "output-formatting",

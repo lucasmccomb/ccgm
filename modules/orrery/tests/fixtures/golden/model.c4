@@ -1,0 +1,94 @@
+// Golden model for the fictional acme-shop repo (plan Epic 1).
+// Every kind appears at least once (incl. actor + container). Prose models the
+// POST-EMIT state: emit_likec4.py HTML-entity-escapes all repo-derived prose
+// unconditionally (plan section 3.7), so the adversarial payload here is
+// carried in its escaped form - the browser E2E verifies it renders as text.
+model {
+  shopper = actor 'Shopper' {
+    summary 'A customer browsing and buying on the acme-shop storefront.'
+    description 'Evidence: the storefront README describes a public retail flow with guest checkout.'
+  }
+
+  system = system 'Acme Shop' {
+    summary 'Fictional e-commerce demo: storefront, checkout API, orders DB.'
+    description '''
+      **Acme Shop** is the fictional system used by the orrery golden fixture.
+
+      - `web/` renders the storefront
+      - `api/` takes payments via Stripe
+      - orders land in the orders database
+    '''
+
+    web = container 'Storefront Web' {
+      technology 'TypeScript / Vite'
+      summary 'Customer-facing storefront single-page app.'
+      description 'Renders the catalog and cart so the Shopper can browse products and start checkout. Payload check (escaped, must render as text): &lt;img src=x onerror=&quot;window.orreryAdvPayload=1&quot;&gt; orrery-adv-payload'
+
+      catalog = component 'Catalog Browser' {
+        summary 'Product listing and search. orrery-adv-payload check in an on-canvas summary: &lt;script&gt;window.orreryAdvPayload=2&lt;/script&gt;'
+        description 'Lists products from the catalog feed because the Shopper needs to find items before checkout.'
+
+        // Title is a unique marker: it must appear nowhere else in the model
+        // (not even in the link URL) so the differential implicit-views
+        // detector counts view occurrences cleanly (1x = model data only).
+        catalog_grid = file 'ProductGridFixtureL4' {
+          summary 'Key file: the product grid renderer.'
+          description 'The L4 tier fixture element. It has NO authored view, so its drill-down view exists only when implicitViews is honored - the differential detector counts occurrences of this title.'
+          link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/web/src/components/ProductGridFixture.tsx#L1-L10 'source'
+        }
+      }
+
+      cart = component 'Cart' {
+        summary 'Client-side cart state.'
+        description 'Holds the pending order because checkout needs a stable line-item list.'
+      }
+    }
+
+    api = container 'Checkout API' {
+      technology 'Cloudflare Worker'
+      summary 'Serverless checkout and payment endpoint.'
+      description 'Charges cards via Stripe and writes orders, because the storefront itself never touches card data.'
+    }
+  }
+
+  orders_db = datastore 'Orders DB' {
+    summary 'Relational store for orders.'
+    description 'Backing store for completed checkouts.'
+  }
+
+  fulfillment_queue = queue 'Fulfillment Queue' {
+    summary 'Async order-fulfillment queue.'
+    description 'Decouples checkout latency from warehouse processing.'
+  }
+
+  cloudflare = cloud_provider 'Cloudflare' {
+    summary 'Edge platform the API deploys onto.'
+    description 'The wrangler config in api/ deploys the checkout worker here.'
+    link https://developers.cloudflare.com 'docs'
+  }
+
+  stripe = external_service 'Stripe' {
+    summary 'Third-party payment SaaS.'
+    description 'Card processing consumed via API from the checkout worker.'
+    link https://stripe.com/docs 'docs'
+  }
+
+  stripe_sdk = package 'stripe-node' {
+    summary 'In-process Stripe client library.'
+    description 'Notable dependency declared in package.json.'
+  }
+
+  wrangler_cli = tool 'Wrangler CLI' {
+    summary 'Deploy tooling for the checkout worker.'
+    description 'Dev/CI tool, not in the runtime path.'
+  }
+
+  shopper -> system 'browses and buys'
+  web -> api 'submits checkout'
+  catalog -> cart 'adds items'
+  api -> stripe 'charges cards'
+  api -> orders_db 'writes orders'
+  api -> fulfillment_queue 'enqueues fulfillment jobs'
+  api -> cloudflare 'deploys to'
+  api -> stripe_sdk 'uses'
+}
