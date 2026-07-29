@@ -78,8 +78,7 @@ Do NOT pick an option on the user's behalf. If the reply is not `1`, `2`, `3`, o
 5. Show the staged diff. Ask the user to confirm the squash commit message.
 6. `git commit -m "<message>"`
 7. Push: ask first. If confirmed, `git push origin main`.
-8. Remove the worktree: `git worktree remove <path>`
-9. Delete the branch: `git branch -D <branch>` (safe after squash merge).
+8. Tear down the worktree and its branch in one step: `bash ~/.claude/lib/worktree-sweep.sh --worktree <path>`. This removes the worktree, prunes the metadata, and deletes the branch after verifying the squash merge absorbed it. Do **not** hand-roll `git branch -D` — it is denied and hard-blocked, and chaining it onto `git worktree remove` kills the removal too (issue #907).
 
 #### Option 2: Push and Open PR
 
@@ -115,7 +114,7 @@ Branch: <branch>
 3. If the typed reply does not match the branch name exactly, abort and report: "Discard cancelled - typed name did not match."
 4. If it matches:
    - `git worktree remove --force <path>`
-   - `git branch -D <branch>`
+   - `ALLOW_BRANCH_FORCE_DELETE=1 git branch -D <branch>` — discard is the one case where throwing commits away is the point, so it uses the escape hatch rather than the sweep (which by design refuses to delete an unmerged branch). The typed confirmation in step 2 is what authorizes it.
    - If the branch was pushed, ask separately whether to delete the remote: `git push origin --delete <branch>`. This is a second typed confirmation.
 5. Report: worktree and branch discarded.
 

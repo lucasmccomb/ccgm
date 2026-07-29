@@ -83,7 +83,10 @@ identical to `/permission-fix apply <id>` and the opt-in
    via `git apply`.
 6. Run `tests/test-modules.sh` and `tests/test-no-personal-data.sh`.
    If either fails: revert the branch (`git checkout main`,
-   `git branch -D autoheal/{id}`), surface the failure, exit non-zero.
+   `ALLOW_BRANCH_FORCE_DELETE=1 git branch -D autoheal/{id}`), surface the
+   failure, exit non-zero. The hatch is required because force-deleting a
+   branch is hard-blocked by default; discarding this just-created,
+   test-failing branch is exactly the intentional case it exists for.
 7. If tests pass: commit with message
    `#auto: apply autoheal proposal {proposal-id}`. The `#auto:`
    prefix is recognized by `enforce-git-workflow.py` as a non-issue

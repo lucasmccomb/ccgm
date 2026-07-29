@@ -121,6 +121,24 @@ def destructive_check(data: dict) -> "hd.Result":
     return hd.Result()
 
 
+def force_branch_delete_check(data: dict) -> "hd.Result":
+    """`git branch` force-delete: hard-block naming the segment and the way out.
+
+    Bypass-safe on purpose. In bypass mode the pattern check never runs, so
+    without this the only message an agent sees is Claude Code's own generic
+    "Permission to use Bash with command <whole chain> has been denied" —
+    which reads as if worktree removal were blocked (issue #907).
+    """
+    aab = _load_hook("aab", "auto-approve-bash.py")
+    command = _command(data)
+    if data.get("tool_name", "") != "Bash" or not command:
+        return hd.Result()
+    segment, reason = aab.check_force_branch_delete(command)
+    if segment:
+        return hd.Result(hd.HARD_BLOCK, reason or "force branch delete blocked")
+    return hd.Result()
+
+
 def smart_rules_check(data: dict) -> "hd.Result":
     """git reset --hard smart-rule: allow remote-ref resets, hard-block others."""
     aab = _load_hook("aab", "auto-approve-bash.py")
