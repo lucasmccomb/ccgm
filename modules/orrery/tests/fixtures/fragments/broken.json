@@ -1,0 +1,10 @@
+{
+  "pack": "broken",
+  "elements": [
+    {
+      "id": "Bad-Id",
+      "kind": "component",
+      "title": "Invalid fragment fixture: bad id pattern and missing summary"
+    }
+  ]
+}

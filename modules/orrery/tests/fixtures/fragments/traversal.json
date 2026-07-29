@@ -1,0 +1,15 @@
+{
+  "pack": "traversal",
+  "elements": [
+    {
+      "id": "sneaky",
+      "kind": "component",
+      "title": "Traversal fixture",
+      "summary": "Schema-valid fragment whose file path must be rejected by validate_map.py check 3.",
+      "description": "The path below has no leading slash (so it passes the schema pattern) but contains .. segments.",
+      "files": [{ "path": "../../../etc/passwd" }]
+    }
+  ],
+  "relations": [],
+  "open_questions": []
+}

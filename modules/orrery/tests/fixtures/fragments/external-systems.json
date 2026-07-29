@@ -1,0 +1,77 @@
+{
+  "pack": "external-systems",
+  "elements": [
+    {
+      "id": "system",
+      "kind": "system",
+      "title": "Acme Shop",
+      "summary": "Fictional e-commerce demo: storefront, checkout API, orders DB.",
+      "description": "**Acme Shop** is the fictional system the orrery fixtures describe. The manifests declare a Vite storefront and a Cloudflare Worker checkout path, and orders land in a relational store. This copy of the reserved-id element carries the longer description, so the merge picks it as the winner.",
+      "files": [{ "path": "package.json" }],
+      "tags": ["fixture"]
+    },
+    {
+      "id": "cloudflare",
+      "kind": "cloud_provider",
+      "title": "Cloudflare",
+      "summary": "Edge platform the checkout worker deploys onto.",
+      "description": "The wrangler config in api/ deploys the checkout worker here, evidenced by the deploy workflow.",
+      "files": [{ "path": "api/wrangler.toml" }],
+      "external_url": "https://developers.cloudflare.com",
+      "tags": ["infra"]
+    },
+    {
+      "id": "stripe",
+      "kind": "external_service",
+      "title": "Stripe",
+      "summary": "Third-party payment SaaS consumed via API from the checkout worker.",
+      "description": "The worker charges cards through the Stripe API so the storefront never touches card data.",
+      "files": [{ "path": "api/src/worker.js", "start_line": 1, "end_line": 20 }],
+      "external_url": "https://stripe.com/docs"
+    },
+    {
+      "id": "orders_db",
+      "kind": "datastore",
+      "title": "Orders DB",
+      "summary": "Relational store for completed checkouts.",
+      "description": "The migrations in db/migrations define the orders schema this store carries.",
+      "files": [{ "path": "db/migrations/0001_init.sql" }]
+    },
+    {
+      "id": "fulfillment_queue",
+      "kind": "queue",
+      "title": "Fulfillment Queue",
+      "summary": "Async order-fulfillment queue decoupling checkout latency from processing.",
+      "description": "The checkout worker enqueues fulfillment jobs after a successful charge.",
+      "files": [{ "path": "api/src/worker.js" }]
+    },
+    {
+      "id": "stripe_sdk",
+      "kind": "package",
+      "title": "stripe-node",
+      "summary": "In-process Stripe client library declared in package.json.",
+      "description": "Notable runtime dependency: the checkout worker builds charges through it.",
+      "files": [{ "path": "package.json" }]
+    },
+    {
+      "id": "wrangler_cli",
+      "kind": "tool",
+      "title": "Wrangler CLI",
+      "summary": "Deploy tooling for the checkout worker; dev/CI only, not in the runtime path.",
+      "description": "The deploy workflow runs wrangler against api/wrangler.toml.",
+      "files": [{ "path": "api/wrangler.toml" }]
+    },
+    {
+      "id": "payments_gateway",
+      "kind": "external_service",
+      "title": "Payments Gateway",
+      "summary": "Cross-pack collision fixture: same id as a product-vision element with DISJOINT files.",
+      "description": "This copy cites the deploy workflow; the product-vision copy cites the wrangler config. Disjoint evidence means the merge must flag a collision, never fuse.",
+      "files": [{ "path": ".github/workflows/deploy.yml" }]
+    }
+  ],
+  "relations": [],
+  "open_questions": [
+    "The deploy workflow names a staging environment that no manifest declares."
+  ]
+}

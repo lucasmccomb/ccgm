@@ -1,0 +1,26 @@
+{
+  "pack": "area-@AREA_ID@",
+  "elements": [
+    {
+      "id": "@AREA_ID@__migrations",
+      "kind": "component",
+      "title": "Orders Migrations",
+      "summary": "Schema migrations for the orders store.",
+      "description": "Defines the orders tables because checkout writes need a stable schema. The worker config references the placeholder key sk_test_fixturefake123, which is NOT secret-shaped and must NOT be quarantined.",
+      "parent": "api",
+      "files": [{ "path": "db/migrations/0001_init.sql" }]
+    },
+    {
+      "id": "@AREA_ID@__orders_schema",
+      "kind": "file",
+      "title": "0002_orders.sql",
+      "summary": "Key file: the orders table definition.",
+      "parent": "@AREA_ID@__migrations",
+      "files": [{ "path": "db/migrations/0002_orders.sql", "start_line": 1, "end_line": 5 }]
+    }
+  ],
+  "relations": [
+    { "from": "@AREA_ID@__migrations", "to": "orders_db", "kind": "writes", "summary": "defines the schema for" }
+  ],
+  "open_questions": []
+}
