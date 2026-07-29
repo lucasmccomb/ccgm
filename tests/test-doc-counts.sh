@@ -201,7 +201,7 @@ fi
 # with "| **", so an unbounded grep would sweep them in).
 
 CATALOG_NAMES=$(awk '
-  index($0, "|--------|----------|-------------|--------------|") == 1 { in_tbl = 1; next }
+  index($0, "|--------|----------|----------|-------------|--------------|") == 1 { in_tbl = 1; next }
   in_tbl && index($0, "| **") == 1 {
     line = $0
     sub(/^\| \*\*/, "", line)
@@ -238,6 +238,57 @@ if [ -n "$CATALOG_UNKNOWN" ] || [ -n "$CATALOG_MISSING" ]; then
   module exists but unlisted:${CATALOG_MISSING:- none}"
 else
   ok "README module catalog lists exactly the modules on disk"
+fi
+
+# --- (f2) README catalog Commands column matches module.json ----------------
+# The Commands column is pure fact, derived from each module.json files[] block.
+# A module that gains a command without surfacing it in the catalog fails here,
+# so the column cannot silently fall behind the modules it describes.
+
+CATALOG_CMD_DIFF=$(python3 - <<'PYEOF'
+import json, pathlib, re, sys
+
+def declared(mod):
+    d = json.load(open(f"modules/{mod}/module.json"))
+    out = set()
+    for f in d.get("files", {}):
+        if f.startswith("commands/") and f.endswith(".md"):
+            out.add(pathlib.Path(f).stem)
+        elif f.startswith("skills/") and f.endswith("SKILL.md"):
+            out.add(pathlib.Path(f).parts[1])
+    return sorted(out)
+
+lines = pathlib.Path("README.md").read_text().split("\n")
+SEP = "|--------|----------|----------|-------------|--------------|"
+try:
+    s = lines.index(SEP)
+except ValueError:
+    print("catalog separator not found; the column layout changed")
+    sys.exit(0)
+
+e = s + 1
+problems = []
+while e < len(lines) and lines[e].startswith("| **"):
+    cells = [c.strip() for c in lines[e].strip().strip("|").split(" | ")]
+    name = re.match(r"\*\*([^*]+)\*\*", cells[0]).group(1)
+    want = ", ".join("`/" + c + "`" for c in declared(name)) or "-"
+    if len(cells) != 5:
+        problems.append(f"{name}: row has {len(cells)} cells, expected 5")
+    elif cells[2] != want:
+        problems.append(f"{name}: column says [{cells[2]}], module.json declares [{want}]")
+    e += 1
+
+for p in problems:
+    print(p)
+PYEOF
+)
+
+if [ -n "$CATALOG_CMD_DIFF" ]; then
+  fail "README catalog Commands column disagrees with module.json:
+$CATALOG_CMD_DIFF
+  -> update the Commands cell so it lists every command and skill the module installs."
+else
+  ok "README catalog Commands column matches every module.json"
 fi
 
 # --- (g) command + hook count claims track the reference docs ---------------
