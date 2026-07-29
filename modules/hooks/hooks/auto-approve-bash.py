@@ -8,9 +8,10 @@ short-circuit so they survive bypass mode via `hook_utils.hard_block()`.
 
 Execution order in main():
   1. curated destructive set (always run; hard_block, bypass-proof)
-  2. smart-rules (always run; destructive-reset → hard_block, bypass-proof)
-  3. bypass-mode short-circuit (exit 0)
-  4. settings.json allow/deny pattern matching (per-segment)
+  2. force branch delete (always run; hard_block, bypass-proof)
+  3. smart-rules (always run; destructive-reset → hard_block, bypass-proof)
+  4. bypass-mode short-circuit (exit 0)
+  5. settings.json allow/deny pattern matching (per-segment)
 
 Deny/allow matching is PER SEGMENT: the command is decomposed on &&, ||, ;,
 |, newlines, and command substitution before matching, so a chained command
@@ -206,6 +207,114 @@ def check_destructive(command: str) -> tuple[str | None, str | None]:
     return (None, None)
 
 
+# Escape hatch for a genuinely-intended force delete of an unmerged branch.
+# Honored from the environment or inline on the command, matching the
+# ALLOW_MAIN_COMMIT convention in branch-guard.py / enforce-git-workflow.py.
+_FORCE_DELETE_HATCH = "ALLOW_BRANCH_FORCE_DELETE"
+_TRUTHY = frozenset({"1", "true", "yes"})
+
+
+def _git_branch_args(segment: str) -> list[str] | None:
+    """Return the argument tokens of a `git branch` segment, else None.
+
+    Skips the global options that may sit between `git` and the subcommand
+    (`-C <path>`, `-c key=val`, `--git-dir=...`), so `git -C /repo branch -D x`
+    is recognized. Anything that is not a `git branch` invocation — including a
+    segment that merely mentions the string in a grep pattern or an echo —
+    returns None.
+    """
+    tokens = segment.split()
+    if not tokens or tokens[0] != "git":
+        return None
+    i = 1
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in ("-C", "-c"):
+            i += 2  # consumes its value
+            continue
+        if tok.startswith("--") or tok.startswith("-"):
+            i += 1
+            continue
+        break
+    if i >= len(tokens) or tokens[i] != "branch":
+        return None
+    return tokens[i + 1:]
+
+
+def is_force_branch_delete(segment: str) -> bool:
+    """True if `segment` is a `git branch` invocation that force-deletes.
+
+    Covers every spelling git accepts, not just the literal `-D` prefix the
+    settings.json deny pattern matches: `-D`, `-d -f`, `--delete --force`,
+    combined short flags (`-Df`, `-fd`), and any order.
+    """
+    args = _git_branch_args(segment)
+    if args is None:
+        return False
+    has_delete = has_force = False
+    for tok in args:
+        if tok == "--":
+            break
+        if tok.startswith("--"):
+            if tok == "--delete":
+                has_delete = True
+            elif tok == "--force":
+                has_force = True
+        elif tok.startswith("-") and len(tok) > 1:
+            letters = tok[1:]
+            if "D" in letters:
+                has_delete = has_force = True
+            if "d" in letters:
+                has_delete = True
+            if "f" in letters:
+                has_force = True
+    return has_delete and has_force
+
+
+def check_force_branch_delete(command: str) -> tuple[str | None, str | None]:
+    """Block `git branch` force-deletes, naming the segment and the way out.
+
+    Runs ABOVE the bypass short-circuit in main() so the reason reaches the
+    agent in bypassPermissions sessions. There, the settings.json pattern
+    check never runs, and Claude Code's own deny enforcement emits a generic
+    "Permission to use Bash with command <whole chain> has been denied" — which
+    reads as if worktree removal were blocked and makes agents abandon teardown
+    (GitHub issue #907).
+
+    Returns (segment, reason) on the first force-delete segment, else
+    (None, None).
+    """
+    if os.environ.get(_FORCE_DELETE_HATCH, "").strip().lower() in _TRUTHY:
+        return (None, None)
+    if f"{_FORCE_DELETE_HATCH}=1" in command:
+        return (None, None)
+
+    for segment in split_command_segments(command):
+        if not is_force_branch_delete(segment):
+            continue
+        return (
+            segment,
+            f"Force-deleting a branch is blocked. ONLY this segment is at fault: {segment!r}\n"
+            "Every other segment of your command is permitted — `git worktree remove` and "
+            "`git worktree prune` are both on the allow list. Re-run them without this segment "
+            "and they will succeed.\n"
+            "\n"
+            "`git branch -D` can discard commits that exist nowhere else, so it is never "
+            "permitted ad hoc. Use the janitor, which deletes a branch only after verifying "
+            "the default branch already contains its work (merged OR squash-merged):\n"
+            "\n"
+            "  # tear down one worktree: remove it, prune, delete its branch if absorbed\n"
+            "  bash ~/.claude/lib/worktree-sweep.sh --worktree <path-to-worktree>\n"
+            "\n"
+            "  # worktree already gone? sweep leftover absorbed branches\n"
+            "  bash ~/.claude/lib/worktree-sweep.sh --merged-branches\n"
+            "\n"
+            "If the branch is genuinely unmerged and you intend to discard its commits, say so "
+            f"explicitly: `{_FORCE_DELETE_HATCH}=1 git branch -D <branch>`.",
+        )
+    return (None, None)
+
+
 def check_smart_rules(command: str) -> tuple[str | None, str | None]:
     """
     Context-aware rules for commands that are safe in some forms but dangerous in others.
@@ -298,7 +407,14 @@ def main() -> None:
     if destructive_label:
         hook_utils.hard_block(destructive_reason or "destructive command blocked")
 
-    # 2. Smart-rules run next, also OUTSIDE the bypass short-circuit so the
+    # 2. Force branch-delete runs OUTSIDE the bypass short-circuit too. In
+    #    bypass mode the pattern check below never runs, so this is the only
+    #    place an actionable reason can reach the agent (issue #907).
+    fbd_segment, fbd_reason = check_force_branch_delete(command)
+    if fbd_segment:
+        hook_utils.hard_block(fbd_reason or "force branch delete blocked")
+
+    # 3. Smart-rules run next, also OUTSIDE the bypass short-circuit so the
     #    destructive-reset hard-blocks even in bypass mode.
     smart_decision, smart_reason = check_smart_rules(command)
     if smart_decision == "hard_block":
@@ -307,13 +423,13 @@ def main() -> None:
         hook_utils.emit_decision("allow", smart_reason or "smart-rule allow")
     # "deny" via smart-rule is unused now (legacy path).
 
-    # 3. Bypass mode: skip pattern matching. The session has opted out
+    # 4. Bypass mode: skip pattern matching. The session has opted out
     #    of permission noise, and smart-rule hard-blocks have already
     #    fired for the genuinely dangerous cases.
     if hook_utils.is_bypass_mode(input_data):
         sys.exit(0)
 
-    # 4. Pattern matching against settings.json allow/deny lists.
+    # 5. Pattern matching against settings.json allow/deny lists.
     allow_patterns, deny_patterns = load_settings()
     decision, reason = check_pattern_decision(command, allow_patterns, deny_patterns)
 

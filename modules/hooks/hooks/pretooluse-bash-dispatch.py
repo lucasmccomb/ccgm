@@ -23,6 +23,7 @@ short_circuit so it is emitted the instant it fires, nothing can soften it.
   --------  --------------------------  -------------------  -----------  -----
   10        git_workflow_check          hard_block / adv     yes          no
   20        destructive_check           hard_block           yes          YES
+  25        force_branch_delete_check   hard_block           yes          YES
   30        smart_rules_check           hard_block / allow   yes          YES
   40        port_advisory_check         advisory             no           no
   50        agent_tracking_check        advisory             no           no
@@ -53,6 +54,8 @@ def build_manifest() -> "hd.Manifest":
     m.add(hd.Check(10, "git_workflow", bash_only, checks.git_workflow_check,
                    runs_in_bypass=True, short_circuit=False))
     m.add(hd.Check(20, "destructive", bash_only, checks.destructive_check,
+                   runs_in_bypass=True, short_circuit=True))
+    m.add(hd.Check(25, "force_branch_delete", bash_only, checks.force_branch_delete_check,
                    runs_in_bypass=True, short_circuit=True))
     m.add(hd.Check(30, "smart_rules", bash_only, checks.smart_rules_check,
                    runs_in_bypass=True, short_circuit=True))

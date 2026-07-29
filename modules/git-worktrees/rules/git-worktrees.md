@@ -41,7 +41,13 @@ A worktree is created for **exactly one unit of work** and has one owner — the
 1. **Create** — the delegator makes one worktree per unit (via the Agent/Workflow `isolation: "worktree"`, or `/worktree-start` for hands-on work). One branch, one unit.
 2. **Implement / test / PR** — the sub-agent does the work inside its worktree, on its feature branch, and opens a PR.
 3. **Merge** — the PR is reviewed and merged.
-4. **Remove** — **the delegator removes that unit's worktree as soon as its PR merges** (or the unit is abandoned). This step is mandatory, not "when I get around to it." See Cleanup below.
+4. **Remove** — **the delegator tears that unit down as soon as its PR merges** (or the unit is abandoned). One command does the whole step — remove the worktree, prune the metadata, and delete the branch if the merge already absorbed it:
+
+   ```bash
+   bash ~/.claude/lib/worktree-sweep.sh --worktree .claude/worktrees/<name>
+   ```
+
+   This step is mandatory, not "when I get around to it." See Cleanup below.
 5. **Sweep orphans** — as a backstop, run `/worktree-sweep` to remove any clean worktree that leaked past step 4 (an early exit, a crash, a `isolation:"worktree"` worktree the harness could not auto-remove because it was built in).
 
 Steps 4 and 5 are the half of the fix that the incident was missing. A delegator that spawns worktrees and does not tear them down has not finished the job.
@@ -78,7 +84,15 @@ This is the whole lesson of the incident: **cleanup must not depend on the happy
 - **On any abnormal exit** (early stop, gate rejection, crash, a `isolation:"worktree"` worktree the harness could not reclaim), the worktree leaks. So a **standalone safe sweep must be runnable at any time** to reclaim orphans: `/worktree-sweep`.
 - **For unattended runs**, schedule the sweep as a backstop so cleanup happens even if no one remembers (see "Scheduled backstop" below). This mirrors the principle that *safety must not depend on a report being read*: the disk is reclaimed whether or not the operator notices.
 
-Removing a single worktree by hand:
+Tearing down a single worktree — **use the janitor, not hand-rolled git**:
+
+```bash
+bash ~/.claude/lib/worktree-sweep.sh --worktree .claude/worktrees/<branch-name>
+```
+
+It removes the worktree (non-force, so git still refuses on unsaved work), prunes the metadata, and deletes the branch **only if** the default branch already contains its work. Add `--dry-run` first if you want to see the classification before anything changes.
+
+The raw git equivalent is two commands, and both are on the allow list:
 
 ```bash
 git worktree remove .claude/worktrees/<branch-name>   # non-force; refuses if there is unsaved work
@@ -86,6 +100,25 @@ git worktree prune                                    # drop administrative stat
 ```
 
 Never `rm -rf` a worktree directory — it leaves dangling `.git/worktrees/<name>/` metadata. Always use `git worktree remove` (then `git worktree prune`).
+
+### Do Not Chain `git branch -D` Onto Teardown
+
+`git branch -D` is **denied**, and a chain is only as safe as its most dangerous link: a single `git branch -D` segment kills the whole command, including the `git worktree remove` in front of it. The denial names the entire command, so it reads as if worktree removal were blocked. It is not — both worktree commands are permitted; only the branch delete is at fault.
+
+This dead-end is why worktrees kept getting left on disk (issue #907): agents chained the branch delete onto teardown, got the whole chain denied, concluded teardown was impossible, and moved on. Measured across session transcripts: ~39 such denials in 26 sessions, spread over two months.
+
+The branch delete is denied because it can discard commits that exist nowhere else — and `git branch -d`, the safe form, is no way out either. **This repo family squash-merges**, and a squash merge rewrites the branch's commits, so the branch is not an ancestor of main and `git branch -d` refuses it with "not fully merged."
+
+`worktree-sweep.sh` is the way through. It verifies absorption two ways — the branch is an ancestor of the default branch (a normal merge), **or** replaying the branch's tree on the merge base is patch-equivalent to something already upstream (a squash merge) — and only then force-deletes. A branch that passes neither test is kept and reported, so nothing unmerged is ever discarded.
+
+| Situation | Command |
+|-----------|---------|
+| Worktree still present, PR merged | `bash ~/.claude/lib/worktree-sweep.sh --worktree <path>` |
+| Worktree already removed, branch left behind | `bash ~/.claude/lib/worktree-sweep.sh --merged-branches` |
+| Many worktrees to reclaim | `/worktree-sweep` |
+| Branch genuinely unmerged, discarding it on purpose | `ALLOW_BRANCH_FORCE_DELETE=1 git branch -D <branch>` |
+
+The last row is a deliberate statement that you are throwing commits away — not a way around the friction. A PreToolUse hook hard-blocks every force-delete spelling (`-D`, `-d -f`, `--delete --force`, `-Df`) and names the offending segment plus the command to run instead, so a chain that hits it tells you how to fix itself.
 
 ## Removal Safety (Codified From the Incident)
 
@@ -115,6 +148,8 @@ git worktree add .claude/worktrees/<branch-name> <branch-name>
 
 The one exception is a **detached-HEAD** worktree. It has no branch ref, so commits made on top of a detached checkout (e.g. `git worktree add <path> <sha>` then a fixup commit) are reachable from *nothing* once the checkout is gone — removing it orphans them (gc-eligible). So a clean detached worktree is safe to remove **only if** its HEAD is already reachable from some other ref (the common "parked at an existing commit" case); if it carries ref-orphan commits, preserve it.
 
+The sweep's branch cleanup does not weaken this. It deletes a branch only when the default branch already contains that branch's work, so every commit on the deleted ref is still reachable from the default branch. A branch with work of its own is kept, and the report prints the `git worktree add` line that restores its checkout.
+
 ### The four cases, decided
 
 | Worktree state | Outcome | Why |
@@ -124,6 +159,13 @@ The one exception is a **detached-HEAD** worktree. It has no branch ref, so comm
 | Mid-rebase with an unresolved conflict | **Preserve** | An in-progress operation; removal discards the resolution-in-progress |
 | Clean detached HEAD, reachable from a ref | **Remove** | The commit survives on that other ref; only the checkout goes |
 | Clean detached HEAD, commits on no ref | **Preserve** | No ref survives removal — the commits would be orphaned |
+
+Branch cleanup adds two more, decided the same way — by whether the work survives elsewhere:
+
+| Branch state after its worktree is removed | Outcome | Why |
+|--------------------------------------------|---------|-----|
+| Merged or squash-merged into the default branch | **Delete** | Every commit is already reachable from the default branch |
+| Anything else, including unverifiable | **Keep** | The work exists only on this ref; the report says so and prints the restore command |
 
 `/worktree-sweep` implements exactly this classification.
 

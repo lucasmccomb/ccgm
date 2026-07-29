@@ -20,28 +20,58 @@
 # (legacy module location), plus prunable entries whose directory is already
 # gone. Worktrees elsewhere are reported but left alone unless --all is given.
 #
-# Usage: worktree-sweep.sh [--dry-run|-n] [--conservative] [--all] [-h|--help]
-#   --dry-run       Report the classification and planned actions; remove nothing.
-#   --conservative  Also PRESERVE clean worktrees whose branch has commits not on
-#                   the origin default branch (keep in-progress-but-committed
-#                   checkouts around). Default removes clean worktrees regardless,
-#                   since their commits survive on the branch ref.
-#   --all           Also sweep clean worktrees outside the two managed locations.
-#   -h, --help      Print this header.
+# BRANCH CLEANUP: after removing a worktree, its branch is deleted IFF the default
+# branch already contains the branch's work - either a normal merge (the branch is
+# an ancestor) or a SQUASH merge (the branch's tree, replayed on the merge base,
+# is patch-equivalent to something already upstream). A branch that fails both
+# tests is kept and reported, so no unmerged commit is ever discarded. This is the
+# permitted path that `git branch -D` is not: agents cannot run `git branch -D`
+# (it is denied, and hard-blocked by auto-approve-bash.py), and `git branch -d`
+# refuses squash-merged branches, so without this there is no way to finish a
+# teardown after a squash merge (GitHub issue #907).
+#
+# Usage: worktree-sweep.sh [--dry-run|-n] [--conservative] [--all]
+#                          [--worktree <path>] [--keep-branches] [--merged-branches]
+#                          [-h|--help]
+#   --dry-run          Report the classification and planned actions; change nothing.
+#   --conservative     Also PRESERVE clean worktrees whose branch has commits not on
+#                      the origin default branch (keep in-progress-but-committed
+#                      checkouts around). Default removes clean worktrees regardless,
+#                      since their commits survive on the branch ref.
+#   --all              Also sweep clean worktrees outside the two managed locations.
+#   --worktree <path>  Scope the sweep to ONE worktree - the per-unit teardown for
+#                      lifecycle step 4. Implies --all for that path.
+#   --keep-branches    Never delete branches; only remove worktrees (pre-#907 behavior).
+#   --merged-branches  Also delete local branches with no worktree at all whose work
+#                      the default branch already contains. Recovers the leftover
+#                      branch when a worktree was removed by hand earlier.
+#   -h, --help         Print this header.
 set -u
 
 MODE="apply"
 CONSERVATIVE=0
 ALL=0
+KEEP_BRANCHES=0
+MERGED_BRANCHES=0
+ONLY_WORKTREE=""
 
-for arg in "$@"; do
-  case "$arg" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --dry-run|-n) MODE="dry-run" ;;
     --conservative) CONSERVATIVE=1 ;;
     --all) ALL=1 ;;
+    --keep-branches) KEEP_BRANCHES=1 ;;
+    --merged-branches) MERGED_BRANCHES=1 ;;
+    --worktree)
+      shift
+      [ $# -gt 0 ] || { echo "worktree-sweep: --worktree needs a path" >&2; exit 2; }
+      ONLY_WORKTREE="$1"; ALL=1 ;;
+    --worktree=*)
+      ONLY_WORKTREE="${1#--worktree=}"; ALL=1 ;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "worktree-sweep: unknown arg: $arg" >&2; exit 2 ;;
+    *) echo "worktree-sweep: unknown arg: $1" >&2; exit 2 ;;
   esac
+  shift
 done
 
 if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
@@ -80,12 +110,103 @@ if [ -n "$_common_dir" ] && [ "$(git rev-parse --is-bare-repository 2>/dev/null)
   MAIN_CHECKOUT="$(cd "$_common_dir/.." 2>/dev/null && pwd -P)"
 fi
 
+# Short name of the default branch, so it is never a deletion candidate.
+DEFAULT_BRANCH="${DEFAULT_REF#origin/}"
+
+# Resolve --worktree to the same canonical form git reports, so the comparison
+# in process_record holds (pwd -P collapses macOS /var -> /private/var).
+if [ -n "$ONLY_WORKTREE" ]; then
+  _resolved="$(cd "$ONLY_WORKTREE" 2>/dev/null && pwd -P)"
+  if [ -z "$_resolved" ]; then
+    echo "worktree-sweep: --worktree path does not exist: $ONLY_WORKTREE" >&2
+    exit 2
+  fi
+  ONLY_WORKTREE="$_resolved"
+  if ! git worktree list --porcelain | grep -qxF "worktree $ONLY_WORKTREE"; then
+    echo "worktree-sweep: not a worktree of this repository: $ONLY_WORKTREE" >&2
+    exit 2
+  fi
+  # The main checkout is listed like any other worktree but can never be torn
+  # down. Refuse loudly rather than exiting 0 having done nothing.
+  if [ -n "$MAIN_CHECKOUT" ] && [ "$ONLY_WORKTREE" = "$MAIN_CHECKOUT" ]; then
+    echo "worktree-sweep: refusing to sweep the main checkout: $ONLY_WORKTREE" >&2
+    exit 2
+  fi
+fi
+
 is_managed() {
   # True if the path lives under a managed worktree dir.
   case "$1" in
     */.claude/worktrees/*|*/.worktrees/*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+branch_is_absorbed() {
+  # True if the default branch already contains this branch's work, by EITHER
+  # a normal merge or a squash merge. False on any error, so an unverifiable
+  # branch is always kept.
+  #
+  # Squash detection: a squash merge rewrites the branch's commits into one new
+  # commit, so the originals are not ancestors and their patch-ids do not match.
+  # Replaying the branch's TREE as a single synthetic commit on the merge base
+  # reproduces exactly what the squash produced, and `git cherry` then reports
+  # it as already upstream ("-"). GIT_* identity is set explicitly because
+  # `git commit-tree` fails with "empty ident name not allowed" on a machine or
+  # CI runner with no configured git identity.
+  local b="$1" base tree syn
+  [ -n "$DEFAULT_REF" ] || return 1
+  [ "$b" != "$DEFAULT_BRANCH" ] || return 1
+  git show-ref --verify --quiet "refs/heads/$b" 2>/dev/null || return 1
+  git merge-base --is-ancestor "refs/heads/$b" "$DEFAULT_REF" 2>/dev/null && return 0
+  base="$(git merge-base "$DEFAULT_REF" "refs/heads/$b" 2>/dev/null)" || return 1
+  [ -n "$base" ] || return 1
+  tree="$(git rev-parse "refs/heads/$b^{tree}" 2>/dev/null)" || return 1
+  syn="$(GIT_AUTHOR_NAME=worktree-sweep GIT_AUTHOR_EMAIL=worktree-sweep@localhost \
+         GIT_COMMITTER_NAME=worktree-sweep GIT_COMMITTER_EMAIL=worktree-sweep@localhost \
+         git commit-tree "$tree" -p "$base" -m _ 2>/dev/null)" || return 1
+  [ -n "$syn" ] || return 1
+  case "$(git cherry "$DEFAULT_REF" "$syn" 2>/dev/null)" in
+    "-"*) return 0 ;;
+  esac
+  return 1
+}
+
+BRANCHES_DELETED=0
+BRANCH_NOTE=""
+BRANCH_LINES=""
+
+# Snapshot the worktree table BEFORE pruning, so already-gone entries are still
+# in it and their leftover branches can be cleaned. Then drop the stale metadata:
+# git refuses to delete a branch a registered worktree still claims, so the claim
+# has to go first. Pruning only ever touches entries whose directory is gone.
+WT_LIST="$(git worktree list --porcelain)"
+[ "$MODE" = "apply" ] && git worktree prune 2>/dev/null
+
+cleanup_branch() {
+  # Delete $1 if absorbed, else keep it. Sets BRANCH_NOTE to a report suffix.
+  # Deliberately assigns a global instead of printing: a $(...) call site would
+  # run this in a subshell and lose the BRANCHES_DELETED increment.
+  local b="$1"
+  BRANCH_NOTE=""
+  [ -n "$b" ] || return 0
+  if [ "$KEEP_BRANCHES" = "1" ]; then
+    BRANCH_NOTE=" (branch $b kept: --keep-branches)"; return 0
+  fi
+  if ! branch_is_absorbed "$b"; then
+    BRANCH_NOTE=" (branch $b KEPT: work not on ${DEFAULT_REF:-<unknown default>} - nothing discarded)"
+    return 0
+  fi
+  if [ "$MODE" = "dry-run" ]; then
+    BRANCH_NOTE=" (branch $b WOULD BE DELETED: already on $DEFAULT_REF)"
+    BRANCHES_DELETED=$((BRANCHES_DELETED+1)); return 0
+  fi
+  if git branch -D "$b" >/dev/null 2>&1; then
+    BRANCH_NOTE=" (branch $b deleted: already on $DEFAULT_REF)"
+    BRANCHES_DELETED=$((BRANCHES_DELETED+1))
+  else
+    BRANCH_NOTE=" (branch $b kept: git refused the delete)"
+  fi
 }
 
 in_progress_op() {
@@ -120,13 +241,21 @@ process_record() {
   [ -z "$CUR_PATH" ] && return 0
   [ "$CUR_BARE" = "1" ] && return 0                                  # the bare repo itself is not a checkout
   if [ -n "$MAIN_CHECKOUT" ] && [ "$CUR_PATH" = "$MAIN_CHECKOUT" ]; then return 0; fi   # main checkout
+  # --worktree scopes the whole sweep to one unit of work.
+  if [ -n "$ONLY_WORKTREE" ] && [ "$CUR_PATH" != "$ONLY_WORKTREE" ]; then return 0; fi
   local path="$CUR_PATH"
   local label="$path"
   if [ "$CUR_DETACHED" = "1" ]; then label="$label  (detached)"; else label="$label  [$CUR_BRANCH]"; fi
 
-  # Already-gone directory: git prunable will drop the metadata.
+  # Already-gone directory: git prunable will drop the metadata. Its branch is
+  # still a teardown leftover, so it gets the same verified cleanup.
   if [ "$CUR_PRUNABLE" = "1" ] || [ ! -d "$path" ]; then
-    PRUNABLE=$((PRUNABLE+1)); return 0
+    PRUNABLE=$((PRUNABLE+1))
+    if [ "$CUR_DETACHED" != "1" ] && [ -n "$CUR_BRANCH" ]; then
+      cleanup_branch "$CUR_BRANCH"
+      [ -n "$BRANCH_NOTE" ] && BRANCH_LINES="${BRANCH_LINES}  - ${CUR_BRANCH} (worktree already gone)${BRANCH_NOTE}"$'\n'
+    fi
+    return 0
   fi
   # Never touch the worktree we are standing in.
   if [ "$path" = "$CWD_WT" ]; then
@@ -174,19 +303,36 @@ process_record() {
   fi
 
   local kb; kb="$(du -sk "$path" 2>/dev/null | awk '{print $1}')"; [ -z "$kb" ] && kb=0
-  local note=""
-  [ -n "$unmerged" ] && note=" (branch kept: $unmerged commit(s) not on $DEFAULT_REF; restore with 'git worktree add $path $CUR_BRANCH')"
   if [ "$MODE" = "dry-run" ]; then
-    REMOVED_LINES="${REMOVED_LINES}  - $label -> WOULD REMOVE, ~$((kb/1024)) MB$note"$'\n'
+    branch_note_for "$path"
+    REMOVED_LINES="${REMOVED_LINES}  - $label -> WOULD REMOVE, ~$((kb/1024)) MB${BRANCH_NOTE}"$'\n'
     REMOVED=$((REMOVED+1)); RECLAIMED_KB=$((RECLAIMED_KB+kb)); return 0
   fi
   if git worktree remove "$path" 2>/dev/null; then
-    REMOVED_LINES="${REMOVED_LINES}  - $label -> removed, ~$((kb/1024)) MB$note"$'\n'
+    # Branch cleanup runs only AFTER the checkout is gone: git refuses to delete
+    # a branch that a live worktree has checked out.
+    branch_note_for "$path"
+    REMOVED_LINES="${REMOVED_LINES}  - $label -> removed, ~$((kb/1024)) MB${BRANCH_NOTE}"$'\n'
     REMOVED=$((REMOVED+1)); RECLAIMED_KB=$((RECLAIMED_KB+kb))
   else
     # Non-force refused: git found something unsafe the checks missed. Never force.
     declare_preserved "  - $label -> PRESERVE (git refused non-force removal)"
   fi
+}
+
+branch_note_for() {
+  # Resolve the branch decision for the record being processed, appending the
+  # restore hint whenever the branch survives. $1 is the worktree path (for the
+  # hint only).
+  BRANCH_NOTE=""
+  [ "$CUR_DETACHED" = "1" ] && return 0        # detached: no branch to clean up
+  [ -n "$CUR_BRANCH" ] || return 0
+  cleanup_branch "$CUR_BRANCH"
+  case "$BRANCH_NOTE" in
+    *"deleted:"*|*"WOULD BE DELETED"*) ;;
+    "") ;;
+    *) BRANCH_NOTE="${BRANCH_NOTE%)}; restore with 'git worktree add $1 $CUR_BRANCH')" ;;
+  esac
 }
 
 while IFS= read -r line || [ -n "$line" ]; do
@@ -199,9 +345,33 @@ while IFS= read -r line || [ -n "$line" ]; do
     "bare")       CUR_BARE=1 ;;   # the bare repo entry has no checkout; skip it
   esac
 done <<EOF
-$(git worktree list --porcelain)
+${WT_LIST}
 EOF
 process_record   # flush the final record
+
+# --merged-branches: leftover branches with no worktree at all. This is the
+# recovery path when a worktree was removed by hand earlier, leaving a branch
+# `git branch -d` will not delete because the PR was squash-merged. Only
+# branches the default branch already contains are touched, and never one that
+# is checked out anywhere.
+if [ "$MERGED_BRANCHES" = "1" ] && [ "$KEEP_BRANCHES" != "1" ] && [ -n "$DEFAULT_REF" ]; then
+  CHECKED_OUT="$(git worktree list --porcelain | sed -n 's/^branch refs\/heads\///p')"
+  while IFS= read -r b; do
+    [ -n "$b" ] || continue
+    [ "$b" = "$DEFAULT_BRANCH" ] && continue
+    printf '%s\n' "$CHECKED_OUT" | grep -qxF "$b" && continue
+    branch_is_absorbed "$b" || continue
+    if [ "$MODE" = "dry-run" ]; then
+      BRANCH_LINES="${BRANCH_LINES}  - $b (no worktree) WOULD BE DELETED: already on $DEFAULT_REF"$'\n'
+      BRANCHES_DELETED=$((BRANCHES_DELETED+1))
+    elif git branch -D "$b" >/dev/null 2>&1; then
+      BRANCH_LINES="${BRANCH_LINES}  - $b (no worktree) deleted: already on $DEFAULT_REF"$'\n'
+      BRANCHES_DELETED=$((BRANCHES_DELETED+1))
+    fi
+  done <<EOF
+$(git for-each-ref --format='%(refname:short)' refs/heads)
+EOF
+fi
 
 # Drop administrative state for worktrees whose directories are gone or removed.
 if [ "$MODE" = "dry-run" ]; then
@@ -227,5 +397,10 @@ if [ "$SKIPPED" -gt 0 ]; then
   printf "%s" "$SKIPPED_LINES"
   echo ""
 fi
+if [ -n "$BRANCH_LINES" ]; then
+  echo "BRANCHES (no live worktree):"
+  printf "%s" "$BRANCH_LINES"
+  echo ""
+fi
 [ "$PRUNABLE" -gt 0 ] && echo "PRUNED $PRUNABLE worktree(s) whose directory was already gone."
-echo "Done. $REMOVED removed, $PRESERVED preserved, $SKIPPED skipped."
+echo "Done. $REMOVED removed, $PRESERVED preserved, $SKIPPED skipped, $BRANCHES_DELETED branch(es) deleted."

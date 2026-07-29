@@ -13,12 +13,27 @@ It exists because the harness's `isolation: "worktree"` auto-removes a worktree 
 
 ```
 /worktree-sweep [--dry-run] [--conservative] [--all]
+                [--worktree <path>] [--keep-branches] [--merged-branches]
 ```
 
-- **(no flags)** — report + remove every clean worktree in the managed locations. Safe by construction: a clean worktree's commits survive on its branch ref after removal (only the checkout and its build artifacts go), so nothing committed is ever lost.
-- **`--dry-run`** — classify and show what *would* happen; remove nothing. Run this first if you want a preview.
+- **(no flags)** — report + remove every clean worktree in the managed locations, and delete each removed worktree's branch if the default branch already contains its work. Safe by construction: a clean worktree's commits survive on its branch ref after removal, and a branch is only deleted once those commits are reachable from the default branch anyway.
+- **`--dry-run`** — classify and show what *would* happen; change nothing. Run this first if you want a preview.
 - **`--conservative`** — additionally preserve clean worktrees whose branch has commits not yet on the origin default branch (keep in-progress-but-committed checkouts around). Removes only fully-merged, detached, or behind worktrees.
 - **`--all`** — also sweep clean worktrees outside the two managed locations (`.claude/worktrees/`, `.worktrees/`). Off by default so a deliberately-placed worktree elsewhere is never touched.
+- **`--worktree <path>`** — scope the whole sweep to one worktree. This is the per-unit teardown of lifecycle step 4: remove it, prune, delete its branch if absorbed. Refuses a path that is not a worktree of this repo, and refuses the main checkout.
+- **`--keep-branches`** — never delete branches; only remove worktrees.
+- **`--merged-branches`** — also delete local branches that have no worktree at all and whose work the default branch already contains. This is the recovery path when a worktree was removed by hand earlier and left its branch behind.
+
+## Branch Cleanup
+
+The sweep deletes a branch only after verifying the default branch already contains its work, two ways:
+
+- the branch is an **ancestor** of the default branch (a normal merge), or
+- replaying the branch's **tree** on the merge base is patch-equivalent to something already upstream (a **squash merge**).
+
+The second test is what makes this useful. This repo family squash-merges, and a squash merge rewrites the branch's commits — so `git branch -d` refuses the branch as "not fully merged", and `git branch -D` is denied. Without this verification step there is no permitted way to finish a teardown after a squash merge, which is how worktrees kept getting stranded on disk (issue #907).
+
+A branch that passes neither test is **kept**, and the report says so and prints the `git worktree add` line that restores its checkout. Nothing unmerged is ever discarded.
 
 ## What It Does
 
@@ -40,13 +55,13 @@ The script classifies each worktree (never the main checkout, never the one you 
 | Locked | **PRESERVE** (report; run `git worktree unlock` if intended) |
 | Clean, in a managed location | **REMOVE** (non-force) |
 | Clean, outside managed locations | **SKIP** (unless `--all`) |
-| Directory already gone (prunable) | **PRUNE** metadata |
+| Directory already gone (prunable) | **PRUNE** metadata, then clean up its leftover branch |
 
 It **never uses `--force`.** A non-force `git worktree remove` is itself a safety gate — git refuses on any modified-or-untracked worktree — so even if the classification missed something, git will not let the sweep destroy unsaved work. A gitignored build artifact (`.build/`, `target/`) does not block a clean removal.
 
 ## After the Sweep
 
-Report the summary the script prints: how many worktrees were removed (and disk reclaimed), how many were preserved and why, and how many prunable entries were cleaned. For any removed worktree whose branch had commits not on the default branch, the report includes the exact `git worktree add ...` command to restore the checkout — the branch and its commits were never deleted.
+Report the summary the script prints: how many worktrees were removed (and disk reclaimed), how many were preserved and why, how many branches were deleted, and how many prunable entries were cleaned. For any removed worktree whose branch had commits not on the default branch, the report includes the exact `git worktree add ...` command to restore the checkout — that branch and its commits were never deleted.
 
 ## Related
 

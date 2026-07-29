@@ -11,7 +11,7 @@ Key capabilities:
 - **Default parallel-delegation isolation**: one ephemeral worktree per unit of work, sharing the parent `.git`.
 - **`/worktree-start`**: create a worktree hands-on, with gitignore verification and project-setup auto-detection.
 - **`/worktree-finish`**: finish one worktree via a four-option gate (merge locally / push + PR / keep / discard).
-- **`/worktree-sweep`**: repo-wide safe janitor — remove clean worktrees, preserve anything with unsaved work, prune stale metadata. The enforced-teardown backstop.
+- **`/worktree-sweep`**: repo-wide safe janitor — remove clean worktrees, preserve anything with unsaved work, prune stale metadata, and delete each removed worktree's branch once the default branch provably contains its work. The enforced-teardown backstop, and the only permitted way to delete a squash-merged branch.
 
 ## Why It Exists
 
@@ -38,7 +38,7 @@ Worktrees share `.git` objects and external caches, but **each still builds its 
 | `commands/worktree-start.md` | command | `/worktree-start {branch-name}` |
 | `commands/worktree-finish.md` | command | `/worktree-finish` — four-option gate for one worktree |
 | `commands/worktree-sweep.md` | command | `/worktree-sweep` — safe repo-wide orphan janitor |
-| `lib/worktree-sweep.sh` | lib | Deterministic sweep implementation (classify → non-force remove → prune → report) |
+| `lib/worktree-sweep.sh` | lib | Deterministic sweep implementation (classify → non-force remove → prune → verified branch delete → report) |
 
 ## Dependencies
 
