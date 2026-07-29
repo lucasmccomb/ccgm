@@ -22,8 +22,10 @@ fail() {
 }
 
 # --- validate must exit 1 with structured JSON -------------------------------
+# Stderr deliberately NOT suppressed: on a cold cache this call runs npm ci,
+# and its failure must stay loud instead of dying with zero explanation.
 set +e
-VALIDATE_OUT="$(bash "$SCRIPTS/likec4.sh" validate --json "$BROKEN" 2>/dev/null)"
+VALIDATE_OUT="$(bash "$SCRIPTS/likec4.sh" validate --json "$BROKEN")"
 VALIDATE_CODE=$?
 set -e
 

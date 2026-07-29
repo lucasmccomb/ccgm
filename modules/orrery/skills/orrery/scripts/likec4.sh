@@ -80,16 +80,30 @@ warn_node_floor
 LOCK_HASH="$(hash_file "$LOCKFILE")"
 TOOLCHAIN_DIR="$CACHE_ROOT/toolchain-$LOCK_HASH"
 
-if [ ! -x "$TOOLCHAIN_DIR/node_modules/.bin/likec4" ]; then
-  mkdir -p "$TOOLCHAIN_DIR"
-  cp "$TOOLCHAIN_SRC/package.json" "$TOOLCHAIN_SRC/package-lock.json" "$TOOLCHAIN_DIR/"
+# Completion gate: trust the cache dir ONLY when the .install-ok sentinel is
+# present. Mere existence of node_modules/.bin/likec4 is not proof of a
+# complete install - an interrupted npm ci can leave the bin link with missing
+# transitives, and that partial tree would otherwise be trusted forever.
+# A dir without the sentinel is wiped and reinstalled. The install itself is
+# atomic: npm ci runs in a temp sibling dir, the sentinel is written last,
+# and the finished tree is renamed into place - no path half-succeeds.
+if [ ! -f "$TOOLCHAIN_DIR/.install-ok" ]; then
+  rm -rf "$TOOLCHAIN_DIR"
+  TMP_INSTALL_DIR="$TOOLCHAIN_DIR.tmp.$$"
+  rm -rf "$TMP_INSTALL_DIR"
+  mkdir -p "$TMP_INSTALL_DIR"
+  cp "$TOOLCHAIN_SRC/package.json" "$TOOLCHAIN_SRC/package-lock.json" "$TMP_INSTALL_DIR/"
   echo "likec4.sh: installing pinned toolchain into $TOOLCHAIN_DIR (npm ci)" >&2
-  if ! (cd "$TOOLCHAIN_DIR" && npm ci --no-audit --no-fund >&2); then
-    # Retry once: npm ci cold-start flakiness (plan section 11).
+  if ! (cd "$TMP_INSTALL_DIR" && npm ci --no-audit --no-fund >&2); then
+    # Retry once: npm ci cold-start flakiness (plan section 11). A second
+    # failure propagates loudly - set -e aborts with npm's stderr visible.
     echo "likec4.sh: npm ci failed; retrying once" >&2
-    rm -rf "$TOOLCHAIN_DIR/node_modules"
-    (cd "$TOOLCHAIN_DIR" && npm ci --no-audit --no-fund >&2)
+    rm -rf "$TMP_INSTALL_DIR/node_modules"
+    (cd "$TMP_INSTALL_DIR" && npm ci --no-audit --no-fund >&2)
   fi
+  touch "$TMP_INSTALL_DIR/.install-ok"
+  rm -rf "$TOOLCHAIN_DIR"
+  mv "$TMP_INSTALL_DIR" "$TOOLCHAIN_DIR"
 fi
 
 # Prune every stale toolchain-* cache dir, keeping exactly the current one.

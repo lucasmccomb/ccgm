@@ -30,11 +30,13 @@ fail() {
 
 # --- (iii) snippet-string assertion (no browser; cannot skip) ----------------
 echo "--- (iii) embed-snippet string assertion ---"
-SNIPPET_FILES="$MODULE_DIR/README.md"
+# Build the scanned-file list as positional parameters so every path stays a
+# single argument even under an install path containing spaces (bash 3.2 safe).
+set -- "$MODULE_DIR/README.md"
 if [ -f "$MODULE_DIR/skills/orrery/SKILL.md" ]; then
-  SNIPPET_FILES="$SNIPPET_FILES $MODULE_DIR/skills/orrery/SKILL.md"
+  set -- "$@" "$MODULE_DIR/skills/orrery/SKILL.md"
 fi
-python3 - $SNIPPET_FILES <<'PYEOF'
+python3 - "$@" <<'PYEOF'
 import re
 import sys
 
@@ -63,7 +65,9 @@ print("ok: %d published sandbox snippet(s) carry allow-popups + allow-popups-to-
 PYEOF
 
 # --- browser availability -----------------------------------------------------
-TOOLCHAIN_DIR="$(bash "$SCRIPTS/likec4.sh" --print-toolchain-dir 2>/dev/null)"
+# Stderr deliberately NOT suppressed: on a cold cache this call runs npm ci,
+# and its failure must stay loud (diagnostics visible, nonzero exit).
+TOOLCHAIN_DIR="$(bash "$SCRIPTS/likec4.sh" --print-toolchain-dir)"
 [ -n "$TOOLCHAIN_DIR" ] || fail "could not resolve the toolchain dir"
 
 set +e

@@ -116,7 +116,11 @@ jobs:
           key: ${{ runner.os }}-orrery-playwright-${{ steps.orrery-pw.outputs.version }}
 
       - name: Orrery - install playwright chromium (via pinned toolchain)
-        run: bash modules/orrery/skills/orrery/scripts/likec4.sh playwright install chromium --with-deps
+        # Retry once on a transient download failure (plan section 11 browser-
+        # provisioning row); a second failure fails the step.
+        run: |
+          bash modules/orrery/skills/orrery/scripts/likec4.sh playwright install chromium --with-deps \
+            || bash modules/orrery/skills/orrery/scripts/likec4.sh playwright install chromium --with-deps
 
       - name: Orrery module tests (ORRERY_STRICT=1)
         run: |
@@ -237,7 +241,11 @@ jobs:
           key: ${{ runner.os }}-orrery-playwright-${{ steps.orrery-pw.outputs.version }}
 
       - name: Orrery - install playwright chromium (via pinned toolchain)
-        run: bash modules/orrery/skills/orrery/scripts/likec4.sh playwright install chromium
+        # Retry once on a transient download failure (plan section 11 browser-
+        # provisioning row); a second failure fails the step.
+        run: |
+          bash modules/orrery/skills/orrery/scripts/likec4.sh playwright install chromium \
+            || bash modules/orrery/skills/orrery/scripts/likec4.sh playwright install chromium
 
       - name: Orrery module tests (ORRERY_STRICT=1)
         run: |

@@ -33,6 +33,12 @@ if [ ! -d "$OUT_DIR/model" ]; then
   exit 2
 fi
 
+# dist/ is owned by this script and fully generated - nothing user-authored
+# lives there. Wipe it before the build: a likec4 build into a non-empty out
+# dir skips its own cleanup and leaves intermediates (favicon.ico,
+# likec4-views.js, robots.txt, a stale prior artifact) beside the renamed
+# artifact, silently violating the single-artifact contract on reruns.
+rm -rf "$OUT_DIR/dist"
 mkdir -p "$OUT_DIR/dist"
 
 bash "$SCRIPT_DIR/likec4.sh" build --output-single-file --base ./ -o "$OUT_DIR/dist" "$OUT_DIR/model"
@@ -49,14 +55,16 @@ mv "$OUT_DIR/dist/index.html" "$OUT_DIR/dist/$SLUG.html"
 rm -f "$OUT_DIR/dist/404.html"
 find "$OUT_DIR/dist" -maxdepth 1 -name 'favicon*.svg' -exec rm -f {} +
 
-HTML_COUNT="$(find "$OUT_DIR/dist" -maxdepth 1 -name '*.html' | wc -l | tr -d ' ')"
-if [ "$HTML_COUNT" != "1" ]; then
-  echo "render_map.sh: expected exactly one .html in $OUT_DIR/dist, found $HTML_COUNT:" >&2
-  find "$OUT_DIR/dist" -maxdepth 1 -name '*.html' >&2
+# Exactly ONE entry (of any kind) may remain, and it must be the named
+# artifact - counting only *.html would let stray build outputs ride along.
+ENTRY_COUNT="$(find "$OUT_DIR/dist" -mindepth 1 | wc -l | tr -d ' ')"
+if [ "$ENTRY_COUNT" != "1" ]; then
+  echo "render_map.sh: expected exactly one file in $OUT_DIR/dist, found $ENTRY_COUNT:" >&2
+  find "$OUT_DIR/dist" -mindepth 1 >&2
   exit 1
 fi
 if [ ! -f "$OUT_DIR/dist/$SLUG.html" ]; then
-  echo "render_map.sh: the single .html is not the named artifact $SLUG.html" >&2
+  echo "render_map.sh: the single remaining file is not the named artifact $SLUG.html" >&2
   exit 1
 fi
 
