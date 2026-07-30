@@ -160,7 +160,7 @@ ALL_FIELDS = {
     "external_systems_flagged", "history_rewritten", "new_anchor_sha",
     "new_paths_routed_to_misc", "old_anchor_sha", "orphaned_elements",
     "product_vision_flagged", "rebuild_required", "rebuild_reason",
-    "renamed_paths", "unchanged",
+    "renamed_paths", "state_missing", "stop_reason", "unchanged",
 }
 
 
@@ -193,6 +193,8 @@ def test_changed_path_maps_to_area(diff_mod, installed_likec4, tmp_path):
     assert diff["unchanged"] is False
     assert diff["history_rewritten"] is False
     assert diff["rebuild_required"] is False
+    assert diff["state_missing"] is False
+    assert diff["stop_reason"] is None
     assert diff["external_systems_flagged"] is False
     assert diff["product_vision_flagged"] is False
     assert diff["old_anchor_sha"] == v1
@@ -404,18 +406,21 @@ def test_readme_change_flags_product_vision(diff_mod, installed_likec4, tmp_path
 
 
 # --- the deterministic state gate (adrev2-009 / business R5) -----------------
-def test_gate_missing_state_names_the_searched_path(diff_mod, installed_likec4, tmp_path):
+def test_gate_missing_state_stops_never_rebuilds(diff_mod, installed_likec4, tmp_path):
+    """adrev2-014 orchestrator ruling: on an explicit update, no state.json at
+    the resolved root means STOP with the loud message (resolved path + --out
+    hint) - never a full rebuild at a possibly-wrong root."""
     repo = make_repo(tmp_path, V1_FILES)
     v1 = head(repo)
     out = make_out(tmp_path, v1, installed_likec4, write_state=False)
 
     code, diff = run_diff(diff_mod, repo, out, v1)
     assert code == 0
-    assert diff["rebuild_required"] is True
-    # adrev2-014: the message names the resolved path that was searched and
-    # points at the --out mismatch cause.
-    assert os.path.join(out, "state.json") in diff["rebuild_reason"]
-    assert "--out" in diff["rebuild_reason"]
+    assert diff["state_missing"] is True
+    assert diff["rebuild_required"] is False
+    assert diff["rebuild_reason"] is None
+    assert os.path.join(out, "state.json") in diff["stop_reason"]
+    assert "--out" in diff["stop_reason"]
     assert diff["unchanged"] is False
     assert diff["history_rewritten"] is False
 
@@ -487,6 +492,179 @@ def test_missing_baseline_model_forces_rebuild(diff_mod, installed_likec4, tmp_p
     assert code == 0
     assert diff["rebuild_required"] is True
     assert "model.json" in diff["rebuild_reason"]
+
+
+def test_gate_corrupt_element_index_routes_to_rebuild(diff_mod, installed_likec4, tmp_path):
+    """Stage-2 finding 3 repro: an element_index value that is a nested list
+    (unhashable) used to traceback at the orphan loop; corrupt-but-parseable
+    state must route to rebuild with a stated reason."""
+    repo = make_repo(tmp_path, V1_FILES)
+    v1 = head(repo)
+    write_files(repo, {"web/src/app.ts": "export const app = 2;\n"})
+    v2 = commit_all(repo)
+    out = make_out(tmp_path, v1, installed_likec4,
+                   element_index={"web__app": [["web/src/app.ts"]]})
+
+    code, diff = run_diff(diff_mod, repo, out, v2)
+    assert code == 0
+    assert diff["rebuild_required"] is True
+    assert "element_index" in diff["rebuild_reason"]
+    assert "malformed" in diff["rebuild_reason"]
+
+
+def test_gate_corrupt_areas_routes_to_rebuild(diff_mod, installed_likec4, tmp_path):
+    """Stage-2 finding 3 repro: areas as a dict used to traceback at
+    areas_of; it must route to rebuild with a stated reason instead."""
+    repo = make_repo(tmp_path, V1_FILES)
+    v1 = head(repo)
+    write_files(repo, {"web/src/app.ts": "export const app = 2;\n"})
+    v2 = commit_all(repo)
+    out = make_out(tmp_path, v1, installed_likec4,
+                   areas={"web": {"root_paths": ["web"]}})
+
+    code, diff = run_diff(diff_mod, repo, out, v2)
+    assert code == 0
+    assert diff["rebuild_required"] is True
+    assert "areas" in diff["rebuild_reason"]
+    assert "malformed" in diff["rebuild_reason"]
+
+
+# --- rename routing: unmapped destinations and edited/cross-area renames -----
+def test_rename_to_unmapped_dir_routes_to_misc(diff_mod, installed_likec4, tmp_path):
+    """Stage-2 finding 1 repro (few-file shape): moving both web/src files
+    into a new shared/ top dir must route the destinations to misc - the old
+    area's re-run no longer covers them, so something must investigate the
+    destination or the map silently shrinks."""
+    repo = make_repo(tmp_path, V1_FILES)
+    v1 = head(repo)
+    os.makedirs(os.path.join(repo, "shared"), exist_ok=True)
+    git(repo, "mv", "web/src/app.ts", "shared/app.ts")
+    git(repo, "mv", "web/src/cart.ts", "shared/cart.ts")
+    v2 = commit_all(repo)
+    out = make_out(tmp_path, v1, installed_likec4)
+
+    code, diff = run_diff(diff_mod, repo, out, v2)
+    assert code == 0
+    assert diff["new_paths_routed_to_misc"] == ["shared/app.ts", "shared/cart.ts"]
+    # misc investigates the destination; the old area is re-investigated too.
+    assert diff["affected_areas"] == ["misc", "web"]
+    assert diff["rebuild_required"] is False
+    assert len(diff["renamed_paths"]) == 2
+    assert sorted(diff["elements_reanchored"]) == ["web__app", "web__cart"]
+
+
+def test_whole_dir_move_to_unmapped_territory_triggers_rebuild(diff_mod, installed_likec4, tmp_path):
+    """Stage-2 finding 1 repro (mass-move shape): a whole-directory move of a
+    5-file area to a new top-level dir is a clustering-material change and
+    must trigger rebuild_required, exactly as 5 ADDED files would - renames
+    must never silently delete an area."""
+    files = {
+        "web/src/a.ts": "export const a = 1;\n",
+        "web/src/b.ts": "export const b = 1;\n",
+        "web/src/c.ts": "export const c = 1;\n",
+        "web/src/d.ts": "export const d = 1;\n",
+        "web/src/e.ts": "export const e = 1;\n",
+        "api/worker.js": "export default {};\n",
+    }
+    repo = make_repo(tmp_path, files)
+    v1 = head(repo)
+    git(repo, "mv", "web", "lib")
+    v2 = commit_all(repo)
+    out = make_out(
+        tmp_path, v1, installed_likec4,
+        areas=[{"id": "web", "root_paths": ["web"]},
+               {"id": "misc", "root_paths": ["api"]}],
+        element_index={"web__a": ["web/src/a.ts"], "web__b": ["web/src/b.ts"]},
+    )
+    before = open(os.path.join(out, "model.json"), encoding="utf-8").read()
+
+    code, diff = run_diff(diff_mod, repo, out, v2)
+    assert code == 0
+    assert diff["rebuild_required"] is True
+    assert "lib" in diff["rebuild_reason"]
+    assert len(diff["renamed_paths"]) == 5
+    # The rebuild path never mutates the baseline.
+    assert open(os.path.join(out, "model.json"), encoding="utf-8").read() == before
+
+
+def test_rename_with_edits_counts_as_change(diff_mod, installed_likec4, tmp_path):
+    """R<100: the rename is recorded, the new path counts as a change, the
+    area is affected, and the element is still re-anchored."""
+    body = "".join("export const line%d = %d;\n" % (i, i) for i in range(12))
+    files = dict(V1_FILES)
+    files["web/src/big.ts"] = body
+    repo = make_repo(tmp_path, files)
+    v1 = head(repo)
+    os.remove(os.path.join(repo, "web/src/big.ts"))
+    write_files(repo, {"web/src/bigger.ts": body + "export const extra = 99;\n"})
+    v2 = commit_all(repo)
+    out = make_out(tmp_path, v1, installed_likec4,
+                   element_index=dict(ELEMENT_INDEX, web__big=["web/src/big.ts"]))
+
+    code, diff = run_diff(diff_mod, repo, out, v2)
+    assert code == 0
+    assert len(diff["renamed_paths"]) == 1
+    rename = diff["renamed_paths"][0]
+    assert rename["from"] == "web/src/big.ts"
+    assert rename["to"] == "web/src/bigger.ts"
+    assert rename["similarity"] < 100
+    assert "web/src/bigger.ts" in diff["changed_paths"]
+    assert diff["affected_areas"] == ["web"]
+    assert diff["elements_reanchored"] == ["web__big"]
+
+
+def test_cross_area_rename_marks_both_areas(diff_mod, installed_likec4, tmp_path):
+    """A pure rename crossing area boundaries (misc -> web) marks BOTH areas
+    affected and re-anchors every owning element."""
+    repo = make_repo(tmp_path, V1_FILES)
+    v1 = head(repo)
+    git(repo, "mv", "api/worker.js", "web/src/worker.js")
+    v2 = commit_all(repo)
+    out = make_out(tmp_path, v1, installed_likec4)
+
+    code, diff = run_diff(diff_mod, repo, out, v2)
+    assert code == 0
+    assert diff["affected_areas"] == ["misc", "web"]
+    assert diff["new_paths_routed_to_misc"] == []
+    assert sorted(diff["elements_reanchored"]) == ["misc__multi", "misc__worker"]
+
+
+# --- the empty-re-run-pack fast path (stage-2 finding 2, shape b) ------------
+def test_identical_tree_anchor_advance_is_empty_patchable_diff(diff_mod, installed_likec4, tmp_path):
+    """An anchor advance with an identical tree (allow-empty commit) yields a
+    patchable diff affecting ZERO packs - both flags false, no areas, nothing
+    re-anchored, unchanged false. The SKILL's U4.2 fast path consumes this
+    shape without ever calling merge (which exits 2 on an empty pack list)."""
+    repo = make_repo(tmp_path, V1_FILES)
+    v1 = head(repo)
+    git(repo, "commit", "-q", "--allow-empty", "-m", "no tree change", "--no-verify")
+    v2 = head(repo)
+    assert v2 != v1
+    out = make_out(tmp_path, v1, installed_likec4)
+    before = open(os.path.join(out, "model.json"), encoding="utf-8").read()
+
+    code, diff = run_diff(diff_mod, repo, out, v2)
+    assert code == 0
+    assert diff["unchanged"] is False
+    assert diff["rebuild_required"] is False
+    assert diff["history_rewritten"] is False
+    assert diff["affected_areas"] == []
+    assert diff["external_systems_flagged"] is False
+    assert diff["product_vision_flagged"] is False
+    assert diff["changed_paths"] == []
+    assert diff["deleted_paths"] == []
+    assert diff["renamed_paths"] == []
+    assert diff["elements_reanchored"] == []
+    assert open(os.path.join(out, "model.json"), encoding="utf-8").read() == before
+
+
+# --- manifest-table semantics drift must fail loudly (stage-2 finding 5) -----
+def test_unknown_manifest_match_type_raises(diff_mod, monkeypatch):
+    monkeypatch.setattr(diff_mod, "MANIFEST_TABLE",
+                        (("mystery", "content-hash", "whatever"),))
+    with pytest.raises(ValueError) as exc:
+        diff_mod.path_matches_manifest("any/path.txt")
+    assert "content-hash" in str(exc.value)
 
 
 # --- input errors exit 2, never a silent diff --------------------------------

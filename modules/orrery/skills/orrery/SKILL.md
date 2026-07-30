@@ -307,10 +307,14 @@ rendered.
 Resolve the target repo exactly as step 1, then run step 2 (anchor) as written - the
 update flow anchors a worktree too, so **the teardown obligation starts here** and is
 discharged on every exit path below. Resolve the out dir exactly as step 2:
-`--out` if given, else `$ORRERY_HOME/{slug}`. If `$out/state.json` does not exist, say so
-naming the resolved path - "no state.json at `$out/state.json`; a map built with a custom
-`--out` needs that same `--out` passed to update" - never silently build a second
-divergent copy without stating where the update looked.
+`--out` if given, else `$ORRERY_HOME/{slug}`. If `$out/state.json` does not exist,
+**STOP** (after step 8): report "no state.json at `$out/state.json` - a map built with a
+custom `--out` needs that same `--out` passed to update; run `/orrery` (the build path)
+to build here". An explicit update must never full-rebuild at a root it merely guessed -
+that is exactly how a second divergent copy gets created (risk adrev2-014). The other
+gate conditions (unparseable state, wrong schema_version, likec4_version mismatch -
+where the root is right but the state is unusable) DO fall back to a full rebuild; U3
+routes them.
 
 ### U2 - gate + diff (deterministic)
 
@@ -334,15 +338,18 @@ run step 8.
 
 ### U3 - route on diff.json (first match wins)
 
-1. **`rebuild_required` true**: announce the `rebuild_reason` verbatim (it names which
+1. **`state_missing` true**: report the `stop_reason` verbatim (it names the resolved
+   path that was searched and the `--out` mismatch cause), run step 8 (teardown), and
+   STOP. Never rebuild here - see U1.
+2. **`rebuild_required` true**: announce the `rebuild_reason` verbatim (it names which
    gate condition fired, or the clustering-material change), then run the full build -
    steps 3 through 9 exactly as written, reusing the anchor and worktree from U1.
-2. **`history_rewritten` true**: announce "history rewritten - old anchor {sha} is
+3. **`history_rewritten` true**: announce "history rewritten - old anchor {sha} is
    unresolvable or not an ancestor of {new sha}; full rebuild", then run steps 3-9 the
    same way. Never guess-diff across rewritten history.
-3. **`unchanged` true**: report "up to date (anchor {sha})" - zero agent dispatch, **but
+4. **`unchanged` true**: report "up to date (anchor {sha})" - zero agent dispatch, **but
    still run step 8 (teardown)**. The short-circuit skips the work, never the cleanup.
-4. Otherwise: the patch path (U4).
+5. Otherwise: the patch path (U4).
 
 ### U4 - patch path
 
@@ -356,15 +363,27 @@ run step 8.
    list; step U4.5 passes exactly it to `--packs`. If `affected_areas` names `misc` and
    state.json's `areas[]` has no misc entry, dispatch `area-misc` with
    `new_paths_routed_to_misc` as its root_paths (`misc` is a reserved, pattern-legal id).
+
+   **Empty pack list = the no-dispatch fast path, not an error.** A patchable diff can
+   legitimately affect zero packs - a pure same-area rename (continuity preserved by the
+   re-anchor alone) or an anchor advance with an identical tree. Never call
+   `merge_fragments.py` with an empty `--packs` (it exits 2 by contract). Instead: skip
+   U4.3-U4.5 entirely; if `elements_reanchored` is non-empty, run emit -> validate ->
+   render against the already re-anchored baseline `$out/model.json` (step 6 from the
+   emit command on - its dispositions apply); if it is empty, keep the existing artifact
+   untouched. Either way finish the flow - the atomic state.json advance (U4.6),
+   teardown (U4.7) - and report "no packs affected; anchor advanced" with the
+   re-anchored element count.
 3. **Clear `$out/fragments/`** (delete and recreate - same hygiene as step 5), then
    dispatch ONLY the re-run packs as `orrery-scout`, waves of at most 8, wave-0 packs
    (if flagged) first. Briefs come from `references/packs.md` as in step 5; each area
    pack gets its recorded `root_paths` from state.json's `areas[]`, plus
    `new_paths_routed_to_misc` appended for the misc pack. The published-id set: resolve
-   it from re-run wave-0 replies where available, else from the baseline
-   `$out/model.json` (the `system` id, every `container` and `actor` id, and every
-   element whose `source_packs` includes `external-systems`). Persist and check
-   fragments exactly as step 5.
+   it **per wave-0 pack** - from that pack's re-run reply where it was re-run, else from
+   the baseline `$out/model.json` (the `system` id, every `container` and `actor` id,
+   and every element whose `source_packs` includes `external-systems`) - so re-running
+   only external-systems never drops the baseline container/actor ids. Persist and
+   check fragments exactly as step 5.
 4. **Failure protocol (update mode)**: one re-dispatch per failed pack, then STOP
    retrying - do NOT split (a split's suffixed area ids would not match the baseline's
    pack namespaces, so its output could never replace the baseline). Keep the failed

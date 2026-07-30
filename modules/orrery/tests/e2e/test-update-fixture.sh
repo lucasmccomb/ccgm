@@ -10,6 +10,11 @@ set -euo pipefail
 #   - the deleted element's content is absent from artifact and model
 #   - the renamed element is retained with its anchor updated to the new path
 #   - state.json's anchor advanced atomically (no temp file left behind)
+# Then two more cycles pin the empty-re-run-pack fast path (stage-2 finding 2):
+#   v3 - pure same-area rename: zero packs to dispatch, NO merge call, render
+#        from the re-anchored baseline, state advances
+#   v4 - identical-tree anchor advance (allow-empty commit): zero packs, zero
+#        re-anchors, artifact byte-identical, only state.json advances
 #
 # The whole run exercises the $ORRERY_HOME override (risk adrev2-014): the
 # output root is redirected under this test's tempdir, asserted honored, and
@@ -439,8 +444,168 @@ if grep -qF "Client-side cart state." "$ARTIFACT"; then
 fi
 echo "ok: artifact carries the new title; deleted element's content absent"
 
-# --- v2: teardown + worktree-clean assertion ---------------------------------
+# --- v2: teardown ------------------------------------------------------------
 bash "$SCRIPTS/anchor_repo.sh" --teardown "$REPO" "$WORKTREE" || fail "v2 teardown failed"
+WORKTREE=""
+
+# --- v3: pure same-area rename -> the empty-re-run-pack fast path ------------
+# Stage-2 finding 2, shape (a): a same-area rename touching no manifest or
+# vision path affects ZERO packs. The flow must NOT call merge (empty --packs
+# exits 2); it re-renders from the baseline model diff_since re-anchored in
+# place, then advances state.
+OLD_GRID="$($GITC rev-parse :web/src/components/ProductGrid.tsx)"
+$GITC update-index --force-remove web/src/components/ProductGrid.tsx
+$GITC update-index --add --cacheinfo "100644,$OLD_GRID,web/src/components/Grid.tsx"
+$GITC commit -qm "v3: rename ProductGrid within the web area" --no-verify
+$GITC push -q origin main
+
+bash "$SCRIPTS/anchor_repo.sh" "$REPO" >"$WORK/anchor3.txt" || fail "v3 anchor_repo.sh failed"
+PARSED="$(parse_anchor "$WORK/anchor3.txt")" || fail "could not parse v3 anchor JSON"
+V3_SHA="$(printf '%s\n' "$PARSED" | cut -f2)"
+WORKTREE="$(printf '%s\n' "$PARSED" | cut -f3)"
+[ "$V3_SHA" != "$V2_SHA" ] || fail "v3 anchor did not advance"
+
+python3 "$SCRIPTS/diff_since.py" \
+  --repo "$REPO" --state "$OUT/state.json" \
+  --new-anchor "$V3_SHA" --out "$OUT/diff.json" \
+  || fail "v3 diff_since.py failed"
+python3 - "$OUT/diff.json" "$OUT/model.json" <<'PYEOF' || fail "v3 empty-pack fast-path diff assertions failed"
+import json
+import sys
+
+diff = json.load(open(sys.argv[1], encoding="utf-8"))
+model = json.load(open(sys.argv[2], encoding="utf-8"))
+if diff["unchanged"] or diff["history_rewritten"] or diff["rebuild_required"] or diff["state_missing"]:
+    sys.exit("expected a patchable diff, got routing flags set")
+# The empty re-run pack list: no areas affected, neither wave-0 pack flagged.
+if diff["affected_areas"] != [] or diff["external_systems_flagged"] or diff["product_vision_flagged"]:
+    sys.exit("expected ZERO re-run packs, got areas=%s flags=%s/%s" % (
+        diff["affected_areas"], diff["external_systems_flagged"], diff["product_vision_flagged"]))
+if diff["elements_reanchored"] != ["web__catalog"]:
+    sys.exit("elements_reanchored wrong: %s" % diff["elements_reanchored"])
+cat = [e for e in model["elements"] if e["id"] == "web__catalog"][0]
+if cat["files"][0]["path"] != "web/src/components/Grid.tsx":
+    sys.exit("baseline model not re-anchored to the renamed path")
+print("ok: v3 diff affects zero packs; baseline re-anchored in place")
+PYEOF
+
+# Fast path (SKILL U4.2): refresh inputs, SKIP dispatch + merge entirely,
+# re-render from the re-anchored baseline because elements_reanchored != [].
+python3 "$SCRIPTS/enumerate_repo.py" --worktree "$WORKTREE" --out "$OUT/census.json" \
+  || fail "v3 enumerate_repo.py failed"
+python3 "$SCRIPTS/emit_likec4.py" --model "$OUT/model.json" --out-dir "$OUT" \
+  || fail "v3 emit_likec4.py failed"
+python3 "$SCRIPTS/validate_map.py" \
+  --model "$OUT/model.json" --model-dir "$OUT/model" \
+  --repo "$REPO" --anchor-sha "$V3_SHA" \
+  || fail "v3 validate_map.py failed - the re-anchored baseline must be valid at v3"
+bash "$SCRIPTS/render_map.sh" "$OUT" "$SLUG" >/dev/null || fail "v3 render_map.sh failed"
+grep -q "Catalog Browser" "$ARTIFACT" || fail "renamed element's title missing after fast-path re-render"
+
+python3 - "$OUT" "$SKILL_DIR" <<'PYEOF' || fail "v3 state.json write failed"
+import json, os, sys, time
+out, skill_dir = sys.argv[1], sys.argv[2]
+anchor = json.load(open(os.path.join(out, "anchor.json")))
+census = json.load(open(os.path.join(out, "census.json")))
+model = json.load(open(os.path.join(out, "model.json")))
+toolchain = json.load(open(os.path.join(skill_dir, "scripts/toolchain/package.json")))
+state = {
+    "schema_version": 1,
+    "slug": anchor["slug"],
+    "repo_path": anchor["repo_path"],
+    "remote_url": anchor["remote_url"],
+    "default_ref": anchor["default_ref"],
+    "anchor_sha": anchor["anchor_sha"],
+    "visibility": anchor["visibility"],
+    "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "likec4_version": toolchain["dependencies"]["likec4"],
+    "areas": census["areas"],
+    "element_index": {e["id"]: [f["path"] for f in e.get("files", [])]
+                      for e in model["elements"]},
+    "artifact": "dist/%s.html" % anchor["slug"],
+}
+tmp = os.path.join(out, "state.json.tmp")
+with open(tmp, "w") as fh:
+    json.dump(state, fh, indent=2, sort_keys=True)
+os.replace(tmp, os.path.join(out, "state.json"))
+PYEOF
+V3_STATE_SHA="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["anchor_sha"])' "$OUT/state.json")"
+[ "$V3_STATE_SHA" = "$V3_SHA" ] || fail "v3 state.json anchor did not advance"
+echo "ok: v3 fast path green - zero dispatch, re-anchored render, state advanced"
+
+bash "$SCRIPTS/anchor_repo.sh" --teardown "$REPO" "$WORKTREE" || fail "v3 teardown failed"
+WORKTREE=""
+
+# --- v4: identical-tree anchor advance -> fast path with nothing to do -------
+# Stage-2 finding 2, shape (b): the anchor advances but the tree is byte-
+# identical. Zero packs, zero re-anchors: the artifact stays untouched and
+# only state.json advances.
+ART_SUM_BEFORE="$(cksum "$ARTIFACT" | cut -d' ' -f1-2)"
+$GITC commit -q --allow-empty -m "v4: no tree change" --no-verify
+$GITC push -q origin main
+
+bash "$SCRIPTS/anchor_repo.sh" "$REPO" >"$WORK/anchor4.txt" || fail "v4 anchor_repo.sh failed"
+PARSED="$(parse_anchor "$WORK/anchor4.txt")" || fail "could not parse v4 anchor JSON"
+V4_SHA="$(printf '%s\n' "$PARSED" | cut -f2)"
+WORKTREE="$(printf '%s\n' "$PARSED" | cut -f3)"
+[ "$V4_SHA" != "$V3_SHA" ] || fail "v4 anchor did not advance"
+
+python3 "$SCRIPTS/diff_since.py" \
+  --repo "$REPO" --state "$OUT/state.json" \
+  --new-anchor "$V4_SHA" --out "$OUT/diff.json" \
+  || fail "v4 diff_since.py failed"
+python3 - "$OUT/diff.json" <<'PYEOF' || fail "v4 identical-tree diff assertions failed"
+import json
+import sys
+
+diff = json.load(open(sys.argv[1], encoding="utf-8"))
+if diff["unchanged"] or diff["history_rewritten"] or diff["rebuild_required"] or diff["state_missing"]:
+    sys.exit("expected a patchable diff, got routing flags set")
+for key in ("affected_areas", "changed_paths", "deleted_paths", "renamed_paths",
+            "orphaned_elements", "new_paths_routed_to_misc", "elements_reanchored"):
+    if diff[key]:
+        sys.exit("%s expected empty, got %s" % (key, diff[key]))
+if diff["external_systems_flagged"] or diff["product_vision_flagged"]:
+    sys.exit("no pack flags expected on an identical tree")
+print("ok: v4 diff is the all-empty patchable shape")
+PYEOF
+
+# Fast path with elements_reanchored empty: keep the artifact, advance state.
+python3 - "$OUT" "$SKILL_DIR" <<'PYEOF' || fail "v4 state.json write failed"
+import json, os, sys, time
+out, skill_dir = sys.argv[1], sys.argv[2]
+anchor = json.load(open(os.path.join(out, "anchor.json")))
+census = json.load(open(os.path.join(out, "census.json")))
+model = json.load(open(os.path.join(out, "model.json")))
+toolchain = json.load(open(os.path.join(skill_dir, "scripts/toolchain/package.json")))
+state = {
+    "schema_version": 1,
+    "slug": anchor["slug"],
+    "repo_path": anchor["repo_path"],
+    "remote_url": anchor["remote_url"],
+    "default_ref": anchor["default_ref"],
+    "anchor_sha": anchor["anchor_sha"],
+    "visibility": anchor["visibility"],
+    "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "likec4_version": toolchain["dependencies"]["likec4"],
+    "areas": census["areas"],
+    "element_index": {e["id"]: [f["path"] for f in e.get("files", [])]
+                      for e in model["elements"]},
+    "artifact": "dist/%s.html" % anchor["slug"],
+}
+tmp = os.path.join(out, "state.json.tmp")
+with open(tmp, "w") as fh:
+    json.dump(state, fh, indent=2, sort_keys=True)
+os.replace(tmp, os.path.join(out, "state.json"))
+PYEOF
+V4_STATE_SHA="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["anchor_sha"])' "$OUT/state.json")"
+[ "$V4_STATE_SHA" = "$V4_SHA" ] || fail "v4 state.json anchor did not advance"
+ART_SUM_AFTER="$(cksum "$ARTIFACT" | cut -d' ' -f1-2)"
+[ "$ART_SUM_BEFORE" = "$ART_SUM_AFTER" ] || fail "artifact changed on the nothing-to-do fast path"
+echo "ok: v4 fast path green - artifact untouched, state advanced to $V4_SHA"
+
+# --- final teardown + worktree-clean assertion -------------------------------
+bash "$SCRIPTS/anchor_repo.sh" --teardown "$REPO" "$WORKTREE" || fail "v4 teardown failed"
 WORKTREE=""
 WT_LIST="$(git -C "$REPO" worktree list)"
 WT_COUNT="$(printf '%s\n' "$WT_LIST" | wc -l | tr -d ' ')"
