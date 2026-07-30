@@ -12,6 +12,7 @@
     "skills/orrery/references/model.schema.json": { "target": "skills/orrery/references/model.schema.json", "type": "doc", "template": false },
     "skills/orrery/references/packs.md": { "target": "skills/orrery/references/packs.md", "type": "doc", "template": false },
     "skills/orrery/scripts/anchor_repo.sh": { "target": "skills/orrery/scripts/anchor_repo.sh", "type": "script", "template": false },
+    "skills/orrery/scripts/diff_since.py": { "target": "skills/orrery/scripts/diff_since.py", "type": "script", "template": false },
     "skills/orrery/scripts/emit_likec4.py": { "target": "skills/orrery/scripts/emit_likec4.py", "type": "script", "template": false },
     "skills/orrery/scripts/enumerate_repo.py": { "target": "skills/orrery/scripts/enumerate_repo.py", "type": "script", "template": false },
     "skills/orrery/scripts/likec4.sh": { "target": "skills/orrery/scripts/likec4.sh", "type": "script", "template": false },
