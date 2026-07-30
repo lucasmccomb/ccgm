@@ -44,10 +44,13 @@ origin, and `gh` (optional — without it repo visibility reports `unknown`).
 - **`/orrery` with no argument** maps the repo containing the current working directory.
 - **`/orrery update`** re-anchors, diffs the recorded anchor SHA against the new one
   (ancestry-checked, rename-aware), re-investigates only the affected areas, and re-runs
-  the same merge → validate → render chain. Rewritten history or a missing/corrupt
-  `state.json` triggers a full rebuild with a clear message. An update must be given the
-  same `--out` as the build that produced the map — it searches only the resolved default
-  otherwise.
+  the same merge → validate → render chain. A pure rename preserves element continuity
+  and can complete with no re-investigation at all; an unchanged repo reports "up to
+  date" and stops. If `state.json` is missing at the resolved output root, the update
+  STOPS and names the path it searched — a map built with a custom `--out` needs that
+  same `--out` passed to update; it never rebuilds at a root it merely guessed.
+  Rewritten history, an unparseable `state.json`, or a schema/toolchain version mismatch
+  falls back to a full rebuild with a clear message.
 - **`--vision`** takes a LOCAL file only; a URL is rejected, never fetched. Without it,
   the product-vision scout reads the repo's own README/docs.
 - **`$ORRERY_HOME`** overrides the output root (default `~/code/orrery`) without editing
