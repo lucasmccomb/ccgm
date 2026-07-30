@@ -15,7 +15,9 @@ The seven ordered checks (plan Epic 3):
      `git -C <repo> cat-file -e <anchor_sha>:<path>` -- git-native ONLY,
      never a raw filesystem join (security C4: cannot escape the repo by
      construction).
-  4. Line ranges sane (start_line <= end_line; no end without start).
+  4. Line ranges sane (start_line <= end_line; no end without start) AND
+     inside the real blob at the anchor (git cat-file blob line count --
+     an out-of-range #L link is a hallucinated citation).
   5. Relation endpoints exist.
   6. Parent refs exist and are acyclic.
   7. `likec4.sh validate --json <model-dir>` -- its structured errors are
@@ -256,18 +258,59 @@ def check_paths(model, repo, anchor_sha):
     return errors
 
 
-def check_ranges(model):
+def _blob_line_count(repo, anchor_sha, path, cache):
+    """Line count of the blob at the anchor, or None when unreadable (the
+    path check has already recorded the missing-blob error)."""
+    if path in cache:
+        return cache[path]
+    proc = subprocess.run(
+        ["git", "-C", repo, "cat-file", "blob", "%s:%s" % (anchor_sha, path)],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+    )
+    if proc.returncode != 0:
+        cache[path] = None
+        return None
+    data = proc.stdout
+    count = data.count(b"\n")
+    if data and not data.endswith(b"\n"):
+        count += 1
+    cache[path] = count
+    return count
+
+
+def check_ranges(model, repo, anchor_sha):
+    """Line ranges must be internally sane AND exist in the blob at the
+    anchor: a #L500-L600 link into a 3-line file is a hallucinated citation
+    (PR #910 stage-2 finding 5), so start/end are compared against the real
+    blob line count via git cat-file."""
     errors = []
+    cache = {}
     for el in model.get("elements", []):
         eid = el.get("id")
         for f in el.get("files") or []:
             start, end = f.get("start_line"), f.get("end_line")
+            path = f.get("path")
             if end is not None and start is None:
                 errors.append(err("range", "end_line without start_line",
-                                  element_id=eid, path=f.get("path")))
-            elif start is not None and end is not None and end < start:
+                                  element_id=eid, path=path))
+                continue
+            if start is not None and end is not None and end < start:
                 errors.append(err("range", "end_line %s < start_line %s" % (end, start),
-                                  element_id=eid, path=f.get("path")))
+                                  element_id=eid, path=path))
+                continue
+            if start is None or not isinstance(path, str) or path_shape_error(path):
+                continue
+            total = _blob_line_count(repo, anchor_sha, path, cache)
+            if total is None:
+                continue  # missing blob already reported by check 3
+            last = end if end is not None else start
+            if start > total or last > total:
+                errors.append(err(
+                    "range",
+                    "line range %s-%s exceeds the blob's %d line(s) at the anchor"
+                    % (start, last, total),
+                    element_id=eid, path=path,
+                ))
     return errors
 
 
@@ -376,7 +419,7 @@ def run(argv=None):
         # the model already, so they are skipped rather than crash-prone.
         errors.extend(check_evidence(model))
         errors.extend(check_paths(model, args.repo, args.anchor_sha))
-        errors.extend(check_ranges(model))
+        errors.extend(check_ranges(model, args.repo, args.anchor_sha))
         errors.extend(check_relations(model))
         errors.extend(check_parents(model))
     if not errors:

@@ -78,7 +78,7 @@
         {
           "path": "api/src/worker.js",
           "start_line": 1,
-          "end_line": 40
+          "end_line": 17
         }
       ],
       "source_packs": [
@@ -187,7 +187,7 @@
         {
           "path": "api/src/worker.js",
           "start_line": 1,
-          "end_line": 20
+          "end_line": 10
         }
       ],
       "external_url": "https://stripe.com/docs",
@@ -277,7 +277,7 @@
         {
           "path": "web/src/components/ProductGrid.tsx",
           "start_line": 1,
-          "end_line": 12
+          "end_line": 7
         }
       ],
       "source_packs": [
@@ -294,7 +294,7 @@
         {
           "path": "web/src/components/ProductGrid.tsx",
           "start_line": 1,
-          "end_line": 10
+          "end_line": 5
         }
       ],
       "source_packs": [

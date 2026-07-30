@@ -89,6 +89,30 @@ SECRET_PATTERNS = [
     ("email-address", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")),
 ]
 
+# The full pattern class runs over every prose string that reaches the
+# emitter (PR #910 stage-2 finding 1: `technology` sailed to the published
+# artifact unscreened).
+SCREENED_PROSE_FIELDS = ("title", "summary", "description", "technology")
+
+# external_url is guaranteed to hold a URL, so the email pattern would
+# false-positive constantly; it gets the credentialed-URL pattern plus a
+# bare-userinfo check instead (any user@ before the first path separator is
+# suspicious in a docs link, with or without a token after a colon).
+_CREDENTIALED_URL_RE = dict(SECRET_PATTERNS)["credentialed-url"]
+_URL_USERINFO_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^/?#\s]*@")
+
+
+def screen_external_url(url):
+    """Return a pattern name when an external_url carries credentials or any
+    userinfo, else None. Normal https URLs pass untouched."""
+    if not isinstance(url, str):
+        return None
+    if _CREDENTIALED_URL_RE.search(url):
+        return "credentialed-url"
+    if _URL_USERINFO_RE.search(url):
+        return "url-userinfo"
+    return None
+
 # ---------------------------------------------------------------------------
 # INJECTION_PATTERNS -- adapted from
 # modules/self-improving/lib/learnings_store.py (security R3). Copied +
@@ -118,23 +142,38 @@ def screen_secret(text):
     return None
 
 
-def neutralize(text, max_len=None):
-    """Wrap INJECTION_PATTERNS matches; clamp to max_len (schema max).
-
-    The clamp mirrors the learnings_store precedent (truncate AFTER
-    sanitizing): wrapping adds characters, and a wrapped field must not
-    fail the frozen model.schema.json maxLength in validate_map.py.
-    Returns (text, changed).
-    """
+def _wrap_injections(text):
     changed = False
     for rx in INJECTION_PATTERNS:
         text, n = rx.subn(lambda m: "[neutralized]" + m.group(0) + "[/neutralized]", text)
         if n:
             changed = True
-    if max_len is not None and len(text) > max_len:
-        text = text[:max_len]
-        changed = True
     return text, changed
+
+
+def neutralize(text, max_len=None):
+    """Wrap INJECTION_PATTERNS matches; keep the result within max_len
+    (the schema max) WITHOUT ever cutting a marker.
+
+    A naive truncate-after-wrap can slice through the closing
+    [/neutralized] (PR #910 stage-2 finding 2), leaving a dangling open
+    marker. Instead the SOURCE text is shortened and re-wrapped until the
+    wrapped result fits, so both markers always survive intact. If even an
+    empty source cannot fit (max_len smaller than a marker pair -- never
+    true for the schema caps, all >= 60), the field collapses to "".
+    Returns (text, changed).
+    """
+    out, changed = _wrap_injections(text)
+    if max_len is None or len(out) <= max_len:
+        return out, changed
+    src = text
+    while src and len(out) > max_len:
+        overshoot = len(out) - max_len
+        src = src[:len(src) - overshoot]
+        out, _ = _wrap_injections(src)
+    if len(out) > max_len:
+        out = ""
+    return out, True
 
 
 # ---------------------------------------------------------------------------
@@ -237,12 +276,17 @@ def validate_fragment(frag, pack):
 # Screening + neutralization of one validated fragment
 # ---------------------------------------------------------------------------
 
-def process_pack(pack, frag, report):
+def process_pack(pack, frag, report, quarantined_parents=None):
     """Screen and neutralize one schema-valid fragment.
 
     Returns (elements, relations, open_questions); every element/relation
-    carries _packs (provenance list) for the merge step.
+    carries _packs (provenance list) for the merge step. A secret match in
+    ANY screened field withholds the whole element; its parent is recorded
+    in quarantined_parents so surviving children can be reparented instead
+    of cascade-dropped (stage-2 finding 4).
     """
+    if quarantined_parents is None:
+        quarantined_parents = {}
     area_prefix = None
     if pack.startswith("area-"):
         area_prefix = pack[len("area-"):] + "__"
@@ -250,13 +294,24 @@ def process_pack(pack, frag, report):
     kept_elements = []
     for el in frag.get("elements", []):
         hit = None
-        for field in ("title", "summary", "description"):
+        for field in SCREENED_PROSE_FIELDS:
             pat = screen_secret(el.get(field))
             if pat:
                 hit = {"pack": pack, "id": el.get("id"), "field": field, "pattern": pat}
                 break
+        if hit is None:
+            for tag in el.get("tags") or []:
+                pat = screen_secret(tag)
+                if pat:
+                    hit = {"pack": pack, "id": el.get("id"), "field": "tags", "pattern": pat}
+                    break
+        if hit is None:
+            pat = screen_external_url(el.get("external_url"))
+            if pat:
+                hit = {"pack": pack, "id": el.get("id"), "field": "external_url", "pattern": pat}
         if hit:
             report["withheld_secret_elements"].append(hit)
+            quarantined_parents.setdefault(el.get("id"), el.get("parent"))
             continue
         if area_prefix and not el["id"].startswith(area_prefix):
             report["namespace_violations"].append(
@@ -374,6 +429,43 @@ def merge_elements(pool, report):
         if el is not None:
             merged.append(_ordered_element(el))
     return merged
+
+
+def reparent_quarantine_orphans(elements, quarantined_parents, report):
+    """Reparent children of a secret-quarantined element instead of letting
+    the cascade delete the whole subtree (stage-2 finding 4).
+
+    A child whose parent was withheld by secret screening moves to the
+    quarantined element's own parent (walking a chain of quarantined
+    ancestors to the nearest survivor), falling back to the system root, or
+    to top level when no system element exists. The offending element stays
+    fully withheld; only its evidence-clean descendants survive. Every move
+    is reported. Non-quarantine orphans (never-defined or collision-dropped
+    parents) still go through cascade_parent_orphans afterwards.
+    """
+    ids = {e["id"] for e in elements}
+    has_system = "system" in ids
+    out = []
+    for e in elements:
+        parent = e.get("parent")
+        if parent is None or parent in ids or parent not in quarantined_parents:
+            out.append(e)
+            continue
+        candidate = quarantined_parents.get(parent)
+        seen = {parent}
+        while candidate is not None and candidate not in ids:
+            if candidate in quarantined_parents and candidate not in seen:
+                seen.add(candidate)
+                candidate = quarantined_parents[candidate]
+            else:
+                candidate = None
+        if candidate is None and has_system and e["id"] != "system":
+            candidate = "system"
+        moved = dict(e)
+        moved["parent"] = candidate
+        report["reparented"].append({"id": e["id"], "from": parent, "to": candidate})
+        out.append(_ordered_element(moved))
+    return out
 
 
 def cascade_parent_orphans(elements, report):
@@ -554,6 +646,7 @@ def new_report(mode, packs):
         "collisions": [],
         "neutralized": [],
         "dropped_relations": [],
+        "reparented": [],
         "dropped_parent_orphans": [],
         "open_questions": {},
         "counts": {},
@@ -598,6 +691,7 @@ def run(argv=None):
 
     element_pool = []
     relation_pool = []
+    quarantined_parents = {}
     for pack in packs:
         frag_path = os.path.join(args.fragments_dir, pack + ".json")
         if not os.path.isfile(frag_path):
@@ -616,7 +710,7 @@ def run(argv=None):
             report["quarantined_fragments"].append({"pack": pack, "errors": errs})
             continue
         report["loaded_packs"].append(pack)
-        els, rels, questions = process_pack(pack, frag, report)
+        els, rels, questions = process_pack(pack, frag, report, quarantined_parents)
         element_pool.extend(els)
         relation_pool.extend(rels)
         if questions:
@@ -626,17 +720,24 @@ def run(argv=None):
         baseline = _load_json(args.out, "baseline model (--patch mode)")
         diff = _load_json(args.diff, "diff") if args.diff else {}
         state = _load_json(args.state, "state") if args.state else None
-        rerun = set(packs)
+        # A pack replaces its baseline content ONLY when it actually produced
+        # a valid fragment this run (stage-2 finding 3). A re-run pack whose
+        # fragment is missing or quarantined KEEPS its baseline elements --
+        # patch mode must never silently shrink the map because one scout
+        # re-investigation failed.
+        rerun_loaded = set(report["loaded_packs"])
+        rerun_failed = sorted(set(packs) - rerun_loaded)
         orphaned = set(diff.get("orphaned_elements", []) or [])
         patch_info = {
-            "rerun_packs": sorted(rerun),
+            "rerun_packs": sorted(set(packs)),
             "baseline_elements_replaced": [],
             "orphaned_deleted": [],
+            "reinvestigation_failed_retained": rerun_failed,
             "baseline_anchor_sha": (state or {}).get("anchor_sha"),
         }
         for el in baseline.get("elements", []) or []:
             src = set(el.get("source_packs") or [])
-            if src & rerun:
+            if src & rerun_loaded:
                 patch_info["baseline_elements_replaced"].append(el["id"])
                 continue
             if el["id"] in orphaned:
@@ -647,7 +748,7 @@ def run(argv=None):
             element_pool.append(kept)
         for rel in baseline.get("relations", []) or []:
             src = set(rel.get("source_packs") or [])
-            if src & rerun:
+            if src & rerun_loaded:
                 continue
             kept = dict(rel)
             kept["_packs"] = sorted(src) or ["baseline"]
@@ -655,6 +756,7 @@ def run(argv=None):
         report["patch"] = patch_info
 
     elements = merge_elements(element_pool, report)
+    elements = reparent_quarantine_orphans(elements, quarantined_parents, report)
     elements = cascade_parent_orphans(elements, report)
     valid_ids = {e["id"] for e in elements}
     relations = merge_relations(relation_pool, valid_ids, report)
@@ -695,9 +797,15 @@ def run(argv=None):
     if report["dropped_relations"]:
         print("merge_fragments.py: dropped %d dangling relation(s)"
               % len(report["dropped_relations"]))
+    if report["reparented"]:
+        print("merge_fragments.py: reparented %d child(ren) of withheld element(s): %s"
+              % (len(report["reparented"]),
+                 ", ".join(r["id"] for r in report["reparented"])))
     if report["dropped_parent_orphans"]:
         print("merge_fragments.py: dropped %d element(s) whose parent is not in the model"
               % len(report["dropped_parent_orphans"]))
+    for pack in (report.get("patch") or {}).get("reinvestigation_failed_retained", []):
+        print("merge_fragments.py: pack %s: re-investigation failed, baseline retained" % pack)
     print("merge_fragments.py: report written: %s" % report_path)
     return 0
 

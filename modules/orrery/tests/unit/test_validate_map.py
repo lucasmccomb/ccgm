@@ -195,6 +195,27 @@ def test_end_without_start_fails(validate_mod, tmp_path, repo):
     assert errors[0]["message"] == "end_line without start_line"
 
 
+def test_end_line_beyond_eof_fails(validate_mod, tmp_path, repo):
+    # Stage-2 finding 5: a #L link past the blob's real EOF is a
+    # hallucinated citation. README.md is 1 line in the throwaway repo.
+    model = model_for(repo[1])
+    model["elements"][0]["files"] = [{"path": "README.md", "start_line": 1, "end_line": 5}]
+    code, errors = run_validate(validate_mod, tmp_path, model, repo)
+    assert code == 1
+    assert checks(errors) == ["range"]
+    assert "exceeds the blob's 1 line(s)" in errors[0]["message"]
+    assert errors[0]["path"] == "README.md"
+
+
+def test_start_line_beyond_eof_fails(validate_mod, tmp_path, repo):
+    model = model_for(repo[1])
+    model["elements"][1]["files"] = [{"path": "api/worker.js", "start_line": 99}]
+    code, errors = run_validate(validate_mod, tmp_path, model, repo)
+    assert code == 1
+    assert checks(errors) == ["range"]
+    assert "exceeds the blob's 40 line(s)" in errors[0]["message"]
+
+
 # --- check 5: relation endpoints --------------------------------------------
 
 def test_dangling_relation_endpoint_fails(validate_mod, tmp_path, repo):

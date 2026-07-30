@@ -26,7 +26,7 @@
       "title": "Stripe",
       "summary": "Third-party payment SaaS consumed via API from the checkout worker.",
       "description": "The worker charges cards through the Stripe API so the storefront never touches card data.",
-      "files": [{ "path": "api/src/worker.js", "start_line": 1, "end_line": 20 }],
+      "files": [{ "path": "api/src/worker.js", "start_line": 1, "end_line": 10 }],
       "external_url": "https://stripe.com/docs"
     },
     {

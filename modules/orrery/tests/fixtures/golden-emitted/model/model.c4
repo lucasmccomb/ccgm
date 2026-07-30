@@ -33,7 +33,7 @@ model {
     description '''
       The worker charges cards through the Stripe API so the storefront never touches card data.
     '''
-    link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/api/src/worker.js#L1-L20 'source'
+    link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/api/src/worker.js#L1-L10 'source'
     link https://stripe.com/docs 'docs'
   }
   stripe_sdk = package 'stripe-node' {
@@ -73,7 +73,7 @@ model {
         description '''
           Charges cards through the Stripe API and writes orders because the storefront never touches card data.
         '''
-        link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/api/src/worker.js#L1-L40 'source'
+        link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/api/src/worker.js#L1-L17 'source'
       }
 
       db__migrations = component 'Orders Migrations' {
@@ -111,11 +111,11 @@ model {
         description '''
           Lists products from the catalog feed because the Shopper needs to find items before checkout.
         '''
-        link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/web/src/components/ProductGrid.tsx#L1-L12 'source'
+        link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/web/src/components/ProductGrid.tsx#L1-L7 'source'
 
         web__catalog_grid = file 'ProductGrid.tsx' {
           summary 'Key file: the product grid renderer.'
-          link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/web/src/components/ProductGrid.tsx#L1-L10 'source'
+          link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/web/src/components/ProductGrid.tsx#L1-L5 'source'
         }
       }
     }
