@@ -159,7 +159,7 @@ embed-in-browser, joined ingest, pipeline, and the snippet-string assertion) on 
 One residual is out of CI's reach by design: latent investigation quality — what the
 scouts write about an arbitrary repo. CI cannot run live subagents, so that surface is
 gated per-run by `validate_map.py` (structure, anchoring, links, screening) and was
-proven once end-to-end by the live acceptance demo on a real repo. No surface is left to
-manual testing.
+proven once end-to-end by the live acceptance demo on a real repo. No surface depends on
+recurring manual testing.
 
 All fixture content is fictional (the `acme-shop` repo).
