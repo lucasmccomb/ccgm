@@ -506,6 +506,20 @@ Commands installed:
 
 ---
 
+### orrery
+
+Codebase system map: `/orrery` deep-dives a repo with parallel read-only scout agents and renders an interactive, zoomable, embeddable system-design map as one self-contained HTML file.
+
+**Installs**: `skills/orrery/SKILL.md` (`/orrery`), `agents/orrery-scout.md` (the restricted Read/Grep/Glob-only scout), fragment/model JSON schemas and pack briefs under `skills/orrery/references/`, and eight deterministic scripts under `skills/orrery/scripts/` (anchor, census, diff, merge, emit, validate, render, and the lockfile-pinned LikeC4 toolchain entry point)
+
+**What it does**: Anchors the target repo to a SHA (fetch + temp worktree, always removed), censuses it into at most 24 investigation areas, fans out `orrery-scout` agents that each return a schema-validated JSON fragment, then merges, screens, emits LikeC4, validates (`likec4 validate --json` is the gate — build never is), and renders `dist/{slug}.html`: 4 zoom tiers (landscape → containers → components → key files), file-level GitHub links pinned to the anchor SHA, external systems, and per-node product-context prose. Publish safety is layered: secret-shaped content is quarantined at merge, all repo-derived prose is HTML-entity-escaped, the report states repo visibility (private/unknown → do-not-publish warning), and the documented embed is a sandboxed iframe. `/orrery update` refreshes an existing map incrementally from its recorded `state.json`. Output root: `$ORRERY_HOME` (default `~/code/orrery`).
+
+**Requirements**: Node >= 22.22.3 + npm, `python3`, `git`, network access to the target repo's origin; `gh` optional (absent → visibility `unknown`)
+
+**Dependencies**: None
+
+---
+
 ## Category: workflow
 
 Development workflow patterns and coordination systems.

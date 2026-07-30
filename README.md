@@ -220,7 +220,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **model-vetting** | core | - | Security vetting gate for new AI models: weights provenance, format safety, license/data terms, serving path, staged agentic access | - |
 | **multi-agent** | workflow | `/handoff`, `/mawf`, `/workspace-setup` | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | startup-dashboard |
 | **onboarding** | commands | `/onboarding` | Analyzes a repository and generates a structured ONBOARDING.md for new contributors | - |
-| **orrery** | commands | `/orrery` | Deep-dives a codebase with parallel read-only scouts and renders an interactive, zoomable, embeddable system-design map as one self-contained HTML file. Under construction: this release ships the scaffold (pinned LikeC4 toolchain, schemas, scout agent, fixtures) | - |
+| **orrery** | commands | `/orrery` | Deep-dives a codebase with parallel read-only scouts and renders an interactive, zoomable, embeddable system-design map as one self-contained HTML file: 4 zoom tiers, GitHub links pinned to an anchor SHA, per-node product prose; `/orrery update` refreshes it | - |
 | **output-formatting** | patterns | - | Copy-pasteable content goes in fenced code blocks, never blockquotes, so it pastes clean anywhere | - |
 | **output-styles** | patterns | - | Packages the always-on tone rules as Claude Code output styles - a prompt-cached system-prompt layer instead of per-turn rule files | - |
 | **plugin-marketplace** [BETA] | core | - | Maintainer tooling that projects CCGM modules into a native Claude Code plugin marketplace. The bash installer stays canonical | - |
@@ -375,7 +375,7 @@ The `docs/` directory contains comprehensive documentation:
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
 | [Module Catalog](docs/modules.md) | Detailed reference for all 77 modules |
-| [Commands Reference](docs/commands.md) | All 83 slash commands with usage examples |
+| [Commands Reference](docs/commands.md) | All 84 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 31 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |

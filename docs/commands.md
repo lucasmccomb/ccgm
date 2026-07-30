@@ -1684,6 +1684,26 @@ Reference skill for making interfaces feel polished. Covers concentric border ra
 
 ---
 
+### /orrery
+
+**Codebase system map.**
+
+Deep-dives a codebase with parallel read-only `orrery-scout` agents and generates an interactive, zoomable, embeddable system-design map as one self-contained HTML file: 4 zoom tiers (landscape → containers → components → key files), file-level GitHub links pinned to an anchor SHA, external systems, and per-node product-context prose. Anchoring, census, merge, secret screening, emit, validation, and render are deterministic tested scripts; only the investigation is latent. The report states repo visibility and includes the sandboxed-iframe embed snippet; private/unknown repos get a do-not-publish-without-review warning.
+
+**Usage**:
+```
+/orrery                                  # map the repo you are currently in
+/orrery <repo>                           # a path, or a bare name tried at ~/code/{name}
+/orrery update [<repo>]                  # refresh an existing map incrementally
+/orrery --vision <file> --out <dir>      # local vision file; custom output dir
+```
+
+Output lands at `$ORRERY_HOME/{slug}/` (default `~/code/orrery`): `state.json`, `fragments/`, `model/`, and the artifact `dist/{slug}.html`.
+
+**Installed by**: orrery module
+
+---
+
 ### /pr-description
 
 **Write a PR title and body. Nothing else.**
