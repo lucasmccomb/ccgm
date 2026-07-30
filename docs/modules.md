@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 77 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 78 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -174,6 +174,18 @@ Security vetting gate for integrating any new AI model — open-weights or hoste
 **Installs**: `rules/model-vetting.md`
 
 **What it does**: Blocks "just wire it up" model integrations behind a verification checklist: weights provenance (the artifact must exist, come from the vendor's verified org, and be pinned to a revision hash — announced ≠ released ≠ verified), file-format safety (safetensors/GGUF only, no pickle loads, no `trust_remote_code`), license and hosted-API data terms (retention, training-on-inputs, jurisdiction), the serving path as supply chain (aggregators, upstream providers, and translation proxies all see plaintext traffic), and staged agentic access — a new backend model inherits every tool and credential the harness can reach, so access advances chat-only → sandboxed worktree → implementer-behind-two-stage-review → expanded roles, on tracked evidence only. Requires a written verification record next to the integration config, re-verified whenever that config changes.
+
+**Dependencies**: none
+
+---
+
+### live-testing-guard
+
+Keeps agent-driven live testing off the machine the operator is working on.
+
+**Installs**: `rules/live-testing-guard.md`
+
+**What it does**: A dev machine running many concurrent agent streams is a cockpit — focus, keyboard, pointer, microphone, and dictation are the operator's control channel to all of them at once, so one agent borrowing any of them blinds every stream. This rule routes live testing to a dedicated runner and gates it on recorded permission. **Machine gate**: anything that launches or relaunches an app, fires dictation, posts synthetic input events, changes focus, sets a machine-global input/audio override, opens the mic or camera, or drives a simulator/attached device from the host runs only on the runner — no quick-check exception, and an unreachable runner blocks the test rather than relocating it. **Permission gate**: every plan with live-testing steps carries a grant recorded at planning time (which steps, which runner, approved by the user, dated); planning commands ask, autonomous modes record `NOT AUTHORIZED` rather than inferring, and executors hold any step whose grant is missing and ask before running it — a plan step that mandates a live test is never its own authorization. Headless work (builds, unit tests, lint, type checks, read-only queries) stays on the dev machine. Written after a 2026-07-30 incident where a plan-mandated "fixture dictation preflight" set a machine-global audio-fixture override and silently replaced every real dictation with synthetic text injected into the focused app.
 
 **Dependencies**: none
 

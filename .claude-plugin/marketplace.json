@@ -559,6 +559,19 @@
       ]
     },
     {
+      "category": "core",
+      "description": "Keeps agent-driven live testing off the machine the operator works on. Anything that launches or relaunches an app, fires dictation, posts synthetic input events, changes focus, sets a machine-global input/audio override, or opens the mic runs only on the dedicated runner machine — and only against a permission grant recorded in the plan at planning time. Headless work (builds, unit tests, lint, read-only queries) stays on the dev machine.",
+      "name": "live-testing-guard",
+      "source": "./live-testing-guard",
+      "tags": [
+        "input-surface",
+        "permissions",
+        "safety",
+        "testing",
+        "ui-testing"
+      ]
+    },
+    {
       "category": "patterns",
       "description": "Design-engineering details that compound into polished interfaces. Model-invoked skill with references on design direction (aesthetic identity, typeface/color/spacing choices, avoiding generic AI aesthetics), typography (text-wrap, tabular nums, font smoothing), surfaces (concentric radii, shadows over borders, optical alignment, image outlines), animations (interruptible transitions, enter/exit, icon micro-interactions), and performance (transition specificity, will-change).",
       "name": "make-interfaces-feel-better",

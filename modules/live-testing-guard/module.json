@@ -1,0 +1,17 @@
+{
+  "name": "live-testing-guard",
+  "displayName": "Live Testing Guard",
+  "description": "Keeps agent-driven live testing off the machine the operator works on. Anything that launches or relaunches an app, fires dictation, posts synthetic input events, changes focus, sets a machine-global input/audio override, or opens the mic runs only on the dedicated runner machine — and only against a permission grant recorded in the plan at planning time. Headless work (builds, unit tests, lint, read-only queries) stays on the dev machine.",
+  "category": "core",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "rules/live-testing-guard.md": {
+      "target": "rules/live-testing-guard.md",
+      "type": "rule",
+      "template": false
+    }
+  },
+  "tags": ["safety", "testing", "ui-testing", "input-surface", "permissions"],
+  "configPrompts": []
+}

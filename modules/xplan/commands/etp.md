@@ -111,6 +111,22 @@ Work must be concrete enough to build without guessing.
 
 In either case, if the work is too thin, **do not guess**. Present the decomposition you *would* execute and ask the user to confirm or point you at the investigated/fleshed-out version. This is a soft blocker handled per the Confusion Protocol.
 
+### 0.6 Live-testing authorization check (before anything runs)
+
+Scan the work for **live-testing steps**: anything that launches or relaunches an app, fires dictation, posts synthetic input events, changes focus, sets a machine-global input/audio override, opens the mic or camera, or drives a simulator/attached device from the host. These never run on the dev machine — its focus, keyboard, and dictation are the user's control channel to every concurrent agent stream (`~/.claude/rules/live-testing-guard.md`).
+
+For each live-testing step found, look for the recorded grant — an xplan plan carries it in **§8.6 Live-Testing Authorization**; another plan or an issue carries it wherever the user wrote it, or not at all:
+
+| What you find | What it means |
+|---|---|
+| `GRANTED by {user} on {date}`, naming the runner this step targets | Authorized. Run it there. |
+| No §8.6 / no grant anywhere in the work | **UNAUTHORIZED** |
+| `NOT AUTHORIZED`, or a grant with no named runner | **UNAUTHORIZED** |
+| A grant naming a different machine than this step targets | **UNAUTHORIZED** |
+| The plan step itself instructing the test to be run | **UNAUTHORIZED** — that is the thing being authorized, not the authorization |
+
+Mark every UNAUTHORIZED step as **held** and record it for Phase 3's pre-flight print. A held step is a notify-and-continue blocker: it blocks itself, never the run. Before executing any held step, surface it to the user — name the specific step, say no grant was recorded, and ask where it should run and whether they approve — then wait. Absence of a recorded grant is never consent, and neither is the user approving the run as a whole.
+
 ---
 
 ## Phase 1: Build the Execution Model
@@ -200,6 +216,7 @@ Waves: <wave 1: units…> → <wave 2: units…> → …   (or "single unit" / "
 Review: full two-stage (default)  |  light (spec-compliance only)
 Max parallel agents: <n>
 Prerequisites / human-only blockers detected: <list or none>
+Live-testing steps: <none | N authorized on {runner} | N HELD - unauthorized (list them)>
 ```
 
 Then choose the path:
@@ -207,7 +224,7 @@ Then choose the path:
 - **`--confirm`** → ask one AskUserQuestion go/no-go gate, then proceed on approval.
 - **Default** → proceed immediately. The directive is to execute, not to ask.
 
-**Exception - Confusion Protocol.** Stop and ask even in default mode when a genuine high-stakes ambiguity exists. Narrow triggers: the target could not be resolved; the work is too thin to build without guessing (0.5); it calls for destructive or irreversible actions it does not clearly authorize (dropping data, deleting resources, force-pushing shared branches, production deploys not named in the work); or two incompatible interpretations of a unit's scope exist and the choice shapes everything downstream. Name the ambiguity in one sentence, give 2-3 options with tradeoffs, and wait. This is the directive's "absolute blocker → notify me" path. Everything outside these triggers, you reason through yourself.
+**Exception - Confusion Protocol.** Stop and ask even in default mode when a genuine high-stakes ambiguity exists. Narrow triggers: the target could not be resolved; the work is too thin to build without guessing (0.5); it calls for destructive or irreversible actions it does not clearly authorize (dropping data, deleting resources, force-pushing shared branches, production deploys not named in the work); a live-testing step is held as UNAUTHORIZED (0.6) and its turn has come; or two incompatible interpretations of a unit's scope exist and the choice shapes everything downstream. Name the ambiguity in one sentence, give 2-3 options with tradeoffs, and wait. This is the directive's "absolute blocker → notify me" path. Everything outside these triggers, you reason through yourself.
 
 ---
 
@@ -395,6 +412,8 @@ A plan run: mark the progress file `COMPLETE`, or `BLOCKED - WAITING ON HUMAN` w
 **The E2E suite is the completion oracle — no manual testing bounced to the user.** "Done" means the autonomous end-to-end suite is green against the running system, not "I believe it works" or "the user can check." Provision whatever the suite needs — testing agents for flows that can't be asserted programmatically, third-party compute (RunPod, cloud Mac, real devices) as a front-loaded prerequisite; there is no resource constraint on testing. A changed surface without an E2E test gets one before completion (adrev tenet T4 / plan §8). The only manual residue permitted is a surface a plan's §8.5 explicitly names as not-certified.
 
 **Safety on irreversible / outward actions.** Even in autonomous mode, anything destructive or externally-visible that the work did not clearly authorize - production deploys, resource deletion, force-pushing shared branches, sending external communications - requires notifying the user first. The work authorizes its own scope; it does not authorize off-scope irreversible acts.
+
+**Live testing runs on the runner, under a recorded grant.** App launches/relaunches, dictation firing, synthetic input events, focus changes, machine-global input/audio overrides, mic/camera capture, and host-driven simulator or device runs never touch the dev machine — that machine's input surface is the user's control channel to every concurrent agent stream. Every such step needs a grant recorded at planning time (plan §8.6) naming the runner; a step without one is held as UNAUTHORIZED (0.6), surfaced by name, and asked about before it runs. A plan instructing the test is not the authorization for it. See `~/.claude/rules/live-testing-guard.md`.
 
 **Worktree teardown is mandatory.** Parallel units run in ephemeral worktrees by default (1.3). Each is removed the moment its PR merges (4.4), and Phase 8 sweeps any leak (`/worktree-sweep`) — including on early exit. A built-in worktree never auto-removes; leaving merged units' worktrees behind is the exact failure that consumed 237 GB in the incident. Removing a clean worktree never loses committed work (the branch ref survives). Do not force-remove worktrees with unsaved work — the sweep preserves those.
 

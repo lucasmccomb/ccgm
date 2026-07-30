@@ -368,8 +368,8 @@ After 5.6 passes:
 ## Phase 0.5: Discovery Interview
 
 **Skip this phase entirely if `--light` OR `--autonomous` flag is active.**
-- `--light`: proceed to Phase 1 with no interview.
-- `--autonomous`: proceed to Phase 1 with full-depth research forced (see Inference Rules below). Inferred answers must be written to `decisions.md` so they are visible during the final walkthrough.
+- `--light`: proceed to Phase 1 with no interview. **Q8 (live-testing authorization) is deferred, not dropped** — ask it at Phase 3.3.5 point 7, once the suite's live-testing steps are known. A user is present in light mode, so the grant is available; skipping it would silently produce a `NOT AUTHORIZED` plan.
+- `--autonomous`: proceed to Phase 1 with full-depth research forced (see Inference Rules below). Inferred answers must be written to `decisions.md` so they are visible during the final walkthrough. Q8 is the one question autonomous mode cannot answer for the user: record `NOT AUTHORIZED` in §8.6 and surface it at 6.A.
 
 **Goal**: Reach 95%+ confidence about what the user wants to build before committing to research and planning. A wrong assumption at this stage cascades into hours of wasted work.
 
@@ -387,6 +387,7 @@ When `--autonomous` is active, use these defaults in place of the user's answers
 | Revenue model (if product) | Mark "TBD - address in final walkthrough". Do NOT block. |
 | Timeline | Assume no hard deadline. |
 | Research level | **Full** (all 7 agents, unconditionally). |
+| Live-testing authorization (Q8) | **NOT AUTHORIZED.** Autonomous mode cannot grant it — no user is present to approve. Record `NOT AUTHORIZED` in plan §8.6 and surface it at the 6.A walkthrough. Never infer a grant from the plan's own testing needs. |
 
 ### 0.5.0 Menu-Gen Test
 
@@ -474,6 +475,23 @@ options:
   - "Soft target in mind (I'll specify)"
   - "Hard deadline (I'll specify)"
 ```
+
+**Q8 - Live-testing environment (ALWAYS ask unless the work is provably headless-only):**
+
+Live testing is anything that launches or relaunches an app, fires dictation, posts synthetic input events, changes focus, sets a machine-global input/audio override, opens the mic or camera, or drives a simulator/attached device from the host. It never runs on the dev machine — that machine's focus, keyboard, and dictation are the user's control channel to every agent stream running on it. See `~/.claude/rules/live-testing-guard.md`.
+
+Ask this whenever the plan could plausibly include any such step. State plainly, in visible text before the question, which steps in the proposed work are live testing, so the user is approving something specific:
+
+```
+question: "This plan includes live testing ({name the specific steps}). Where does it run, and do you approve it there?"
+options:
+  - "Approved — run it on the dedicated runner machine (I'll name it)"
+  - "Approved — run it on a specific device/runner (I'll specify)"
+  - "Not approved — plan headless verification only"
+  - "No live testing in this plan"
+```
+
+Record the answer verbatim in plan §8.6 (Live-Testing Authorization) with the date and the fact that the user granted it. **The absence of an answer is `NOT AUTHORIZED`, never an implied yes.** If the user approves, name the runner explicitly — a grant that does not name where it runs is not a grant.
 
 ### 0.5.3 Research Level Preference
 
@@ -956,6 +974,10 @@ Design the suite now; it becomes plan.md Section 8 and is enforced by the execut
 
 **6. Certainty, not coverage theater.** Prefer a smaller set of tests that exercise real end-to-end behavior over a large set of shallow mocked ones. The bar is: if the suite is green, the user can ship without opening the app. State explicitly in Section 8 what the suite does and does not certify, so any residual manual check is named rather than silently assumed.
 
+**7. Live testing runs on the runner, under a recorded grant.** Any step that launches or relaunches an app, fires dictation, posts synthetic input events, changes focus, sets a machine-global input/audio override, opens the mic or camera, or drives a simulator/attached device from the host is **live testing**. It runs on the dedicated runner machine, never on the dev machine — the dev machine's focus, keyboard, and dictation are the user's control channel to every concurrent agent stream, and one machine-global override silently corrupts all of them (see `~/.claude/rules/live-testing-guard.md`). Enumerate every live-testing step the plan needs, name the runner each one targets, and write the Phase 0.5.2 Q8 answer into **§8.6 Live-Testing Authorization**. A plan whose §8.6 says `NOT AUTHORIZED` is still a valid plan — the executor will surface those steps and ask before running them. What is not valid is omitting §8.6, or letting a plan step's own instruction ("run the dictation preflight") stand in for the user's approval.
+
+**Ask Q8 here if it has not been asked yet** (`--light` defers it to this point), or if designing the suite produced live-testing steps that the Phase 0.5.2 answer did not cover. Use the same Q8 payload, naming the specific steps. In `--autonomous`, do not ask — write `NOT AUTHORIZED`.
+
 ### 3.4 Define Human-Epics
 
 For each human-epic:
@@ -1190,6 +1212,17 @@ This section is what makes the Section 9.5 follow-up contract executable autonom
 - [coverage targets per layer.]
 - **Certifies**: [what a green suite guarantees — the flows the user can trust without opening the app.]
 - **Does NOT certify**: [any residual surface not covered and why — named explicitly, never silently assumed. The goal is zero residual manual testing; any exception is justified here.]
+
+### 8.6 Live-Testing Authorization
+
+[From Phase 0.5.2 Q8 / Phase 3.3.5 point 7. MANDATORY section — present in every plan, even when the answer is "none". The executor reads this before running anything; a missing or incomplete block means UNAUTHORIZED.]
+
+- **Live-testing steps in this plan**: [each step named individually — app launches/relaunches, dictation firing, synthetic input events, focus changes, machine-global input/audio overrides, mic/camera capture, simulator or attached-device runs driven from a host. "None — this plan is headless-only" if genuinely none.]
+- **Where they run**: [the specific dedicated runner machine or device. Never the dev machine.]
+- **Permission granted**: [`GRANTED by {user} on {ISO date}` — the user's explicit approval at planning time — or `NOT AUTHORIZED`.]
+- **Dev machine**: headless only (builds, unit tests, lint, type checks, read-only queries). Non-negotiable.
+
+`NOT AUTHORIZED` is the correct value whenever the user did not explicitly approve, including every `--autonomous` run. Absence of an answer is never an implied grant.
 
 ## 9. Post-Implementation Integration
 
@@ -1693,6 +1726,11 @@ Structure the output in this exact order, as a single message (or a small number
 - Include the **Optimistic E2E coverage additions** (decisions.md) — E2E-coverage work added on the assumption the user wants it. List each so the user can veto a specific one; the default is to keep them all.
 - Each row: "I assumed X; correct if wrong."
 
+**7.5 Live-testing authorization (always shown, never folded into assumptions)**
+- Render plan §8.6 verbatim: the live-testing steps, the runner they target, and the permission line.
+- In autonomous mode the permission line is always `NOT AUTHORIZED` — autonomous planning cannot grant it. Say so plainly: "These steps need your approval and a named runner before an executor will run them; until then the executor will surface them and stop."
+- If §8.6 lists no live-testing steps, one line: "No live testing in this plan."
+
 **8. Open questions**
 - Anything the plan could not confidently decide
 - Revenue model (if flagged TBD in 0.5)
@@ -1760,6 +1798,8 @@ ls -la ~/code/plans/{concept-name}/reviews/adversarial-*-1.md \
 If any selected review file is missing, STOP. Go back to Phase 4. If Phase 5.7 was supposed to run (not skipped) but the three `adversarial-*-{1,2,3}.md` artifacts do not all exist, STOP and complete Phase 5.7 before gating.
 
 If the Phase 5.7 final pass left unresolved P0/P1 findings, surface them in the gate summary so the user decides to execute with eyes open — do not bury them.
+
+Also re-read plan §8.6. If it lists live-testing steps whose permission line is `NOT AUTHORIZED`, name those steps in the gate summary and state that the executor will stop on each one until the user approves it and names a runner. **Proceeding through this gate approves execution; it does not grant live-testing permission** — only an explicit Q8 answer recorded in §8.6 does that.
 
 Use AskUserQuestion:
 
@@ -1842,6 +1882,8 @@ Before spinning up agents, list all human-epics with:
 1. Instructions for each
 2. Which can be done NOW (while agents work)
 3. Which must wait until a specific wave completes
+
+Then check plan §8.6 the same way `/etp` Phase 0.5 does: every live-testing step needs a `GRANTED` line naming the runner it will run on. Any step without one is **UNAUTHORIZED** — name it, ask the user, and hold that step while the rest of the wave proceeds. Never run a live-testing step on the dev machine, and never read the plan's own instruction to run one as the grant. See `~/.claude/rules/live-testing-guard.md`.
 
 ### 7.3 Execute Waves
 

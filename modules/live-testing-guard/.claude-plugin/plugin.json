@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Keeps agent-driven live testing off the machine the operator works on. Anything that launches or relaunches an app, fires dictation, posts synthetic input events, changes focus, sets a machine-global input/audio override, or opens the mic runs only on the dedicated runner machine — and only against a permission grant recorded in the plan at planning time. Headless work (builds, unit tests, lint, read-only queries) stays on the dev machine.",
+  "displayName": "Live Testing Guard",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "keywords": [
+    "input-surface",
+    "permissions",
+    "safety",
+    "testing",
+    "ui-testing"
+  ],
+  "license": "MIT",
+  "name": "live-testing-guard"
+}
