@@ -38,6 +38,10 @@ Contract highlights (plan Epic 3):
     or the reserved cross-cutting ids (system, users), merge normally:
     longest description wins, files/tags union, source_packs[] provenance.
   * Relations are deduped; dangling endpoints dropped + reported.
+  * Ancestor-descendant relations (one endpoint on the other's parent
+    chain, or equal endpoints) are dropped + reported: containment is
+    already expressed by nesting, and LikeC4 rejects such edges
+    ("Invalid parent-child relationship").
 
 Exit codes: 0 = merged (the report carries all screening findings);
 2 = usage / unreadable input.
@@ -514,6 +518,41 @@ def merge_relations(pool, valid_ids, report):
     return out
 
 
+def drop_ancestor_relations(relations, elements, report):
+    """Drop relations where one endpoint is an ancestor of the other (via
+    the elements' parent chains), or the endpoints are equal (#915).
+
+    Containment is already expressed by nesting, so the relation is
+    semantically redundant -- and LikeC4 rejects it outright ("Invalid
+    parent-child relationship"), which failed validate on the first
+    full-scale run (16 such relations on a 551-element model). The walk
+    carries a visited set so a defensive parent cycle (validate_map.py
+    check 6 catches those later) can never loop it forever.
+    """
+    parent = {e["id"]: e.get("parent") for e in elements}
+
+    def is_ancestor(anc, node):
+        seen = set()
+        cur = parent.get(node)
+        while cur is not None and cur not in seen:
+            if cur == anc:
+                return True
+            seen.add(cur)
+            cur = parent.get(cur)
+        return False
+
+    out = []
+    for rel in relations:
+        frm, to = rel["from"], rel["to"]
+        if frm == to or is_ancestor(frm, to) or is_ancestor(to, frm):
+            report["dropped_ancestor_relations"].append(
+                {"from": frm, "to": to, "reason": "implied by nesting"}
+            )
+            continue
+        out.append(rel)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Meta (anchor + census -> model.schema.json meta)
 # ---------------------------------------------------------------------------
@@ -646,6 +685,7 @@ def new_report(mode, packs):
         "collisions": [],
         "neutralized": [],
         "dropped_relations": [],
+        "dropped_ancestor_relations": [],
         "reparented": [],
         "dropped_parent_orphans": [],
         "open_questions": {},
@@ -760,6 +800,10 @@ def run(argv=None):
     elements = cascade_parent_orphans(elements, report)
     valid_ids = {e["id"] for e in elements}
     relations = merge_relations(relation_pool, valid_ids, report)
+    # After dangling-drop, before the model is written; both modes (build
+    # and --patch) flow through here, so the patched model gets the same
+    # screen (#915).
+    relations = drop_ancestor_relations(relations, elements, report)
 
     model = {
         "meta": build_meta(anchor, census),
@@ -797,6 +841,9 @@ def run(argv=None):
     if report["dropped_relations"]:
         print("merge_fragments.py: dropped %d dangling relation(s)"
               % len(report["dropped_relations"]))
+    if report["dropped_ancestor_relations"]:
+        print("merge_fragments.py: %d ancestor relation(s) dropped: implied by nesting"
+              % len(report["dropped_ancestor_relations"]))
     if report["reparented"]:
         print("merge_fragments.py: reparented %d child(ren) of withheld element(s): %s"
               % (len(report["reparented"]),

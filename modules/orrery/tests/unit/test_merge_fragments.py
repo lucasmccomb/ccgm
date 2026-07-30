@@ -467,6 +467,168 @@ def test_never_defined_parent_still_cascades(merge_mod, tmp_path):
     assert [d["id"] for d in report["dropped_parent_orphans"]] == ["child_of_ghost"]
 
 
+# --- ancestor-descendant relations (#915) ----------------------------------
+
+def test_parent_child_relation_dropped(merge_mod, tmp_path):
+    # Direct parent -> child: containment is already expressed by nesting;
+    # LikeC4 rejects the edge ("Invalid parent-child relationship").
+    box = element("box", kind="container")
+    item = element("box_item", parent="box")
+    code, model, report = run_merge(
+        merge_mod, tmp_path, packs=["one"],
+        fragments={"one.json": frag(
+            "one", [box, item],
+            relations=[{"from": "box", "to": "box_item", "summary": "contains"}],
+        )},
+    )
+    assert code == 0
+    assert model["relations"] == []
+    assert report["dropped_ancestor_relations"] == [
+        {"from": "box", "to": "box_item", "reason": "implied by nesting"}
+    ]
+
+
+def test_grandparent_grandchild_relation_dropped(merge_mod, tmp_path):
+    # The walk follows the whole parent chain, not just one hop.
+    top = element("top", kind="container")
+    mid = element("mid", kind="container", parent="top")
+    leaf = element("leaf", parent="mid")
+    code, model, report = run_merge(
+        merge_mod, tmp_path, packs=["one"],
+        fragments={"one.json": frag(
+            "one", [top, mid, leaf],
+            relations=[{"from": "top", "to": "leaf", "summary": "reaches down two levels"}],
+        )},
+    )
+    assert model["relations"] == []
+    assert report["dropped_ancestor_relations"] == [
+        {"from": "top", "to": "leaf", "reason": "implied by nesting"}
+    ]
+
+
+def test_child_parent_reverse_relation_dropped(merge_mod, tmp_path):
+    # The descendant -> ancestor direction is the same class.
+    box = element("box", kind="container")
+    item = element("box_item", parent="box")
+    code, model, report = run_merge(
+        merge_mod, tmp_path, packs=["one"],
+        fragments={"one.json": frag(
+            "one", [box, item],
+            relations=[{"from": "box_item", "to": "box", "summary": "calls up"}],
+        )},
+    )
+    assert model["relations"] == []
+    assert report["dropped_ancestor_relations"] == [
+        {"from": "box_item", "to": "box", "reason": "implied by nesting"}
+    ]
+
+
+def test_self_relation_dropped(merge_mod, tmp_path):
+    # Equal endpoints are treated as the same class.
+    code, model, report = run_merge(
+        merge_mod, tmp_path, packs=["one"],
+        fragments={"one.json": frag(
+            "one", [element("alpha")],
+            relations=[{"from": "alpha", "to": "alpha", "summary": "self loop"}],
+        )},
+    )
+    assert model["relations"] == []
+    assert report["dropped_ancestor_relations"] == [
+        {"from": "alpha", "to": "alpha", "reason": "implied by nesting"}
+    ]
+
+
+def test_sibling_and_unrelated_relations_untouched(merge_mod, tmp_path, capsys):
+    box = element("box", kind="container")
+    sib_a = element("sib_a", parent="box")
+    sib_b = element("sib_b", parent="box")
+    other = element("other")
+    code, model, report = run_merge(
+        merge_mod, tmp_path, packs=["one"],
+        fragments={"one.json": frag(
+            "one", [box, sib_a, sib_b, other],
+            relations=[
+                {"from": "sib_a", "to": "sib_b", "summary": "sibling edge"},
+                {"from": "other", "to": "sib_a", "summary": "unrelated edge"},
+            ],
+        )},
+    )
+    assert len(model["relations"]) == 2
+    assert report["dropped_ancestor_relations"] == []
+    assert "ancestor relation(s) dropped" not in capsys.readouterr().out
+
+
+def test_ancestor_drop_count_reported(merge_mod, tmp_path, capsys):
+    # The count line matches the existing report-line pattern, and the
+    # report carries one entry per dropped relation.
+    box = element("box", kind="container")
+    item = element("box_item", parent="box")
+    sib = element("sib", parent="box")
+    code, model, report = run_merge(
+        merge_mod, tmp_path, packs=["one"],
+        fragments={"one.json": frag(
+            "one", [box, item, sib],
+            relations=[
+                {"from": "box", "to": "box_item", "summary": "contains"},
+                {"from": "box_item", "to": "box_item", "summary": "self loop"},
+                {"from": "box_item", "to": "sib", "summary": "sibling edge kept"},
+            ],
+        )},
+    )
+    assert "2 ancestor relation(s) dropped: implied by nesting" in capsys.readouterr().out
+    assert len(report["dropped_ancestor_relations"]) == 2
+    assert [(r["from"], r["to"]) for r in model["relations"]] == [("box_item", "sib")]
+
+
+def test_parent_cycle_walk_terminates(merge_mod, tmp_path):
+    # Defensive: a cycle in the parent chains (validate_map.py flags it
+    # later) must not hang the ancestor walk. The edge between the two
+    # cycle members is classified ancestor (each is on the other's chain);
+    # the edge from the unrelated element survives.
+    a = element("cyc_a", kind="container", parent="cyc_b")
+    b = element("cyc_b", kind="container", parent="cyc_a")
+    c = element("outside")
+    code, model, report = run_merge(
+        merge_mod, tmp_path, packs=["one"],
+        fragments={"one.json": frag(
+            "one", [a, b, c],
+            relations=[
+                {"from": "cyc_a", "to": "cyc_b", "summary": "inside the cycle"},
+                {"from": "outside", "to": "cyc_a", "summary": "into the cycle"},
+            ],
+        )},
+    )
+    assert code == 0
+    assert [(r["from"], r["to"]) for r in model["relations"]] == [("outside", "cyc_a")]
+    assert report["dropped_ancestor_relations"] == [
+        {"from": "cyc_a", "to": "cyc_b", "reason": "implied by nesting"}
+    ]
+
+
+def test_patch_mode_drops_ancestor_relation(merge_mod, tmp_path):
+    # The patched model gets the same screen: --patch flows through the
+    # same post-merge drop as build mode.
+    box = element("box", kind="container")
+    item = element("box_item", parent="box")
+    code, baseline, _ = run_merge(
+        merge_mod, tmp_path, packs=["one"],
+        fragments={"one.json": frag("one", [box, item])},
+    )
+    assert {e["id"] for e in baseline["elements"]} == {"box", "box_item"}
+    frag_dir = os.path.join(str(tmp_path), "fragments")
+    write_json(os.path.join(frag_dir, "one.json"),
+               frag("one", [box, item],
+                    relations=[{"from": "box", "to": "box_item", "summary": "contains"}]))
+    code, patched, report = run_merge(
+        merge_mod, tmp_path, packs=["one"], extra_args=["--patch"],
+    )
+    assert code == 0
+    assert patched["relations"] == []
+    assert report["dropped_ancestor_relations"] == [
+        {"from": "box", "to": "box_item", "reason": "implied by nesting"}
+    ]
+
+
 # --- meta ------------------------------------------------------------------
 
 def test_meta_source_links_github(merge_mod, tmp_path):
