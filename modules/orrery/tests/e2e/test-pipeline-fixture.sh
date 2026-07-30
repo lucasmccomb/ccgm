@@ -15,7 +15,6 @@ set -euo pipefail
 MODULE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPTS="$MODULE_DIR/skills/orrery/scripts"
 FRAGSRC="$MODULE_DIR/tests/fixtures/fragments"
-REPOSRC="$MODULE_DIR/tests/fixtures/fixture-repo"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/orrery-pipeline.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -26,18 +25,52 @@ fail() {
 }
 
 # --- 1. materialize the fixture repo as a real git anchor --------------------
+# INDEX PLUMBING, never a filesystem copy + `git add`: the fixture repo
+# deliberately commits BOTH web/ (storefront) and Web/ (legacy) -- two dirs
+# with disjoint files that differ only by case. A `cp -R` materializes them
+# as ONE merged physical dir on case-insensitive macOS and TWO dirs on
+# case-sensitive Linux, so a copy-based temp repo diverges per OS and
+# case-folds half the paths. Building the temp index from the ccgm index
+# entry list is case-exact and OS-deterministic: every blob is read from the
+# ccgm INDEX (git cat-file), rehashed into the temp object store, and
+# registered with git update-index -- the filesystem never gets a vote.
 REPO="$WORK/repo"
 mkdir -p "$REPO"
-cp -R "$REPOSRC/." "$REPO/"
 # Throwaway repo: bypass machine-level hooks (core.hooksPath) because the
 # fixture deliberately contains secret-SHAPED fake values that a gitleaks
 # pre-commit hook rejects.
 GITC="git -C $REPO -c user.name=orrery -c user.email=orrery@example.invalid -c core.hooksPath=/dev/null"
 $GITC init -q
-$GITC add -A
+CCGM_ROOT="$(cd "$MODULE_DIR/../.." && pwd)"
+FIXPREFIX="modules/orrery/tests/fixtures/fixture-repo"
+SRC_COUNT="$(git -C "$CCGM_ROOT" ls-files -- "$FIXPREFIX" | wc -l | tr -d ' ')"
+[ "$SRC_COUNT" -gt 0 ] || fail "no fixture-repo entries in the ccgm index (this test must run from a ccgm checkout)"
+TAB="$(printf '\t')"
+git -C "$CCGM_ROOT" ls-files -s -- "$FIXPREFIX" | while IFS= read -r line; do
+  # ls-files -s line shape: <mode> <sha> <stage><TAB><path>
+  mode="${line%% *}"
+  path="${line#*$TAB}"
+  rel="${path#$FIXPREFIX/}"
+  sha="$(git -C "$CCGM_ROOT" cat-file blob ":$path" | $GITC hash-object -w --stdin)"
+  $GITC update-index --add --cacheinfo "$mode,$sha,$rel"
+done
 $GITC commit -qm fixture --no-verify
 ANCHOR_SHA="$($GITC rev-parse HEAD)"
-echo "ok: fixture repo materialized at anchor $ANCHOR_SHA"
+
+# Deterministic regression guard for the case-split: the committed TREE
+# (read via plumbing, never the filesystem, so it is identical on every OS)
+# must still carry BOTH case-colliding dirs, and every source index entry
+# must have survived the materialization.
+TREE_LIST="$WORK/tree-paths.txt"
+$GITC ls-tree -r --name-only HEAD > "$TREE_LIST"
+grep -q '^web/' "$TREE_LIST" \
+  || fail "materialized tree lost the lowercase web/ dir (case-folded materialization?)"
+grep -q '^Web/' "$TREE_LIST" \
+  || fail "materialized tree lost the uppercase Web/ dir (case-folded materialization?)"
+TMP_COUNT="$(wc -l < "$TREE_LIST" | tr -d ' ')"
+[ "$SRC_COUNT" = "$TMP_COUNT" ] \
+  || fail "materialized tree has $TMP_COUNT entries but the ccgm index has $SRC_COUNT"
+echo "ok: fixture repo materialized case-exactly at anchor $ANCHOR_SHA ($TMP_COUNT entries, web/ + Web/ both present)"
 
 # --- 2. fragments: static fixtures + materialized area templates -------------
 FRAG="$WORK/fragments"
@@ -47,6 +80,38 @@ cp "$FRAGSRC/external-systems.json" "$FRAGSRC/product-vision.json" \
 sed 's/@AREA_ID@/web/g' "$FRAGSRC/area-alpha.json.tmpl" > "$FRAG/area-web.json"
 sed 's/@AREA_ID@/api/g' "$FRAGSRC/area-beta.json.tmpl" > "$FRAG/area-api.json"
 sed 's/@AREA_ID@/db/g' "$FRAGSRC/area-gamma.json.tmpl" > "$FRAG/area-db.json"
+
+# Every canned fragment path must be CASE-EXACT against the committed tree:
+# git cat-file -e reads the object store, so this assertion is identical on
+# case-sensitive and case-insensitive filesystems and catches a wrong-case
+# citation (web/ vs Web/) that a macOS filesystem lookup would mask.
+# traversal.json is the deliberately-bad-path fixture and is excluded.
+python3 - "$FRAG" "$REPO" "$ANCHOR_SHA" <<'PY' || fail "a canned fragment cites a path absent at the anchor (case drift?)"
+import glob, json, os, subprocess, sys
+frag_dir, repo, sha = sys.argv[1], sys.argv[2], sys.argv[3]
+bad = []
+for path in sorted(glob.glob(os.path.join(frag_dir, "*.json"))):
+    name = os.path.basename(path)
+    if name == "traversal.json":
+        continue
+    with open(path) as fh:
+        frag = json.load(fh)
+    for el in frag.get("elements", []):
+        if not isinstance(el, dict):
+            continue
+        for f in el.get("files") or []:
+            p = f.get("path")
+            rc = subprocess.run(
+                ["git", "-C", repo, "cat-file", "-e", "%s:%s" % (sha, p)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            ).returncode
+            if rc != 0:
+                bad.append("%s: %s cites %s (absent at anchor)" % (name, el.get("id"), p))
+if bad:
+    print("\n".join(bad))
+    sys.exit(1)
+PY
+echo "ok: every canned fragment path is case-exact at the anchor"
 
 # --- 3. anchor.json + census.json --------------------------------------------
 python3 - "$WORK" "$ANCHOR_SHA" "$REPO" <<'PY'
@@ -60,7 +125,7 @@ with open(work + "/anchor.json", "w") as fh:
                "behind": False, "dirty": False, "no_remote": False,
                "visibility": "public"}, fh)
 with open(work + "/census.json", "w") as fh:
-    json.dump({"areas": [{"id": "web", "title": "Web", "root_paths": ["Web"]},
+    json.dump({"areas": [{"id": "web", "title": "Web", "root_paths": ["web"]},
                          {"id": "api", "title": "api", "root_paths": ["api"]},
                          {"id": "db", "title": "db", "root_paths": ["db"]}]}, fh)
 PY

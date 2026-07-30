@@ -25,7 +25,7 @@
       "description": "Renders the catalog and cart so the Shopper can browse products and start checkout.",
       "technology": "TypeScript / Vite",
       "parent": "system",
-      "files": [{ "path": "Web/src/main.ts" }]
+      "files": [{ "path": "web/src/main.ts" }]
     },
     {
       "id": "api",

@@ -96,14 +96,14 @@ model {
       description '''
         Renders the catalog and cart so the Shopper can browse products and start checkout.
       '''
-      link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/Web/src/main.ts 'source'
+      link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/web/src/main.ts 'source'
 
       web__cart = component 'Cart' {
         summary 'Client-side cart state.'
         description '''
           Holds the pending order because checkout needs a stable line-item list.
         '''
-        link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/Web/src/components/Cart.tsx 'source'
+        link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/web/src/components/Cart.tsx 'source'
       }
 
       web__catalog = component 'Catalog Browser' {
@@ -111,11 +111,11 @@ model {
         description '''
           Lists products from the catalog feed because the Shopper needs to find items before checkout.
         '''
-        link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/Web/src/components/ProductGrid.tsx#L1-L12 'source'
+        link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/web/src/components/ProductGrid.tsx#L1-L12 'source'
 
         web__catalog_grid = file 'ProductGrid.tsx' {
           summary 'Key file: the product grid renderer.'
-          link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/Web/src/components/ProductGrid.tsx#L1-L10 'source'
+          link https://github.com/acme-fixture/acme-shop/blob/1234567890abcdef1234567890abcdef12345678/web/src/components/ProductGrid.tsx#L1-L10 'source'
         }
       }
     }

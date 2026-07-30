@@ -13,7 +13,7 @@
         "id": "web",
         "title": "Web",
         "root_paths": [
-          "Web"
+          "web"
         ]
       },
       {
@@ -243,7 +243,7 @@
       "technology": "TypeScript / Vite",
       "files": [
         {
-          "path": "Web/src/main.ts"
+          "path": "web/src/main.ts"
         }
       ],
       "source_packs": [
@@ -259,7 +259,7 @@
       "description": "Holds the pending order because checkout needs a stable line-item list.",
       "files": [
         {
-          "path": "Web/src/components/Cart.tsx"
+          "path": "web/src/components/Cart.tsx"
         }
       ],
       "source_packs": [
@@ -275,7 +275,7 @@
       "description": "Lists products from the catalog feed because the Shopper needs to find items before checkout.",
       "files": [
         {
-          "path": "Web/src/components/ProductGrid.tsx",
+          "path": "web/src/components/ProductGrid.tsx",
           "start_line": 1,
           "end_line": 12
         }
@@ -292,7 +292,7 @@
       "summary": "Key file: the product grid renderer.",
       "files": [
         {
-          "path": "Web/src/components/ProductGrid.tsx",
+          "path": "web/src/components/ProductGrid.tsx",
           "start_line": 1,
           "end_line": 10
         }

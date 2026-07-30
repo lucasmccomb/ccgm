@@ -71,7 +71,7 @@ def make_anchor(remote_url="https://github.com/acme-fixture/acme-shop.git",
 
 def make_census():
     return {"areas": [
-        {"id": "web", "title": "Web", "root_paths": ["Web"]},
+        {"id": "web", "title": "Web", "root_paths": ["web"]},
         {"id": "api", "title": "api", "root_paths": ["api"]},
         {"id": "db", "title": "db", "root_paths": ["db"]},
     ]}
