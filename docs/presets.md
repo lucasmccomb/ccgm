@@ -55,7 +55,7 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **Best for**: Power users who want the complete CCGM experience, including multi-agent coordination, brand research, and tech-specific guides.
 
-**Modules (72)**: Every stable module — `full` is defined as the set of all modules whose `module.json` status is not `beta` or `deprecated`. This includes **autoheal** (continuous self-improvement; opt-in real-time alerts and auto-apply) and `cloud-dispatch`. The only modules omitted are the beta ones (`plugin-marketplace`, `relevance-injection`, `dreaming`) and the deprecated `agent-manager`; install those individually via the module selector if you need them.
+**Modules (73)**: Every stable module — `full` is defined as the set of all modules whose `module.json` status is not `beta` or `deprecated`. This includes **autoheal** (continuous self-improvement; opt-in real-time alerts and auto-apply), `cloud-dispatch`, and **orrery** (`/orrery` codebase system maps). The only modules omitted are the beta ones (`plugin-marketplace`, `relevance-injection`, `dreaming`) and the deprecated `agent-manager`; install those individually via the module selector if you need them.
 
 **What you get**: The full suite. Includes multi-agent workflows, planning frameworks, tech-specific patterns (Cloudflare, Supabase, Tailwind, shadcn, MCP development), specialized commands, and the autoheal observability loop with three opt-in toggles (`/autoheal-toggle realtime|autoapply|webhook`).
 
