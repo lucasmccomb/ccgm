@@ -79,16 +79,53 @@ check_count_claim "docs/getting-started.md" "all __N__ modules"                 
 # regardless of which doc they appear in, so a wrong number cannot slip in via a
 # phrasing the explicit list above does not cover. Any match whose number is NOT
 # the derived MODULE_COUNT fails.
+
+# TRACKED docs only, and that word is load-bearing (issue #922). Recursing the
+# filesystem also reaches gitignored paths — notably docs/audits/, which holds
+# historical audit reports that correctly quote the module count that was true
+# on their audit date. Those are a record, not drift: the count in them is
+# supposed to stay put, so a filesystem walk fires on them after every module
+# addition, forever. Worse, being gitignored makes the result machine-dependent
+# — green in CI and on a fresh clone, red only for whoever holds the report
+# locally. A guard that disagrees with itself by machine is not a guard.
+# tests/test-no-personal-data.sh excludes docs/audits for the same reason.
+#
+# git ls-files gives exactly the tracked set, so this needs no hardcoded
+# directory name and covers any future gitignored doc path for free.
+scanned_docs() {
+  # Test seam: --self-test points this at fixtures instead of the real repo.
+  if [ -n "${CCGM_DOC_SCAN_LIST:-}" ]; then
+    printf '%s\n' "$CCGM_DOC_SCAN_LIST"
+    return
+  fi
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    git ls-files -- README.md CLAUDE.md docs | grep -E '\.md$' || true
+    return
+  fi
+  # No git (tarball export): walk the same paths and drop gitignored-by-
+  # convention dirs explicitly, so the check still runs and still skips audits.
+  find README.md CLAUDE.md docs -name '*.md' -type f 2>/dev/null \
+    | grep -v '/audits/' || true
+}
+
 check_no_wrong_count_phrasing() {
   local label="$1"
   shift
   local regex="$1"
   local found_wrong=0
-  local matches
-  # -R over the docs we ship; -n for line numbers; -E for extended regex.
-  # Limit to Markdown docs at the repo root and under docs/ to avoid scanning
-  # module bodies that legitimately discuss arbitrary counts.
-  matches=$(grep -REn "$regex" README.md CLAUDE.md docs 2>/dev/null || true)
+  local matches files
+  # -n for line numbers, -E for extended regex, over the tracked doc list.
+  # Limited to Markdown at the repo root and under docs/ so module bodies that
+  # legitimately discuss arbitrary counts are never scanned.
+  files=$(scanned_docs)
+  if [ -z "$files" ]; then
+    ok "no tracked docs to scan for '$label'"
+    return
+  fi
+  # $files is intentionally unquoted (word-split into arguments). /dev/null is
+  # appended so grep always has >=2 file operands: that forces the file: prefix
+  # the parser below needs, and stops grep reading stdin if the list is short.
+  matches=$(grep -En "$regex" $files /dev/null 2>/dev/null || true)
   if [ -z "$matches" ]; then
     ok "no '$label' phrasing present (nothing to drift)"
     return
@@ -108,6 +145,73 @@ EOF
     ok "all '$label' phrasings use $MODULE_COUNT"
   fi
 }
+
+# --- (a2) self-test ---------------------------------------------------------
+# Pins BOTH directions of the #922 fix: a gitignored audit report must not be
+# scanned, AND the guard must still catch real drift in a doc that IS scanned.
+# The second half matters most — an exclusion that quietly disables the check
+# would otherwise look identical to a working one.
+if [ "${1:-}" = "--self-test" ]; then
+  echo "=== test-doc-counts self-test ==="
+  ST_DIR="$(mktemp -d -t doccounts.XXXXXX)"
+  trap 'rm -rf "$ST_DIR"' EXIT
+  WRONG=$((MODULE_COUNT + 11))
+  printf 'This repo is a collection of %s configuration modules.\n' "$WRONG" > "$ST_DIR/stale.md"
+  printf 'This repo is a collection of %s configuration modules.\n' "$MODULE_COUNT" > "$ST_DIR/current.md"
+
+  # 1. A scanned doc carrying a wrong count MUST fail.
+  FAILURES=0
+  CCGM_DOC_SCAN_LIST="$ST_DIR/stale.md" \
+    check_no_wrong_count_phrasing "selftest stale" '[0-9]+ configuration modules' 2>/dev/null
+  if [ "$FAILURES" -gt 0 ]; then
+    echo "ok: self-test — stale count in a scanned doc still fails the guard"
+  else
+    echo "FAIL: self-test — guard did NOT catch a stale count; the check is inert" >&2
+    exit 1
+  fi
+
+  # 2. A scanned doc carrying the right count must pass.
+  FAILURES=0
+  CCGM_DOC_SCAN_LIST="$ST_DIR/current.md" \
+    check_no_wrong_count_phrasing "selftest current" '[0-9]+ configuration modules'
+  if [ "$FAILURES" -ne 0 ]; then
+    echo "FAIL: self-test — correct count reported as drift" >&2
+    exit 1
+  fi
+  echo "ok: self-test — correct count passes"
+
+  # 3. The real scan list includes tracked docs and excludes gitignored ones.
+  #    docs/audits/ is gitignored, so a file dropped there must not be scanned.
+  mkdir -p docs/audits
+  ST_AUDIT="docs/audits/.doc-count-selftest-$$.md"
+  printf 'Historical: a collection of %s configuration modules.\n' "$WRONG" > "$ST_AUDIT"
+  trap 'rm -rf "$ST_DIR"; rm -f "$ST_AUDIT"' EXIT
+  if [ -n "$(git check-ignore "$ST_AUDIT" 2>/dev/null)" ]; then
+    LIST="$(scanned_docs)"
+    case "$LIST" in
+      *"$ST_AUDIT"*)
+        echo "FAIL: self-test — gitignored $ST_AUDIT appeared in the scan list" >&2
+        exit 1 ;;
+    esac
+    echo "ok: self-test — gitignored docs/audits file is not scanned"
+    FAILURES=0
+    check_no_wrong_count_phrasing "selftest audit-excluded" '[0-9]+ configuration modules' >/dev/null
+    if [ "$FAILURES" -ne 0 ]; then
+      echo "FAIL: self-test — a gitignored audit report still failed the guard" >&2
+      exit 1
+    fi
+    echo "ok: self-test — a stale count inside docs/audits does not fail the run"
+    case "$LIST" in
+      *README.md*) echo "ok: self-test — tracked README.md is in the scan list" ;;
+      *) echo "FAIL: self-test — tracked README.md missing from the scan list" >&2; exit 1 ;;
+    esac
+  else
+    echo "ok: self-test — docs/audits not gitignored here; scan-list checks skipped"
+  fi
+
+  echo "test-doc-counts.sh --self-test: all checks passed"
+  exit 0
+fi
 
 check_no_wrong_count_phrasing "N configuration modules" \
   '[0-9]+ configuration modules'
