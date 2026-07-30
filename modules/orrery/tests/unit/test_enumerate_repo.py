@@ -17,6 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 MODULE_DIR = Path(__file__).resolve().parents[2]
 SCRIPT = MODULE_DIR / "skills" / "orrery" / "scripts" / "enumerate_repo.py"
 CCGM_ROOT = MODULE_DIR.parents[1]
@@ -32,12 +34,19 @@ _spec.loader.exec_module(er)
 
 
 # --- helpers -----------------------------------------------------------------
-def git_env(tmp_path):
-    env = dict(os.environ)
+def git_env(tmp_path=None):
+    """Scrubbed environment: every inherited GIT_* var dropped (an exported
+    GIT_DIR/GIT_INDEX_FILE/GIT_WORK_TREE would redirect every git call), then
+    the fixed hermetic set restored (review finding 9)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    if tmp_path is not None:
+        config_global = str(tmp_path / "gitconfig-does-not-exist")
+    else:
+        config_global = os.devnull
     env.update(
         {
             "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig-does-not-exist"),
+            "GIT_CONFIG_GLOBAL": config_global,
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_AUTHOR_NAME": "Fixture",
             "GIT_AUTHOR_EMAIL": "fixture@example.com",
@@ -51,10 +60,12 @@ def git_env(tmp_path):
 def _fixture_files():
     """{relative path: bytes} for every fixture-repo file, from the ccgm
     index (the checkout is case-folded on macOS and cannot be trusted)."""
+    env = git_env()
     raw = subprocess.run(
         ["git", "-C", str(CCGM_ROOT), "ls-files", "-z", "--", FIXTURE_PREFIX.rstrip("/")],
         check=True,
         stdout=subprocess.PIPE,
+        env=env,
     ).stdout
     files = {}
     for entry in raw.split(b"\0"):
@@ -65,6 +76,7 @@ def _fixture_files():
             ["git", "-C", str(CCGM_ROOT), "cat-file", "blob", ":0:%s" % path],
             check=True,
             stdout=subprocess.PIPE,
+            env=env,
         ).stdout
         files[path[len(FIXTURE_PREFIX):]] = content
     assert files, "fixture-repo is empty - materialization is broken"
@@ -130,6 +142,7 @@ def run_census(tmp_path, files, name="repo"):
         [sys.executable, str(SCRIPT), "--worktree", str(repo), "--out", str(out)],
         capture_output=True,
         text=True,
+        env=env,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     census = json.loads(out.read_bytes())
@@ -452,6 +465,19 @@ def test_missing_worktree_exits_2(tmp_path):
         ],
         capture_output=True,
         text=True,
+        env=git_env(tmp_path),
     )
     assert result.returncode == 2
     assert "not a git worktree" in result.stderr
+
+
+def test_bucket_ceiling_guard_exits_2():
+    """The sibling-group ceiling guard uses the documented CLI error shape:
+    one stderr line, exit 2 (review finding 8)."""
+    candidates = [
+        {"path": "p%02d/x" % i, "files": ["f%d" % j for j in range(5)]}
+        for i in range(25)
+    ]
+    with pytest.raises(SystemExit) as exc:
+        er._bucketize(candidates, misc_exists=False)
+    assert exc.value.code == 2

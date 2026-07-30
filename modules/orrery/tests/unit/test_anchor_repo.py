@@ -68,8 +68,11 @@ def make_repo(path, env, origin=None):
     git(path, env, "add", "hello.txt")
     git(path, env, "commit", "-q", "-m", "c1")
     if origin is not None:
+        # -b main: a bare init without it leaves HEAD dangling at
+        # refs/heads/master, and a dangling remote HEAD makes
+        # `remote set-head --auto` unable to resolve anything.
         subprocess.run(
-            ["git", "init", "-q", "--bare", str(origin)],
+            ["git", "init", "-q", "--bare", "-b", "main", str(origin)],
             env=env,
             check=True,
             capture_output=True,
@@ -180,6 +183,39 @@ def test_behind_counts_commits(tmp_path):
     run_anchor(env, "--teardown", repo, data["worktree"])
 
 
+def test_stale_origin_head_refreshed_after_default_branch_rename(tmp_path):
+    """Review finding 1 / probe P5: the remote renamed its default branch
+    (main -> trunk with one extra commit, old branch deleted) after the local
+    clone recorded origin/HEAD. The anchor must refresh the symref after the
+    fetch and pin the NEW default's tip - never the dead branch's old tip."""
+    env = make_env(tmp_path / "home")
+    origin = tmp_path / "origin.git"
+    repo = make_repo(tmp_path / "repo", env, origin=origin)
+    git(repo, env, "fetch", "-q", "origin")
+    git(repo, env, "remote", "set-head", "origin", "--auto")
+    assert (
+        git(repo, env, "symbolic-ref", "refs/remotes/origin/HEAD").strip()
+        == "refs/remotes/origin/main"
+    )
+
+    # Remote-side rename: trunk continues from main plus one commit; main dies.
+    (repo / "second.txt").write_text("second\n")
+    git(repo, env, "add", "second.txt")
+    git(repo, env, "commit", "-q", "-m", "c2")
+    git(repo, env, "push", "-q", "origin", "HEAD:refs/heads/trunk")
+    new_tip = git(repo, env, "rev-parse", "HEAD").strip()
+    old_tip = git(repo, env, "rev-parse", "HEAD~1").strip()
+    git(repo, env, "reset", "-q", "--hard", "HEAD~1")
+    git(origin, env, "symbolic-ref", "HEAD", "refs/heads/trunk")
+    git(origin, env, "branch", "-D", "main")
+
+    data = anchor_json(run_anchor(env, repo))
+    assert data["default_ref"] == "origin/trunk"
+    assert data["anchor_sha"] == new_tip
+    assert data["anchor_sha"] != old_tip
+    run_anchor(env, "--teardown", repo, data["worktree"])
+
+
 def test_no_remote_supported_and_flagged(tmp_path):
     env = make_env(tmp_path / "home")
     repo = make_repo(tmp_path / "repo", env, origin=None)
@@ -208,6 +244,20 @@ def test_non_repo_dir_exits_2_with_json_error(tmp_path):
     result = run_anchor(env, plain)
     assert result.returncode == 2
     assert "error" in json.loads(result.stdout.strip())
+
+
+def test_control_char_repo_path_exits_2_with_valid_json(tmp_path):
+    """Review finding 2 / probe P1: a repo dir with an embedded newline must
+    never produce invalid JSON with exit 0. It is rejected up front, and the
+    error object stays parseable because the offending path is not echoed."""
+    env = make_env(tmp_path / "home")
+    repo = make_repo(tmp_path / "bad\nname", env, origin=None)
+
+    result = run_anchor(env, repo)
+    assert result.returncode == 2
+    data = json.loads(result.stdout.strip())
+    assert "error" in data
+    assert worktree_count(repo, env) == 1
 
 
 # --- slug rule (security C7) -------------------------------------------------
@@ -287,6 +337,33 @@ def test_credentialed_remote_url_stripped_in_output(tmp_path):
     assert FAKE_TOKEN not in result.stderr
     # github.com remote + stubbed `gh` answering isPrivate=true.
     assert data["visibility"] == "private"
+    run_anchor(env, "--teardown", repo, data["worktree"])
+
+
+def test_uppercase_scheme_credential_stripped(tmp_path):
+    """Review finding 3 / probe P2: URL schemes are case-insensitive per RFC
+    3986, so HTTPS:// userinfo must strip exactly like https://."""
+    cred_upper = "HTTPS://x-token:ghp_fake@github.com/o/r.git"
+    env_home = tmp_path / "home"
+    stub = stub_gh(env_home, "exit 1")
+    env = make_env(env_home, path_prepend=stub)
+    repo = make_repo(tmp_path / "repo", env, origin=None)
+    bare = tmp_path / "bare.git"
+    subprocess.run(
+        ["git", "init", "-q", "--bare", str(bare)],
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    git(repo, env, "push", "-q", str(bare), "main")
+    git(repo, env, "remote", "add", "origin", cred_upper)
+    git(repo, env, "config", "url.%s.insteadOf" % bare, cred_upper)
+
+    result = run_anchor(env, repo)
+    data = anchor_json(result)
+    assert data["remote_url"] == "HTTPS://github.com/o/r.git"
+    assert FAKE_TOKEN not in result.stdout
+    assert FAKE_TOKEN not in result.stderr
     run_anchor(env, "--teardown", repo, data["worktree"])
 
 

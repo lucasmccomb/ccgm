@@ -47,7 +47,9 @@ emit_error() {
 strip_userinfo() {
   # Remove any user[:token]@ userinfo before the host, for both
   # scheme://user:token@host/... and scp-like user@host:... URL forms.
-  printf '%s' "$1" | LC_ALL=C sed -e 's#^\([a-z][a-z0-9+.-]*://\)\{0,1\}[^/@]*@#\1#'
+  # Schemes are case-insensitive (RFC 3986), so the class allows A-Z too:
+  # an HTTPS:// URL must strip exactly like https:// (review finding 3).
+  printf '%s' "$1" | LC_ALL=C sed -e 's#^\([a-zA-Z][a-zA-Z0-9+.-]*://\)\{0,1\}[^/@]*@#\1#'
 }
 
 sanitize_slug() {
@@ -86,10 +88,23 @@ fi
 REPO_ARG="$1"
 
 # --- validate the repo -------------------------------------------------------
+# Control characters anywhere in the path would corrupt the single-line JSON
+# output while exiting 0 (review finding 2). Reject them up front, and never
+# echo the offending path back - emit_error must stay valid JSON.
+case "$REPO_ARG" in
+  *[[:cntrl:]]*)
+    emit_error "repo path contains control characters" ""
+    ;;
+esac
 if [ ! -d "$REPO_ARG" ]; then
   emit_error "repo path does not exist or is not a directory" "$REPO_ARG"
 fi
 REPO="$(cd "$REPO_ARG" && pwd -P)"
+case "$REPO" in
+  *[[:cntrl:]]*)
+    emit_error "resolved repo path contains control characters" ""
+    ;;
+esac
 if ! git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
   emit_error "not a git repository" "$REPO"
 fi
@@ -124,6 +139,11 @@ if [ "$NO_REMOTE" = "false" ]; then
   if ! git -C "$REPO" fetch origin >/dev/null 2>&1; then
     emit_error "git fetch origin failed (remote: $REMOTE_URL)" "$REPO"
   fi
+  # Refresh the origin/HEAD symref before reading it: a plain fetch neither
+  # updates the symref nor prunes a renamed-away default branch, so a stale
+  # symref would silently anchor the dead branch's old tip (review finding 1).
+  # Tolerate failure - the fallback chain below then behaves as before.
+  git -C "$REPO" remote set-head origin --auto >/dev/null 2>&1 || true
   ORIGIN_HEAD="$(git -C "$REPO" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null || true)"
   if [ -n "$ORIGIN_HEAD" ]; then
     DEFAULT_REF="origin/${ORIGIN_HEAD#refs/remotes/origin/}"

@@ -385,11 +385,15 @@ def _bucketize(survivors, misc_exists):
         by_parent.setdefault(parent, []).append(cand)
     groups = sorted(by_parent.items())
     if len(groups) > ceiling:
-        raise SystemExit(
+        # Same error shape as the documented CLI failure: one line on stderr,
+        # exit 2 (review finding 8).
+        print(
             "enumerate_repo.py: %d sibling groups exceed the %d-bucket "
             "ceiling (outside the v1 boundary - plan section 3.5a)"
-            % (len(groups), ceiling)
+            % (len(groups), ceiling),
+            file=sys.stderr,
         )
+        raise SystemExit(2)
 
     target = min(ceiling, max(CANDIDATE_TARGET, -(-n // 3)))
     bucket_total = max(target, len(groups))
@@ -457,10 +461,13 @@ def compute_areas(paths):
     areas.sort(key=lambda a: a["id"])
     for area in areas:
         if not AREA_ID_PATTERN.match(area["id"]):
-            raise SystemExit(
+            # Same error shape as the documented CLI failure (review finding 8).
+            print(
                 "enumerate_repo.py: internal error - area id %r is not "
-                "element-id-legal" % area["id"]
+                "element-id-legal" % area["id"],
+                file=sys.stderr,
             )
+            raise SystemExit(2)
     return areas, bucketing
 
 
