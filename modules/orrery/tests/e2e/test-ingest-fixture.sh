@@ -33,12 +33,24 @@ done
 [ -d "$FRAGMENTS_SRC" ] || fail "canned fragment templates missing: tests/fixtures/fragments"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/orrery-ingest.XXXXXX")"
-SLUG=""
-# anchor_repo.sh creates its output dir under the fixed root below (R4); the
-# slug derived from this test's repo dir name exists only here, so removing it
-# in cleanup is safe and keeps the real output root clean.
+# The slug anchor_repo.sh derives from the fixed repo dir name below (frozen C7
+# rule), pre-computed so cleanup can purge the anchor's default output dir even
+# when the run dies before the anchor JSON is parsed; stage 1 asserts the
+# anchor's reported slug matches it. The slug exists only in this test, so
+# removing its output dir is safe and keeps the real output root clean.
+SLUG="orrery_ingest_fixture"
+REPO=""
+WORKTREE=""
 ANCHOR_OUT_ROOT="$HOME/code/orrery"
 cleanup() {
+  # Tear down the anchor worktree FIRST: it lives under anchor_repo.sh's own
+  # mktemp base in TMPDIR - OUTSIDE $WORK - so an intermediate failure between
+  # stage 1 and stage 8 would otherwise strand a full fixture checkout there.
+  # Teardown is idempotent and never fatal; re-running it after a happy-path
+  # stage 8 is a no-op.
+  if [ -n "$WORKTREE" ] && [ -n "$REPO" ] && [ -d "$REPO" ]; then
+    bash "$SCRIPTS/anchor_repo.sh" --teardown "$REPO" "$WORKTREE" >/dev/null 2>&1 || true
+  fi
   rm -rf "$WORK"
   if [ -n "$SLUG" ] && [ -d "$ANCHOR_OUT_ROOT/$SLUG" ]; then
     rm -rf "$ANCHOR_OUT_ROOT/$SLUG"
@@ -55,7 +67,7 @@ trap cleanup EXIT
 # index entry list is case-exact and OS-deterministic (same technique as
 # test-pipeline-fixture.sh). core.hooksPath is neutralized because the fixture
 # carries secret-SHAPED fake values a machine-level pre-commit hook rejects.
-REPO="$WORK/orrery-ingest-fixture"
+REPO="$WORK/orrery-ingest-fixture"   # basename must keep matching $SLUG above
 mkdir -p "$REPO"
 GITC="git -C $REPO -c user.name=orrery -c user.email=orrery@example.invalid -c core.hooksPath=/dev/null"
 $GITC init -q
@@ -126,9 +138,11 @@ with open(sys.argv[2], "w", encoding="utf-8") as fh:
 print("%s\t%s\t%s" % (obj["slug"], obj["anchor_sha"], obj["worktree"]))
 PYEOF
 )" || fail "could not parse anchor_repo.sh JSON output"
-SLUG="$(printf '%s\n' "$PARSED" | cut -f1)"
+ANCHOR_SLUG="$(printf '%s\n' "$PARSED" | cut -f1)"
 ANCHOR_SHA="$(printf '%s\n' "$PARSED" | cut -f2)"
 WORKTREE="$(printf '%s\n' "$PARSED" | cut -f3)"
+[ "$ANCHOR_SLUG" = "$SLUG" ] \
+  || fail "anchor reported slug $ANCHOR_SLUG but the frozen C7 rule predicts $SLUG (slug-rule drift?)"
 [ -d "$WORKTREE" ] || fail "anchor worktree does not exist: $WORKTREE"
 echo "ok: anchored at $ANCHOR_SHA (slug $SLUG)"
 
@@ -233,6 +247,11 @@ for tmpl, aid in zip(tmpls, pool):
     with open(os.path.join(out_dir, pack + ".json"), "w", encoding="utf-8") as fh:
         fh.write(text)
     packs.append(pack)
+
+if len(packs) != len(tmpls):
+    sys.exit("substituted only %d of %d templates - the census yielded too few "
+             "distinct area ids (%s); zip() must never truncate silently"
+             % (len(packs), len(tmpls), pool))
 
 sys.stderr.write("ok: substituted %d template(s) with census-derived ids %s\n"
                  % (len(packs), pool[: len(packs)]))

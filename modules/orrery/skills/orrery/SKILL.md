@@ -79,6 +79,10 @@ and save the anchor JSON to `$out/anchor.json`.
 python3 scripts/enumerate_repo.py --worktree <worktree> --out $out/census.json
 ```
 
+If `enumerate_repo.py` exits nonzero: report BLOCKED with the script's error and run step 8
+- it is a deterministic script, so a failure is an environment or contract bug, never
+something to retry.
+
 Read the census and announce the plan before any dispatch: N areas (and "N candidate areas
 grouped into M buckets" when the census says `bucketed`), plus the wave layout (wave 0, then
 ceil(N/8) area waves).
@@ -93,11 +97,20 @@ ceil(N/8) area waves).
 
 ## Step 5 - scout fan-out (wave 0, published ids, area waves)
 
+**Pack naming (load-bearing)**: each census area `{area_id}` is dispatched as the pack
+named `area-{area_id}` - census area `web` runs as pack `area-web` and persists to
+`fragments/area-web.json`. The scout's `pack` field, the `packs.txt` line, the fragment
+filename, and the `--packs` entry all carry that exact `area-` name (element ids keep the
+bare `{area_id}__` prefix). The prefix is not cosmetic: `merge_fragments.py` keys its
+deterministic `{area_id}__` namespace screen on the pack name starting with `area-` - a
+bare pack name silently deactivates that screen.
+
 **Before the first dispatch**: CLEAR `$out/fragments/` (delete and recreate - stale
 fragments from an interrupted run must never survive into this build) and record the run's
 planned pack list to `$out/packs.txt` (one pack per line: `product-vision`,
-`external-systems`, then one per census area). Keep `packs.txt` current through every
-split/give-up below; step 6 passes exactly this list to `merge_fragments.py --packs`.
+`external-systems`, then `area-{area_id}` per census area). Keep `packs.txt` current
+through every split/give-up below; step 6 passes exactly this list to
+`merge_fragments.py --packs`.
 
 **Wave 0** - dispatch `product-vision` and `external-systems` in parallel, both as
 `orrery-scout`, each with its brief from `references/packs.md`, the worktree path,
@@ -105,13 +118,17 @@ split/give-up below; step 6 passes exactly this list to `merge_fragments.py --pa
 top-level `vision_brief` string (300-600 words) alongside the fragment fields; write it to
 `$out/vision-brief.md`.
 
-**Persisting a fragment (every pack, every wave)**: the scout's reply ends with exactly one
-fenced JSON code block. Parse it and check it deterministically against the fragment
-contract: required fields, id pattern `^[a-z][a-z0-9_]*$`, kind/relation enums, length caps,
-the per-fragment budget (max 40 elements / max 25 relations), and - for area packs - the
-`<area_id>__` prefix on every element id and published-id targets for parents and cross-area
-relations. Valid: write it to `$out/fragments/{pack}.json`. A reply that is missing the
-block, does not parse, or fails the contract is a failed dispatch.
+**Persisting a fragment (every pack, every wave)**: the scout's reply contains exactly one
+fenced JSON code block (followed by the four-state status line). Parse it and check it
+deterministically against the fragment contract: required fields, id pattern
+`^[a-z][a-z0-9_]*$`, kind/relation enums, length caps, the per-fragment budget (max 40
+elements / max 25 relations), the `pack` field equal to the dispatched pack name (for area
+packs: `area-{area_id}`), and - for area packs - the `{area_id}__` prefix on every element
+id, every `parent` either own-namespace or a published id, and every relation carrying at
+least one own-namespace (`{area_id}__*`) endpoint with the other endpoint own-namespace or
+a published id (either direction - a published id may sit at `from` or `to`; two published
+endpoints is the violation). Valid: write it to `$out/fragments/{pack}.json`. A reply that
+is missing the block, does not parse, or fails the contract is a failed dispatch.
 
 **Published-id set** - after wave 0, resolve the exact id list area packs may attach to or
 reference: `system` (the root system element's id), the product-vision `container` ids, the
@@ -119,15 +136,18 @@ reference: `system` (the root system element's id), the product-vision `containe
 area-pack prompt, alongside the path to `$out/vision-brief.md`.
 
 **Area waves** - one `orrery-scout` per census area, in waves of at most 8, each with the
-area brief (pack id, `root_paths`, budget), the published-id set, the vision-brief path, the
-worktree path, `$out/census.json`, and `references/fragment.schema.json`.
+area brief (pack id `area-{area_id}`, element-id prefix `{area_id}__`, `root_paths`,
+budget), the published-id set, the vision-brief path, the worktree path,
+`$out/census.json`, and `references/fragment.schema.json`.
 
 **Failure protocol (per pack)**:
 1. First failure: re-dispatch the same brief ONCE.
 2. Second failure: do NOT retry again - a truncated over-budget reply fails identically on a
    plain retry. SPLIT the area's `root_paths` in half and dispatch two packs with suffixed,
-   pattern-legal area ids (`{area_id}_a`, `{area_id}_b`), updating `packs.txt` (failed pack
-   out, both halves in). Each half gets one dispatch plus one re-dispatch.
+   pattern-legal area ids (`{area_id}_a` and `{area_id}_b`, so pack names
+   `area-{area_id}_a` / `area-{area_id}_b` and element prefixes `{area_id}_a__` /
+   `{area_id}_b__`), updating `packs.txt` (failed pack out, both halves in). Each half gets
+   one dispatch plus one re-dispatch.
 3. Only after a split half fails twice: proceed without it, remove it from `packs.txt`, and
    record the gap for the report.
 
@@ -154,7 +174,13 @@ python3 scripts/validate_map.py \
   --anchor-sha <anchor_sha>
 ```
 
-On validate failure, run the bounded fix loop - at most 3 iterations:
+Only a `validate_map.py` **exit 1** enters the fix loop - exit 1 is the code path that
+freshly writes `errors.json` (exit 0 removes it). If `merge_fragments.py` or
+`emit_likec4.py` itself exits nonzero, or validate exits with anything other than 0 or 1
+(e.g. exit 2 on unreadable input): that is NOT an element-content error - report BLOCKED
+immediately with the tool's stderr, run step 8, and never loop on it.
+
+On validate exit 1, run the bounded fix loop - at most 3 iterations:
 
 1. Read `errors.json`. Apply the deterministic fixes it names directly to the offending
    fragment files: drop a dangling relation, clamp an insane line range, drop a quarantined
@@ -162,7 +188,9 @@ On validate failure, run the bounded fix loop - at most 3 iterations:
 2. For element-content errors a deterministic edit cannot fix: dispatch ONE fixer scout per
    iteration - an `orrery-scout` receiving `errors.json` plus the offending fragment(s),
    correcting only the named elements, returning the corrected fragment(s) in-reply.
-3. Re-run merge -> emit -> validate.
+3. Delete `errors.json`, then re-run merge -> emit -> validate. Deleting first makes a
+   stale file impossible to mistake for a fresh verdict: after the re-run, an `errors.json`
+   on disk is always the current iteration's.
 
 After 3 failed iterations: STOP. Report BLOCKED with the `errors.json` path and the
 remaining error list, run step 8, and never render the invalid model.
@@ -175,7 +203,8 @@ bash scripts/render_map.sh $out <slug>
 
 This builds via the pinned toolchain, renames `index.html` to `{slug}.html`, drops the
 build's `404.html`/favicon leftovers, and asserts exactly one artifact remains:
-`$out/dist/{slug}.html`.
+`$out/dist/{slug}.html`. If `render_map.sh` (or the state.json write below) fails after a
+green validate: report BLOCKED with the error and run step 8 - never retry-loop a render.
 
 Then write `$out/state.json` ATOMICALLY (temp file + rename, never in place):
 

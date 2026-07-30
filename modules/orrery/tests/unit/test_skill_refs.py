@@ -116,6 +116,19 @@ def test_diff_since_stays_inside_the_update_stub_until_epic5():
     )
 
 
+def test_area_pack_name_convention_is_stated_in_both_docs():
+    """B1 regression pin: merge_fragments.py keys its deterministic namespace
+    screen on the pack name starting with `area-`, so both docs must state the
+    `area-{area_id}` pack-name convention explicitly. A doc rewrite that drops
+    it (or re-teaches the bare form) silently deactivates the screen."""
+    for doc in (SKILL_MD, PACKS_MD):
+        text = doc.read_text(encoding="utf-8")
+        assert "area-{area_id}" in text, (
+            "%s no longer states the literal `area-{area_id}` pack-name "
+            "convention (stage-2 finding B1)" % doc.name
+        )
+
+
 def test_both_ci_jobs_still_set_orrery_strict():
     text = WORKFLOW.read_text(encoding="utf-8")
     jobs = {}
