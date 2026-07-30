@@ -18,6 +18,9 @@ jobs:
       - name: Validate modules
         run: bash tests/test-modules.sh
 
+      - name: Doc-count detector self-test
+        run: bash tests/test-doc-counts.sh --self-test
+
       - name: Check doc counts + preset coverage
         run: bash tests/test-doc-counts.sh
 
@@ -142,6 +145,9 @@ jobs:
 
       - name: Validate modules
         run: bash tests/test-modules.sh
+
+      - name: Doc-count detector self-test
+        run: bash tests/test-doc-counts.sh --self-test
 
       - name: Check doc counts + preset coverage
         run: bash tests/test-doc-counts.sh
