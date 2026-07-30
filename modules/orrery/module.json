@@ -10,6 +10,7 @@
     "agents/orrery-scout.md": { "target": "agents/orrery-scout.md", "type": "agent", "template": false },
     "skills/orrery/references/fragment.schema.json": { "target": "skills/orrery/references/fragment.schema.json", "type": "doc", "template": false },
     "skills/orrery/references/model.schema.json": { "target": "skills/orrery/references/model.schema.json", "type": "doc", "template": false },
+    "skills/orrery/references/packs.md": { "target": "skills/orrery/references/packs.md", "type": "doc", "template": false },
     "skills/orrery/scripts/anchor_repo.sh": { "target": "skills/orrery/scripts/anchor_repo.sh", "type": "script", "template": false },
     "skills/orrery/scripts/emit_likec4.py": { "target": "skills/orrery/scripts/emit_likec4.py", "type": "script", "template": false },
     "skills/orrery/scripts/enumerate_repo.py": { "target": "skills/orrery/scripts/enumerate_repo.py", "type": "script", "template": false },
