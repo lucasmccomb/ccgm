@@ -4,7 +4,7 @@ The CCGM installer (`start.sh`) is an interactive bash script that handles prere
 
 ## Installation flow
 
-The installer runs 15 sequential steps:
+The installer runs 15 sequential steps, plus a conditional Step 14b (legacy MCP migration):
 
 ### Step 1: Welcome
 
@@ -48,7 +48,7 @@ Choose a preset (minimal, standard, full, team) or select individual modules fro
 
 Automatically adds any modules required by your selection. Uses a depth-first topological sort with cycle detection. Reports any automatically added dependencies.
 
-For example, selecting `xplan` automatically adds its dependencies `multi-agent` and `adversarial-review`, which in turn add `startup-dashboard` (multi-agent's dependency) and `subagent-patterns` (adversarial-review's dependency).
+For example, selecting `xplan` automatically adds its dependencies `multi-agent` and `adversarial-review`, which in turn add `startup-dashboard` (multi-agent's dependency) and `subagent-patterns` (adversarial-review's dependency), and `startup-dashboard` in turn adds `session-history`.
 
 ### Step 7: Module config prompts
 
@@ -64,7 +64,7 @@ A single yes/no gate. Answering no exits without making changes.
 
 ### Step 10: Backup
 
-Creates a timestamped backup of existing `~/.claude/` contents to `~/.claude/backups/ccgm-YYYYMMDD-HHMMSS/`. Only backs up files that CCGM will overwrite.
+Creates a timestamped backup at `<target>/backups/ccgm-YYYYMMDD-HHMMSS/` - `~/.claude/backups/` for a global install, `<project>/.claude/backups/` for a project install. It copies a fixed list of top-level items if they exist: `settings.json`, `CLAUDE.md`, `rules/`, `commands/`, `hooks/`, `multi-agent-system.md`, `github-repo-protocols.md`, and any `.ccgm*` files. The 5 most recent backups are kept; older ones are deleted. Module targets outside that list (`skills/`, `agents/`, `lib/`, `bin/`, ...) are not currently backed up (see #917).
 
 ### Step 11: Install
 
@@ -101,6 +101,10 @@ Optionally adds two aliases to `~/.zshrc` or `~/.bashrc`:
 - `alias ccgms="claude /startup --dangerously-skip-permissions"` — launch with the startup dashboard
 
 Detects existing aliases to avoid duplicates.
+
+### Step 14b: Legacy MCP migration
+
+If a legacy `~/.claude/mcp.json` exists (unread by current Claude Code), re-registers each of its server entries via `claude mcp add-json --scope user` (`lib/mcp-migrate.sh`). Idempotent: already-registered names are skipped, and the legacy file is renamed with a `.migrated.bak` suffix on success. Note: this writes MCP registrations to `~/.claude.json`, which the manifest does not track and `uninstall.sh` does not undo.
 
 ### Step 15: Next steps
 
@@ -184,7 +188,7 @@ CCGM_NON_INTERACTIVE=1 \
 | `CCGM_CODE_DIR` | Code workspace directory | `~/code` |
 | `CCGM_TIMEZONE` | Timezone | auto-detected |
 
-All module config prompts use their default values in non-interactive mode.
+In non-interactive mode, text and yes/no prompts use their default values. Choice prompts currently resolve to their first option, not their declared default (see #918).
 
 ## Adding a module to an existing install
 
