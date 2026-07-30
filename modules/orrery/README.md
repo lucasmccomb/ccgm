@@ -111,8 +111,8 @@ is the publish-safety boundary between repo-derived content and your site.
   success, on BLOCKED, and on every early exit; a run that leaves one behind is a failed
   run. Because the freshness guard is a real fetch, the run needs network access and
   read credentials for origin — there is no offline mode in v1.
-- **Typical artifact size is ~3-11 MB** depending on element count. The run report states
-  the exact byte size.
+- **Typical artifact size is ~3-14 MB** depending on element count (a ~600-element map of
+  this repo measures ~13 MB). The run report states the exact byte size.
 
 ## Publish safety
 
