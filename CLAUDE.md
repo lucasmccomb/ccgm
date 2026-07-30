@@ -18,7 +18,10 @@ ccgm/
 │   ├── template.sh     # __PLACEHOLDER__ expansion
 │   ├── merge.sh        # settings.json merge via jq
 │   ├── modules.sh      # Module discovery + deps
-│   └── backup.sh       # Backup/restore
+│   ├── backup.sh       # Backup/restore
+│   ├── mcp-migrate.sh  # Legacy mcp.json re-registration
+│   ├── repair.sh       # Stale symlink repair
+│   └── statusline.sh   # Status line script
 ├── modules/            # 77 self-contained modules
 │   └── {name}/
 │       ├── module.json # Manifest
@@ -28,7 +31,8 @@ ccgm/
 │   ├── minimal.json
 │   ├── standard.json
 │   ├── full.json
-│   └── team.json
+│   ├── team.json
+│   └── cloud-agent.json
 └── tests/              # Test scripts
 ```
 
@@ -51,7 +55,7 @@ bash tests/test-no-personal-data.sh
 
 Each module is self-contained in `modules/{name}/`:
 - `module.json` defines metadata, files, dependencies, and config prompts
-- Content files go in subdirectories matching their target location (rules/, commands/, hooks/)
+- Content files go in subdirectories matching their target location (rules/, commands/, hooks/, skills/, agents/)
 - Rule files (rules/*.md) use generic language, NOT template variables
 - Config files (hooks, settings) may use `__PLACEHOLDER__` template variables
 

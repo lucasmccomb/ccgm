@@ -17,7 +17,7 @@ Optional but recommended:
 
 - **[GitHub CLI](https://cli.github.com/)** (`gh`) - enables auto-detection of your GitHub username, issue management commands, and PR workflows
 
-The installer checks for all prerequisites and offers to install missing tools using your system's package manager (Homebrew on macOS, apt/dnf/pacman on Linux).
+The installer checks for these global prerequisites and offers to install missing tools using your system's package manager (Homebrew on macOS, apt/dnf/pacman on Linux). Some modules need extra tools (Node, wrangler, etc.) - see each module's README for its specific requirements.
 
 ## Installation
 
@@ -33,7 +33,7 @@ The interactive installer handles everything from here.
 
 ### 2. Choose a preset (or pick modules individually)
 
-The installer offers five presets, or you can select modules one by one:
+Five presets exist. The interactive menu currently offers four of them; **cloud-agent** is available via `./start.sh --preset cloud-agent` (see #919). You can also select modules one by one:
 
 | Preset | What you get | Best for |
 |--------|-------------|----------|
@@ -60,17 +60,19 @@ After installation, start a new Claude Code session. Your new rules, commands, a
 
 ## Install scopes
 
-CCGM can install to two locations:
+CCGM can install to either or both of two locations:
 
 | Scope | Path | Effect |
 |-------|------|--------|
 | **Global** | `~/.claude/` | Applies to all projects and all Claude Code environments |
 | **Project** | `.claude/` in current directory | Applies only to the current project |
+| **Both** | Both paths above | Installs to both locations |
 
 ```bash
 ./start.sh                    # Interactive scope selection
 ./start.sh --scope global     # Global only
 ./start.sh --scope project    # Project only
+./start.sh --scope both       # Both locations
 ```
 
 Global installation is the most common choice. Project-level installation is useful when you want different rules for a specific repo, or when sharing configuration with a team via version control.

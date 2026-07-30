@@ -82,8 +82,10 @@ For blocks pre-selecting a specific preset, and for how to dry-run this safely, 
 - macOS or Linux
 - bash 4+ or zsh
 - git
+- python3
+- jq
 
-The installer checks for Claude Code, additional tools (jq, Python 3, gh CLI), and offers to install any that are missing.
+The installer checks for these tools (plus the optional gh CLI) and offers to install any that are missing.
 
 ## Install
 
@@ -132,7 +134,7 @@ For a quick install with a preset:
 |--------|---------|----------|
 | **minimal** | global-claude-md, autonomy, git-workflow | Getting started |
 | **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, ask-context, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline | Most users |
-| **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, ask-context, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, writing-system, ce-review, pr-feedback, pr-review-toolkit, document-review, compound-knowledge (+ deps) | Teams |
+| **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, ask-context, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, writing-system, ce-review, pr-feedback, pr-review-toolkit, document-review, compound-knowledge, skill-authoring, subagent-patterns (+ deps) | Teams |
 | **cloud-agent** | 55 modules | Autonomous/headless agents |
 | **full** | 73 modules | Power users |
 
