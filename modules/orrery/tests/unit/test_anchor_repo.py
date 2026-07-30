@@ -27,6 +27,9 @@ FAKE_TOKEN = "ghp_fake"
 def make_env(home, path_prepend=None):
     home.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
+    # Hermeticity: an ambient $ORRERY_HOME must not redirect the default-root
+    # assertions; the override test sets it explicitly.
+    env.pop("ORRERY_HOME", None)
     env.update(
         {
             "HOME": str(home),
@@ -440,6 +443,23 @@ def test_output_dir_created_chmod_700(tmp_path):
     out_dir = tmp_path / "home" / "code" / "orrery" / "repo"
     assert out_dir.is_dir()
     assert stat.S_IMODE(out_dir.stat().st_mode) == 0o700
+    run_anchor(env, "--teardown", repo, data["worktree"])
+
+
+def test_output_dir_honors_orrery_home_override(tmp_path):
+    """Risk adrev2-014: $ORRERY_HOME overrides the output root without editing
+    the module. The dir is created under the override (chmod 700) and the
+    default ~/code/orrery root is NOT created."""
+    env = make_env(tmp_path / "home")
+    custom = tmp_path / "custom-root"
+    env["ORRERY_HOME"] = str(custom)
+    repo = make_repo(tmp_path / "repo", env, origin=None)
+
+    data = anchor_json(run_anchor(env, repo))
+    out_dir = custom / "repo"
+    assert out_dir.is_dir()
+    assert stat.S_IMODE(out_dir.stat().st_mode) == 0o700
+    assert not (tmp_path / "home" / "code" / "orrery" / "repo").exists()
     run_anchor(env, "--teardown", repo, data["worktree"])
 
 

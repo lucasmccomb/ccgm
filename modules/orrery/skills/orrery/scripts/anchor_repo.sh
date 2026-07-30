@@ -24,7 +24,9 @@ set -euo pipefail
 #   C7 - the slug must match ^[a-z0-9][a-z0-9_-]*$ after sanitization or we
 #        exit 2; it is derived from the repo directory basename only, so a
 #        path-shaped argument can never smuggle separators into the slug.
-#   R4 - the output dir ~/code/orrery/{slug} is chmod 700.
+#   R4 - the output dir ${ORRERY_HOME:-~/code/orrery}/{slug} is chmod 700.
+#        $ORRERY_HOME overrides the output root without editing this module
+#        (risk adrev2-014); unset, it defaults to ~/code/orrery.
 #
 # The run mutates the target repo in exactly two ways - `git fetch origin`
 # and `git worktree add`. The worktree is the only durable side effect, so
@@ -213,7 +215,7 @@ if [ -n "$OWNER_REPO" ] && command -v gh >/dev/null 2>&1; then
 fi
 
 # --- output dir (security R4) ------------------------------------------------
-OUT_DIR="$HOME/code/orrery/$SLUG"
+OUT_DIR="${ORRERY_HOME:-$HOME/code/orrery}/$SLUG"
 if ! mkdir -p "$OUT_DIR" 2>/dev/null; then
   emit_error "cannot create output dir $OUT_DIR" "$REPO"
 fi

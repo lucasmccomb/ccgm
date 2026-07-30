@@ -42,8 +42,8 @@ and never re-implements what a script owns.
   guidance: "run /orrery inside the repo you want mapped, or pass a path: /orrery <repo-path>".
 - **Explicit argument**: a path that exists is used as-is; a bare name tries `~/code/{name}`;
   otherwise stop with the same guidance.
-- **`update` keyword**: route to the update flow (see the labeled section at the bottom -
-  implemented in Epic 5).
+- **`update` keyword**: route to the update flow (the "Update flow" section at the
+  bottom) instead of the build steps below.
 - **`--vision <file>`**: a LOCAL file only - never fetched. If the value looks like a URL,
   stop with an error; do not download anything.
 - **`--out <dir>`**: output directory for this map. Default: `$ORRERY_HOME/{slug}` where
@@ -70,7 +70,8 @@ Capture stdout and parse the single-line JSON: `repo_path`, `remote_url`
   `private` or `unknown`, say now that the report will carry a do-not-publish-without-review
   warning.
 
-Resolve the out dir (`--out`, else `$ORRERY_HOME/{slug}`), create it `chmod 700` if needed,
+Resolve the out dir (`--out`, else `$ORRERY_HOME/{slug}` - the same root
+`anchor_repo.sh` itself honors for the dir it creates), create it `chmod 700` if needed,
 and save the anchor JSON to `$out/anchor.json`.
 
 ## Step 3 - enumerate + announce
@@ -294,10 +295,116 @@ State plainly, in this order:
   then re-dispatch ONLY the failed packs in waves of at most 4. If it trips again, halve
   the wave size and double the cooldown. Never re-launch the whole burst.
 
-## Update flow - implemented in Epic 5
+## Update flow - `/orrery update`
 
-`/orrery update [<repo>]` is not built yet. The planned shape: re-anchor, diff the recorded
-anchor against the new one (`scripts/diff_since.py` - ancestry-checked, rename-aware),
-re-investigate only the affected packs, patch-merge, and re-run the same emit -> validate ->
-render chain with the same fix loop and the same unskippable teardown. Until Epic 5 lands,
-tell the user: "the update flow is not implemented yet - run /orrery for a full rebuild."
+`/orrery update [<repo>]` refreshes an existing map incrementally. Everything the hard
+rules say about the build path holds here unchanged: every dispatch is an `orrery-scout`,
+teardown always runs (including on the "up to date" stop), and an invalid model is never
+rendered.
+
+### U1 - anchor and locate the map
+
+Resolve the target repo exactly as step 1, then run step 2 (anchor) as written - the
+update flow anchors a worktree too, so **the teardown obligation starts here** and is
+discharged on every exit path below. Resolve the out dir exactly as step 2:
+`--out` if given, else `$ORRERY_HOME/{slug}`. If `$out/state.json` does not exist, say so
+naming the resolved path - "no state.json at `$out/state.json`; a map built with a custom
+`--out` needs that same `--out` passed to update" - never silently build a second
+divergent copy without stating where the update looked.
+
+### U2 - gate + diff (deterministic)
+
+```
+python3 scripts/diff_since.py \
+  --repo <repo-path> \
+  --state $out/state.json \
+  --new-anchor <anchor_sha> \
+  --out $out/diff.json
+```
+
+`scripts/diff_since.py` owns the whole deterministic decision: the state gate (no
+state.json / unparseable / `schema_version` != 1 / `likec4_version` != the installed
+toolchain version, which it reads from `scripts/toolchain/package.json` the same way
+step 7 does), the history-rewrite check (old anchor resolvable AND an ancestor of the
+new one), the unchanged short-circuit, and the rename-aware `git diff -M`
+classification. It also updates renamed files' element anchors in place in the baseline
+`$out/model.json`, so renames preserve element continuity without re-investigation.
+A nonzero exit is an environment or contract bug: report BLOCKED with its stderr and
+run step 8.
+
+### U3 - route on diff.json (first match wins)
+
+1. **`rebuild_required` true**: announce the `rebuild_reason` verbatim (it names which
+   gate condition fired, or the clustering-material change), then run the full build -
+   steps 3 through 9 exactly as written, reusing the anchor and worktree from U1.
+2. **`history_rewritten` true**: announce "history rewritten - old anchor {sha} is
+   unresolvable or not an ancestor of {new sha}; full rebuild", then run steps 3-9 the
+   same way. Never guess-diff across rewritten history.
+3. **`unchanged` true**: report "up to date (anchor {sha})" - zero agent dispatch, **but
+   still run step 8 (teardown)**. The short-circuit skips the work, never the cleanup.
+4. Otherwise: the patch path (U4).
+
+### U4 - patch path
+
+1. **Refresh the deterministic inputs**: overwrite `$out/anchor.json` with the U1 anchor
+   JSON and re-run step 3's enumerate command to refresh `$out/census.json` (announce is
+   not repeated; the census here feeds merge meta and the state writer).
+2. **Build the re-run pack list from diff.json**: `product-vision` if
+   `product_vision_flagged`, `external-systems` if `external_systems_flagged`, and
+   `area-{area_id}` for every entry in `affected_areas` - the same load-bearing
+   `area-{area_id}` pack naming as step 5. Overwrite `$out/packs.txt` with exactly this
+   list; step U4.5 passes exactly it to `--packs`. If `affected_areas` names `misc` and
+   state.json's `areas[]` has no misc entry, dispatch `area-misc` with
+   `new_paths_routed_to_misc` as its root_paths (`misc` is a reserved, pattern-legal id).
+3. **Clear `$out/fragments/`** (delete and recreate - same hygiene as step 5), then
+   dispatch ONLY the re-run packs as `orrery-scout`, waves of at most 8, wave-0 packs
+   (if flagged) first. Briefs come from `references/packs.md` as in step 5; each area
+   pack gets its recorded `root_paths` from state.json's `areas[]`, plus
+   `new_paths_routed_to_misc` appended for the misc pack. The published-id set: resolve
+   it from re-run wave-0 replies where available, else from the baseline
+   `$out/model.json` (the `system` id, every `container` and `actor` id, and every
+   element whose `source_packs` includes `external-systems`). Persist and check
+   fragments exactly as step 5.
+4. **Failure protocol (update mode)**: one re-dispatch per failed pack, then STOP
+   retrying - do NOT split (a split's suffixed area ids would not match the baseline's
+   pack namespaces, so its output could never replace the baseline). Keep the failed
+   pack listed in `packs.txt`: `merge_fragments.py --patch` retains that pack's baseline
+   elements when no valid fragment arrives (reported as
+   `reinvestigation_failed_retained`) - the map must never silently shrink because one
+   re-investigation failed. Record the retention for the report. This applies to wave-0
+   packs too: a failed wave-0 re-run falls back to the baseline, it does not BLOCK.
+5. **Patch-merge, emit, validate** - run step 6 with the merge command replaced by patch
+   mode; everything else in step 6 (the BLOCKED dispositions for non-element errors, the
+   bounded <=3 fix loop, one fixer scout per iteration, the delete-errors.json-first
+   hygiene) applies verbatim, re-running THIS merge command each iteration:
+
+```
+python3 scripts/merge_fragments.py \
+  --fragments-dir $out/fragments \
+  --packs <comma-separated list from packs.txt> \
+  --census $out/census.json \
+  --anchor $out/anchor.json \
+  --out $out/model.json \
+  --patch --state $out/state.json --diff $out/diff.json
+```
+
+   (`--out` is both the baseline in and the patched model out. After 3 failed fix
+   iterations: BLOCKED with the errors.json path, step 8, never render.)
+6. **Render + state**: run step 7 exactly as written - render, then the atomic
+   state.json write. It reads the refreshed anchor.json/census.json and the patched
+   model.json, so the new anchor SHA and element index land atomically
+   (temp file + rename, never in place).
+7. **Teardown**: step 8, unskippable, as always.
+
+### U5 - report the delta
+
+Report the step 9 items (artifact, anchor, visibility warning, counts, embed snippet),
+plus the update delta, computed from `$out/diff.json` and the `patch` section of
+`merge-report.json`:
+
+- Elements added / updated / removed (`baseline_elements_replaced`, `orphaned_deleted`,
+  and the re-run fragments' contents).
+- Renames preserved: each `renamed_paths` entry (`from -> to`) and the
+  `elements_reanchored` ids whose anchors moved with them.
+- Any packs retained from baseline after a failed re-investigation.
+- The `open_questions` rollup from the re-run fragments.
