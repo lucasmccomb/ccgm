@@ -18,6 +18,12 @@ jobs:
       - name: Validate modules
         run: bash tests/test-modules.sh
 
+      - name: Cross-module invocation detector self-test
+        run: bash tests/test-cross-module-invocations.sh --self-test
+
+      - name: Cross-module invocations declared or guarded
+        run: bash tests/test-cross-module-invocations.sh
+
       - name: Doc-count detector self-test
         run: bash tests/test-doc-counts.sh --self-test
 
@@ -145,6 +151,12 @@ jobs:
 
       - name: Validate modules
         run: bash tests/test-modules.sh
+
+      - name: Cross-module invocation detector self-test
+        run: bash tests/test-cross-module-invocations.sh --self-test
+
+      - name: Cross-module invocations declared or guarded
+        run: bash tests/test-cross-module-invocations.sh
 
       - name: Doc-count detector self-test
         run: bash tests/test-doc-counts.sh --self-test

@@ -309,6 +309,10 @@ def check_force_branch_delete(command: str) -> tuple[str | None, str | None]:
             "  # worktree already gone? sweep leftover absorbed branches\n"
             "  bash ~/.claude/lib/worktree-sweep.sh --merged-branches\n"
             "\n"
+            "(That script ships with the git-worktrees module. If it is not installed, "
+            "`git branch -d` still deletes a normally-merged branch; a squash-merged one "
+            "needs the hatch below.)\n"
+            "\n"
             "If the branch is genuinely unmerged and you intend to discard its commits, say so "
             f"explicitly: `{_FORCE_DELETE_HATCH}=1 git branch -D <branch>`.",
         )
