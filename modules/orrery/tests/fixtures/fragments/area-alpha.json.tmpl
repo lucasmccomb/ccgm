@@ -1,0 +1,38 @@
+{
+  "pack": "area-@AREA_ID@",
+  "elements": [
+    {
+      "id": "@AREA_ID@__catalog",
+      "kind": "component",
+      "title": "Catalog Browser",
+      "summary": "Product listing. Raw adversarial markup (emit must escape it): <img src=x onerror=\"window.orreryAdvPayload=1\"> orrery-adv-payload",
+      "description": "Lists products from the catalog feed because the Shopper needs to find items before checkout.",
+      "parent": "web",
+      "files": [{ "path": "web/src/components/ProductGrid.tsx", "start_line": 1, "end_line": 7 }]
+    },
+    {
+      "id": "@AREA_ID@__cart",
+      "kind": "component",
+      "title": "Cart",
+      "summary": "Client-side cart state.",
+      "description": "Holds the pending order because checkout needs a stable line-item list.",
+      "parent": "web",
+      "files": [{ "path": "web/src/components/Cart.tsx" }]
+    },
+    {
+      "id": "@AREA_ID@__catalog_grid",
+      "kind": "file",
+      "title": "ProductGrid.tsx",
+      "summary": "Key file: the product grid renderer.",
+      "parent": "@AREA_ID@__catalog",
+      "files": [{ "path": "web/src/components/ProductGrid.tsx", "start_line": 1, "end_line": 5 }]
+    }
+  ],
+  "relations": [
+    { "from": "@AREA_ID@__catalog", "to": "@AREA_ID@__cart", "kind": "uses", "summary": "adds items" },
+    { "from": "@AREA_ID@__cart", "to": "api", "kind": "calls", "summary": "submits checkout" }
+  ],
+  "open_questions": [
+    "The README mentions search but no search route exists under Web/src."
+  ]
+}

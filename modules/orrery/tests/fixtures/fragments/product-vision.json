@@ -1,0 +1,54 @@
+{
+  "pack": "product-vision",
+  "elements": [
+    {
+      "id": "system",
+      "kind": "system",
+      "title": "Acme Shop",
+      "summary": "Fictional e-commerce demo: storefront, checkout API, orders DB.",
+      "description": "Acme Shop sells fictional goods through a storefront and a checkout worker.",
+      "files": [{ "path": "README.md" }],
+      "tags": ["core"]
+    },
+    {
+      "id": "shopper",
+      "kind": "actor",
+      "title": "Shopper",
+      "summary": "A customer browsing and buying on the acme-shop storefront.",
+      "description": "Evidence: the storefront README describes a public retail flow with guest checkout. Actors carry evidence in prose, never a fabricated file anchor."
+    },
+    {
+      "id": "web",
+      "kind": "container",
+      "title": "Storefront Web",
+      "summary": "Customer-facing storefront single-page app.",
+      "description": "Renders the catalog and cart so the Shopper can browse products and start checkout.",
+      "technology": "TypeScript / Vite",
+      "parent": "system",
+      "files": [{ "path": "web/src/main.ts" }]
+    },
+    {
+      "id": "api",
+      "kind": "container",
+      "title": "Checkout API",
+      "summary": "Serverless checkout and payment endpoint.",
+      "description": "Charges cards via Stripe and writes orders, because the storefront itself never touches card data.",
+      "technology": "Cloudflare Worker",
+      "parent": "system",
+      "files": [{ "path": "api/src/worker.js" }]
+    },
+    {
+      "id": "payments_gateway",
+      "kind": "external_service",
+      "title": "Payments Gateway",
+      "summary": "Cross-pack collision fixture: same id as an external-systems element with DISJOINT files.",
+      "description": "This copy cites the wrangler config; the external-systems copy cites the deploy workflow.",
+      "files": [{ "path": "api/wrangler.toml" }]
+    }
+  ],
+  "relations": [
+    { "from": "shopper", "to": "system", "kind": "uses", "summary": "browses and buys" },
+    { "from": "web", "to": "api", "kind": "calls", "summary": "submits checkout" }
+  ],
+  "open_questions": []
+}

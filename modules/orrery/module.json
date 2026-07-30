@@ -11,9 +11,12 @@
     "skills/orrery/references/fragment.schema.json": { "target": "skills/orrery/references/fragment.schema.json", "type": "doc", "template": false },
     "skills/orrery/references/model.schema.json": { "target": "skills/orrery/references/model.schema.json", "type": "doc", "template": false },
     "skills/orrery/scripts/anchor_repo.sh": { "target": "skills/orrery/scripts/anchor_repo.sh", "type": "script", "template": false },
+    "skills/orrery/scripts/emit_likec4.py": { "target": "skills/orrery/scripts/emit_likec4.py", "type": "script", "template": false },
     "skills/orrery/scripts/enumerate_repo.py": { "target": "skills/orrery/scripts/enumerate_repo.py", "type": "script", "template": false },
     "skills/orrery/scripts/likec4.sh": { "target": "skills/orrery/scripts/likec4.sh", "type": "script", "template": false },
+    "skills/orrery/scripts/merge_fragments.py": { "target": "skills/orrery/scripts/merge_fragments.py", "type": "script", "template": false },
     "skills/orrery/scripts/render_map.sh": { "target": "skills/orrery/scripts/render_map.sh", "type": "script", "template": false },
+    "skills/orrery/scripts/validate_map.py": { "target": "skills/orrery/scripts/validate_map.py", "type": "script", "template": false },
     "skills/orrery/scripts/toolchain/package.json": { "target": "skills/orrery/scripts/toolchain/package.json", "type": "doc", "template": false },
     "skills/orrery/scripts/toolchain/package-lock.json": { "target": "skills/orrery/scripts/toolchain/package-lock.json", "type": "doc", "template": false }
   },
