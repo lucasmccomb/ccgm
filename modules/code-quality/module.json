@@ -10,7 +10,10 @@
     "rules/change-philosophy.md": { "target": "rules/change-philosophy.md", "type": "rule", "template": false },
     "rules/latent-vs-deterministic.md": { "target": "rules/latent-vs-deterministic.md", "type": "rule", "template": false },
     "rules/completeness.md": { "target": "rules/completeness.md", "type": "rule", "template": false },
-    "rules/receiving-code-review.md": { "target": "rules/receiving-code-review.md", "type": "rule", "template": false }
+    "rules/receiving-code-review.md": { "target": "rules/receiving-code-review.md", "type": "rule", "template": false },
+    "rules/in-the-circuits.md": { "target": "rules/in-the-circuits.md", "type": "rule", "template": false },
+    "rules/spec-is-the-artifact.md": { "target": "rules/spec-is-the-artifact.md", "type": "rule", "template": false },
+    "rules/menu-gen-test.md": { "target": "rules/menu-gen-test.md", "type": "rule", "template": false }
   },
   "tags": ["code-quality", "testing", "security", "standards"],
   "configPrompts": []

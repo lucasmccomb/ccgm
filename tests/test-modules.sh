@@ -190,8 +190,17 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
 done
 echo ""
 
-# --- Test: All file paths in files map point to existing files ---
-echo "--- Checking file references ---"
+# --- Test: manifest-existence gate - every files map entry resolves on disk ---
+# For every module.json files[] key, assert the source path exists. Uses
+# [ -e ], not [ -f ], so a symlink to a file or a directory both count as
+# present - only a missing path (including a broken symlink) fails. This
+# guards the declared -> disk direction (a stale or mistyped manifest entry
+# pointing at a deleted/renamed file). It is the companion, not the fix, for
+# #930's actual bug class - three code-quality rules shipped on disk with no
+# files[] entry at all - which the disk -> declared "manifest completeness"
+# check below catches, but only for lib/*.sh and commands/*.md today.
+echo "--- Checking manifest-existence gate (files map -> source exists) ---"
+declared_entries=0
 for mod_dir in "$REPO_ROOT"/modules/*/; do
   [ ! -d "$mod_dir" ] && continue
   mod_name=$(basename "$mod_dir")
@@ -200,14 +209,18 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
   jq empty "$manifest" 2>/dev/null || continue
 
   while IFS= read -r src_path; do
+    [ -z "$src_path" ] && continue
+    declared_entries=$((declared_entries + 1))
     full_path="$mod_dir/$src_path"
-    if [ -f "$full_path" ]; then
+    if [ -e "$full_path" ]; then
       pass "$mod_name: file exists '$src_path'"
     else
       fail "$mod_name: referenced file missing '$src_path' (expected at $full_path)"
     fi
   done < <(jq -r '.files | keys[]' "$manifest" 2>/dev/null)
 done
+echo ""
+echo "  Checked $declared_entries declared files[] entries across $module_count modules"
 echo ""
 
 # --- Test: Manifest completeness - every shipped lib/command is installed ---
