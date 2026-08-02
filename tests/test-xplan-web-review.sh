@@ -15,17 +15,37 @@ pass() { PASS=$((PASS + 1)); echo "  PASS: $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 
 # Poll for a server to accept a connection on 127.0.0.1:$1, up to $2
-# attempts at ~50ms apiece (default 100 attempts =~ 5s). Condition-based
-# waiting per ~/.claude/rules/condition-based-waiting.md -- replaces a
-# fixed sleep-then-curl, which is a latent flake under a loaded CI runner
-# even once the server is guaranteed to actually attempt to bind (see the
+# attempts (default 60). Condition-based waiting per
+# ~/.claude/rules/condition-based-waiting.md -- replaces a fixed
+# sleep-then-curl, which is a latent flake under a loaded CI runner even
+# once the server is guaranteed to actually attempt to bind (see the
 # DISPLAY export below).
+#
+# Each attempt is bounded to 1s via curl's --max-time. Without a per-call
+# bound, a single curl invocation has no time limit of its own, and the
+# loop's real wall-clock time is set by however long that one call happens
+# to block -- not by attempt-count * sleep arithmetic. That gap is not
+# theoretical here: on the macOS CI runner this workflow targets, two
+# independent green runs of this exact call site (PR #937, runs
+# 30760298565 and 30759895061) measured 35.16-36.40s to succeed, ~7x what
+# a naive 100 * 50ms reading implies. Likely cause: Python's
+# http.server.HTTPServer.server_bind() calls socket.getfqdn(host) -- a
+# reverse-DNS lookup -- between bind() and listen(); PlanHandler already
+# overrides log_message as a no-op, so this is not per-request log
+# resolution, it is the one-time bind-time lookup. That is server
+# behavior in modules/xplan/lib/xplan-web-review.py -- out of scope here,
+# and not fixed by this suite.
+#
+# 60 attempts * (1s curl bound + 0.05s sleep) ~= 63s worst case: about
+# 1.7x the highest of the four observed real values (36.40s), enough
+# margin for ordinary CI variance without leaving a genuinely dead server
+# to poll for ~100s before this suite reports it.
 wait_for_port() {
   local port="$1"
-  local max_attempts="${2:-100}"
+  local max_attempts="${2:-60}"
   local attempt=0
   while [ "$attempt" -lt "$max_attempts" ]; do
-    if curl -s -o /dev/null "http://127.0.0.1:$port/" 2>/dev/null; then
+    if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$port/" 2>/dev/null; then
       return 0
     fi
     attempt=$((attempt + 1))
@@ -151,7 +171,7 @@ if wait_for_port "$PORT"; then
     fail "GET / returned $code (expected 200)"
   fi
 else
-  fail "server did not bind on port $PORT within ~5s"
+  fail "server did not bind on port $PORT within ~63s (60 attempts x ~1.05s)"
 fi
 
 # -- Test 7: /raw/plan.md returns markdown
@@ -241,7 +261,7 @@ assert d['comments'] == [], 'comments not empty on accept'
     fail "/accept did not write expected payload"
   fi
 else
-  fail "server did not bind on port $PORT within ~5s"
+  fail "server did not bind on port $PORT within ~63s (60 attempts x ~1.05s)"
 fi
 
 # -- Cleanup scratch files
