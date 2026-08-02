@@ -11,6 +11,24 @@ CCGM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${CCGM_ROOT}/lib/ui.sh"
 source "${CCGM_ROOT}/lib/backup.sh"
 source "${CCGM_ROOT}/lib/merge.sh"
+source "${CCGM_ROOT}/lib/template.sh"
+
+# --- Remove CCGM shell aliases + comment header from a single rc file ---
+# Usage: remove_ccgm_alias_lines "/path/to/rc_file"
+# Returns 1 (no-op) when the file is missing or has no CCGM aliases.
+# Only the alias step in start.sh ever writes a "# CCGM - " line to an rc
+# file, so matching the whole prefix (rather than specific trailing words)
+# is safe and also cleans up comment text left by older CCGM versions.
+remove_ccgm_alias_lines() {
+  local rc="$1"
+  if [ ! -f "$rc" ] || ! grep -qE 'alias ccgm(s)?=' "$rc" 2>/dev/null; then
+    return 1
+  fi
+  sed_inplace '/^# CCGM - /d' "$rc"
+  sed_inplace '/^alias ccgm=/d' "$rc"
+  sed_inplace '/^alias ccgms=/d' "$rc"
+  return 0
+}
 
 # ============================================================
 # Main
@@ -272,11 +290,7 @@ main() {
   local rc_files=("$HOME/.zshrc" "$HOME/.bashrc")
   local rc alias_removed=false
   for rc in "${rc_files[@]}"; do
-    if [ -f "$rc" ] && grep -qE 'alias ccgm(s)?=' "$rc" 2>/dev/null; then
-      # Remove alias lines and their CCGM comment lines
-      sed -i '' '/^# CCGM - .*session.*$/d' "$rc"
-      sed -i '' '/^alias ccgm=/d' "$rc"
-      sed -i '' '/^alias ccgms=/d' "$rc"
+    if remove_ccgm_alias_lines "$rc"; then
       ui_success "Removed CCGM aliases from $rc"
       alias_removed=true
     fi
@@ -295,4 +309,8 @@ main() {
   echo ""
 }
 
-main "$@"
+# Guard so this file can be sourced (e.g. by tests, to call
+# remove_ccgm_alias_lines directly) without triggering a live uninstall run.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi

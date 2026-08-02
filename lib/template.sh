@@ -2,6 +2,23 @@
 # CCGM - Template expansion
 # Replaces __PLACEHOLDER__ variables with values from .ccgm.env
 
+# --- Portable in-place sed ---
+# Usage: sed_inplace 'sed-script' file [file2 ...]
+# macOS (BSD) sed requires -i '' (empty string as its own argument for the
+# backup suffix); GNU sed (Linux) takes -i with no separate argument and
+# would otherwise misparse a bare '' as the script and the real script as a
+# filename. Centralized here so every caller picks the right form once,
+# instead of re-deriving this detection at each call site.
+sed_inplace() {
+  local script="$1"
+  shift
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "$script" "$@"
+  else
+    sed -i "$script" "$@"
+  fi
+}
+
 # --- Expand templates in a single file ---
 # Usage: expand_templates "/path/to/file" "/path/to/.ccgm.env"
 # Modifies the file in-place
@@ -77,13 +94,6 @@ expand_templates() {
 
   # Perform replacements using sed
   # Use a different delimiter (|) in case paths contain /
-  local sed_cmd="sed"
-  # macOS sed requires -i '' while GNU sed uses -i
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed_cmd="sed -i ''"
-  else
-    sed_cmd="sed -i"
-  fi
 
   # Build sed expression
   local sed_expr=""
@@ -111,11 +121,7 @@ expand_templates() {
   done
 
   # Apply sed in-place
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' "$sed_expr" "$file"
-  else
-    sed -i "$sed_expr" "$file"
-  fi
+  sed_inplace "$sed_expr" "$file"
 }
 
 # --- Check if a file has unexpanded templates ---
