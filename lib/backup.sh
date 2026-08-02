@@ -37,6 +37,69 @@ _backup_modules_dir() {
   return 1
 }
 
+# --- Validate a derived top-level backup path segment ---
+# Usage: _backup_safe_segment "segment"; returns 0 (safe) or 1 (reject).
+# This is the guard against a manifest target that reduces to something
+# dangerous once only its first path segment is kept. A target authored as
+# "./skills/foo.md" reduces via "${t%%/*}" to the literal segment ".", and
+# "../skills/foo.md" reduces to "..". Both would otherwise reach
+# create_backup's copy loop as a real check_paths entry: "." resolves to
+# target_dir itself, and since backup_dir lives *inside* target_dir, `cp -r`
+# would copy the (in-progress) backup directory into itself; ".." resolves
+# to target_dir's parent, a directory create_backup has no business ever
+# touching. Rejects empty, ".", "..", anything containing "/" (defensive --
+# %%/* should already prevent this), and anything outside a conservative
+# [A-Za-z0-9._-] charset that does not start with a letter or digit (so a
+# leading "." or "-" is also refused, even outside the "." / ".." cases).
+_backup_safe_segment() {
+  local seg="$1"
+  case "$seg" in
+    ""|.|..) return 1 ;;
+    */*) return 1 ;;
+    [A-Za-z0-9]*) : ;;
+    *) return 1 ;;
+  esac
+  case "$seg" in
+    *[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  return 0
+}
+
+# --- Extract only the "files" object's text from a module.json (no jq) ---
+# Usage: _backup_files_block "/path/to/module.json"
+# Scans for the "files": { key and prints from its opening brace through the
+# matching closing brace (tracking nesting depth across lines), so a later
+# grep for "target" cannot pick up an unrelated "target" key that happens to
+# live elsewhere in the manifest (e.g. a future configPrompts entry). This
+# assumes "files" appears once, as a real top-level object key -- true for
+# every manifest in this repo -- and is not a general JSON parser; jq is
+# used whenever available and this fallback only runs without it.
+_backup_files_block() {
+  awk '
+    BEGIN { in_files = 0; depth = 0; done = 0 }
+    !in_files && !done {
+      if (match($0, /"files"[ \t]*:[ \t]*\{/)) {
+        in_files = 1
+        rest = substr($0, RSTART + RLENGTH - 1)
+        o = gsub(/\{/, "{", rest)
+        c = gsub(/\}/, "}", rest)
+        depth = o - c
+        print rest
+        if (depth <= 0) { in_files = 0; done = 1 }
+        next
+      }
+      next
+    }
+    in_files {
+      o = gsub(/\{/, "{", $0)
+      c = gsub(/\}/, "}", $0)
+      depth += (o - c)
+      print $0
+      if (depth <= 0) { in_files = 0; done = 1 }
+    }
+  ' "$1" 2>/dev/null
+}
+
 # --- Derive the set of CCGM-managed top-level backup paths ---
 # Usage: managed_backup_paths
 # Prints one deduped, sorted top-level path per line, derived from the first
@@ -45,7 +108,11 @@ _backup_modules_dir() {
 # list so no previously-covered path ever regresses. Falls back to the
 # legacy list alone if the modules directory cannot be found -- failing
 # closed to "back up less" would silently lose user data, so on any doubt
-# we fail open to the known-safe legacy set instead.
+# we fail open to the known-safe legacy set instead. Every derived segment
+# is additionally checked by _backup_safe_segment before it can reach the
+# caller; a segment that fails the check is dropped (never included, never
+# aborts the install) and reported to stderr so a malformed manifest target
+# is visible without ever becoming a filesystem hazard.
 managed_backup_paths() {
   local modules_dir
   if ! modules_dir="$(_backup_modules_dir)"; then
@@ -70,11 +137,12 @@ managed_backup_paths() {
         [ -n "$t" ] && targets+=("$t")
       done < <(jq -r '.files // {} | to_entries[]? | .value.target // empty' "$manifest" 2>/dev/null)
     else
-      # Minimal fallback: module.json's only "target" keys are file-entry
-      # targets, so a plain extraction is safe without a full JSON parser.
+      # Minimal fallback: scope the extraction to the "files" object first
+      # (see _backup_files_block) so a "target" key anywhere else in the
+      # manifest can never be mistaken for a file-entry target.
       while IFS= read -r t; do
         [ -n "$t" ] && targets+=("$t")
-      done < <(grep -o '"target"[[:space:]]*:[[:space:]]*"[^"]*"' "$manifest" | sed 's/^"target"[[:space:]]*:[[:space:]]*"//; s/"$//')
+      done < <(_backup_files_block "$manifest" | grep -o '"target"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/^"target"[[:space:]]*:[[:space:]]*"//; s/"$//')
     fi
   done
 
@@ -85,8 +153,14 @@ managed_backup_paths() {
   done < <(_backup_legacy_paths)
 
   local -a tops=()
+  local top
   for t in "${targets[@]}"; do
-    tops+=("${t%%/*}")
+    top="${t%%/*}"
+    if _backup_safe_segment "$top"; then
+      tops+=("$top")
+    else
+      echo "WARNING: ignoring unsafe backup path segment '${top}' derived from manifest target '${t}'" >&2
+    fi
   done
 
   printf '%s\n' "${tops[@]}" | sort -u

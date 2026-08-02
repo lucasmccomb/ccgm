@@ -565,6 +565,169 @@ else
 fi
 echo ""
 
+# --- Test 17: unsafe manifest targets never reach the copy loop ---
+# Regression test for the Stage 2 HIGH finding on issue #917: a manifest
+# target like "./skills/foo.md" reduces via "${t%%/*}" to the literal
+# segment ".", which -- unguarded -- would reach create_backup's copy loop
+# and `cp -r` the in-progress backup directory into itself (backup_dir
+# lives inside target_dir). "../x" reduces to "..", and "/abs/x" reduces to
+# an empty segment. _backup_safe_segment must reject all three while still
+# letting a legitimate sibling target through.
+echo "--- Test 17: unsafe manifest targets (., .., empty, abs) are rejected ---"
+
+FIXTURE_ROOT="$TMPDIR/fixture-root"
+mkdir -p "$FIXTURE_ROOT/modules/weirdmod"
+cat > "$FIXTURE_ROOT/modules/weirdmod/module.json" <<'JSON'
+{
+  "name": "weirdmod",
+  "files": {
+    "a": { "target": "./weird/file.md", "type": "doc" },
+    "b": { "target": "../also-weird/file.md", "type": "doc" },
+    "c": { "target": "/abs/weird/file.md", "type": "doc" },
+    "d": { "target": "", "type": "doc" },
+    "e": { "target": "skills/real/thing.md", "type": "doc" }
+  }
+}
+JSON
+
+fixture_paths=$(CCGM_ROOT="$FIXTURE_ROOT" managed_backup_paths 2>/dev/null)
+
+if ! echo "$fixture_paths" | grep -qx '\.'; then
+  pass "Derived path list does not contain a literal '.' segment"
+else
+  fail "Derived path list contains a dangerous literal '.' segment"
+fi
+
+if ! echo "$fixture_paths" | grep -qx '\.\.'; then
+  pass "Derived path list does not contain a literal '..' segment"
+else
+  fail "Derived path list contains a dangerous literal '..' segment"
+fi
+
+if ! echo "$fixture_paths" | grep -qx ''; then
+  pass "Derived path list does not contain an empty segment"
+else
+  fail "Derived path list contains an empty segment"
+fi
+
+if echo "$fixture_paths" | grep -qx 'skills'; then
+  pass "Legitimate sibling target (skills/) still passes through"
+else
+  fail "Legitimate sibling target (skills/) was dropped by the safety filter"
+fi
+echo ""
+
+# --- Test 18: create_backup survives a manifest with a "./..." target ---
+# Proves the fix against the concrete crash, not just the filtered list:
+# with the same weirdmod fixture as the manifest source, create_backup
+# must complete with exit 0 and must not leave a nested
+# backups/ccgm-*/backups/ccgm-*/... directory behind (the original crash
+# signature -- cp -r recursing into the in-progress backup).
+echo "--- Test 18: create_backup survives a manifest with a './...' target ---"
+
+WEIRD_TARGET="$TMPDIR/weird-claude"
+mkdir -p "$WEIRD_TARGET/skills"
+echo '{"key": "value"}' > "$WEIRD_TARGET/settings.json"
+echo "real skill" > "$WEIRD_TARGET/skills/thing.md"
+
+# Run in a subshell with set -euo pipefail, matching exactly how start.sh
+# sources lib/backup.sh and calls create_backup. The subshell inherits the
+# already-sourced functions from this script. set +e/-e brackets the call
+# (same pattern as Test 6) so a regression here fails this assertion
+# instead of aborting the whole suite.
+set +e
+( set -euo pipefail; CCGM_ROOT="$FIXTURE_ROOT" create_backup "$WEIRD_TARGET" >/dev/null )
+weird_exit=$?
+set -e
+
+if [ "$weird_exit" -eq 0 ]; then
+  pass "create_backup exits 0 with a manifest containing a './...' target"
+else
+  fail "create_backup exited $weird_exit with a manifest containing a './...' target"
+fi
+
+if [ -d "$WEIRD_TARGET/backups" ]; then
+  nested_count=$(find "$WEIRD_TARGET/backups" -mindepth 1 -type d -name backups 2>/dev/null | wc -l | tr -d ' ')
+else
+  nested_count=0
+fi
+
+if [ "$nested_count" -eq 0 ]; then
+  pass "No nested backups/ directory created inside the backup"
+else
+  fail "Found $nested_count nested backups/ directory(ies) -- the original crash signature"
+fi
+echo ""
+
+# --- Test 19: no-jq fallback is scoped to the "files" object only ---
+# Regression test for the Stage 2 MEDIUM finding: the grep-based fallback
+# must not pick up a "target" key that lives outside files (e.g. a future
+# configPrompts entry), unlike a bare `grep -o '"target"...'` over the
+# whole manifest. _backup_files_block is what scopes it.
+echo "--- Test 19: _backup_files_block excludes a decoy target outside files ---"
+
+SCOPE_FIXTURE="$TMPDIR/scope-fixture.module.json"
+cat > "$SCOPE_FIXTURE" <<'JSON'
+{
+  "name": "scopetest",
+  "files": {
+    "a": { "target": "real/path.md", "type": "doc" }
+  },
+  "configPrompts": [
+    { "key": "x", "prompt": "p", "target": "unrelated-decoy" }
+  ]
+}
+JSON
+
+scope_targets=$(_backup_files_block "$SCOPE_FIXTURE" | grep -o '"target"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/^"target"[[:space:]]*:[[:space:]]*"//; s/"$//')
+
+if echo "$scope_targets" | grep -qx 'real/path.md'; then
+  pass "_backup_files_block includes the real files[].target"
+else
+  fail "_backup_files_block missed the real files[].target"
+fi
+
+if ! echo "$scope_targets" | grep -qx 'unrelated-decoy'; then
+  pass "_backup_files_block excludes a decoy 'target' key outside files"
+else
+  fail "_backup_files_block leaked a decoy 'target' key outside files"
+fi
+echo ""
+
+# --- Test 20: managed_backup_paths dedupes shared top-level segments ---
+# Mutation-check regression for the Stage 2 LOW finding: changing
+# `sort -u` to plain `sort` in managed_backup_paths must fail this test.
+echo "--- Test 20: managed_backup_paths dedupes shared top-level segments ---"
+
+DEDUPE_ROOT="$TMPDIR/dedupe-root"
+mkdir -p "$DEDUPE_ROOT/modules/mod-a" "$DEDUPE_ROOT/modules/mod-b"
+cat > "$DEDUPE_ROOT/modules/mod-a/module.json" <<'JSON'
+{
+  "name": "mod-a",
+  "files": {
+    "a": { "target": "skills/mod-a/one.md", "type": "doc" }
+  }
+}
+JSON
+cat > "$DEDUPE_ROOT/modules/mod-b/module.json" <<'JSON'
+{
+  "name": "mod-b",
+  "files": {
+    "a": { "target": "skills/mod-b/two.md", "type": "doc" }
+  }
+}
+JSON
+
+dedupe_output=$(CCGM_ROOT="$DEDUPE_ROOT" managed_backup_paths 2>/dev/null)
+skills_count=$(echo "$dedupe_output" | grep -cx 'skills')
+
+if [ "$skills_count" -eq 1 ]; then
+  pass "managed_backup_paths lists 'skills' exactly once across two modules"
+else
+  fail "managed_backup_paths listed 'skills' $skills_count times, expected exactly 1"
+fi
+echo ""
+
 # --- Summary ---
 echo "==================================="
 echo "  Results: $PASS passed, $FAIL failed"
