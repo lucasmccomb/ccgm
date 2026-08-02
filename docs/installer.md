@@ -165,7 +165,7 @@ The uninstaller:
 7. Offers to restore from the safety backup if you change your mind
 8. Removes the `ccgm`/`ccgms` aliases from `~/.zshrc` and `~/.bashrc`, if present
 
-Only CCGM-installed files are removed. Personal files you created in `~/.claude/` are untouched. `settings.json` keeps any keys you added yourself - CCGM only un-merges out what it contributed, and removes the file itself if that leaves nothing behind.
+Only CCGM-installed files are removed. Personal files you created in `~/.claude/` are untouched.
 
 ## Installer library
 

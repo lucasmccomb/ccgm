@@ -78,7 +78,7 @@ CCGM can install to either or both of two locations:
 
 Global installation is the most common choice. Project-level installation is useful when you want different rules for a specific repo.
 
-Only 18 of the 78 modules declare `"project"` in their `scope`. A module that does not lists nothing to install at project scope: `start.sh` silently skips it and prints no message. If you install with `--scope project` alone, expect most of the modules you picked to install nothing - check each module's README for whether it supports project scope before relying on it.
+Only 18 of the 78 modules declare `"project"` in their `scope`. A module that doesn't has nothing to install there: `start.sh` silently skips it and prints no message. If you install with `--scope project` alone, expect most of the modules you picked to install nothing - check each module's README for whether it supports project scope before relying on it.
 
 ## Install modes
 
