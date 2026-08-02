@@ -38,6 +38,50 @@ Stop and reach for a script (or an existing tool) if you catch yourself:
 
 Each of these is a deterministic computation. If it gets the wrong answer once, it will get the wrong answer again. Push it into code where the test can pin it.
 
+## The Same Rule Applies to Claims, Not Just Computations
+
+Everything above is about arithmetic the model does in its head. The identical mistake happens one level up, with **assertions about how a system behaves** — and it is harder to see, because the output is an argument rather than a number.
+
+"Does `X` work here?" is not a judgment call. It is a question with a determinate answer that a short experiment returns exactly. Reasoning about it produces a confident paragraph; running it produces the answer.
+
+| Claim | Class | Belongs in |
+|-------|-------|-----------|
+| Is this the right architecture? | Latent | Model |
+| Which of these tradeoffs matters more to us? | Latent | Model |
+| Does this flag / mechanism / config actually work here? | **Deterministic** | An experiment |
+| Does this suite pass? | **Deterministic** | Run it |
+| Can this alternative do the thing we said it can't? | **Deterministic** | Try it |
+| Is that field / file / option really there? | **Deterministic** | Read, grep, `--help` |
+| Do these two approaches produce the same output? | **Deterministic** | Diff them |
+
+### Dismissed Alternatives Are the Worst Case
+
+A rejected alternative — in a plan, a design doc, a risk register, an "options considered" list — is an **untested claim wearing the costume of a settled decision**. It gets written once, early, under time pressure, and then every later reader inherits it as fact. Nobody re-opens it, because it looks decided.
+
+This is measured, not hypothetical: a dismissal in one plan survived **six reviews** — three constructive and three adversarial at maximum effort — with two reviewers citing it directly. None ran it. A two-minute experiment then falsified half of it and changed the plan materially. Six expensive reviews lost to one cheap test.
+
+**When a decision rests on a dismissal, run the dismissed thing before defending the decision.**
+
+### The Cost Gate
+
+This is bounded on purpose, or it becomes a mandate to prototype every road not taken. A claim is worth testing when the experiment is **minutes, needs no permanent change, and is fully reversible.**
+
+- **Testable:** does this flag scope that file, does this command accept that argument, does this suite pass, does that API return that shape.
+- **Not testable here:** would a different database have been better, will users like this, does this scale to 100x. Record these as **untested assumptions and label them as such** — an assumption that says "unverified" is still better than one that reads as settled.
+
+If you must touch shared state to get an answer: make the change inert by construction (scope it to a name nothing else uses), remove it immediately, and verify the removal.
+
+### Red Flags That a Claim Is Being Argued Instead of Tested
+
+Stop and run it if you catch yourself:
+
+- Writing a paragraph defending whether a mechanism works, with a shell available
+- Carrying a rejected alternative through a second review without anyone having run it
+- Saying "the docs don't mention it, so presumably…" when a canary would settle it in two minutes
+- Reviewing a claim again because the last review didn't resolve it
+- Treating "three reviewers agreed" as evidence about behavior — agreement is not observation
+- Writing "should work" / "shouldn't be affected" / "presumably fine" about something runnable
+
 ## Why This Rule Exists
 
 Two classes of failure disappear when deterministic work moves to scripts:

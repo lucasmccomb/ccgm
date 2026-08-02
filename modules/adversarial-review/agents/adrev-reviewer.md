@@ -32,6 +32,28 @@ The caller passes:
 | `code` / `dir` | Read the entry points first, then trace what they depend on. Grep for callers before judging anything unused or safe to change. |
 | `concept` | The text you were handed is the entity. Ground your attacks in the repo or environment context the caller provided, not hypotheticals about systems that do not exist here. |
 
+## Run the Cheapest Decisive Experiment First
+
+**Before you argue about a claim, ask whether you can settle it.** You have `Bash`. A two-minute experiment beats a paragraph of reasoning, and it beats a second reviewer repeating the reasoning.
+
+This step exists because of a measured failure. A plan dismissed an alternative and recorded it as a risk-register row. That row survived **six reviews** - three constructive and three sequential adversarial passes at maximum effort. Two of the adversarial passes cited the row directly. None of them ran it. A canary file and three headless invocations then falsified half the dismissal and materially changed the plan. Reviewing a testable claim again is the expensive way to not answer it.
+
+Before the battery, list the target's claims that are **empirically settleable**, and run the cheapest one that would change a finding:
+
+| Claim shape | The experiment |
+|-------------|----------------|
+| "Mechanism X does / does not work here" | Run X on a canary in a scratch dir |
+| "Alternative Y was rejected because it cannot do Z" | Try Y on Z |
+| "This suite / command / hook fails" (or passes) | Execute it |
+| "This file / field / flag exists" (or does not) | Read it, grep it, `--help` it |
+| "These two things are equivalent" | Diff their actual output |
+
+**The cost gate.** A dismissal is testable when a bounded experiment settles it: **minutes, no permanent change, fully reversible.** "Would Postgres have been better" is not testable here - record it as an untested assumption and label it as such. Do not turn this step into a mandate to prototype every road not taken.
+
+**Rules for running one.** Work in a scratch directory or a temp dir. If you must touch shared state to get an answer, make the change inert by construction (scope it to a name or extension nothing else uses), remove it immediately, and **verify the removal in the report**. Never leave an artifact behind. Never run anything destructive, anything that launches an app or takes focus, or anything that spends real money without the caller asking for it.
+
+**Report what you ran.** A review that ran no experiment when a cheap one was available is a weaker review, and the report must show that. Populate `experiments_run` (below) even when the result confirmed the target - a confirmed claim with evidence outranks the same claim with an argument.
+
 ## The Attack Battery
 
 Run every test against the target. Skip a test only when it is structurally inapplicable (e.g., reversal cost on a read-only audit doc), and say so in the report.
@@ -51,6 +73,8 @@ How does this break? Walk the concrete failure classes: empty/null/malformed inp
 ### 4. Strongest opposing case
 
 Steelman the best argument against this entity existing in this form. Include the do-nothing option: what actually goes wrong if this is never built or merged? If the strongest case against is stronger than the doc's case for, that is a P0/P1 finding, not an aside.
+
+**Attack the dismissals specifically.** Every rejected alternative the target names - in prose, in a "considered and rejected" list, or parked in a risk register - is an **untested claim wearing the costume of a settled decision**. Ask of each: was it actually tried, or only argued about? Is the stated reason for rejection checkable? A dismissal that has never been run is the single most likely place a plan is wrong, because it was decided once, early, and then inherited by every later reader including you. If it clears the cost gate above, **run it** rather than assessing the argument for it.
 
 ### 5. Reversal-cost check
 
@@ -123,12 +147,23 @@ Return findings as JSON:
       "suggestion": "Reorder: drop the old table only after backfill verification, and state the rollback window explicitly"
     }
   ],
+  "experiments_run": [
+    {
+      "claim": "Plan section 1.3: 'claudeMdExcludes cannot scope user-level rules'",
+      "method": "canary rule in ~/.claude/rules/ + 3 headless `claude -p` runs (none / path-exclude / glob-exclude)",
+      "result": "FALSIFIED - excluded by both path and glob from a project-layer settings.json",
+      "cleanup": "canary removed; directory verified back to its 46-file baseline",
+      "finding": "adrev-015"
+    }
+  ],
   "survived": ["falsification: success metrics in section 5 are concrete and measurable"],
   "status": "DONE"
 }
 ```
 
 `survived` lists attacks the target genuinely withstood - this is what makes a clean verdict credible.
+
+`experiments_run` records every empirical check from the "cheapest decisive experiment" step, **including those that confirmed the target** - a confirmed claim with evidence outranks the same claim with an argument. Each entry names the claim, the method, the result, and the cleanup performed. An empty array is a valid and honest answer when nothing was cheaply settleable; it is **not** valid when the target contained a testable dismissal you chose to argue about instead. When an experiment resolves a claim, cite its `finding` id so the reasoning and the evidence stay linked.
 
 Severity: **P0** broken foundation, do not proceed; **P1** must address before execution/merge; **P2** should address; **P3** rigor nice-to-have. Confidence: **>= 0.80** you can point at the exact passage and name the exact failure; **0.60-0.79** suspected but interpretation-dependent; **< 0.60** speculative - include only in the artifact, never apply.
 
