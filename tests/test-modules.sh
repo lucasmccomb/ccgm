@@ -347,7 +347,13 @@ WORKFLOW_FILE="$REPO_ROOT/.github/workflows/test.yml"
 if [ ! -f "$WORKFLOW_FILE" ]; then
   fail "workflow file missing: .github/workflows/test.yml"
 else
-  jobs_line=$(grep -n '^jobs:[[:space:]]*$' "$WORKFLOW_FILE" | head -1 | cut -d: -f1)
+  # No pipe: `grep -n ... | head -1 | cut -d: -f1` races `head -1` closing
+  # its read end against `grep` still writing (same SIGPIPE hazard as #943).
+  # `-m1` makes grep itself stop after the first match instead, and the
+  # `:1` field split is plain bash parameter expansion - no second process
+  # is ever reading from another live process's stdout.
+  jobs_match=$(grep -m1 -n '^jobs:[[:space:]]*$' "$WORKFLOW_FILE" || true)
+  jobs_line="${jobs_match%%:*}"
   if [ -z "$jobs_line" ]; then
     fail "test.yml: could not locate top-level 'jobs:' key"
   else
@@ -413,7 +419,14 @@ else
           start="${range%%:*}"
           end="${range##*:}"
           job_label=$(sed -n "${start}p" "$WORKFLOW_FILE" | sed 's/^[[:space:]]*//; s/:.*$//')
-          if sed -n "${start},${end}p" "$WORKFLOW_FILE" | grep -qF "tests/$suite_name"; then
+          # Capture the job's slice first, then match against the variable
+          # with a herestring instead of piping sed straight into
+          # `grep -qF`. Same SIGPIPE hazard as #943: `grep -q` can exit on
+          # its first match before `sed` finishes writing the range, and
+          # under pipefail that turns a real match into a false "missing"
+          # report - here, for every job after the first suite line found.
+          job_slice=$(sed -n "${start},${end}p" "$WORKFLOW_FILE")
+          if grep -qF "tests/$suite_name" <<< "$job_slice"; then
             :
           else
             missing_in="$missing_in $job_label"
