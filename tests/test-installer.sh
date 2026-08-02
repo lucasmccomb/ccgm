@@ -11,9 +11,6 @@ PASS=0
 FAIL=0
 ERRORS=()
 TMPDIR=""
-# Set only while Test 8's scratch preset file exists, so cleanup() below
-# removes it even if the test fails before reaching its own removal.
-SCRATCH_PRESET_FILE=""
 
 # --- Helpers ---
 pass() {
@@ -30,9 +27,6 @@ fail() {
 cleanup() {
   if [ -n "$TMPDIR" ] && [ -d "$TMPDIR" ]; then
     rm -rf "$TMPDIR"
-  fi
-  if [ -n "$SCRATCH_PRESET_FILE" ] && [ -f "$SCRATCH_PRESET_FILE" ]; then
-    rm -f "$SCRATCH_PRESET_FILE"
   fi
 }
 trap cleanup EXIT
@@ -665,16 +659,27 @@ echo ""
 
 # ============================================================
 # Test 10: interactive preset menu and --help preset list are both
-# derived from presets/*.json (#919)
+# derived from presets/*.json via the shared list_preset_names() helper
+# (lib/modules.sh) (#919)
 #
 # Before the fix, start.sh printed every presets/*.json file but then
 # hardcoded both the ui_choose "Select preset" menu AND the --help
 # "--preset <name>" line to "minimal standard full team" - cloud-agent
 # was advertised in the printed list but unreachable from either. This
-# proves both derived lists come from the same glob that prints the
+# proves both derived lists come from the same function that prints the
 # list (so neither can diverge again), and covers the degenerate case
 # of a preset filename containing a space (the glob must not
 # word-split it into multiple entries).
+#
+# The whole test runs against an isolated scratch CCGM_ROOT under
+# $TMPDIR, not the repo's real presets/ directory: it symlinks start.sh,
+# lib/, and modules/, then builds its own presets/ (symlinks to the real
+# preset files, plus a scratch preset with a space in its name). This
+# means two concurrent runs of this suite cannot collide over the
+# scratch file, and a mid-test abort cannot leave a stray *.json in the
+# repo's committed presets/ - the scratch root is removed by the
+# existing TMPDIR cleanup() trap like everything else under $TMPDIR,
+# with no separate bookkeeping needed.
 # ============================================================
 echo "--- Test 10: interactive preset menu and --help match presets/*.json ---"
 
@@ -686,22 +691,32 @@ export CCGM_USERNAME=testuser
 export CCGM_TIMEZONE=UTC
 export CCGM_DEFAULT_MODE=ask
 
-# Add a scratch preset with a space in its filename for the duration of
-# this test, so the menu-vs-presets comparison also exercises the
-# space-handling requirement. SCRATCH_PRESET_FILE is removed by the
-# script-wide cleanup() trap even if this test fails before reaching
-# its own removal below.
-scratch_preset="$REPO_ROOT/presets/zz scratch test.json"
-echo '["autonomy"]' > "$scratch_preset"
-SCRATCH_PRESET_FILE="$scratch_preset"
-
-# Expected menu = every presets/*.json basename, in the same glob order
-# start.sh iterates them in when it prints the list.
-expected10_presets=()
+scratch_root="$TMPDIR/test10-root"
+mkdir -p "$scratch_root/presets"
+ln -s "$REPO_ROOT/start.sh" "$scratch_root/start.sh"
+ln -s "$REPO_ROOT/lib" "$scratch_root/lib"
+ln -s "$REPO_ROOT/modules" "$scratch_root/modules"
 for pf in "$REPO_ROOT"/presets/*.json; do
   [ -e "$pf" ] || continue
-  expected10_presets+=("$(basename "$pf" .json)")
+  ln -s "$pf" "$scratch_root/presets/$(basename "$pf")"
 done
+# A preset filename containing a space, present only in this test's
+# isolated presets/ - never written to the real, shared directory.
+echo '["autonomy"]' > "$scratch_root/presets/zz scratch test.json"
+
+# Expected menu = list_preset_names()'s output for the scratch root - the
+# exact same function start.sh itself calls, just pointed at the
+# isolated presets/ built above instead of the real one.
+expected10_presets=()
+(
+  CCGM_ROOT="$scratch_root"
+  # shellcheck source=../lib/modules.sh
+  source "$REPO_ROOT/lib/modules.sh"
+  list_preset_names
+) > "$TMPDIR/test10-expected.txt"
+while IFS= read -r pname; do
+  [ -n "$pname" ] && expected10_presets+=("$pname")
+done < "$TMPDIR/test10-expected.txt"
 
 # Capture the exact arguments start.sh passes to `ui_choose "Select
 # preset" ...` via xtrace. CCGM_NON_INTERACTIVE makes ui_choose a
@@ -713,7 +728,7 @@ done
 # includes a module with a required, unseeded placeholder - so this
 # test does not assert on the installer's overall exit code.)
 trace10="$TMPDIR/test10-trace.log"
-bash -x "$REPO_ROOT/start.sh" --scope global </dev/null >/dev/null 2>"$trace10" || true
+bash -x "$scratch_root/start.sh" --scope global </dev/null >/dev/null 2>"$trace10" || true
 
 menu10_line=$(grep -m1 "ui_choose 'Select preset'" "$trace10" || true)
 if [ -n "$menu10_line" ]; then
@@ -774,10 +789,10 @@ else
 fi
 
 # --help's preset list is a second surface with the exact same class of
-# bug (#919 follow-up): it must also be derived from presets/*.json, not
-# a second hand-maintained list. Reuses the scratch preset still in
-# place above.
-help10_out=$("$REPO_ROOT/start.sh" --help 2>&1)
+# bug (#919 follow-up): it must also be derived from presets/*.json (via
+# the same list_preset_names() helper), not a second hand-maintained
+# list. Reuses the isolated scratch root built above.
+help10_out=$("$scratch_root/start.sh" --help 2>&1)
 help10_line=$(echo "$help10_out" | grep -F -- "--preset <name>" || true)
 
 help10_presets=()
@@ -830,8 +845,6 @@ else
   fail "cloud-agent is missing from the --help preset list (#919 regression)"
 fi
 
-rm -f "$scratch_preset"
-SCRATCH_PRESET_FILE=""
 echo ""
 
 # Restore HOME

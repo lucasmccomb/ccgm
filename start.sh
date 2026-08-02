@@ -395,26 +395,33 @@ main() {
         shift 2
         ;;
       --help|-h)
-        # Derived from presets/*.json (same glob the interactive menu uses,
-        # #919) so this line can never drift out of sync with the actual
-        # preset files again.
-        local help_preset_names="" help_pf help_pname
-        for help_pf in "${CCGM_ROOT}"/presets/*.json; do
-          [ -e "$help_pf" ] || continue
-          help_pname=$(basename "$help_pf" .json)
+        # Derived from list_preset_names() (lib/modules.sh) - the same
+        # source the interactive menu's preset list (below, in the
+        # "Choose a preset" branch) and the printed preset details use, so
+        # this line can never drift out of sync with the actual preset
+        # files, or with the menu, again (#919).
+        local help_preset_names="" help_pname
+        while IFS= read -r help_pname; do
+          [ -z "$help_pname" ] && continue
           if [ -z "$help_preset_names" ]; then
             help_preset_names="$help_pname"
           else
             help_preset_names="${help_preset_names}, ${help_pname}"
           fi
-        done
+        done < <(list_preset_names)
+        if [ -z "$help_preset_names" ]; then
+          # list_preset_names() already printed why (no presets/*.json
+          # found) to stderr; matches the interactive menu's fatal
+          # treatment of the same condition (below).
+          exit 1
+        fi
         echo "CCGM - Claude Code God Mode"
         echo ""
         echo "Usage: ./start.sh [OPTIONS]"
         echo ""
         echo "Options:"
         echo "  --link              Create symlinks instead of copies"
-        echo "  --preset <name>     Use preset (${help_preset_names:-none found in presets/})"
+        echo "  --preset <name>     Use preset (${help_preset_names})"
         echo "  --scope <scope>     Installation scope (global, project, both)"
         echo "  --add <module>      Add a module to an existing install (repeatable);"
         echo "                      inherits link-mode and scope from the manifest"
@@ -754,15 +761,17 @@ main() {
       ui_info "Available presets:"
       echo ""
 
-      # Show preset details. preset_names accumulates in the same order the
-      # list is printed, so the ui_choose menu below can never drift out of
-      # sync with what was just shown (#919).
-      local pf pname pcount pmods
+      # Show preset details. preset_names is built from list_preset_names()
+      # (lib/modules.sh) - the same source --help's preset list uses - in
+      # the same order it is printed here, so the ui_choose menu below can
+      # never drift out of sync with what was just shown, or with --help,
+      # again (#919).
+      local pname pf pcount pmods
       local preset_names=()
-      for pf in "${CCGM_ROOT}"/presets/*.json; do
-        [ -e "$pf" ] || continue # glob matched nothing; skip the literal pattern
-        pname=$(basename "$pf" .json)
+      while IFS= read -r pname; do
+        [ -z "$pname" ] && continue
         preset_names+=("$pname")
+        pf="${CCGM_ROOT}/presets/${pname}.json"
         if [ "$has_jq" = true ]; then
           pcount=$(jq -r 'length' "$pf")
           pmods=$(jq -r 'join(", ")' "$pf")
@@ -771,11 +780,13 @@ main() {
           pmods=$(tr -d '[]"' < "$pf" | tr ',' ' ')
         fi
         ui_list_item "$pname" "($pcount modules) $pmods"
-      done
+      done < <(list_preset_names)
       echo ""
 
       if [ ${#preset_names[@]} -eq 0 ]; then
-        ui_error "No presets found in ${CCGM_ROOT}/presets/"
+        # list_preset_names() already printed why (no presets/*.json
+        # found) to stderr; matches --help's fatal treatment of the same
+        # condition (above).
         exit 1
       fi
 

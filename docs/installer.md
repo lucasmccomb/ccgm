@@ -42,7 +42,7 @@ Choose where to install:
 
 ### Step 5: Module selection
 
-Choose a preset (the menu lists every file under `presets/`: minimal, standard, full, team, cloud-agent) or select individual modules from a checkbox menu. The menu lists stable modules first, with beta modules (labelled `[BETA]`) at the end.
+Choose a preset (the menu lists every file under `presets/`, alphabetically: cloud-agent, full, minimal, standard, team) or select individual modules from a checkbox menu. The menu lists stable modules first, with beta modules (labelled `[BETA]`) at the end.
 
 ### Step 6: Dependency resolution
 
