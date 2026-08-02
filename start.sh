@@ -395,13 +395,26 @@ main() {
         shift 2
         ;;
       --help|-h)
+        # Derived from presets/*.json (same glob the interactive menu uses,
+        # #919) so this line can never drift out of sync with the actual
+        # preset files again.
+        local help_preset_names="" help_pf help_pname
+        for help_pf in "${CCGM_ROOT}"/presets/*.json; do
+          [ -e "$help_pf" ] || continue
+          help_pname=$(basename "$help_pf" .json)
+          if [ -z "$help_preset_names" ]; then
+            help_preset_names="$help_pname"
+          else
+            help_preset_names="${help_preset_names}, ${help_pname}"
+          fi
+        done
         echo "CCGM - Claude Code God Mode"
         echo ""
         echo "Usage: ./start.sh [OPTIONS]"
         echo ""
         echo "Options:"
         echo "  --link              Create symlinks instead of copies"
-        echo "  --preset <name>     Use preset (minimal, standard, full, team)"
+        echo "  --preset <name>     Use preset (${help_preset_names:-none found in presets/})"
         echo "  --scope <scope>     Installation scope (global, project, both)"
         echo "  --add <module>      Add a module to an existing install (repeatable);"
         echo "                      inherits link-mode and scope from the manifest"
