@@ -64,7 +64,13 @@ A single yes/no gate. Answering no exits without making changes.
 
 ### Step 10: Backup
 
-Creates a timestamped backup at `<target>/backups/ccgm-YYYYMMDD-HHMMSS/` - `~/.claude/backups/` for a global install, `<project>/.claude/backups/` for a project install. It copies a fixed list of top-level items if they exist: `settings.json`, `CLAUDE.md`, `rules/`, `commands/`, `hooks/`, `multi-agent-system.md`, `github-repo-protocols.md`, and any `.ccgm*` files. The 5 most recent backups are kept; older ones are deleted. Module targets outside that list (`skills/`, `agents/`, `lib/`, `bin/`, ...) are not currently backed up (see #917).
+Creates a timestamped backup at `<target>/backups/ccgm-YYYYMMDD-HHMMSS/` - `~/.claude/backups/` for a global install, `<project>/.claude/backups/` for a project install.
+
+The set of items copied is derived from the modules themselves: every `modules/*/module.json` file target contributes its first path segment, so `skills/`, `agents/`, `lib/`, `bin/`, `scripts/`, `output-styles/`, and the rest are all covered. That set is unioned with the seven legacy paths (`settings.json`, `CLAUDE.md`, `rules/`, `commands/`, `hooks/`, `multi-agent-system.md`, `github-repo-protocols.md`), so coverage only ever grows. Any `.ccgm*` files are copied too. Deriving from the manifests is what keeps non-CCGM content - `projects/`, holding session transcripts and memory - out of the backup.
+
+A derived segment is skipped, with a warning on stderr, if it is empty, `.`, `..`, contains a `/`, or falls outside a conservative ASCII character set. If the modules directory cannot be located at all, the backup falls back to the seven legacy paths rather than backing up nothing.
+
+The 5 most recent backups are kept; older ones are deleted.
 
 ### Step 11: Install
 
