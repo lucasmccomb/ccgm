@@ -345,6 +345,37 @@ load_preset() {
   fi
 }
 
+# --- List preset names ---
+# Usage: while IFS= read -r name; do ...; done < <(list_preset_names)
+#
+# Prints every presets/*.json basename, one per line, in the glob's own
+# order (alphabetical on a normal filesystem). This is the single source
+# for "what presets exist" - the interactive menu, --help's preset list,
+# the printed preset details, and the installer test suite's expected
+# list all call this function so they cannot drift from each other (#919
+# and its follow-up: two independently-glob-ing copies is the same bug
+# class the issue was filed for).
+#
+# Prints an error to stderr and returns 1 if presets/ contains no *.json
+# files. Does not exit - callers that require at least one preset to
+# proceed must check for an empty result themselves (see start.sh's
+# --help and interactive-menu call sites, which both treat "no presets"
+# as fatal).
+list_preset_names() {
+  local pf pname
+  local found=false
+  for pf in "${CCGM_ROOT}"/presets/*.json; do
+    [ -e "$pf" ] || continue # glob matched nothing; skip the literal pattern
+    found=true
+    pname=$(basename "$pf" .json)
+    echo "$pname"
+  done
+  if [ "$found" = false ]; then
+    echo "No presets found in ${CCGM_ROOT}/presets/" >&2
+    return 1
+  fi
+}
+
 # --- List presets ---
 list_presets() {
   local preset
