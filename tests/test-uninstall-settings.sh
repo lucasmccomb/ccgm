@@ -315,6 +315,211 @@ else
 fi
 echo ""
 
+# ============================================================
+# Shell alias removal (issue #949)
+#
+# uninstall.sh used to strip ccgm/ccgms aliases with a hardcoded BSD-style
+# `sed -i ''`, which GNU sed (Linux) misparses: it reads the empty string as
+# the sed script and the real script as a filename, and errors out. These
+# tests exercise remove_ccgm_alias_lines (uninstall.sh) directly against a
+# scratch rc file, never the real ~/.zshrc or ~/.bashrc. uninstall.sh is
+# sourced rather than executed, so main() never runs - see the
+# BASH_SOURCE guard at the bottom of uninstall.sh.
+# ============================================================
+echo "--- Test 8: Alias removal strips aliases + comment header, leaves everything else untouched ---"
+
+ALIAS_TMPDIR="$TMPDIR/alias-test"
+mkdir -p "$ALIAS_TMPDIR"
+RC_FILE="$ALIAS_TMPDIR/.zshrc"
+
+# Mirrors what start.sh's alias step actually writes: unrelated content,
+# then a blank line + CCGM comment header + both alias lines, then more
+# unrelated content after.
+cat > "$RC_FILE" << 'ZSHRC'
+export PATH="$PATH:/usr/local/bin"
+alias ll="ls -la"
+
+# CCGM - Claude Code launchers
+alias ccgm="claude --dangerously-skip-permissions"
+alias ccgms="claude /startup --dangerously-skip-permissions"
+
+export EDITOR=vim
+ZSHRC
+
+# Everything that should survive removal, byte for byte, in order. The
+# blank line CCGM appended ahead of its comment header is not cleaned up
+# (out of scope for #949), so it remains here too, alongside the blank line
+# that already followed the alias block.
+cat > "$ALIAS_TMPDIR/expected.zshrc" << 'ZSHRC'
+export PATH="$PATH:/usr/local/bin"
+alias ll="ls -la"
+
+
+export EDITOR=vim
+ZSHRC
+
+set +e
+remove_out=$(bash -c "source '$REPO_ROOT/uninstall.sh'; remove_ccgm_alias_lines '$RC_FILE'" 2>&1)
+remove_exit=$?
+set -e
+
+if [ $remove_exit -eq 0 ]; then
+  pass "remove_ccgm_alias_lines reports success when aliases are present"
+else
+  fail "remove_ccgm_alias_lines failed on a file with aliases present: $remove_out"
+fi
+
+if ! grep -qE '^alias ccgm=' "$RC_FILE" && ! grep -qE '^alias ccgms=' "$RC_FILE"; then
+  pass "ccgm and ccgms alias lines removed"
+else
+  fail "alias lines still present: $(grep -E '^alias ccgm' "$RC_FILE" || true)"
+fi
+
+if ! grep -qE '^# CCGM - ' "$RC_FILE"; then
+  pass "CCGM comment header removed"
+else
+  fail "CCGM comment header still present: $(grep -E '^# CCGM - ' "$RC_FILE" || true)"
+fi
+
+if diff -q "$ALIAS_TMPDIR/expected.zshrc" "$RC_FILE" >/dev/null 2>&1; then
+  pass "Every other line in the rc file is byte-identical to before"
+else
+  fail "Unrelated rc file content was altered: $(diff "$ALIAS_TMPDIR/expected.zshrc" "$RC_FILE" || true)"
+fi
+echo ""
+
+echo "--- Test 9: Alias removal is idempotent on an already-clean file ---"
+
+# Snapshot the already-cleaned file, then run removal again.
+cp "$RC_FILE" "$ALIAS_TMPDIR/before-second-run.zshrc"
+
+set +e
+second_out=$(bash -c "source '$REPO_ROOT/uninstall.sh'; remove_ccgm_alias_lines '$RC_FILE'" 2>&1)
+second_exit=$?
+set -e
+
+if [ $second_exit -eq 1 ]; then
+  pass "Second run reports no-op (no CCGM aliases found) instead of erroring"
+else
+  fail "Second run on an already-clean file exited $second_exit (expected 1, no-op): $second_out"
+fi
+
+if diff -q "$ALIAS_TMPDIR/before-second-run.zshrc" "$RC_FILE" >/dev/null 2>&1; then
+  pass "Running removal twice does not change an already-clean file"
+else
+  fail "Second run mutated an already-clean file: $(diff "$ALIAS_TMPDIR/before-second-run.zshrc" "$RC_FILE" || true)"
+fi
+echo ""
+
+echo "--- Test 10: Alias removal is a no-op on a file with no CCGM aliases at all ---"
+
+NO_ALIAS_RC="$ALIAS_TMPDIR/no-alias.zshrc"
+cat > "$NO_ALIAS_RC" << 'ZSHRC'
+export PATH="$PATH:/usr/local/bin"
+alias ll="ls -la"
+ZSHRC
+cp "$NO_ALIAS_RC" "$ALIAS_TMPDIR/no-alias-before.zshrc"
+
+set +e
+bash -c "source '$REPO_ROOT/uninstall.sh'; remove_ccgm_alias_lines '$NO_ALIAS_RC'" >/dev/null 2>&1
+no_alias_exit=$?
+set -e
+
+if [ $no_alias_exit -eq 1 ]; then
+  pass "No-op reported for a file with no CCGM aliases"
+else
+  fail "Expected no-op (exit 1) for a file with no CCGM aliases, got $no_alias_exit"
+fi
+
+if diff -q "$ALIAS_TMPDIR/no-alias-before.zshrc" "$NO_ALIAS_RC" >/dev/null 2>&1; then
+  pass "File with no CCGM aliases left untouched"
+else
+  fail "File with no CCGM aliases was modified"
+fi
+echo ""
+
+echo "--- Test 11: Alias removal reports failure (not success) when sed cannot write the rc file ---"
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "  SKIP: running as root - permission-based write failures cannot be forced"
+else
+  RO_DIR="$ALIAS_TMPDIR/readonly-dir"
+  mkdir -p "$RO_DIR"
+  RO_RC="$RO_DIR/.zshrc"
+  cat > "$RO_RC" << 'ZSHRC'
+export PATH="$PATH:/usr/local/bin"
+
+# CCGM - Claude Code launchers
+alias ccgm="claude --dangerously-skip-permissions"
+alias ccgms="claude /startup --dangerously-skip-permissions"
+ZSHRC
+
+  # sed -i writes via a temp file plus rename in the same directory, so
+  # chmod on the FILE alone does not force a write failure - the rename
+  # only needs the directory to be writable. Locking the directory does.
+  chmod 555 "$RO_DIR"
+
+  set +e
+  bash -c "source '$REPO_ROOT/uninstall.sh'; remove_ccgm_alias_lines '$RO_RC'" >/dev/null 2>&1
+  ro_exit=$?
+  set -e
+
+  chmod 755 "$RO_DIR"
+
+  if [ $ro_exit -eq 2 ]; then
+    pass "remove_ccgm_alias_lines reports failure (exit 2) instead of success when sed cannot write the file"
+  else
+    fail "Expected exit 2 (sed failure) on an unwritable directory, got $ro_exit"
+  fi
+
+  if grep -qE '^alias ccgm=' "$RO_RC"; then
+    pass "Aliases remain in the file sed could not write - the failed removal did not silently drop data"
+  else
+    fail "Aliases were removed even though the containing directory was read-only - test setup invalid"
+  fi
+fi
+echo ""
+
+echo "--- Test 12: sed_inplace does not misparse a dash-prefixed filename as an option ---"
+
+DASH_DIR="$ALIAS_TMPDIR/dash-test"
+mkdir -p "$DASH_DIR"
+DASH_FILE="$DASH_DIR/-leading-dash.txt"
+printf 'keep\nremove-me\n' > "$DASH_FILE"
+
+set +e
+dash_out=$(bash -c "cd '$DASH_DIR' && source '$REPO_ROOT/lib/template.sh' && sed_inplace '/remove-me/d' '-leading-dash.txt'" 2>&1)
+dash_exit=$?
+set -e
+
+if [ $dash_exit -eq 0 ]; then
+  pass "sed_inplace succeeds on a dash-prefixed filename instead of misparsing it as an option"
+else
+  fail "sed_inplace failed on a dash-prefixed filename (exit $dash_exit): $dash_out"
+fi
+
+if grep -qE '^remove-me$' -- "$DASH_FILE" 2>/dev/null; then
+  fail "sed_inplace did not actually remove the target line from the dash-prefixed file"
+else
+  pass "Target line removed from the dash-prefixed file"
+fi
+
+if grep -qE '^keep$' -- "$DASH_FILE" 2>/dev/null; then
+  pass "Unrelated line preserved in the dash-prefixed file"
+else
+  fail "Unrelated line lost from the dash-prefixed file"
+fi
+echo ""
+
+# NOTE (platform coverage): this suite runs on macOS, so the assertions
+# above only exercise sed_inplace's BSD (sed -i with an empty-string suffix
+# argument) branch via lib/template.sh. The GNU branch (sed -i with no
+# separate suffix argument - the actual bug issue #949 fixes) is exercised
+# by CI's ubuntu-latest job, not by a local run on this machine.
+echo "NOTE: local run exercises the BSD/macOS sed_inplace branch only;"
+echo "the GNU/Linux branch is covered by CI's ubuntu-latest job."
+echo ""
+
 # --- Summary ---
 echo "==================================="
 echo "  Results: $PASS passed, $FAIL failed"
