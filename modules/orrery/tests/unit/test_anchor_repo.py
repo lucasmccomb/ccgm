@@ -129,11 +129,16 @@ def stub_git_subcommand_failure(home, subcommand, exit_code):
     finding 7a/7b need a failure the real git binary won't otherwise
     produce).
 
-    The `$1 = -C` check is load-bearing, not decorative: matching on `$3`
-    alone would also catch worktree_count()'s own
-    `git -C <repo> worktree list --porcelain` the moment a future test
-    stubs "worktree" - breaking the assertion helper instead of cleanly
-    failing the code under test."""
+    The `$1 = -C` check only narrows the match to `-C`-prefixed calls; it
+    does NOT disambiguate between two `-C`-prefixed calls to the same
+    subcommand with different sub-actions. Concretely: every invocation
+    this test file makes through the git() helper is `-C`-prefixed, so
+    stubbing "worktree" would still catch worktree_count()'s own
+    `git -C <repo> worktree list --porcelain` alongside the script's
+    `worktree add` - that would need a `$4` check ("list" vs "add"), which
+    this helper does not have. Safe for the subcommands actually stubbed
+    today (config, rev-list): neither appears in any git() call this file
+    makes outside of anchor_repo.sh's own invocations."""
     stub_dir = home / "stub-bin"
     stub_dir.mkdir(parents=True, exist_ok=True)
     real_git = shutil.which("git")
