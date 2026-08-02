@@ -190,8 +190,17 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
 done
 echo ""
 
-# --- Test: All file paths in files map point to existing files ---
-echo "--- Checking file references ---"
+# --- Test: manifest-existence gate - every files map entry resolves on disk ---
+# For every module.json files[] key, assert the source path exists. Uses
+# [ -e ], not [ -f ], so a symlink to a file or a directory both count as
+# present - only a missing path (including a broken symlink) fails. This
+# guards the declared -> disk direction (a stale or mistyped manifest entry
+# pointing at a deleted/renamed file). It is the companion, not the fix, for
+# #930's actual bug class - three code-quality rules shipped on disk with no
+# files[] entry at all - which the disk -> declared "manifest completeness"
+# check below catches, but only for lib/*.sh and commands/*.md today.
+echo "--- Checking manifest-existence gate (files map -> source exists) ---"
+declared_entries=0
 for mod_dir in "$REPO_ROOT"/modules/*/; do
   [ ! -d "$mod_dir" ] && continue
   mod_name=$(basename "$mod_dir")
@@ -200,8 +209,10 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
   jq empty "$manifest" 2>/dev/null || continue
 
   while IFS= read -r src_path; do
+    [ -z "$src_path" ] && continue
+    declared_entries=$((declared_entries + 1))
     full_path="$mod_dir/$src_path"
-    if [ -f "$full_path" ]; then
+    if [ -e "$full_path" ]; then
       pass "$mod_name: file exists '$src_path'"
     else
       fail "$mod_name: referenced file missing '$src_path' (expected at $full_path)"
@@ -209,12 +220,28 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
   done < <(jq -r '.files | keys[]' "$manifest" 2>/dev/null)
 done
 echo ""
+echo "  Checked $declared_entries declared files[] entries across $module_count modules"
+echo ""
 
-# --- Test: Manifest completeness - every shipped lib/command is installed ---
-# Reverse of the check above: ensure no lib/*.sh or commands/*.md sits on disk
-# without a files[] entry, or it silently never installs. Other file types
-# (README.md, terraform/, packer/, tests/) are intentionally not installed.
-echo "--- Checking manifest completeness (lib + commands coverage) ---"
+# --- Test: Manifest completeness - every shipped lib/command/rule is installed ---
+# Reverse of the check above: ensure no lib/*.sh, commands/*.md, or rules/*.md
+# sits on disk without a files[] entry, or it silently never installs. This is
+# the direction that actually catches #930's bug class (a shipped file with no
+# manifest entry at all) - the forward check above only catches the opposite
+# (a manifest entry pointing at a file that isn't there).
+#
+# Two different kinds of file types are NOT scanned here, and they are not
+# the same kind of "not scanned":
+#   - Genuinely never installed: README.md, terraform/, packer/, tests/.
+#     These have no files[] entry by design; a scan would just be noise.
+#   - Installed, but not yet covered by this gate: hooks/*.py, skills/*,
+#     agents/*, bin/*. Install location is driven purely by a files[]
+#     entry's `target` (type is advisory metadata only - see
+#     lib/modules.sh:189-190), so an undeclared hook or skill file fails to
+#     install exactly as silently as an undeclared rule did before this PR.
+#     Extending the scan to those subdirs is deliberately out of scope here;
+#     rules were the demonstrated gap for #930.
+echo "--- Checking manifest completeness (lib + commands + rules coverage) ---"
 for mod_dir in "$REPO_ROOT"/modules/*/; do
   [ ! -d "$mod_dir" ] && continue
   mod_name=$(basename "$mod_dir")
@@ -227,9 +254,9 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
 
   shipped_count=0
   missing_count=0
-  for subdir in lib commands; do
+  for subdir in lib commands rules; do
     [ -d "$mod_dir/$subdir" ] || continue
-    # Match shell scripts in lib/, markdown in commands/.
+    # Match shell scripts in lib/, markdown in commands/ and rules/.
     if [ "$subdir" = "lib" ]; then
       pattern="*.sh"
     else
@@ -250,7 +277,7 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
   done
 
   if [ "$shipped_count" -gt 0 ] && [ "$missing_count" -eq 0 ]; then
-    pass "$mod_name: all $shipped_count shipped lib/command file(s) declared in manifest"
+    pass "$mod_name: all $shipped_count shipped lib/command/rule file(s) declared in manifest"
   fi
 done
 echo ""
