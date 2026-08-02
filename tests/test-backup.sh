@@ -728,6 +728,32 @@ else
 fi
 echo ""
 
+# --- Test 21: charset guard rejects non-ASCII segments regardless of locale ---
+# Regression test for a delta-review finding: under /bin/bash 3.2.57 (this
+# repo's minimum-supported bash, and macOS's stock /bin/bash) combined with
+# a UTF-8 locale (e.g. LC_ALL=en_US.UTF-8, a common ambient default), libc's
+# fnmatch() let accented Latin characters collate as "close enough" to the
+# [A-Za-z0-9._-] range, so "resume" was correctly rejected but "résumé" was
+# not. _backup_safe_segment now forces `local LC_ALL=C` for byte-wise
+# matching, independent of the caller's ambient locale -- so this assertion
+# passes under any invocation, but would have failed pre-fix specifically
+# under `LC_ALL=en_US.UTF-8 /bin/bash tests/test-backup.sh` (part of this
+# repo's gate suite precisely so this class of regression is caught).
+echo "--- Test 21: charset guard rejects non-ASCII segments (locale-invariant) ---"
+
+if _backup_safe_segment "résumé"; then
+  fail "_backup_safe_segment allowed a non-ASCII segment ('résumé')"
+else
+  pass "_backup_safe_segment rejects a non-ASCII segment ('résumé')"
+fi
+
+if _backup_safe_segment "skills"; then
+  pass "_backup_safe_segment still allows a legitimate ASCII segment ('skills')"
+else
+  fail "_backup_safe_segment incorrectly rejected a legitimate ASCII segment ('skills')"
+fi
+echo ""
+
 # --- Summary ---
 echo "==================================="
 echo "  Results: $PASS passed, $FAIL failed"

@@ -51,7 +51,19 @@ _backup_modules_dir() {
 # %%/* should already prevent this), and anything outside a conservative
 # [A-Za-z0-9._-] charset that does not start with a letter or digit (so a
 # leading "." or "-" is also refused, even outside the "." / ".." cases).
+#
+# `local LC_ALL=C` forces byte-wise, ASCII-only matching for the charset
+# check regardless of the caller's ambient locale. Without it, /bin/bash
+# 3.2.57 (this repo's minimum-supported bash, and macOS's stock /bin/bash)
+# combined with a UTF-8 locale (e.g. LC_ALL=en_US.UTF-8, a common ambient
+# default) lets libc's fnmatch() collate accented Latin characters as
+# "close enough" to the A-Z/a-z range, so a segment like "resume" is
+# correctly rejected but "résumé" is not -- a discrepancy from bash 5.x,
+# which rejects it under every locale. Scoping the assignment with `local`
+# means the C locale applies only for the duration of this function; the
+# caller's locale is restored the instant it returns.
 _backup_safe_segment() {
+  local LC_ALL=C
   local seg="$1"
   case "$seg" in
     ""|.|..) return 1 ;;
@@ -65,15 +77,40 @@ _backup_safe_segment() {
   return 0
 }
 
-# --- Extract only the "files" object's text from a module.json (no jq) ---
+# --- Extract (an over-approximation of) the "files" object's text (no jq) ---
 # Usage: _backup_files_block "/path/to/module.json"
 # Scans for the "files": { key and prints from its opening brace through the
 # matching closing brace (tracking nesting depth across lines), so a later
-# grep for "target" cannot pick up an unrelated "target" key that happens to
-# live elsewhere in the manifest (e.g. a future configPrompts entry). This
-# assumes "files" appears once, as a real top-level object key -- true for
-# every manifest in this repo -- and is not a general JSON parser; jq is
-# used whenever available and this fallback only runs without it.
+# grep for "target" is scoped to (approximately) the files object instead of
+# the whole manifest. This is a brace-depth counter, not a JSON parser, and
+# it is NOT guaranteed to end exactly where the "files" object ends. Two
+# known ways it can run past the true end (both verified against real
+# input, neither fixed on purpose -- see below):
+#   (a) a "target" key nested deeper inside a files-entry sub-object (e.g.
+#       files.a.meta.target) is included, where jq's `.value.target` reads
+#       only the direct child and would not see it;
+#   (b) an unmatched "{" or "}" inside a JSON string value desyncs the
+#       depth counter, so the scanned block can run past the real closing
+#       brace and swallow a following key (e.g. a configPrompts entry).
+# Both failure shapes only ADD a spurious "target" match; neither can ever
+# drop a real one, because the scanner starts at the correct opening brace
+# and only ever includes more text, never less. A spurious match is made
+# harmless downstream by two independent layers: _backup_safe_segment
+# rejects anything that is not a plausible bare path segment, and
+# create_backup's `[ -e "${target_dir}/${p}" ]` check silently skips any
+# segment that does not name something that actually exists on disk. So
+# the practical blast radius of over-approximation is zero for any target
+# dir that does not happen to contain a directory matching the spurious
+# name.
+#
+# Writing a real string-aware JSON parser in awk to close (a) and (b)
+# exactly was deliberately not done: this function exists only as the
+# fallback for users without `jq` (the normal path, and the one verified
+# byte-identical to jq's output across all 78 real module.json files in
+# this repo), and a hand-rolled parser is disproportionate complexity --
+# and a new source of bugs -- for code that decides what gets backed up.
+# Bounding the failure to "may over-include a segment that is then
+# filtered out or found to not exist" is the deliberate tradeoff.
 _backup_files_block() {
   awk '
     BEGIN { in_files = 0; depth = 0; done = 0 }
