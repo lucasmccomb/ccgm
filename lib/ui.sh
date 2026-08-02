@@ -152,9 +152,18 @@ _read_key() {
 # non-interactive mode falls back to options[0] (silently for an empty
 # default, with a warning to stderr for a non-empty one that doesn't match -
 # that shape means a manifest typo, not "no default declared").
+#
+# --default with no value following it (i.e. "--default" is the entire
+# argument list) is a caller error, not "no default" - it fails loudly
+# (stderr message, return 1) instead of silently returning an empty string
+# with exit 0, and does so the same way whether or not the caller has -u set.
 ui_choose() {
   local non_interactive_default=""
   if [ "$1" = "--default" ]; then
+    if [ "$#" -lt 2 ]; then
+      echo -e "${UI_RED}  ERROR: ui_choose --default requires a value${UI_RESET}" >&2
+      return 1
+    fi
     non_interactive_default="$2"
     shift 2
   fi
@@ -172,7 +181,7 @@ ui_choose() {
           return 0
         fi
       done
-      echo -e "${UI_YELLOW}  Warning: declared default '$non_interactive_default' for '$prompt' is not among its options; using '${options[0]}'${UI_RESET}" >&2
+      echo -e "${UI_YELLOW}  WARNING: declared default '$non_interactive_default' for '$prompt' is not among its options; using '${options[0]}'${UI_RESET}" >&2
     fi
     # No default declared, or declared default didn't match any option:
     # fall back to the first option.

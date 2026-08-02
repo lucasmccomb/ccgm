@@ -619,15 +619,41 @@ if [ "$result" = "first" ]; then
 else
   fail "ui_choose --default with an unmatched value returned '$result', expected 'first'"
 fi
-if grep -qi "warning" "$mismatch_stderr"; then
-  pass "ui_choose --default with an unmatched value warns to stderr"
+if grep -q "WARNING:" "$mismatch_stderr"; then
+  pass "ui_choose --default with an unmatched value warns to stderr with 'WARNING:' (matches lib/*.sh sibling casing)"
 else
-  fail "ui_choose --default with an unmatched value printed no warning"
+  fail "ui_choose --default with an unmatched value did not print a 'WARNING:'-prefixed message: $(cat "$mismatch_stderr")"
 fi
 if echo "$result" | grep -qi "warning"; then
   fail "Warning text leaked into ui_choose's returned value"
 else
   pass "Warning text did not leak into ui_choose's returned value"
+fi
+
+# --default with no value following it (the flag as the entire argument
+# list) is a caller error, not "no default" - it must fail loudly (stderr
+# message, non-zero exit), never silently return an empty string with
+# exit 0. This holds under both -u (unbound $2) and non -u (silently
+# empty $2) - the guard is arity-based, not reliant on shell options.
+arity_stderr="$TMPDIR/test9-arity-stderr.log"
+set +e
+result=$(ui_choose --default 2>"$arity_stderr")
+arity_exit=$?
+set -e
+if [ $arity_exit -ne 0 ]; then
+  pass "ui_choose --default with no value exits non-zero (arity guard)"
+else
+  fail "ui_choose --default with no value exited 0 (expected non-zero)"
+fi
+if [ -z "$result" ]; then
+  pass "ui_choose --default with no value returns empty stdout"
+else
+  fail "ui_choose --default with no value returned '$result' on stdout"
+fi
+if grep -q "ERROR:" "$arity_stderr"; then
+  pass "ui_choose --default with no value prints an 'ERROR:'-prefixed message to stderr"
+else
+  fail "ui_choose --default with no value did not print an 'ERROR:'-prefixed message: $(cat "$arity_stderr")"
 fi
 echo ""
 
