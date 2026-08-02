@@ -4,7 +4,7 @@ Tailwind CSS v4 design system patterns.
 
 ## What It Does
 
-Installs a rules file covering Tailwind v4 architecture:
+Installs two rules files covering Tailwind v4 architecture and a known gotcha:
 
 - **CSS-first configuration** - Use @theme in CSS instead of tailwind.config.ts
 - **Design token hierarchy** - Primitive, semantic, and component token layers
@@ -14,15 +14,18 @@ Installs a rules file covering Tailwind v4 architecture:
 - **Responsive patterns** - Mobile-first, grid variants, size-* shorthand
 - **Native CSS animations** - @keyframes in @theme, @starting-style for entry animations
 - **v3 to v4 migration** - Reference table for common pattern changes
+- **cursor: pointer gotcha** - Tailwind v4 preflight drops `cursor: pointer` on buttons; base-style fix and where to put it
 
 ## Manual Installation
 
 ```bash
 # Global (all projects)
 cp rules/tailwind.md ~/.claude/rules/tailwind.md
+cp rules/frontend-css.md ~/.claude/rules/frontend-css.md
 
 # Project-level
 cp rules/tailwind.md .claude/rules/tailwind.md
+cp rules/frontend-css.md .claude/rules/frontend-css.md
 ```
 
 ## Files
@@ -30,3 +33,4 @@ cp rules/tailwind.md .claude/rules/tailwind.md
 | File | Description |
 |------|-------------|
 | `rules/tailwind.md` | Tailwind v4 design system guide with tokens, CVA, dark mode, and migration notes |
+| `rules/frontend-css.md` | Tailwind v4's missing `cursor: pointer` on buttons - base-style fix and where to put it in a project |

@@ -34,7 +34,7 @@ The `settings.partial.json` wires these hooks into your `~/.claude/settings.json
 > and the decision is equivalence-proven against the legacy chain. See
 > [Hook Composition Dispatcher](#hook-composition-dispatcher-default) below.
 
-**Libraries**: `lib/agent_tracking.py` (tracking CSV operations), `lib/agent_sessions.py` (live session detection)
+**Libraries**: `lib/hook_utils.py` (shared hook I/O, redaction, locking, bypass-mode detection — imported by every other hook module's hooks), `lib/agent_tracking.py` (tracking CSV operations), `lib/agent_sessions.py` (live session detection), `lib/sched_platform.py` (launchd/cron platform abstraction for scheduled-job installation, used by `autoheal` and `dreaming`'s install scripts)
 
 ## Dependencies
 
@@ -69,11 +69,16 @@ cp hooks/check-careful.py ~/.claude/hooks/check-careful.py
 cp hooks/check-freeze.py ~/.claude/hooks/check-freeze.py
 cp hooks/session-start-enforce.py ~/.claude/hooks/session-start-enforce.py
 cp hooks/sync-ccgm-canonical.py ~/.claude/hooks/sync-ccgm-canonical.py
+cp hooks/pretooluse-bash-dispatch.py ~/.claude/hooks/pretooluse-bash-dispatch.py
 
 # 2. Copy libraries
 mkdir -p ~/.claude/lib
+cp lib/hook_utils.py ~/.claude/lib/hook_utils.py
 cp lib/agent_tracking.py ~/.claude/lib/agent_tracking.py
 cp lib/agent_sessions.py ~/.claude/lib/agent_sessions.py
+cp lib/sched_platform.py ~/.claude/lib/sched_platform.py
+cp lib/hook_dispatcher.py ~/.claude/lib/hook_dispatcher.py
+cp lib/pretooluse_bash_checks.py ~/.claude/lib/pretooluse_bash_checks.py
 
 # 3. Make hooks executable
 chmod +x ~/.claude/hooks/*.py
@@ -182,6 +187,8 @@ six standalone hook entries (`enforce-git-workflow`, `auto-approve-bash`,
 | `hooks/pretooluse-bash-dispatch.py` | Default single-process composition dispatcher for the PreToolUse:Bash chain (declarative precedence; equivalence-proven against the six-process chain) |
 | `lib/hook_dispatcher.py` | Composition engine: declarative `Manifest`/`Check`/`Result` model + `dispatch()` precedence resolution (hard_block > deny > allow > ask) |
 | `lib/pretooluse_bash_checks.py` | Dispatcher handlers wrapping the legacy PreToolUse:Bash hooks' pure functions into the `Result` contract |
+| `lib/hook_utils.py` | Shared hook I/O, redaction, locking, and bypass-mode detection — imported by every other hook module's hooks |
 | `lib/agent_tracking.py` | Python library for tracking CSV operations |
 | `lib/agent_sessions.py` | Python library for live session detection |
+| `lib/sched_platform.py` | Platform abstraction for scheduled-job (launchd/cron) installation, used by `autoheal` and `dreaming`'s install scripts |
 | `settings.partial.json` | Hook wiring configuration to merge into settings.json |

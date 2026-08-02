@@ -87,10 +87,9 @@ cp commands/unfreeze.md ~/.claude/commands/unfreeze.md
 cp commands/guard.md ~/.claude/commands/guard.md
 cp commands/checkpoint.md ~/.claude/commands/checkpoint.md
 
-# Skill (+ reference docs the skill reads and embeds into agent task files)
-mkdir -p ~/.claude/skills/audit/reference
-cp skills/audit/SKILL.md ~/.claude/skills/audit/SKILL.md
-cp skills/audit/reference/*.md ~/.claude/skills/audit/reference/
+# Skill (pack registry, detectors/wrappers, schemas, reference docs)
+mkdir -p ~/.claude/skills/audit
+cp -R skills/audit/* ~/.claude/skills/audit/
 
 # Project-level
 cp commands/audit.md .claude/commands/audit.md

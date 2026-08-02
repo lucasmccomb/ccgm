@@ -43,6 +43,8 @@ Full schema and model: `rules/learnings-store.md`.
 |------|-------------|
 | `ccgm-learnings-log` | Append a learning, reinforce (`verify`), record contradictions, `deprecate`, `supersede <old_id>`, or configure |
 | `ccgm-learnings-search` | Rank + filter + token-cap learnings (formats: preamble, markdown, jsonl; `--include-superseded` to surface chains) |
+| `ccgm-learnings-sync` | Git-substrate versioning for `~/.claude/learnings/`: `init`, `commit`, `pull` (merge-only, never rebase), `push`, `revert <sha>`, `status` |
+| `memory-setup.sh` | Interactive, idempotent activation script — turns on the SessionStart read path (`CCGM_LEARNINGS_INJECT=true` + `ccgm-learnings-sync init`) and, when `dreaming` is also installed, offers the write path and optimistic auto-integration |
 
 ### Hooks
 
@@ -50,6 +52,7 @@ Full schema and model: `rules/learnings-store.md`.
 |------|-------|---------|
 | `reflection-trigger.py` | PostToolUse:Bash | Injects reflection reminder after `gh pr merge` or `gh issue close` |
 | `precompact-reflection.py` | PreCompact | Reminds agent to capture patterns before context compaction |
+| `learnings-inject.py` | SessionStart | Opt-in (env-gated), prefix-cache-safe: surfaces top-ranked learnings for the current project at fresh session start only (never on resume/compact) |
 
 ## Migration from MEMORY.md
 
@@ -83,7 +86,9 @@ cp commands/retro.md ~/.claude/commands/retro.md
 mkdir -p ~/.claude/bin
 cp bin/ccgm-learnings-log ~/.claude/bin/ccgm-learnings-log
 cp bin/ccgm-learnings-search ~/.claude/bin/ccgm-learnings-search
-chmod +x ~/.claude/bin/ccgm-learnings-log ~/.claude/bin/ccgm-learnings-search
+cp bin/ccgm-learnings-sync ~/.claude/bin/ccgm-learnings-sync
+cp bin/memory-setup.sh ~/.claude/bin/memory-setup.sh
+chmod +x ~/.claude/bin/ccgm-learnings-log ~/.claude/bin/ccgm-learnings-search ~/.claude/bin/ccgm-learnings-sync ~/.claude/bin/memory-setup.sh
 
 # Lib (imported by bin scripts)
 mkdir -p ~/.claude/lib
@@ -92,6 +97,10 @@ cp lib/learnings_store.py ~/.claude/lib/learnings_store.py
 # Hooks
 cp hooks/reflection-trigger.py ~/.claude/hooks/reflection-trigger.py
 cp hooks/precompact-reflection.py ~/.claude/hooks/precompact-reflection.py
+cp hooks/learnings-inject.py ~/.claude/hooks/learnings-inject.py
+
+# Run the activation script (turns on the read path; offers the write path if dreaming is installed)
+bash ~/.claude/bin/memory-setup.sh
 
 # Settings (merge into existing settings.json)
 # Use jq or manually add the hook entries from settings.partial.json
@@ -111,10 +120,13 @@ export PATH="$HOME/.claude/bin:$PATH"
 | `commands/retro.md` | command | Windowed git-history retrospective; surfaces candidates for /reflect |
 | `bin/ccgm-learnings-log` | script | CLI to append, verify, contradict, deprecate, configure learnings |
 | `bin/ccgm-learnings-search` | script | CLI to search, rank, filter, and inject learnings |
+| `bin/ccgm-learnings-sync` | script | Git-substrate versioning for the learnings store: `init`, `commit`, `pull`, `push`, `revert <sha>`, `status` |
+| `bin/memory-setup.sh` | script | Interactive activation entrypoint for the read path (and, with `dreaming` installed, the write path + optimistic auto-integration) |
 | `lib/learnings_store.py` | lib | Shared library (schema, decay math, sanitizer, search) |
 | `hooks/reflection-trigger.py` | hook | PostToolUse detection for PR merge and issue close |
 | `hooks/precompact-reflection.py` | hook | PreCompact reminder to capture patterns |
-| `settings.partial.json` | config | Hook registration (PostToolUse:Bash, PreCompact) |
+| `hooks/learnings-inject.py` | hook | Opt-in SessionStart injection of top-ranked learnings for the current project |
+| `settings.partial.json` | config | Hook registration (PostToolUse:Bash, PreCompact, SessionStart) |
 | `tests/test_learnings_store.py` | test | Unit tests for store (schema, sanitizer, decay, search, updates) |
 
 ## Running Tests
