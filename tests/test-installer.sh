@@ -514,6 +514,149 @@ else
 fi
 echo ""
 
+# ============================================================
+# Test 8: CCGM_NON_INTERACTIVE honors declared configPrompt defaults
+# (#918 regression pin: identity's personalizeIdentity declares
+# default "no" with options ["yes","no"] - options[0] is "yes". Before
+# the fix, non-interactive mode silently ran the identity
+# personalization block with unchosen answers.)
+# ============================================================
+echo "--- Test 8: non-interactive mode honors declared defaults (identity) ---"
+
+TEST8_HOME="$TMPDIR/test8"
+mkdir -p "$TEST8_HOME/.claude"
+export HOME="$TEST8_HOME"
+export CCGM_CODE_DIR="$TEST8_HOME/code"
+
+set +e
+"$REPO_ROOT/start.sh" --preset standard --scope global </dev/null >/dev/null 2>&1
+install8_exit=$?
+set -e
+if [ $install8_exit -eq 0 ]; then
+  pass "Installer exited successfully (standard preset, test 8)"
+else
+  fail "Installer exited with code $install8_exit (standard preset, test 8)"
+fi
+
+env8="$TEST8_HOME/.claude/.ccgm.env"
+if [ -f "$env8" ]; then
+  # The declared default ("no") must win, not options[0] ("yes").
+  if grep -q "^CCGM_MODULE_identity__personalizeIdentity=no$" "$env8"; then
+    pass "identity__personalizeIdentity resolved to declared default 'no', not options[0] 'yes'"
+  else
+    fail "identity__personalizeIdentity did not resolve to 'no' (options[0] leaked through)"
+  fi
+
+  # Because personalizeIdentity correctly resolved to "no", the
+  # personalization follow-up block must never have run, so none of its
+  # invented answers should be present.
+  if grep -qE "^CCGM_MODULE_identity__(role|expertise|communication|building|values)=" "$env8"; then
+    fail "Identity personalization block ran under non-interactive mode with unchosen answers"
+  else
+    pass "Identity personalization block did not run (no invented role/communication/values)"
+  fi
+else
+  fail ".ccgm.env not found for test 8"
+fi
+echo ""
+
+# ============================================================
+# Test 9: ui_choose --default edge cases (unit-level, direct)
+#
+# Sourced directly rather than run through the full installer -
+# Test 8 above already pins the end-to-end identity case (a
+# non-options[0] default winning). These cover the remaining
+# ui_choose contract points from #918 that don't need a full
+# installer run to exercise.
+# ============================================================
+echo "--- Test 9: ui_choose --default edge cases ---"
+
+# shellcheck source=../lib/ui.sh
+source "$REPO_ROOT/lib/ui.sh"
+export CCGM_NON_INTERACTIVE=1
+
+# No declared default -> falls back to options[0] (regression guard: the
+# five call sites that never pass --default must be unaffected).
+result=$(ui_choose "Where to install?" "global" "project" "both")
+if [ "$result" = "global" ]; then
+  pass "ui_choose with no --default returns options[0] ('global')"
+else
+  fail "ui_choose with no --default returned '$result', expected 'global'"
+fi
+
+# Declared default is options[0] -> unaffected (regression guard for the
+# common case, where a manifest's default happens to match options[0]).
+result=$(ui_choose --default "minimal" "Select preset" "minimal" "standard" "full" "team")
+if [ "$result" = "minimal" ]; then
+  pass "ui_choose --default matching options[0] returns 'minimal'"
+else
+  fail "ui_choose --default matching options[0] returned '$result', expected 'minimal'"
+fi
+
+# Declared default is an empty string -> treated as "no default declared",
+# falls back to options[0] silently (no warning; an empty default is not a
+# manifest typo).
+default_stderr="$TMPDIR/test9-empty-default-stderr.log"
+result=$(ui_choose --default "" "Pick one" "first" "second" 2>"$default_stderr")
+if [ "$result" = "first" ]; then
+  pass "ui_choose --default '' (empty) returns options[0] ('first')"
+else
+  fail "ui_choose --default '' (empty) returned '$result', expected 'first'"
+fi
+if [ -s "$default_stderr" ]; then
+  fail "ui_choose --default '' (empty) unexpectedly printed a warning"
+else
+  pass "ui_choose --default '' (empty) printed no warning"
+fi
+
+# Declared default is not among the options -> falls back to options[0]
+# AND warns to stderr (a manifest typo must not silently pick an
+# unrelated value).
+mismatch_stderr="$TMPDIR/test9-mismatch-stderr.log"
+result=$(ui_choose --default "nonexistent" "Pick one" "first" "second" 2>"$mismatch_stderr")
+if [ "$result" = "first" ]; then
+  pass "ui_choose --default with an unmatched value returns options[0] ('first')"
+else
+  fail "ui_choose --default with an unmatched value returned '$result', expected 'first'"
+fi
+if grep -q "WARNING:" "$mismatch_stderr"; then
+  pass "ui_choose --default with an unmatched value warns to stderr with 'WARNING:' (matches lib/*.sh sibling casing)"
+else
+  fail "ui_choose --default with an unmatched value did not print a 'WARNING:'-prefixed message: $(cat "$mismatch_stderr")"
+fi
+if echo "$result" | grep -qi "warning"; then
+  fail "Warning text leaked into ui_choose's returned value"
+else
+  pass "Warning text did not leak into ui_choose's returned value"
+fi
+
+# --default with no value following it (the flag as the entire argument
+# list) is a caller error, not "no default" - it must fail loudly (stderr
+# message, non-zero exit), never silently return an empty string with
+# exit 0. This holds under both -u (unbound $2) and non -u (silently
+# empty $2) - the guard is arity-based, not reliant on shell options.
+arity_stderr="$TMPDIR/test9-arity-stderr.log"
+set +e
+result=$(ui_choose --default 2>"$arity_stderr")
+arity_exit=$?
+set -e
+if [ $arity_exit -ne 0 ]; then
+  pass "ui_choose --default with no value exits non-zero (arity guard)"
+else
+  fail "ui_choose --default with no value exited 0 (expected non-zero)"
+fi
+if [ -z "$result" ]; then
+  pass "ui_choose --default with no value returns empty stdout"
+else
+  fail "ui_choose --default with no value returned '$result' on stdout"
+fi
+if grep -q "ERROR:" "$arity_stderr"; then
+  pass "ui_choose --default with no value prints an 'ERROR:'-prefixed message to stderr"
+else
+  fail "ui_choose --default with no value did not print an 'ERROR:'-prefixed message: $(cat "$arity_stderr")"
+fi
+echo ""
+
 # Restore HOME
 export HOME="$TMPDIR/home"
 
