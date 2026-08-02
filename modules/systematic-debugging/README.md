@@ -28,6 +28,7 @@ cp rules/debugging.md ~/.claude/rules/debugging.md
 cp rules/root-cause-tracing.md ~/.claude/rules/root-cause-tracing.md
 cp rules/defense-in-depth.md ~/.claude/rules/defense-in-depth.md
 cp rules/condition-based-waiting.md ~/.claude/rules/condition-based-waiting.md
+cp rules/animals-vs-ghosts.md ~/.claude/rules/animals-vs-ghosts.md
 
 # Project-level
 cp rules/systematic-debugging.md .claude/rules/systematic-debugging.md
@@ -35,6 +36,7 @@ cp rules/debugging.md .claude/rules/debugging.md
 cp rules/root-cause-tracing.md .claude/rules/root-cause-tracing.md
 cp rules/defense-in-depth.md .claude/rules/defense-in-depth.md
 cp rules/condition-based-waiting.md .claude/rules/condition-based-waiting.md
+cp rules/animals-vs-ghosts.md .claude/rules/animals-vs-ghosts.md
 ```
 
 ## Files
@@ -46,3 +48,4 @@ cp rules/condition-based-waiting.md .claude/rules/condition-based-waiting.md
 | `rules/root-cause-tracing.md` | Trace errors backward up the call chain to the originating trigger |
 | `rules/defense-in-depth.md` | Layered validation that makes a fixed bug structurally impossible to reintroduce |
 | `rules/condition-based-waiting.md` | Replace arbitrary sleeps with condition polling to kill flaky tests |
+| `rules/animals-vs-ghosts.md` | Mental model: LLMs are statistical simulators, not animal intelligences - diagnose which RL circuit you're in instead of anthropomorphizing failure |

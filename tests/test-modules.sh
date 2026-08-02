@@ -223,11 +223,14 @@ echo ""
 echo "  Checked $declared_entries declared files[] entries across $module_count modules"
 echo ""
 
-# --- Test: Manifest completeness - every shipped lib/command is installed ---
-# Reverse of the check above: ensure no lib/*.sh or commands/*.md sits on disk
-# without a files[] entry, or it silently never installs. Other file types
+# --- Test: Manifest completeness - every shipped lib/command/rule is installed ---
+# Reverse of the check above: ensure no lib/*.sh, commands/*.md, or rules/*.md
+# sits on disk without a files[] entry, or it silently never installs. This is
+# the direction that actually catches #930's bug class (a shipped file with no
+# manifest entry at all) - the forward check above only catches the opposite
+# (a manifest entry pointing at a file that isn't there). Other file types
 # (README.md, terraform/, packer/, tests/) are intentionally not installed.
-echo "--- Checking manifest completeness (lib + commands coverage) ---"
+echo "--- Checking manifest completeness (lib + commands + rules coverage) ---"
 for mod_dir in "$REPO_ROOT"/modules/*/; do
   [ ! -d "$mod_dir" ] && continue
   mod_name=$(basename "$mod_dir")
@@ -240,9 +243,9 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
 
   shipped_count=0
   missing_count=0
-  for subdir in lib commands; do
+  for subdir in lib commands rules; do
     [ -d "$mod_dir/$subdir" ] || continue
-    # Match shell scripts in lib/, markdown in commands/.
+    # Match shell scripts in lib/, markdown in commands/ and rules/.
     if [ "$subdir" = "lib" ]; then
       pattern="*.sh"
     else
@@ -263,7 +266,7 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
   done
 
   if [ "$shipped_count" -gt 0 ] && [ "$missing_count" -eq 0 ]; then
-    pass "$mod_name: all $shipped_count shipped lib/command file(s) declared in manifest"
+    pass "$mod_name: all $shipped_count shipped lib/command/rule file(s) declared in manifest"
   fi
 done
 echo ""
