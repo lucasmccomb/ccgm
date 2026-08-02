@@ -88,6 +88,47 @@ class ParseLogTests(unittest.TestCase):
             self.assertEqual(len(records), 1)
             self.assertEqual(records[0]["file_path"], "/a/b/c.md")
 
+    def test_valid_json_that_is_not_an_object_is_skipped(self):
+        """A bare list, string, number or null must be dropped, not returned.
+
+        parse_log() promises a list of record dicts; a caller iterating the
+        result and doing record["file_path"] would raise on a bare scalar.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "non-object.jsonl")
+            _write_jsonl(
+                path,
+                [
+                    "[1, 2, 3]",
+                    '"a bare string"',
+                    "42",
+                    "null",
+                    '{"file_path": "/a/b/c.md"}',
+                ],
+            )
+            records = loaded_log.parse_log(path)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["file_path"], "/a/b/c.md")
+
+    def test_invalid_utf8_line_is_skipped_not_raised(self):
+        """One corrupt byte must not discard the rest of the day's log.
+
+        The decode happens in the line iterator, outside the json.loads()
+        guard, so without errors="replace" this raises UnicodeDecodeError
+        and every record in the file is lost -- including the valid ones
+        written before the corruption.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "bad-utf8.jsonl")
+            with open(path, "wb") as fh:
+                fh.write(b'{"file_path": "/a/b/before.md"}\n')
+                fh.write(b'{"file_path": "\xff\xfe not utf8"}\n')
+                fh.write(b'{"file_path": "/a/b/after.md"}\n')
+            records = loaded_log.parse_log(path)
+            paths = [r["file_path"] for r in records]
+            self.assertIn("/a/b/before.md", paths)
+            self.assertIn("/a/b/after.md", paths)
+
     def test_valid_line_is_parsed(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "valid.jsonl")

@@ -52,6 +52,15 @@ def parse_log(path: "str | os.PathLike") -> "list[dict]":
     - A line that is not valid JSON, or that parses to something other
       than a JSON object, is skipped -- never raised. One corrupt line
       must not prevent every other record in the log from being read.
+    - A line carrying invalid UTF-8 never raises. The decode happens in
+      the line iterator, outside any json.loads() guard, so without
+      `errors="replace"` a single corrupt byte would abort the whole
+      parse and discard every other record in the file -- including the
+      valid ones written before it. With replacement, the undecodable
+      bytes become U+FFFD and the line is then treated like any other:
+      kept if it still parses as a JSON object, dropped if it does not.
+      A retained record cannot cause a false positive in assert_loaded()
+      because no real rule path contains U+FFFD.
     - A line that parses to a JSON object is appended to the result
       as-is.
     """
@@ -59,7 +68,7 @@ def parse_log(path: "str | os.PathLike") -> "list[dict]":
         raise FileNotFoundError(path)
 
     records: "list[dict]" = []
-    with open(path, encoding="utf-8") as fh:
+    with open(path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.strip()
             if not line:
