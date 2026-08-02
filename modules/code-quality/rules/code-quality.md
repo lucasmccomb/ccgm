@@ -1,21 +1,54 @@
 # Code Quality Standards
 
+## Simplest Implementation That Fully Meets the Requirements
+
+Choose the simplest implementation that fully meets the current requirements. Both halves carry weight:
+
+- **Simplest** - no abstraction with one implementation, no config option nobody sets, no plugin system for a single plugin, no generic helper called from one place.
+- **Fully meets the current requirements** - simple is not the same as partial. Every stated requirement is handled, edge cases and error paths included. See `completeness.md`.
+
+The requirements that count are the ones that exist now. A requirement someone might have next quarter is a guess, and code shaped around a guess has to be unwound when the guess turns out wrong. Build the second case when the second case arrives - by then its actual shape is known.
+
+Signs the implementation outran the requirements:
+
+- An interface with exactly one implementer
+- A config option that is never set to anything but its default
+- A layer whose only job is forwarding calls to the next layer
+- Generic type parameters instantiated with the same concrete type everywhere
+- "We'll need this when we add X" where X is on no roadmap
+
 ## Minimize Dependencies and Complexity
 
-Prefer simpler, lower-level solutions over external tools and libraries. If a built-in language feature, standard library, or platform capability achieves an equal or better outcome, use it instead of adding a dependency.
+Prefer the simplest layer that fully solves the problem. If a built-in language feature, standard library, or platform capability achieves an equal or better outcome, use it instead of adding a dependency.
 
 This applies to everything: CLI tools, npm packages, frameworks, shell utilities, and any external tooling.
 
+**The ladder: built-in > established library > custom implementation > framework.**
+
 - **Before adding a dependency**, check whether the language or platform already provides what you need
-- **Built-in > library > framework** - use the simplest layer that solves the problem
+- **When the built-in does not cover it, prefer an established, well-maintained library over a custom implementation** - see below
 - **Fewer dependencies = fewer failure modes** - every dependency is a maintenance burden, a security surface, and a breaking-change risk
 - **Equal outcome = no dependency** - if the result is the same or better without the tool, don't use the tool
 
-Examples:
+Built-in wins:
 - Pure bash with ANSI escapes instead of a TUI library for simple menus
 - `fetch()` instead of axios for HTTP requests
 - CSS variables instead of a theming library
 - Shell built-ins (`read`, `printf`) instead of external CLI tools
+
+### Established Library Over Custom Implementation
+
+"Minimize dependencies" is not "write it yourself." A hand-rolled implementation is still a dependency - one with no maintainer, no security advisories, no other users finding its bugs, and no exit. When the built-in genuinely does not cover the problem, take the established library.
+
+Library wins:
+- A maintained date library instead of hand-written timezone and DST arithmetic
+- The platform crypto API or a vetted library instead of a hand-written primitive
+- A real parser for a real grammar (CSV, YAML, semver, HTML) instead of regex
+- A schema validator instead of hand-written per-field checks across every entry point
+
+"Established, well-maintained" means: released within the last year or explicitly finished, an issue tracker someone answers, a license that permits the use, and adoption wide enough that its bugs surface in public rather than in this codebase. A package failing those tests is not a safer choice than writing the code - it is the same risk with less control.
+
+The dividing line is scope, not preference. Twenty lines of obvious logic is not a library's job. Anything with a specification behind it - dates, encodings, crypto, grammars, protocols - is.
 
 ## Code Standards
 
@@ -65,6 +98,7 @@ Examples:
 
 - **Question every new dependency** - can the standard library or a built-in do this?
 - Justify new npm packages in PR description (why is this needed over a simpler approach?)
+- **A custom implementation is also a dependency.** Justify hand-rolling in the PR description the same way - why this over an established library?
 - Prefer well-maintained packages with good TypeScript support when a dependency is genuinely warranted
 
 ### Component Patterns (React/TypeScript)

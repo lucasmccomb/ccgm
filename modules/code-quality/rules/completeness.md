@@ -67,6 +67,8 @@ Completeness is not gold-plating. Do not:
 
 The rule is: **finish the job you are on**, not "expand the job to touch every file you can reach." If the task is "add input validation to the login form," finish it to 10/10 (all inputs, all error paths, tests, a11y). Do not also rewrite the auth middleware because it looked rough.
 
+Completeness governs the *depth* of the job, not the *breadth* of the design. It says handle every case the current requirements imply; it never says build for requirements that do not exist yet. The two run together: **the simplest implementation that fully meets the current requirements, finished completely, is a 10/10.** An extra abstraction layer nothing uses does not raise the score - it is unfinished work in a different direction. See `code-quality.md` > "Simplest Implementation That Fully Meets the Requirements."
+
 ## The Test
 
 Before claiming a task is complete, ask:
