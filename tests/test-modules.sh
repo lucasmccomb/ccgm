@@ -330,6 +330,102 @@ for preset_file in "$REPO_ROOT"/presets/*.json; do
 done
 echo ""
 
+# --- Test: every tests/test-*.sh suite is wired into CI, in every job ---
+# tests/run-all.sh discovers suites by globbing "$SCRIPT_DIR"/test-*.sh, but
+# .github/workflows/test.yml enumerates each suite by hand as its own step,
+# once per job. The two lists drift silently (issue #935): a suite can exist
+# on disk, run green under run-all.sh, and never once gate a PR because no
+# one added its step to the workflow -- or added it to one job and not the
+# other, which is the same bug in miniature.
+echo "--- Checking CI enumeration coverage (test.yml) ---"
+WORKFLOW_FILE="$REPO_ROOT/.github/workflows/test.yml"
+if [ ! -f "$WORKFLOW_FILE" ]; then
+  fail "workflow file missing: .github/workflows/test.yml"
+else
+  jobs_line=$(grep -n '^jobs:[[:space:]]*$' "$WORKFLOW_FILE" | head -1 | cut -d: -f1)
+  if [ -z "$jobs_line" ]; then
+    fail "test.yml: could not locate top-level 'jobs:' key"
+  else
+    total_lines=$(wc -l < "$WORKFLOW_FILE" | tr -d ' ')
+
+    # Job boundaries: lines shaped like "  <job-name>:" (exactly 2-space
+    # indent, colon, then only whitespace and/or a trailing "# comment")
+    # that appear after the top-level "jobs:" key. Each one starts a new
+    # job; the next one (or EOF) ends it. This scopes the check to per-job
+    # step lists rather than treating the file as one flat blob, so a suite
+    # wired into ubuntu but not macos is caught -- not silently passed by a
+    # whole-file grep. The trailing-comment tolerance matters: without it,
+    # a routine "test-macos: # runs on macOS" edit drops a job boundary and
+    # merges two jobs' ranges into one, silently disabling the per-job
+    # check it is supposed to run (see the job-count assertion below).
+    ranges=""
+    job_names=""
+    prev=""
+    while IFS= read -r ln; do
+      if [ -n "$prev" ]; then
+        end=$((ln - 1))
+        ranges="${ranges}${prev}:${end}
+"
+      fi
+      prev="$ln"
+    done < <(tail -n "+$((jobs_line + 1))" "$WORKFLOW_FILE" | grep -nE '^  [A-Za-z0-9_-]+:[[:space:]]*(#.*)?$' | cut -d: -f1 | while IFS= read -r n; do echo $((n + jobs_line)); done)
+    if [ -n "$prev" ]; then
+      ranges="${ranges}${prev}:${total_lines}
+"
+    fi
+
+    while IFS= read -r range; do
+      [ -z "$range" ] && continue
+      start="${range%%:*}"
+      name=$(sed -n "${start}p" "$WORKFLOW_FILE" | sed 's/^[[:space:]]*//; s/:.*$//')
+      job_names="$job_names $name"
+    done < <(printf '%s' "$ranges")
+
+    job_count=$(printf '%s\n' "$ranges" | grep -c ':' || true)
+    # Load-bearing check: assert a floor, not just "> 0". A job-boundary
+    # parsing regression (trailing comment, changed indent, a run: block
+    # that happens to contain a job-key-shaped line, ...) degrades the
+    # per-job scoping silently -- every suite present anywhere in the file
+    # then satisfies a single merged range and the guard reports all-green,
+    # exactly the whole-file-grep weakness this check exists to prevent.
+    # Failing loud here, naming what was actually detected, converts that
+    # class of regression into a red test instead of manufactured
+    # confidence. Raise MIN_EXPECTED_CI_JOBS if a legitimate third job is
+    # ever added; do not hardcode an exact-equals that would break on that.
+    MIN_EXPECTED_CI_JOBS=2
+    if [ "$job_count" -lt "$MIN_EXPECTED_CI_JOBS" ]; then
+      fail "test.yml: expected >= $MIN_EXPECTED_CI_JOBS CI job(s) under 'jobs:', found $job_count (detected:${job_names:- none}) -- job-boundary parsing may be broken (e.g. a trailing comment or unexpected indent on a job key line)"
+    else
+      pass "test.yml: found $job_count job definition(s) under 'jobs:' (${job_names# })"
+
+      for suite_path in "$SCRIPT_DIR"/test-*.sh; do
+        [ -f "$suite_path" ] || continue
+        suite_name=$(basename "$suite_path")
+        missing_in=""
+
+        while IFS= read -r range; do
+          [ -z "$range" ] && continue
+          start="${range%%:*}"
+          end="${range##*:}"
+          job_label=$(sed -n "${start}p" "$WORKFLOW_FILE" | sed 's/^[[:space:]]*//; s/:.*$//')
+          if sed -n "${start},${end}p" "$WORKFLOW_FILE" | grep -qF "tests/$suite_name"; then
+            :
+          else
+            missing_in="$missing_in $job_label"
+          fi
+        done < <(printf '%s' "$ranges")
+
+        if [ -z "$missing_in" ]; then
+          pass "$suite_name: wired into all $job_count CI job(s)"
+        else
+          fail "$suite_name: missing from CI job(s):$missing_in (add 'run: bash tests/$suite_name' to .github/workflows/test.yml)"
+        fi
+      done
+    fi
+  fi
+fi
+echo ""
+
 # --- Summary ---
 echo "==================================="
 echo "  Results: $PASS passed, $FAIL failed"

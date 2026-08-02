@@ -14,6 +14,57 @@ FAIL=0
 pass() { PASS=$((PASS + 1)); echo "  PASS: $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 
+# Poll for a server to accept a connection on 127.0.0.1:$1, up to $2
+# attempts (default 60). Condition-based waiting per
+# ~/.claude/rules/condition-based-waiting.md -- replaces a fixed
+# sleep-then-curl, which is a latent flake under a loaded CI runner even
+# once the server is guaranteed to actually attempt to bind (see the
+# DISPLAY export below).
+#
+# Each attempt is bounded to 1s via curl's --max-time. Without a per-call
+# bound, a single curl invocation has no time limit of its own, and the
+# loop's real wall-clock time is set by however long that one call happens
+# to block -- not by attempt-count * sleep arithmetic. That gap is not
+# theoretical here: on the macOS CI runner this workflow targets, two
+# independent green runs of this exact call site (PR #937, runs
+# 30760298565 and 30759895061) measured 35.16-36.40s to succeed, ~7x what
+# a naive 100 * 50ms reading implies. Likely cause: Python's
+# http.server.HTTPServer.server_bind() calls socket.getfqdn(host) -- a
+# reverse-DNS lookup -- between bind() and listen(); PlanHandler already
+# overrides log_message as a no-op, so this is not per-request log
+# resolution, it is the one-time bind-time lookup. That is server
+# behavior in modules/xplan/lib/xplan-web-review.py -- out of scope here,
+# and not fixed by this suite.
+#
+# 60 attempts * (1s curl bound + 0.05s sleep) ~= 63s worst case: about
+# 1.7x the highest of the four observed real values (36.40s), enough
+# margin for ordinary CI variance without leaving a genuinely dead server
+# to poll for ~100s before this suite reports it.
+wait_for_port() {
+  local port="$1"
+  local max_attempts="${2:-60}"
+  local attempt=0
+  while [ "$attempt" -lt "$max_attempts" ]; do
+    if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$port/" 2>/dev/null; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.05
+  done
+  return 1
+}
+
+# On Linux, is_headless() (modules/xplan/lib/xplan-web-review.py) treats a
+# missing $DISPLAY as headless and exits 1 before argument validation or
+# port binding -- exactly what GitHub's ubuntu-latest runner has, which is
+# why every server/arg-validation test below silently never ran in CI
+# (issue #935). Exporting a fake DISPLAY makes this suite exercise the same
+# validation/serving code path on Linux that it always exercised locally on
+# macOS (where is_headless() never checks $DISPLAY at all). Every server
+# invocation below already passes --no-open, so nothing tries to launch a
+# real browser against this fake display.
+export DISPLAY="${DISPLAY:-:99}"
+
 echo "=== xplan-web-review smoke tests ==="
 
 # -- Setup: scratch plan dir
@@ -68,6 +119,25 @@ else
   fail "XPLAN_NO_WEB=1 exited $rc, expected 1"
 fi
 
+# -- Test 3b: on Linux, missing $DISPLAY yields exit 1 (headless fallback).
+# This is the exact path that let the suite go green locally on macOS while
+# rotting invisibly under CI (issue #935) -- pin it explicitly now that
+# every other invocation below forces DISPLAY to be set. Only meaningful on
+# Linux: is_headless() checks $DISPLAY only when sys.platform starts with
+# "linux", so macOS never takes this branch and asserting on it there would
+# be asserting on unrelated platform behavior.
+if [ "$(uname -s)" = "Linux" ]; then
+  env -u DISPLAY -u XPLAN_NO_WEB python3 "$LIB" "$TMPDIR" --no-open >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" = "1" ]; then
+    pass "Linux without \$DISPLAY exits 1 (headless fallback)"
+  else
+    fail "Linux without \$DISPLAY exited $rc, expected 1"
+  fi
+else
+  echo "  SKIP: Linux-without-\$DISPLAY check (not Linux; is_headless() only checks \$DISPLAY on Linux)"
+fi
+
 # -- Test 4: nonexistent dir yields exit 2
 python3 "$LIB" "$TMPDIR/does-not-exist" --no-open >/dev/null 2>&1
 rc=$?
@@ -92,13 +162,16 @@ rmdir "$EMPTY_DIR" 2>/dev/null
 PORT=47431
 python3 "$LIB" "$TMPDIR" --no-open --port "$PORT" >/tmp/xplan-web-test-stdout.$$ 2>/tmp/xplan-web-test-stderr.$$ &
 SERVER_PID=$!
-sleep 0.8
 
-code=$(curl -s -o /tmp/xplan-web-test-index.$$ -w "%{http_code}" "http://127.0.0.1:$PORT/")
-if [ "$code" = "200" ] && grep -q "xplan review" /tmp/xplan-web-test-index.$$; then
-  pass "GET / returns 200 and expected HTML"
+if wait_for_port "$PORT"; then
+  code=$(curl -s -o /tmp/xplan-web-test-index.$$ -w "%{http_code}" "http://127.0.0.1:$PORT/")
+  if [ "$code" = "200" ] && grep -q "xplan review" /tmp/xplan-web-test-index.$$; then
+    pass "GET / returns 200 and expected HTML"
+  else
+    fail "GET / returned $code (expected 200)"
+  fi
 else
-  fail "GET / returned $code (expected 200)"
+  fail "server did not bind on port $PORT within ~63s (60 attempts x ~1.05s)"
 fi
 
 # -- Test 7: /raw/plan.md returns markdown
@@ -168,24 +241,27 @@ rm "$TMPDIR/comments.json" 2>/dev/null
 PORT=47432
 python3 "$LIB" "$TMPDIR" --no-open --port "$PORT" >/dev/null 2>&1 &
 SERVER_PID=$!
-sleep 0.8
 
-curl -s -X POST -H 'Content-Type: application/json' \
-  -d '{"action":"accept","comments":[]}' \
-  "http://127.0.0.1:$PORT/accept" >/dev/null
+if wait_for_port "$PORT"; then
+  curl -s -X POST -H 'Content-Type: application/json' \
+    -d '{"action":"accept","comments":[]}' \
+    "http://127.0.0.1:$PORT/accept" >/dev/null
 
-wait "$SERVER_PID" 2>/dev/null
-SERVER_PID=""
+  wait "$SERVER_PID" 2>/dev/null
+  SERVER_PID=""
 
-if python3 -c "
+  if python3 -c "
 import json
 d = json.load(open('$TMPDIR/comments.json'))
 assert d['action'] == 'accept', 'action != accept'
 assert d['comments'] == [], 'comments not empty on accept'
 " 2>/dev/null; then
-  pass "POST /accept writes action=accept with empty comments"
+    pass "POST /accept writes action=accept with empty comments"
+  else
+    fail "/accept did not write expected payload"
+  fi
 else
-  fail "/accept did not write expected payload"
+  fail "server did not bind on port $PORT within ~63s (60 attempts x ~1.05s)"
 fi
 
 # -- Cleanup scratch files
