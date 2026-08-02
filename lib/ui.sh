@@ -71,10 +71,12 @@ ui_confirm() {
   else
     yn_hint="[y/N]"
   fi
+  local answer_lower
   while true; do
     echo -en "${UI_CYAN}? ${UI_RESET}${UI_BOLD}$prompt${UI_RESET} $yn_hint "
     read -r answer
-    case "${answer,,}" in
+    answer_lower=$(echo "$answer" | tr '[:upper:]' '[:lower:]')
+    case "$answer_lower" in
       y|yes) return 0 ;;
       n|no) return 1 ;;
       "")

@@ -8,7 +8,7 @@ CCGM requires:
 
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** - the CLI tool from Anthropic (`npm install -g @anthropic-ai/claude-code`)
 - **macOS or Linux** - Windows is not supported
-- **bash 4+** or **zsh**
+- **bash 3.2+** or **zsh**
 - **git** - for cloning and version tracking
 - **Python 3** - hooks are written in Python
 - **jq** - for JSON manipulation during settings merge
@@ -66,7 +66,7 @@ CCGM can install to either or both of two locations:
 |-------|------|--------|
 | **Global** | `~/.claude/` | Applies to all projects and all Claude Code environments |
 | **Project** | `.claude/` in current directory | Applies only to the current project |
-| **Both** | Both paths above | Installs to both locations |
+| **Both** | Both paths above | Applies everywhere, plus a project-level copy in the current repo |
 
 ```bash
 ./start.sh                    # Interactive scope selection

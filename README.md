@@ -80,7 +80,7 @@ For blocks pre-selecting a specific preset, and for how to dry-run this safely, 
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`)
 - macOS or Linux
-- bash 4+ or zsh
+- bash 3.2+ or zsh
 - git
 - python3
 - jq
