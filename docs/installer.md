@@ -68,7 +68,7 @@ Creates a timestamped backup at `<target>/backups/ccgm-YYYYMMDD-HHMMSS/` - `~/.c
 
 The set of items copied is derived from the modules themselves: every `modules/*/module.json` file target contributes its first path segment, so `skills/`, `agents/`, `lib/`, `bin/`, `scripts/`, `output-styles/`, and the rest are all covered. That set is unioned with the seven legacy paths (`settings.json`, `CLAUDE.md`, `rules/`, `commands/`, `hooks/`, `multi-agent-system.md`, `github-repo-protocols.md`), so coverage only ever grows. Any `.ccgm*` files are copied too. Deriving from the manifests is what keeps non-CCGM content - `projects/`, holding session transcripts and memory - out of the backup.
 
-A derived segment is skipped, with a warning on stderr, if it is empty, `.`, `..`, contains a `/`, or falls outside a conservative ASCII character set. If the modules directory cannot be located at all, the backup falls back to the seven legacy paths rather than backing up nothing.
+A derived segment is skipped, with a warning on stderr, unless it clears two separate checks: every character must be in `[A-Za-z0-9._-]`, and the first character must be a letter or digit. So `.`, `..`, an empty segment, and anything containing a `/` are refused - and so is a leading `.` or `-` (`.hidden`, `-foo`), even though those characters are themselves allowed later in a name. If the modules directory cannot be located at all, the backup falls back to the seven legacy paths rather than backing up nothing.
 
 The 5 most recent backups are kept; older ones are deleted.
 
