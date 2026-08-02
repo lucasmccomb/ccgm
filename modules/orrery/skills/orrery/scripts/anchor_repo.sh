@@ -28,9 +28,11 @@ set -euo pipefail
 #        $ORRERY_HOME overrides the output root without editing this module
 #        (risk adrev2-014); unset, it defaults to ~/code/orrery.
 #
-# The run mutates the target repo in exactly two ways - `git fetch origin`
-# and `git worktree add`. The worktree is the only durable side effect, so
-# any failure after it is created triggers teardown from the error path.
+# The run mutates the target repo in three ways - `git fetch origin`,
+# `git remote set-head origin --auto` (refreshes the stale origin/HEAD
+# symref after the fetch), and `git worktree add`. The worktree is the only
+# durable side effect, so any failure after it is created triggers teardown
+# from the error path.
 #
 # Portable: macOS bash 3.2 + BSD tools. Deterministic: no LLM or tool calls.
 
@@ -101,7 +103,12 @@ esac
 if [ ! -d "$REPO_ARG" ]; then
   emit_error "repo path does not exist or is not a directory" "$REPO_ARG"
 fi
-REPO="$(cd "$REPO_ARG" && pwd -P)"
+# `cd --` so a repo dir name starting with `-` is never parsed as an option,
+# and an unreadable dir fails through emit_error instead of aborting via
+# set -e with a non-2 exit and no JSON (review finding 6).
+if ! REPO="$(cd -- "$REPO_ARG" && pwd -P)"; then
+  emit_error "repo path exists but could not be entered" "$REPO_ARG"
+fi
 case "$REPO" in
   *[[:cntrl:]]*)
     emit_error "resolved repo path contains control characters" ""
@@ -127,11 +134,18 @@ NO_REMOTE=false
 REMOTE_URL=""
 # config --get (not remote get-url): get-url expands insteadOf rewrites, and
 # the credential-bearing string to strip is the URL as configured.
-RAW_URL="$(git -C "$REPO" config --get remote.origin.url 2>/dev/null || true)"
-if [ -n "$RAW_URL" ]; then
+# `config --get` exits 1 when the key is simply not set (git-config(1)) -
+# that is a legitimate no-remote repo. Any other nonzero exit (unreadable or
+# malformed config file, etc.) is a genuine read failure and must not be
+# silently folded into the same no_remote path (review finding 7a).
+GIT_CONFIG_RC=0
+RAW_URL="$(git -C "$REPO" config --get remote.origin.url 2>/dev/null)" || GIT_CONFIG_RC=$?
+if [ "$GIT_CONFIG_RC" -eq 0 ]; then
   REMOTE_URL="$(strip_userinfo "$RAW_URL")"
-else
+elif [ "$GIT_CONFIG_RC" -eq 1 ]; then
   NO_REMOTE=true
+else
+  emit_error "cannot read remote.origin.url from git config (exit $GIT_CONFIG_RC)" "$REPO"
 fi
 RAW_URL=""
 
@@ -168,9 +182,17 @@ if [ -z "$ANCHOR_SHA" ]; then
 fi
 
 # --- behind + dirty ----------------------------------------------------------
-BEHIND="$(git -C "$REPO" rev-list --count "HEAD..$ANCHOR_SHA" 2>/dev/null | tr -cd '0-9' || true)"
-if [ -z "$BEHIND" ]; then
-  BEHIND=0
+# Never fabricate a 0: a rev-list failure (e.g. an orphan local branch with a
+# remote configured) must be distinguishable from a legitimate zero-commits-
+# behind result (review finding 7b). BEHIND holds the bare JSON token to
+# emit - either a decimal count or the literal `null`.
+if REV_COUNT="$(git -C "$REPO" rev-list --count "HEAD..$ANCHOR_SHA" 2>/dev/null)"; then
+  BEHIND="$(printf '%s' "$REV_COUNT" | tr -cd '0-9')"
+  if [ -z "$BEHIND" ]; then
+    BEHIND=null
+  fi
+else
+  BEHIND=null
 fi
 DIRTY=false
 if [ -n "$(git -C "$REPO" status --porcelain 2>/dev/null)" ]; then
@@ -188,8 +210,21 @@ on_exit() {
 }
 trap on_exit EXIT
 
-WT_BASE="$(mktemp -d "${TMPDIR:-/tmp}/orrery-anchor-${SLUG}.XXXXXX")"
+# A mktemp failure must fail through emit_error, not abort via set -e with a
+# non-2 exit and no JSON (review finding 6).
+if ! WT_BASE="$(mktemp -d "${TMPDIR:-/tmp}/orrery-anchor-${SLUG}.XXXXXX" 2>/dev/null)"; then
+  emit_error "mktemp failed to create a temp worktree directory" "$REPO"
+fi
 WT="$WT_BASE/wt"
+# TMPDIR is caller-controlled and flows straight into WT; a control character
+# there reproduces the exit-0-with-invalid-JSON shape the repo-path guard
+# above closed (delta re-review residual). Reject before mutating anything.
+case "$WT" in
+  *[[:cntrl:]]*)
+    rmdir "$WT_BASE" >/dev/null 2>&1 || true
+    emit_error "resolved worktree path contains control characters" "$REPO"
+    ;;
+esac
 if ! git -C "$REPO" worktree add --detach "$WT" "$ANCHOR_SHA" >/dev/null 2>&1; then
   rmdir "$WT_BASE" >/dev/null 2>&1 || true
   emit_error "git worktree add failed" "$REPO"
