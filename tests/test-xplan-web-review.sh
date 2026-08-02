@@ -14,6 +14,37 @@ FAIL=0
 pass() { PASS=$((PASS + 1)); echo "  PASS: $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 
+# Poll for a server to accept a connection on 127.0.0.1:$1, up to $2
+# attempts at ~50ms apiece (default 100 attempts =~ 5s). Condition-based
+# waiting per ~/.claude/rules/condition-based-waiting.md -- replaces a
+# fixed sleep-then-curl, which is a latent flake under a loaded CI runner
+# even once the server is guaranteed to actually attempt to bind (see the
+# DISPLAY export below).
+wait_for_port() {
+  local port="$1"
+  local max_attempts="${2:-100}"
+  local attempt=0
+  while [ "$attempt" -lt "$max_attempts" ]; do
+    if curl -s -o /dev/null "http://127.0.0.1:$port/" 2>/dev/null; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.05
+  done
+  return 1
+}
+
+# On Linux, is_headless() (modules/xplan/lib/xplan-web-review.py) treats a
+# missing $DISPLAY as headless and exits 1 before argument validation or
+# port binding -- exactly what GitHub's ubuntu-latest runner has, which is
+# why every server/arg-validation test below silently never ran in CI
+# (issue #935). Exporting a fake DISPLAY makes this suite exercise the same
+# validation/serving code path on Linux that it always exercised locally on
+# macOS (where is_headless() never checks $DISPLAY at all). Every server
+# invocation below already passes --no-open, so nothing tries to launch a
+# real browser against this fake display.
+export DISPLAY="${DISPLAY:-:99}"
+
 echo "=== xplan-web-review smoke tests ==="
 
 # -- Setup: scratch plan dir
@@ -68,6 +99,25 @@ else
   fail "XPLAN_NO_WEB=1 exited $rc, expected 1"
 fi
 
+# -- Test 3b: on Linux, missing $DISPLAY yields exit 1 (headless fallback).
+# This is the exact path that let the suite go green locally on macOS while
+# rotting invisibly under CI (issue #935) -- pin it explicitly now that
+# every other invocation below forces DISPLAY to be set. Only meaningful on
+# Linux: is_headless() checks $DISPLAY only when sys.platform starts with
+# "linux", so macOS never takes this branch and asserting on it there would
+# be asserting on unrelated platform behavior.
+if [ "$(uname -s)" = "Linux" ]; then
+  env -u DISPLAY -u XPLAN_NO_WEB python3 "$LIB" "$TMPDIR" --no-open >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" = "1" ]; then
+    pass "Linux without \$DISPLAY exits 1 (headless fallback)"
+  else
+    fail "Linux without \$DISPLAY exited $rc, expected 1"
+  fi
+else
+  echo "  SKIP: Linux-without-\$DISPLAY check (not Linux; is_headless() only checks \$DISPLAY on Linux)"
+fi
+
 # -- Test 4: nonexistent dir yields exit 2
 python3 "$LIB" "$TMPDIR/does-not-exist" --no-open >/dev/null 2>&1
 rc=$?
@@ -92,13 +142,16 @@ rmdir "$EMPTY_DIR" 2>/dev/null
 PORT=47431
 python3 "$LIB" "$TMPDIR" --no-open --port "$PORT" >/tmp/xplan-web-test-stdout.$$ 2>/tmp/xplan-web-test-stderr.$$ &
 SERVER_PID=$!
-sleep 0.8
 
-code=$(curl -s -o /tmp/xplan-web-test-index.$$ -w "%{http_code}" "http://127.0.0.1:$PORT/")
-if [ "$code" = "200" ] && grep -q "xplan review" /tmp/xplan-web-test-index.$$; then
-  pass "GET / returns 200 and expected HTML"
+if wait_for_port "$PORT"; then
+  code=$(curl -s -o /tmp/xplan-web-test-index.$$ -w "%{http_code}" "http://127.0.0.1:$PORT/")
+  if [ "$code" = "200" ] && grep -q "xplan review" /tmp/xplan-web-test-index.$$; then
+    pass "GET / returns 200 and expected HTML"
+  else
+    fail "GET / returned $code (expected 200)"
+  fi
 else
-  fail "GET / returned $code (expected 200)"
+  fail "server did not bind on port $PORT within ~5s"
 fi
 
 # -- Test 7: /raw/plan.md returns markdown
@@ -168,24 +221,27 @@ rm "$TMPDIR/comments.json" 2>/dev/null
 PORT=47432
 python3 "$LIB" "$TMPDIR" --no-open --port "$PORT" >/dev/null 2>&1 &
 SERVER_PID=$!
-sleep 0.8
 
-curl -s -X POST -H 'Content-Type: application/json' \
-  -d '{"action":"accept","comments":[]}' \
-  "http://127.0.0.1:$PORT/accept" >/dev/null
+if wait_for_port "$PORT"; then
+  curl -s -X POST -H 'Content-Type: application/json' \
+    -d '{"action":"accept","comments":[]}' \
+    "http://127.0.0.1:$PORT/accept" >/dev/null
 
-wait "$SERVER_PID" 2>/dev/null
-SERVER_PID=""
+  wait "$SERVER_PID" 2>/dev/null
+  SERVER_PID=""
 
-if python3 -c "
+  if python3 -c "
 import json
 d = json.load(open('$TMPDIR/comments.json'))
 assert d['action'] == 'accept', 'action != accept'
 assert d['comments'] == [], 'comments not empty on accept'
 " 2>/dev/null; then
-  pass "POST /accept writes action=accept with empty comments"
+    pass "POST /accept writes action=accept with empty comments"
+  else
+    fail "/accept did not write expected payload"
+  fi
 else
-  fail "/accept did not write expected payload"
+  fail "server did not bind on port $PORT within ~5s"
 fi
 
 # -- Cleanup scratch files
