@@ -8,7 +8,7 @@ CCGM requires:
 
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** - the CLI tool from Anthropic (`npm install -g @anthropic-ai/claude-code`)
 - **macOS or Linux** - Windows is not supported
-- **bash 3.2+** or **zsh**
+- **bash 3.2+** - the installer scripts always run under bash via their shebang; your login shell can be zsh, that only affects which rc file the alias-installer feature touches
 - **git** - for cloning and version tracking
 - **Python 3** - hooks are written in Python
 - **jq** - for JSON manipulation during settings merge

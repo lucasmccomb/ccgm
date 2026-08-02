@@ -898,6 +898,43 @@ if [ -x /bin/bash ]; then
     fail "ui_confirm under /bin/bash did not confirm mixed-case 'YES': $mixed_out"
   fi
 
+  # A literal "-n" or "-e" answer must be REJECTED (re-prompt), not
+  # silently accepted as empty input -> the default. Piping the invalid
+  # answer followed by a real one, with a default that would produce a
+  # DIFFERENT result than the real answer, distinguishes "took the
+  # default on the first read" (bug) from "re-prompted, then read the
+  # real answer" (correct): if the bug were present, the invalid answer
+  # would resolve to the default before the second line is ever read.
+  set +e
+  dashn_out=$(printf -- '-n\nyes\n' | /bin/bash -c \
+    "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' 'no' && echo CONFIRMED || echo DECLINED" 2>&1)
+  set -e
+  if echo "$dashn_out" | grep -q "Please answer yes or no"; then
+    pass "ui_confirm under /bin/bash re-prompts on a literal '-n' answer instead of silently taking the default"
+  else
+    fail "ui_confirm under /bin/bash did not re-prompt on '-n' (silently took the default): $dashn_out"
+  fi
+  if echo "$dashn_out" | grep -q "CONFIRMED"; then
+    pass "ui_confirm under /bin/bash accepts the real answer ('yes') after rejecting '-n'"
+  else
+    fail "ui_confirm under /bin/bash did not resolve to the real answer after '-n': $dashn_out"
+  fi
+
+  set +e
+  dashe_out=$(printf -- '-e\nno\n' | /bin/bash -c \
+    "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' 'yes' && echo CONFIRMED || echo DECLINED" 2>&1)
+  set -e
+  if echo "$dashe_out" | grep -q "Please answer yes or no"; then
+    pass "ui_confirm under /bin/bash re-prompts on a literal '-e' answer instead of silently taking the default"
+  else
+    fail "ui_confirm under /bin/bash did not re-prompt on '-e' (silently took the default): $dashe_out"
+  fi
+  if echo "$dashe_out" | grep -q "DECLINED"; then
+    pass "ui_confirm under /bin/bash accepts the real answer ('no') after rejecting '-e'"
+  else
+    fail "ui_confirm under /bin/bash did not resolve to the real answer after '-e': $dashe_out"
+  fi
+
   export CCGM_NON_INTERACTIVE=1
 else
   echo "  SKIP: /bin/bash not present on this system"
@@ -912,10 +949,12 @@ echo ""
 # and missing-files arrays into _install_missing. Namerefs are bash
 # 4.3+; under bash 3.2 `local -n` is a hard "invalid option" abort. The
 # fix shares script-scope globals between _check_installed_drift and
-# _install_missing instead (the same convention start.sh already uses
-# for SELECTED_MODULES). update.sh now guards its `main "$@"` call with
-# a BASH_SOURCE-vs-$0 check so this test can source it directly (no
-# live git fetch, no interactive flow) and drive the real code path.
+# _install_missing instead - _install_missing only ever reads these
+# arrays, never writes them back, so a plain global is simpler than any
+# form of indirection would be. update.sh now guards its `main "$@"`
+# call with a BASH_SOURCE-vs-$0 check so this test can source it
+# directly (no live git fetch, no interactive flow) and drive the real
+# code path.
 # ============================================================
 echo "--- Test 12: update.sh _install_missing under real /bin/bash (#931 nameref regression) ---"
 

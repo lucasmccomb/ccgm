@@ -36,9 +36,11 @@ _check_installed_drift() {
 
   # --- Check 1: Missing modules (in preset but not installed) ---
   # missing_modules/missing_files are intentionally NOT `local`: bash 3.2 has
-  # no namerefs (local -n / declare -n are bash 4.3+), so they are shared
-  # script-scope globals that _install_missing reads directly below - the
-  # same convention start.sh already uses for SELECTED_MODULES.
+  # no namerefs (local -n / declare -n are bash 4.3+). _install_missing below
+  # only ever READS these arrays - it never writes them back - so there is
+  # nothing for a nameref to buy here; a plain script-scope global shared
+  # between this function and _install_missing is simpler than any form of
+  # indirection would be.
   missing_modules=()
   if [ "$preset" != "custom" ] && [ -f "${CCGM_ROOT}/presets/${preset}.json" ]; then
     local preset_modules installed_modules
@@ -132,10 +134,11 @@ _check_installed_drift() {
 # Helper: Install missing modules and files
 #
 # Reads the missing_modules/missing_files arrays set by
-# _check_installed_drift above. No indirection (local -n / declare -n)
-# is used here - namerefs are bash 4.3+, and this installer's floor is
-# bash 3.2. Sharing script-scope globals between these two helpers is
-# the same convention start.sh uses for SELECTED_MODULES.
+# _check_installed_drift above (script-scope globals, not `local` -
+# see the comment there). No indirection (local -n / declare -n) is
+# used here - namerefs are bash 4.3+, and this installer's floor is
+# bash 3.2. This function only reads missing_modules/missing_files, so
+# a plain shared global is simpler than any indirection would be.
 # ============================================================
 _install_missing() {
   local link_mode="$1"

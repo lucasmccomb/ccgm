@@ -71,14 +71,18 @@ ui_confirm() {
   else
     yn_hint="[y/N]"
   fi
-  local answer_lower
   while true; do
     echo -en "${UI_CYAN}? ${UI_RESET}${UI_BOLD}$prompt${UI_RESET} $yn_hint "
     read -r answer
-    answer_lower=$(echo "$answer" | tr '[:upper:]' '[:lower:]')
-    case "$answer_lower" in
-      y|yes) return 0 ;;
-      n|no) return 1 ;;
+    # Case-insensitive match via bracket expressions per character, not
+    # ${answer,,} (bash 4+) or a `tr`/subshell round-trip - the latter
+    # runs the answer through bash's builtin `echo`, which flag-parses a
+    # literal "-n" or "-e" answer into empty output, silently taking the
+    # default instead of rejecting the input. This form forks nothing
+    # (ui_confirm runs in a prompt loop) and needs no bash-4 feature.
+    case "$answer" in
+      [Yy]|[Yy][Ee][Ss]) return 0 ;;
+      [Nn]|[Nn][Oo]) return 1 ;;
       "")
         if [ "$default" = "yes" ]; then return 0; else return 1; fi
         ;;
