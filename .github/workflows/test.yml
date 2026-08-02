@@ -48,14 +48,26 @@ jobs:
       - name: Test templates
         run: bash tests/test-templates.sh
 
+      - name: Test settings merge
+        run: bash tests/test-merge.sh
+
+      - name: Test backup/restore
+        run: bash tests/test-backup.sh
+
       - name: Test installer (minimal)
         run: bash tests/test-installer.sh
 
       - name: Test link mode
         run: bash tests/test-link-mode.sh
 
+      - name: Test uninstall settings preservation
+        run: bash tests/test-uninstall-settings.sh
+
       - name: Audit skill test suite
         run: bash tests/run-audit-suite.sh
+
+      - name: xplan-web-review smoke tests
+        run: bash tests/test-xplan-web-review.sh
 
       - name: Hooks test suites (dispatcher equivalence + precedence)
         run: |
@@ -182,14 +194,26 @@ jobs:
       - name: Test templates
         run: bash tests/test-templates.sh
 
+      - name: Test settings merge
+        run: bash tests/test-merge.sh
+
+      - name: Test backup/restore
+        run: bash tests/test-backup.sh
+
       - name: Test installer (minimal)
         run: bash tests/test-installer.sh
 
       - name: Test link mode
         run: bash tests/test-link-mode.sh
 
+      - name: Test uninstall settings preservation
+        run: bash tests/test-uninstall-settings.sh
+
       - name: Audit skill test suite
         run: bash tests/run-audit-suite.sh
+
+      - name: xplan-web-review smoke tests
+        run: bash tests/test-xplan-web-review.sh
 
       - name: Hooks test suites (dispatcher equivalence + precedence)
         run: |

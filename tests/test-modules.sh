@@ -330,6 +330,79 @@ for preset_file in "$REPO_ROOT"/presets/*.json; do
 done
 echo ""
 
+# --- Test: every tests/test-*.sh suite is wired into CI, in every job ---
+# tests/run-all.sh discovers suites by globbing "$SCRIPT_DIR"/test-*.sh, but
+# .github/workflows/test.yml enumerates each suite by hand as its own step,
+# once per job. The two lists drift silently (issue #935): a suite can exist
+# on disk, run green under run-all.sh, and never once gate a PR because no
+# one added its step to the workflow -- or added it to one job and not the
+# other, which is the same bug in miniature.
+echo "--- Checking CI enumeration coverage (test.yml) ---"
+WORKFLOW_FILE="$REPO_ROOT/.github/workflows/test.yml"
+if [ ! -f "$WORKFLOW_FILE" ]; then
+  fail "workflow file missing: .github/workflows/test.yml"
+else
+  jobs_line=$(grep -n '^jobs:[[:space:]]*$' "$WORKFLOW_FILE" | head -1 | cut -d: -f1)
+  if [ -z "$jobs_line" ]; then
+    fail "test.yml: could not locate top-level 'jobs:' key"
+  else
+    total_lines=$(wc -l < "$WORKFLOW_FILE" | tr -d ' ')
+
+    # Job boundaries: lines shaped like "  <job-name>:" (exactly 2-space
+    # indent, nothing after the colon) that appear after the top-level
+    # "jobs:" key. Each one starts a new job; the next one (or EOF) ends it.
+    # This scopes the check to per-job step lists rather than treating the
+    # file as one flat blob, so a suite wired into ubuntu but not macos is
+    # caught -- not silently passed by a whole-file grep.
+    ranges=""
+    prev=""
+    while IFS= read -r ln; do
+      if [ -n "$prev" ]; then
+        end=$((ln - 1))
+        ranges="${ranges}${prev}:${end}
+"
+      fi
+      prev="$ln"
+    done < <(tail -n "+$((jobs_line + 1))" "$WORKFLOW_FILE" | grep -n '^  [A-Za-z0-9_-]*:[[:space:]]*$' | cut -d: -f1 | while IFS= read -r n; do echo $((n + jobs_line)); done)
+    if [ -n "$prev" ]; then
+      ranges="${ranges}${prev}:${total_lines}
+"
+    fi
+
+    job_count=$(printf '%s\n' "$ranges" | grep -c ':' || true)
+    if [ "$job_count" -eq 0 ]; then
+      fail "test.yml: could not locate any job definitions under 'jobs:' (unexpected format)"
+    else
+      pass "test.yml: found $job_count job definition(s) under 'jobs:'"
+
+      for suite_path in "$SCRIPT_DIR"/test-*.sh; do
+        [ -f "$suite_path" ] || continue
+        suite_name=$(basename "$suite_path")
+        missing_in=""
+
+        while IFS= read -r range; do
+          [ -z "$range" ] && continue
+          start="${range%%:*}"
+          end="${range##*:}"
+          job_label=$(sed -n "${start}p" "$WORKFLOW_FILE" | sed 's/^[[:space:]]*//; s/:.*$//')
+          if sed -n "${start},${end}p" "$WORKFLOW_FILE" | grep -qF "tests/$suite_name"; then
+            :
+          else
+            missing_in="$missing_in $job_label"
+          fi
+        done < <(printf '%s' "$ranges")
+
+        if [ -z "$missing_in" ]; then
+          pass "$suite_name: wired into all $job_count CI job(s)"
+        else
+          fail "$suite_name: missing from CI job(s):$missing_in (add 'run: bash tests/$suite_name' to .github/workflows/test.yml)"
+        fi
+      done
+    fi
+  fi
+fi
+echo ""
+
 # --- Summary ---
 echo "==================================="
 echo "  Results: $PASS passed, $FAIL failed"
