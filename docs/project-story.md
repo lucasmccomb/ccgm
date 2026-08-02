@@ -301,7 +301,7 @@ Every one of these produced a durable control, not just a fix:
 
 ## Third-Party Tools & Integrations
 
-**Hard requirements**: Claude Code, git, bash 3.2+/zsh, python3 (stdlib only — no pip dependencies anywhere in the hook/lib layer), jq.
+**Hard requirements**: Claude Code, git, bash 3.2+ (the installer scripts always run under bash via their shebang, regardless of login shell), python3 (stdlib only — no pip dependencies anywhere in the hook/lib layer), jq.
 
 **Optional, per-module**: `gh` (GitHub CLI), launchd (macOS scheduling for autoheal/dreaming), tmux (agent panes), yt-dlp (transcripts), Resend (email digests), Hetzner Cloud + Terraform + Packer (cloud dispatch), Go + Bubble Tea (the deprecated agent-manager TUI), Playwright + a Chrome extension MCP + WebMCP (browser automation tiers), Exa MCP (semantic research), Docker + Ollama + SearXNG (the separate deep-research companion), and the Anthropic Messages API (background analyzers, via curl).
 

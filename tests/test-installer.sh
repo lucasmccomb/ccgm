@@ -847,6 +847,179 @@ fi
 
 echo ""
 
+# ============================================================
+# Test 11: ui_confirm under real /bin/bash (#931 regression)
+#
+# ${answer,,} is a bash-4 parameter expansion; under bash 3.2 (macOS's
+# system /bin/bash) it is a hard abort ("bad substitution") mid-function,
+# so ui_confirm never returns and NEITHER branch of a
+# `ui_confirm ... && ... || ...` caller runs - `bash -n` does not catch
+# this, because the expansion parses fine and only fails at expansion
+# time. This drives the real interactive path (CCGM_NON_INTERACTIVE
+# unset) under /bin/bash explicitly - not whatever bash resolves to on
+# $PATH, which may be a newer Homebrew bash on a dev machine.
+# ============================================================
+echo "--- Test 11: ui_confirm under real /bin/bash (#931 regression) ---"
+
+if [ -x /bin/bash ]; then
+  unset CCGM_NON_INTERACTIVE
+
+  set +e
+  confirm_out=$(printf 'yes\n' | /bin/bash -c \
+    "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' && echo CONFIRMED || echo DECLINED" 2>&1)
+  set -e
+  if echo "$confirm_out" | grep -q "bad substitution"; then
+    fail "ui_confirm under /bin/bash hit a bash-4 'bad substitution' abort (answer: yes): $confirm_out"
+  elif echo "$confirm_out" | grep -q "CONFIRMED"; then
+    pass "ui_confirm under /bin/bash returns confirmed for 'yes'"
+  else
+    fail "ui_confirm under /bin/bash did not confirm 'yes': $confirm_out"
+  fi
+
+  set +e
+  decline_out=$(printf 'no\n' | /bin/bash -c \
+    "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' && echo CONFIRMED || echo DECLINED" 2>&1)
+  set -e
+  if echo "$decline_out" | grep -q "bad substitution"; then
+    fail "ui_confirm under /bin/bash hit a bash-4 'bad substitution' abort (answer: no): $decline_out"
+  elif echo "$decline_out" | grep -q "DECLINED"; then
+    pass "ui_confirm under /bin/bash returns declined for 'no'"
+  else
+    fail "ui_confirm under /bin/bash did not decline 'no': $decline_out"
+  fi
+
+  set +e
+  mixed_out=$(printf 'YES\n' | /bin/bash -c \
+    "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' && echo CONFIRMED || echo DECLINED" 2>&1)
+  set -e
+  if echo "$mixed_out" | grep -q "CONFIRMED"; then
+    pass "ui_confirm under /bin/bash lowercases mixed-case 'YES' before matching"
+  else
+    fail "ui_confirm under /bin/bash did not confirm mixed-case 'YES': $mixed_out"
+  fi
+
+  # A literal "-n" or "-e" answer must be REJECTED (re-prompt), not
+  # silently accepted as empty input -> the default. Piping the invalid
+  # answer followed by a real one, with a default that would produce a
+  # DIFFERENT result than the real answer, distinguishes "took the
+  # default on the first read" (bug) from "re-prompted, then read the
+  # real answer" (correct): if the bug were present, the invalid answer
+  # would resolve to the default before the second line is ever read.
+  set +e
+  dashn_out=$(printf -- '-n\nyes\n' | /bin/bash -c \
+    "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' 'no' && echo CONFIRMED || echo DECLINED" 2>&1)
+  set -e
+  if echo "$dashn_out" | grep -q "Please answer yes or no"; then
+    pass "ui_confirm under /bin/bash re-prompts on a literal '-n' answer instead of silently taking the default"
+  else
+    fail "ui_confirm under /bin/bash did not re-prompt on '-n' (silently took the default): $dashn_out"
+  fi
+  if echo "$dashn_out" | grep -q "CONFIRMED"; then
+    pass "ui_confirm under /bin/bash accepts the real answer ('yes') after rejecting '-n'"
+  else
+    fail "ui_confirm under /bin/bash did not resolve to the real answer after '-n': $dashn_out"
+  fi
+
+  set +e
+  dashe_out=$(printf -- '-e\nno\n' | /bin/bash -c \
+    "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' 'yes' && echo CONFIRMED || echo DECLINED" 2>&1)
+  set -e
+  if echo "$dashe_out" | grep -q "Please answer yes or no"; then
+    pass "ui_confirm under /bin/bash re-prompts on a literal '-e' answer instead of silently taking the default"
+  else
+    fail "ui_confirm under /bin/bash did not re-prompt on '-e' (silently took the default): $dashe_out"
+  fi
+  if echo "$dashe_out" | grep -q "DECLINED"; then
+    pass "ui_confirm under /bin/bash accepts the real answer ('no') after rejecting '-e'"
+  else
+    fail "ui_confirm under /bin/bash did not resolve to the real answer after '-e': $dashe_out"
+  fi
+
+  export CCGM_NON_INTERACTIVE=1
+else
+  echo "  SKIP: /bin/bash not present on this system"
+fi
+echo ""
+
+# ============================================================
+# Test 12: update.sh's _install_missing under real /bin/bash (#931
+# nameref regression)
+#
+# update.sh:132-133 used `local -n` namerefs to pass the missing-modules
+# and missing-files arrays into _install_missing. Namerefs are bash
+# 4.3+; under bash 3.2 `local -n` is a hard "invalid option" abort. The
+# fix shares script-scope globals between _check_installed_drift and
+# _install_missing instead - _install_missing only ever reads these
+# arrays, never writes them back, so a plain global is simpler than any
+# form of indirection would be. update.sh now guards its `main "$@"`
+# call with a BASH_SOURCE-vs-$0 check so this test can source it
+# directly (no live git fetch, no interactive flow) and drive the real
+# code path.
+# ============================================================
+echo "--- Test 12: update.sh _install_missing under real /bin/bash (#931 nameref regression) ---"
+
+if [ -x /bin/bash ]; then
+  UPDATE_TEST_HOME="$TMPDIR/test12-update-home"
+  mkdir -p "$UPDATE_TEST_HOME/.claude"
+  cat > "$UPDATE_TEST_HOME/.claude/.ccgm-manifest.json" <<'MANIFEST_EOF'
+{
+  "preset": "minimal",
+  "scope": "global",
+  "linkMode": false,
+  "modules": ["global-claude-md", "autonomy"],
+  "files": []
+}
+MANIFEST_EOF
+
+  set +e
+  update_out=$(HOME="$UPDATE_TEST_HOME" CCGM_NON_INTERACTIVE=1 /bin/bash -c \
+    "source '$REPO_ROOT/update.sh'; _check_installed_drift" 2>&1)
+  update_exit=$?
+  set -e
+
+  if echo "$update_out" | grep -qE "invalid option|bad substitution"; then
+    fail "update.sh's _install_missing hit a bash-4-only construct under /bin/bash: $update_out"
+  elif [ $update_exit -ne 0 ]; then
+    fail "update.sh's _check_installed_drift/_install_missing exited $update_exit under /bin/bash: $update_out"
+  else
+    pass "update.sh's _check_installed_drift/_install_missing ran clean under /bin/bash"
+  fi
+
+  # "minimal" preset (presets/minimal.json) is ["global-claude-md",
+  # "autonomy", "git-workflow"]; the manifest above installs the first
+  # two, so git-workflow is the missing module _install_missing must
+  # pull in - exercising the "install files from missing modules" loop.
+  if [ -f "$UPDATE_TEST_HOME/.claude/rules/git-workflow.md" ]; then
+    pass "missing module (git-workflow) installed by _install_missing"
+  else
+    fail "missing module (git-workflow) was not installed"
+  fi
+
+  # global-claude-md and autonomy are already "installed" per the
+  # manifest but have no files on disk in this fresh fake HOME, so their
+  # files are detected as missing too - exercising the "fix missing
+  # files in already-installed modules" loop.
+  if [ -f "$UPDATE_TEST_HOME/.claude/CLAUDE.md" ] && \
+     [ -f "$UPDATE_TEST_HOME/.claude/rules/autonomy.md" ] && \
+     [ -f "$UPDATE_TEST_HOME/.claude/rules/confusion-protocol.md" ]; then
+    pass "missing files in already-installed modules installed by _install_missing"
+  else
+    fail "missing files in already-installed modules were not all installed"
+  fi
+
+  if command -v jq &>/dev/null; then
+    manifest_modules=$(jq -c '.modules | sort' "$UPDATE_TEST_HOME/.claude/.ccgm-manifest.json" 2>/dev/null)
+    if [ "$manifest_modules" = '["autonomy","git-workflow","global-claude-md"]' ]; then
+      pass "manifest updated with the newly installed module (git-workflow)"
+    else
+      fail "manifest modules after install were '$manifest_modules', expected git-workflow added"
+    fi
+  fi
+else
+  echo "  SKIP: /bin/bash not present on this system"
+fi
+echo ""
+
 # Restore HOME
 export HOME="$TMPDIR/home"
 

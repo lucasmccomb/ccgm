@@ -48,7 +48,7 @@ Choose a preset (the menu lists every file under `presets/`, alphabetically: clo
 
 Automatically adds any modules required by your selection. Uses a depth-first topological sort with cycle detection. Reports any automatically added dependencies.
 
-For example, selecting `xplan` automatically adds its dependencies `multi-agent` and `adversarial-review`, which in turn add `startup-dashboard` (multi-agent's dependency) and `subagent-patterns` (adversarial-review's dependency), and `startup-dashboard` in turn adds `session-history`.
+For example, selecting `xplan` automatically adds its dependencies `multi-agent` and `adversarial-review`, which in turn add `startup-dashboard` (multi-agent's dependency) and `subagent-patterns` (adversarial-review's dependency). `startup-dashboard` then adds `session-history`.
 
 ### Step 7: Module config prompts
 

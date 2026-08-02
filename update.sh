@@ -35,7 +35,13 @@ _check_installed_drift() {
   local drift_count=0
 
   # --- Check 1: Missing modules (in preset but not installed) ---
-  local missing_modules=()
+  # missing_modules/missing_files are intentionally NOT `local`: bash 3.2 has
+  # no namerefs (local -n / declare -n are bash 4.3+). _install_missing below
+  # only ever READS these arrays - it never writes them back - so there is
+  # nothing for a nameref to buy here; a plain script-scope global shared
+  # between this function and _install_missing is simpler than any form of
+  # indirection would be.
+  missing_modules=()
   if [ "$preset" != "custom" ] && [ -f "${CCGM_ROOT}/presets/${preset}.json" ]; then
     local preset_modules installed_modules
     preset_modules=$(jq -r '.[]' "${CCGM_ROOT}/presets/${preset}.json" 2>/dev/null | sort)
@@ -60,7 +66,7 @@ _check_installed_drift() {
   # --- Check 2: Missing files in installed modules ---
   local installed_modules
   installed_modules=$(jq -r '.modules[]?' "$manifest" 2>/dev/null)
-  local missing_files=()
+  missing_files=()
 
   while IFS= read -r mod; do
     [ -z "$mod" ] && continue
@@ -117,7 +123,7 @@ _check_installed_drift() {
   if [ ${#missing_modules[@]} -gt 0 ] || [ ${#missing_files[@]} -gt 0 ]; then
     echo ""
     if ui_confirm "Install missing modules/files now?"; then
-      _install_missing "$link_mode" missing_modules missing_files
+      _install_missing "$link_mode"
     else
       ui_info "Run ./start.sh to do a full reinstall"
     fi
@@ -126,15 +132,20 @@ _check_installed_drift() {
 
 # ============================================================
 # Helper: Install missing modules and files
+#
+# Reads the missing_modules/missing_files arrays set by
+# _check_installed_drift above (script-scope globals, not `local` -
+# see the comment there). No indirection (local -n / declare -n) is
+# used here - namerefs are bash 4.3+, and this installer's floor is
+# bash 3.2. This function only reads missing_modules/missing_files, so
+# a plain shared global is simpler than any indirection would be.
 # ============================================================
 _install_missing() {
   local link_mode="$1"
-  local -n _missing_mods=$2
-  local -n _missing_files=$3
   local installed_count=0
 
   # Install files from missing modules
-  for mod in ${_missing_mods[@]+"${_missing_mods[@]}"}; do
+  for mod in ${missing_modules[@]+"${missing_modules[@]}"}; do
     ui_info "Installing module: $mod"
     while IFS='|' read -r src target type template merge; do
       local full_src="${CCGM_ROOT}/modules/${mod}/${src}"
@@ -162,13 +173,13 @@ _install_missing() {
   done
 
   # Fix missing/unsymlinked files in already-installed modules
-  for entry in ${_missing_files[@]+"${_missing_files[@]}"}; do
+  for entry in ${missing_files[@]+"${missing_files[@]}"}; do
     local mod="${entry%%:*}"
     local target="${entry#*:}"
 
     # Skip if this module was just fully installed above
     local already_done=false
-    for m in ${_missing_mods[@]+"${_missing_mods[@]}"}; do
+    for m in ${missing_modules[@]+"${missing_modules[@]}"}; do
       [ "$m" = "$mod" ] && already_done=true
     done
     [ "$already_done" = true ] && continue
@@ -194,18 +205,18 @@ _install_missing() {
   done
 
   # Update manifest with newly installed modules
-  if [ ${#_missing_mods[@]} -gt 0 ]; then
+  if [ ${#missing_modules[@]} -gt 0 ]; then
     local manifest="${HOME}/.claude/.ccgm-manifest.json"
     local tmp_manifest
     tmp_manifest=$(mktemp)
 
     # Add missing modules to the modules array
     local new_modules_json
-    new_modules_json=$(printf '%s\n' "${_missing_mods[@]}" | jq -R . | jq -s .)
+    new_modules_json=$(printf '%s\n' "${missing_modules[@]}" | jq -R . | jq -s .)
     jq --argjson new "$new_modules_json" '.modules = (.modules + $new | unique)' "$manifest" > "$tmp_manifest"
 
     # Add new file paths to the files array
-    for mod in "${_missing_mods[@]}"; do
+    for mod in "${missing_modules[@]}"; do
       while IFS='|' read -r src target type template merge; do
         [ "$merge" = "true" ] && continue
         local full_target="${HOME}/.claude/${target}"
@@ -215,7 +226,7 @@ _install_missing() {
     done
 
     mv "$tmp_manifest" "$manifest"
-    ui_success "Updated manifest with ${#_missing_mods[@]} new module(s)"
+    ui_success "Updated manifest with ${#missing_modules[@]} new module(s)"
   fi
 
   echo ""
@@ -403,4 +414,10 @@ main() {
   _offer_reinstall
 }
 
-main "$@"
+# Only run main when executed directly (./update.sh, bash update.sh) - not
+# when sourced (tests/test-installer.sh sources this file to drive
+# _check_installed_drift/_install_missing directly, bash-3.2-only, without
+# triggering a live git fetch or the rest of the interactive flow).
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi
