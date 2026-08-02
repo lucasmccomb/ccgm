@@ -57,15 +57,17 @@ bash scripts/anchor_repo.sh <repo-path>
 ```
 
 Capture stdout and parse the single-line JSON: `repo_path`, `remote_url`
-(credential-stripped), `default_ref`, `anchor_sha`, `worktree`, `slug`, `behind`, `dirty`,
-`no_remote`, `visibility`.
+(credential-stripped), `default_ref`, `anchor_sha`, `worktree`, `slug`, `behind` (an integer,
+or `null` when the commit count could not be determined), `dirty`, `no_remote`, `visibility`.
 
 - **Exit 2** (unreachable repo, fetch failure, unsanitizable slug): stop and report the
   script's error. Nothing was created, so no teardown is owed yet.
 - **Success**: from this moment the teardown obligation exists - record `<repo-path>` and
   `<worktree>` so step 8 can always run, even if a later step fails.
-- **`dirty` or `behind` true**: proceed - the build runs against the pinned anchor, not the
-  working tree - and state the fact in the report (step 9).
+- **`dirty` true, or `behind` a positive count**: proceed - the build runs against the pinned
+  anchor, not the working tree - and state the fact in the report (step 9).
+- **`behind` is `null`**: proceed the same way, but never treat this as "not behind" - the
+  count is undetermined, not zero. Report it as such in step 9.
 - **Surface `visibility` immediately** to the user (`public` / `private` / `unknown`). For
   `private` or `unknown`, say now that the report will carry a do-not-publish-without-review
   warning.
@@ -259,8 +261,9 @@ never fatal; run it even if you believe a partial cleanup already happened.
 State plainly, in this order:
 
 - Artifact path (`$out/dist/{slug}.html`) and its byte size.
-- Anchor SHA and default ref; whether the source repo was `dirty` or `behind` at anchor time
-  (the map reflects the anchor, not the working tree).
+- Anchor SHA and default ref; whether the source repo was `dirty` or `behind` at anchor time,
+  or - if `behind` was `null` - that the behind-count could not be determined (the map
+  reflects the anchor, not the working tree).
 - Repo visibility. For `private` or `unknown`: **"do not publish this artifact without
   review - the source repo is not public"** - place the warning directly beside the embed
   snippet below.

@@ -26,7 +26,11 @@ FAKE_TOKEN = "ghp_fake"
 # --- helpers -----------------------------------------------------------------
 def make_env(home, path_prepend=None):
     home.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
+    # Scrubbed environment: every inherited GIT_* var dropped (an exported
+    # GIT_DIR/GIT_INDEX_FILE/GIT_WORK_TREE would redirect every git call the
+    # script makes), then the fixed hermetic set restored below - mirrors the
+    # enumerate-side git_env() fix (review finding 9).
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     # Hermeticity: an ambient $ORRERY_HOME must not redirect the default-root
     # assertions; the override test sets it explicitly.
     env.pop("ORRERY_HOME", None)
@@ -114,6 +118,39 @@ def stub_gh(home, body):
     gh = stub_dir / "gh"
     gh.write_text("#!/bin/sh\n" + body + "\n")
     gh.chmod(0o755)
+    return stub_dir
+
+
+def stub_git_subcommand_failure(home, subcommand, exit_code):
+    """Install a git stub on a PATH-prepend dir that exits `exit_code` when
+    invoked as exactly `git -C <repo> <subcommand> ...` and execs the real
+    git for every other invocation. Returns the stub dir. Used to force a
+    specific git subcommand to fail without corrupting repo state (review
+    finding 7a/7b need a failure the real git binary won't otherwise
+    produce).
+
+    The `$1 = -C` check only narrows the match to `-C`-prefixed calls; it
+    does NOT disambiguate between two `-C`-prefixed calls to the same
+    subcommand with different sub-actions. Concretely: every invocation
+    this test file makes through the git() helper is `-C`-prefixed, so
+    stubbing "worktree" would still catch worktree_count()'s own
+    `git -C <repo> worktree list --porcelain` alongside the script's
+    `worktree add` - that would need a `$4` check ("list" vs "add"), which
+    this helper does not have. Safe for the subcommands actually stubbed
+    today (config, rev-list): neither appears in any git() call this file
+    makes outside of anchor_repo.sh's own invocations."""
+    stub_dir = home / "stub-bin"
+    stub_dir.mkdir(parents=True, exist_ok=True)
+    real_git = shutil.which("git")
+    git_stub = stub_dir / "git"
+    git_stub.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "-C" ] && [ "$3" = "%s" ]; then\n'
+        "  exit %d\n"
+        "fi\n"
+        'exec "%s" "$@"\n' % (subcommand, exit_code, real_git)
+    )
+    git_stub.chmod(0o755)
     return stub_dir
 
 
@@ -261,6 +298,101 @@ def test_control_char_repo_path_exits_2_with_valid_json(tmp_path):
     data = json.loads(result.stdout.strip())
     assert "error" in data
     assert worktree_count(repo, env) == 1
+
+
+def test_control_char_tmpdir_worktree_path_exits_2_with_valid_json(tmp_path):
+    """Delta re-review residual: a TMPDIR containing a control character
+    flows into the worktree path via mktemp and must not reproduce the
+    exit-0-with-invalid-JSON shape the repo-path guard closed (finding 2)."""
+    env = make_env(tmp_path / "home")
+    repo = make_repo(tmp_path / "repo", env, origin=None)
+    bad_tmpdir = tmp_path / "bad\ntmp"
+    bad_tmpdir.mkdir(parents=True, exist_ok=True)
+    env["TMPDIR"] = str(bad_tmpdir)
+
+    result = run_anchor(env, repo)
+    assert result.returncode == 2
+    data = json.loads(result.stdout.strip())
+    assert "error" in data
+    assert worktree_count(repo, env) == 1
+
+
+def test_unreadable_repo_dir_exits_2_with_json_error(tmp_path):
+    """Review finding 6: cd into a repo dir with no read/execute permission
+    must fail through emit_error (exit 2 + JSON), not abort via set -e with a
+    bare non-2 exit and no JSON."""
+    env = make_env(tmp_path / "home")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o000)
+    try:
+        result = run_anchor(env, locked)
+        assert result.returncode == 2
+        data = json.loads(result.stdout.strip())
+        assert "error" in data
+    finally:
+        locked.chmod(0o755)
+
+
+def test_dash_prefixed_repo_arg_not_parsed_as_cd_option(tmp_path):
+    """Review finding 6: a repo dir name starting with `-` must not be read
+    by `cd` as an option flag; `cd --` fixes this."""
+    env = make_env(tmp_path / "home")
+    workdir = tmp_path / "somewhere"
+    workdir.mkdir()
+    repo = make_repo(workdir / "-dashrepo", env, origin=None)
+
+    result = run_anchor(env, "-dashrepo", cwd=workdir)
+    data = anchor_json(result)
+    assert data["repo_path"] == str(repo.resolve())
+    run_anchor(env, "--teardown", repo, data["worktree"])
+
+
+def test_mktemp_failure_exits_2_with_json_error(tmp_path):
+    """Review finding 6: an unwritable TMPDIR makes mktemp fail; the run must
+    fail through emit_error, not abort via set -e with a bare non-2 exit."""
+    env = make_env(tmp_path / "home")
+    repo = make_repo(tmp_path / "repo", env, origin=None)
+    readonly_tmp = tmp_path / "readonly-tmp"
+    readonly_tmp.mkdir()
+    readonly_tmp.chmod(0o500)
+    env["TMPDIR"] = str(readonly_tmp)
+    try:
+        result = run_anchor(env, repo)
+        assert result.returncode == 2
+        data = json.loads(result.stdout.strip())
+        assert "error" in data
+        assert worktree_count(repo, env) == 1
+    finally:
+        readonly_tmp.chmod(0o700)
+
+
+def test_git_config_read_failure_exits_2_with_json_error(tmp_path):
+    """Review finding 7a: a genuine git-config read failure (distinct from
+    "no origin configured", exit 1) must fail loudly through emit_error, not
+    silently fall into the no-remote path."""
+    env_home = tmp_path / "home"
+    stub = stub_git_subcommand_failure(env_home, "config", 3)
+    env = make_env(env_home, path_prepend=stub)
+    repo = make_repo(tmp_path / "repo", env, origin=None)
+
+    result = run_anchor(env, repo)
+    assert result.returncode == 2
+    data = json.loads(result.stdout.strip())
+    assert "error" in data
+
+
+def test_rev_list_failure_emits_behind_null_not_fabricated_zero(tmp_path):
+    """Review finding 7b: a rev-list failure must never fabricate behind: 0 -
+    it must be reported as null so callers can tell the count is unknown."""
+    env_home = tmp_path / "home"
+    stub = stub_git_subcommand_failure(env_home, "rev-list", 128)
+    env = make_env(env_home, path_prepend=stub)
+    repo = make_repo(tmp_path / "repo", env, origin=None)
+
+    data = anchor_json(run_anchor(env, repo))
+    assert data["behind"] is None
+    run_anchor(env, "--teardown", repo, data["worktree"])
 
 
 # --- slug rule (security C7) -------------------------------------------------
