@@ -33,7 +33,7 @@ The interactive installer handles everything from here.
 
 ### 2. Choose a preset (or pick modules individually)
 
-Five presets exist. The interactive menu currently offers four of them; **cloud-agent** is available via `./start.sh --preset cloud-agent` (see #919). You can also select modules one by one:
+Five presets exist, and the interactive menu offers all of them. You can also select modules one by one:
 
 | Preset | What you get | Best for |
 |--------|-------------|----------|

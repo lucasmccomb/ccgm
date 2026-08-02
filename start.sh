@@ -741,10 +741,15 @@ main() {
       ui_info "Available presets:"
       echo ""
 
-      # Show preset details
+      # Show preset details. preset_names accumulates in the same order the
+      # list is printed, so the ui_choose menu below can never drift out of
+      # sync with what was just shown (#919).
       local pf pname pcount pmods
+      local preset_names=()
       for pf in "${CCGM_ROOT}"/presets/*.json; do
+        [ -e "$pf" ] || continue # glob matched nothing; skip the literal pattern
         pname=$(basename "$pf" .json)
+        preset_names+=("$pname")
         if [ "$has_jq" = true ]; then
           pcount=$(jq -r 'length' "$pf")
           pmods=$(jq -r 'join(", ")' "$pf")
@@ -756,7 +761,12 @@ main() {
       done
       echo ""
 
-      PRESET_NAME=$(ui_choose "Select preset" "minimal" "standard" "full" "team")
+      if [ ${#preset_names[@]} -eq 0 ]; then
+        ui_error "No presets found in ${CCGM_ROOT}/presets/"
+        exit 1
+      fi
+
+      PRESET_NAME=$(ui_choose "Select preset" "${preset_names[@]}")
       while IFS= read -r mod; do
         [ -n "$mod" ] && SELECTED_MODULES+=("$mod")
       done < <(load_preset "$PRESET_NAME")

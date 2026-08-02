@@ -11,6 +11,9 @@ PASS=0
 FAIL=0
 ERRORS=()
 TMPDIR=""
+# Set only while Test 8's scratch preset file exists, so cleanup() below
+# removes it even if the test fails before reaching its own removal.
+SCRATCH_PRESET_FILE=""
 
 # --- Helpers ---
 pass() {
@@ -27,6 +30,9 @@ fail() {
 cleanup() {
   if [ -n "$TMPDIR" ] && [ -d "$TMPDIR" ]; then
     rm -rf "$TMPDIR"
+  fi
+  if [ -n "$SCRATCH_PRESET_FILE" ] && [ -f "$SCRATCH_PRESET_FILE" ]; then
+    rm -f "$SCRATCH_PRESET_FILE"
   fi
 }
 trap cleanup EXIT
@@ -655,6 +661,177 @@ if grep -q "ERROR:" "$arity_stderr"; then
 else
   fail "ui_choose --default with no value did not print an 'ERROR:'-prefixed message: $(cat "$arity_stderr")"
 fi
+echo ""
+
+# ============================================================
+# Test 10: interactive preset menu and --help preset list are both
+# derived from presets/*.json (#919)
+#
+# Before the fix, start.sh printed every presets/*.json file but then
+# hardcoded both the ui_choose "Select preset" menu AND the --help
+# "--preset <name>" line to "minimal standard full team" - cloud-agent
+# was advertised in the printed list but unreachable from either. This
+# proves both derived lists come from the same glob that prints the
+# list (so neither can diverge again), and covers the degenerate case
+# of a preset filename containing a space (the glob must not
+# word-split it into multiple entries).
+# ============================================================
+echo "--- Test 10: interactive preset menu and --help match presets/*.json ---"
+
+TEST10_HOME="$TMPDIR/test10"
+mkdir -p "$TEST10_HOME/.claude"
+export HOME="$TEST10_HOME"
+export CCGM_CODE_DIR="$TEST10_HOME/code"
+export CCGM_USERNAME=testuser
+export CCGM_TIMEZONE=UTC
+export CCGM_DEFAULT_MODE=ask
+
+# Add a scratch preset with a space in its filename for the duration of
+# this test, so the menu-vs-presets comparison also exercises the
+# space-handling requirement. SCRATCH_PRESET_FILE is removed by the
+# script-wide cleanup() trap even if this test fails before reaching
+# its own removal below.
+scratch_preset="$REPO_ROOT/presets/zz scratch test.json"
+echo '["autonomy"]' > "$scratch_preset"
+SCRATCH_PRESET_FILE="$scratch_preset"
+
+# Expected menu = every presets/*.json basename, in the same glob order
+# start.sh iterates them in when it prints the list.
+expected10_presets=()
+for pf in "$REPO_ROOT"/presets/*.json; do
+  [ -e "$pf" ] || continue
+  expected10_presets+=("$(basename "$pf" .json)")
+done
+
+# Capture the exact arguments start.sh passes to `ui_choose "Select
+# preset" ...` via xtrace. CCGM_NON_INTERACTIVE makes ui_choose a
+# pass-through that returns options[0] without touching a tty, so this
+# is safe to run headlessly - we only need the trace to see the FULL
+# menu it was offered, not what it happened to auto-pick. (The
+# auto-picked preset, whichever one sorts first, may go on to fail
+# later in this same run for unrelated reasons - e.g. a preset that
+# includes a module with a required, unseeded placeholder - so this
+# test does not assert on the installer's overall exit code.)
+trace10="$TMPDIR/test10-trace.log"
+bash -x "$REPO_ROOT/start.sh" --scope global </dev/null >/dev/null 2>"$trace10" || true
+
+menu10_line=$(grep -m1 "ui_choose 'Select preset'" "$trace10" || true)
+if [ -n "$menu10_line" ]; then
+  pass "Captured the 'Select preset' ui_choose invocation"
+else
+  fail "Did not find a 'Select preset' ui_choose invocation in the trace"
+fi
+
+menu10_presets=()
+if [ -n "$menu10_line" ]; then
+  menu10_args_src="${menu10_line#*ui_choose }"
+  menu10_opts=()
+  eval "menu10_opts=($menu10_args_src)"
+  # First element is the prompt string ("Select preset"); the rest are
+  # the actual menu options.
+  menu10_presets=("${menu10_opts[@]:1}")
+fi
+
+if [ "${#menu10_presets[@]}" -eq "${#expected10_presets[@]}" ]; then
+  pass "Preset menu offers ${#menu10_presets[@]} options (matches presets/*.json count)"
+else
+  fail "Preset menu offers ${#menu10_presets[@]} options, expected ${#expected10_presets[@]} (${expected10_presets[*]})"
+fi
+
+menu10_match=true
+for i in "${!expected10_presets[@]}"; do
+  if [ "${menu10_presets[$i]:-}" != "${expected10_presets[$i]}" ]; then
+    menu10_match=false
+  fi
+done
+if [ "$menu10_match" = true ]; then
+  pass "Preset menu options exactly match presets/*.json basenames, in glob order (${expected10_presets[*]})"
+else
+  fail "Preset menu options (${menu10_presets[*]:-none}) do not match presets/*.json (${expected10_presets[*]})"
+fi
+
+# The exact bug #919 reported: cloud-agent is printed but not selectable.
+menu10_cloud_agent_present=false
+for opt in "${menu10_presets[@]}"; do
+  [ "$opt" = "cloud-agent" ] && menu10_cloud_agent_present=true
+done
+if [ "$menu10_cloud_agent_present" = true ]; then
+  pass "cloud-agent is present in the interactive preset menu"
+else
+  fail "cloud-agent is missing from the interactive preset menu (#919 regression)"
+fi
+
+# The scratch preset's space-bearing name must survive intact as a
+# single menu option, not get word-split.
+scratch_present=false
+for opt in "${menu10_presets[@]}"; do
+  [ "$opt" = "zz scratch test" ] && scratch_present=true
+done
+if [ "$scratch_present" = true ]; then
+  pass "A preset filename containing a space appears intact as a single menu option"
+else
+  fail "A preset filename containing a space did not appear intact in the menu (${menu10_presets[*]:-none})"
+fi
+
+# --help's preset list is a second surface with the exact same class of
+# bug (#919 follow-up): it must also be derived from presets/*.json, not
+# a second hand-maintained list. Reuses the scratch preset still in
+# place above.
+help10_out=$("$REPO_ROOT/start.sh" --help 2>&1)
+help10_line=$(echo "$help10_out" | grep -F -- "--preset <name>" || true)
+
+help10_presets=()
+if [ -n "$help10_line" ]; then
+  # Extract the parenthesized, comma-separated list, e.g.
+  # "  --preset <name>     Use preset (cloud-agent, full, minimal, ...)"
+  help10_inner="${help10_line#*\(}"
+  help10_inner="${help10_inner%\)*}"
+  help10_raw=()
+  IFS=',' read -ra help10_raw <<< "$help10_inner"
+  for help10_item in "${help10_raw[@]}"; do
+    # Trim leading/trailing whitespace left by the ", " separator.
+    help10_item="${help10_item#"${help10_item%%[![:space:]]*}"}"
+    help10_item="${help10_item%"${help10_item##*[![:space:]]}"}"
+    help10_presets+=("$help10_item")
+  done
+fi
+
+if [ -n "$help10_line" ]; then
+  pass "Found the --help '--preset <name>' line"
+else
+  fail "Did not find a '--preset <name>' line in --help output"
+fi
+
+if [ "${#help10_presets[@]}" -eq "${#expected10_presets[@]}" ]; then
+  pass "--help lists ${#help10_presets[@]} presets (matches presets/*.json count)"
+else
+  fail "--help lists ${#help10_presets[@]} presets, expected ${#expected10_presets[@]} (${expected10_presets[*]})"
+fi
+
+help10_match=true
+for i in "${!expected10_presets[@]}"; do
+  if [ "${help10_presets[$i]:-}" != "${expected10_presets[$i]}" ]; then
+    help10_match=false
+  fi
+done
+if [ "$help10_match" = true ]; then
+  pass "--help preset list exactly matches presets/*.json basenames, in glob order (${expected10_presets[*]})"
+else
+  fail "--help preset list (${help10_presets[*]:-none}) does not match presets/*.json (${expected10_presets[*]})"
+fi
+
+help10_cloud_agent_present=false
+for opt in "${help10_presets[@]}"; do
+  [ "$opt" = "cloud-agent" ] && help10_cloud_agent_present=true
+done
+if [ "$help10_cloud_agent_present" = true ]; then
+  pass "cloud-agent is present in the --help preset list"
+else
+  fail "cloud-agent is missing from the --help preset list (#919 regression)"
+fi
+
+rm -f "$scratch_preset"
+SCRATCH_PRESET_FILE=""
 echo ""
 
 # Restore HOME

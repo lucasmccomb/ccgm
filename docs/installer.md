@@ -42,7 +42,7 @@ Choose where to install:
 
 ### Step 5: Module selection
 
-Choose a preset (minimal, standard, full, team) or select individual modules from a checkbox menu. The menu lists stable modules first, with beta modules (labelled `[BETA]`) at the end.
+Choose a preset (the menu lists every file under `presets/`: minimal, standard, full, team, cloud-agent) or select individual modules from a checkbox menu. The menu lists stable modules first, with beta modules (labelled `[BETA]`) at the end.
 
 ### Step 6: Dependency resolution
 
@@ -168,6 +168,9 @@ The installer is split into library files in `lib/`:
 | `lib/template.sh` | Template variable expansion via `sed`. Handles macOS and Linux `sed` differences. |
 | `lib/merge.sh` | Deep JSON merge for `settings.json` using `jq`. Special handling for arrays and hook objects. |
 | `lib/backup.sh` | Timestamped backup and restore of `~/.claude/` contents. |
+| `lib/mcp-migrate.sh` | Migrates a legacy `~/.claude/mcp.json` (unread by current Claude Code) to `~/.claude.json` via `claude mcp add-json --scope user`. Idempotent; backs up the legacy file with a `.migrated.bak` suffix on success. |
+| `lib/repair.sh` | Prunes dangling symlinks left under `~/.claude/` by module renames or moved files, so a stale link at an old target doesn't break commands like `/startup`. |
+| `lib/statusline.sh` | Claude Code status line script: model, directory + branch, context usage, and 5h/7d rate limits on one line. |
 
 ## Non-interactive mode
 
