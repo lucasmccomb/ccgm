@@ -349,12 +349,17 @@ else
     total_lines=$(wc -l < "$WORKFLOW_FILE" | tr -d ' ')
 
     # Job boundaries: lines shaped like "  <job-name>:" (exactly 2-space
-    # indent, nothing after the colon) that appear after the top-level
-    # "jobs:" key. Each one starts a new job; the next one (or EOF) ends it.
-    # This scopes the check to per-job step lists rather than treating the
-    # file as one flat blob, so a suite wired into ubuntu but not macos is
-    # caught -- not silently passed by a whole-file grep.
+    # indent, colon, then only whitespace and/or a trailing "# comment")
+    # that appear after the top-level "jobs:" key. Each one starts a new
+    # job; the next one (or EOF) ends it. This scopes the check to per-job
+    # step lists rather than treating the file as one flat blob, so a suite
+    # wired into ubuntu but not macos is caught -- not silently passed by a
+    # whole-file grep. The trailing-comment tolerance matters: without it,
+    # a routine "test-macos: # runs on macOS" edit drops a job boundary and
+    # merges two jobs' ranges into one, silently disabling the per-job
+    # check it is supposed to run (see the job-count assertion below).
     ranges=""
+    job_names=""
     prev=""
     while IFS= read -r ln; do
       if [ -n "$prev" ]; then
@@ -363,17 +368,35 @@ else
 "
       fi
       prev="$ln"
-    done < <(tail -n "+$((jobs_line + 1))" "$WORKFLOW_FILE" | grep -n '^  [A-Za-z0-9_-]*:[[:space:]]*$' | cut -d: -f1 | while IFS= read -r n; do echo $((n + jobs_line)); done)
+    done < <(tail -n "+$((jobs_line + 1))" "$WORKFLOW_FILE" | grep -nE '^  [A-Za-z0-9_-]+:[[:space:]]*(#.*)?$' | cut -d: -f1 | while IFS= read -r n; do echo $((n + jobs_line)); done)
     if [ -n "$prev" ]; then
       ranges="${ranges}${prev}:${total_lines}
 "
     fi
 
+    while IFS= read -r range; do
+      [ -z "$range" ] && continue
+      start="${range%%:*}"
+      name=$(sed -n "${start}p" "$WORKFLOW_FILE" | sed 's/^[[:space:]]*//; s/:.*$//')
+      job_names="$job_names $name"
+    done < <(printf '%s' "$ranges")
+
     job_count=$(printf '%s\n' "$ranges" | grep -c ':' || true)
-    if [ "$job_count" -eq 0 ]; then
-      fail "test.yml: could not locate any job definitions under 'jobs:' (unexpected format)"
+    # Load-bearing check: assert a floor, not just "> 0". A job-boundary
+    # parsing regression (trailing comment, changed indent, a run: block
+    # that happens to contain a job-key-shaped line, ...) degrades the
+    # per-job scoping silently -- every suite present anywhere in the file
+    # then satisfies a single merged range and the guard reports all-green,
+    # exactly the whole-file-grep weakness this check exists to prevent.
+    # Failing loud here, naming what was actually detected, converts that
+    # class of regression into a red test instead of manufactured
+    # confidence. Raise MIN_EXPECTED_CI_JOBS if a legitimate third job is
+    # ever added; do not hardcode an exact-equals that would break on that.
+    MIN_EXPECTED_CI_JOBS=2
+    if [ "$job_count" -lt "$MIN_EXPECTED_CI_JOBS" ]; then
+      fail "test.yml: expected >= $MIN_EXPECTED_CI_JOBS CI job(s) under 'jobs:', found $job_count (detected:${job_names:- none}) -- job-boundary parsing may be broken (e.g. a trailing comment or unexpected indent on a job key line)"
     else
-      pass "test.yml: found $job_count job definition(s) under 'jobs:'"
+      pass "test.yml: found $job_count job definition(s) under 'jobs:' (${job_names# })"
 
       for suite_path in "$SCRIPT_DIR"/test-*.sh; do
         [ -f "$suite_path" ] || continue
