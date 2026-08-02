@@ -53,7 +53,7 @@ The installer asks for a few values up front, before you pick modules:
 - **Code directory** - where your projects live (default: `~/code`)
 - **Timezone** - auto-detected from system settings
 
-These three are always asked, regardless of which modules you select. After module selection, the installer asks any further questions the chosen modules define - currently just **Permission mode** (`ask` or `dontAsk`), from the **settings** module.
+These three are always asked, regardless of which modules you select. After module selection, the installer asks whatever further questions the chosen modules declare in their own `configPrompts` - the set depends entirely on what you picked. For example: permission mode (`ask` or `dontAsk`) from `settings`, protected branch names from `hooks`, or SSH connection details from `remote-server`. See [Installer - Step 7](installer.md#step-7-module-config-prompts) for how these are collected.
 
 ### 4. Restart Claude Code
 
