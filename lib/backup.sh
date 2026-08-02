@@ -1,6 +1,97 @@
 #!/usr/bin/env bash
 # CCGM - Backup and restore
 
+# --- Legacy hardcoded backup targets ---
+# Pre-dynamic-derivation coverage. Kept as a fallback (modules dir missing)
+# and unioned into the derived set so no prior coverage ever regresses.
+_backup_legacy_paths() {
+  printf '%s\n' \
+    "settings.json" \
+    "CLAUDE.md" \
+    "rules" \
+    "commands" \
+    "hooks" \
+    "multi-agent-system.md" \
+    "github-repo-protocols.md"
+}
+
+# --- Resolve the CCGM modules directory ---
+# Prefers CCGM_ROOT (set by start.sh/uninstall.sh) when it points at a real
+# modules dir; falls back to deriving the repo root from this file's own
+# location so backup.sh works correctly even when CCGM_ROOT is unset (e.g.
+# sourced directly by a test). Prints nothing and returns 1 if neither
+# resolves to an existing modules/ directory.
+_backup_modules_dir() {
+  if [ -n "${CCGM_ROOT:-}" ] && [ -d "${CCGM_ROOT}/modules" ]; then
+    echo "${CCGM_ROOT}/modules"
+    return 0
+  fi
+
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -d "${script_dir}/../modules" ]; then
+    (cd "${script_dir}/../modules" && pwd)
+    return 0
+  fi
+
+  return 1
+}
+
+# --- Derive the set of CCGM-managed top-level backup paths ---
+# Usage: managed_backup_paths
+# Prints one deduped, sorted top-level path per line, derived from the first
+# path segment of every module.json's files[].target (e.g.
+# "skills/orrery/SKILL.md" -> "skills"), unioned with the legacy hardcoded
+# list so no previously-covered path ever regresses. Falls back to the
+# legacy list alone if the modules directory cannot be found -- failing
+# closed to "back up less" would silently lose user data, so on any doubt
+# we fail open to the known-safe legacy set instead.
+managed_backup_paths() {
+  local modules_dir
+  if ! modules_dir="$(_backup_modules_dir)"; then
+    _backup_legacy_paths
+    return 0
+  fi
+
+  local have_jq=false
+  if command -v jq &>/dev/null; then
+    have_jq=true
+  fi
+
+  local manifest
+  local -a targets=()
+  local t
+
+  for manifest in "${modules_dir}"/*/module.json; do
+    [ -f "$manifest" ] || continue
+
+    if [ "$have_jq" = true ]; then
+      while IFS= read -r t; do
+        [ -n "$t" ] && targets+=("$t")
+      done < <(jq -r '.files // {} | to_entries[]? | .value.target // empty' "$manifest" 2>/dev/null)
+    else
+      # Minimal fallback: module.json's only "target" keys are file-entry
+      # targets, so a plain extraction is safe without a full JSON parser.
+      while IFS= read -r t; do
+        [ -n "$t" ] && targets+=("$t")
+      done < <(grep -o '"target"[[:space:]]*:[[:space:]]*"[^"]*"' "$manifest" | sed 's/^"target"[[:space:]]*:[[:space:]]*"//; s/"$//')
+    fi
+  done
+
+  # Union with the legacy list so removal/renaming of a module never
+  # silently drops backup coverage for a path it used to own.
+  while IFS= read -r t; do
+    [ -n "$t" ] && targets+=("$t")
+  done < <(_backup_legacy_paths)
+
+  local -a tops=()
+  for t in "${targets[@]}"; do
+    tops+=("${t%%/*}")
+  done
+
+  printf '%s\n' "${tops[@]}" | sort -u
+}
+
 # --- Resolve the backup base for a given install target ---
 # Backups are scoped to the install target so a project-scope (.claude/) install
 # never writes to or restores from the global ~/.claude/backups (and vice-versa).
@@ -64,17 +155,16 @@ create_backup() {
     return 0
   fi
 
-  # Check for existing CCGM-managed files
+  # Check for existing CCGM-managed files. The set of paths is derived from
+  # every installed module's manifest (see managed_backup_paths), so newer
+  # module targets like skills/, lib/, agents/, bin/ are covered without
+  # needing a hardcoded list update per module.
   local has_files=false
-  local check_paths=(
-    "settings.json"
-    "CLAUDE.md"
-    "rules"
-    "commands"
-    "hooks"
-    "multi-agent-system.md"
-    "github-repo-protocols.md"
-  )
+  local -a check_paths=()
+  local p
+  while IFS= read -r p; do
+    [ -n "$p" ] && check_paths+=("$p")
+  done < <(managed_backup_paths)
 
   for p in "${check_paths[@]}"; do
     if [ -e "${target_dir}/${p}" ]; then

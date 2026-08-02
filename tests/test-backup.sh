@@ -378,6 +378,193 @@ else
 fi
 echo ""
 
+# --- Test 11: Dynamic coverage backs up skills/ and agents/ (issue #917 case) ---
+echo "--- Test 11: Dynamic coverage - skills/ and agents/ ---"
+
+DYN_TARGET="$TMPDIR/dyn-claude"
+mkdir -p "$DYN_TARGET/skills/orrery"
+mkdir -p "$DYN_TARGET/agents"
+echo "# Orrery skill" > "$DYN_TARGET/skills/orrery/SKILL.md"
+echo "# Orrery scout agent" > "$DYN_TARGET/agents/orrery-scout.md"
+
+dyn_backup=$(create_backup "$DYN_TARGET")
+
+if [ -f "$dyn_backup/skills/orrery/SKILL.md" ]; then
+  pass "skills/orrery/SKILL.md backed up"
+else
+  fail "skills/orrery/SKILL.md not found in backup"
+fi
+
+if [ -f "$dyn_backup/agents/orrery-scout.md" ]; then
+  pass "agents/orrery-scout.md backed up"
+else
+  fail "agents/orrery-scout.md not found in backup"
+fi
+echo ""
+
+# --- Test 12: lib/, bin/, output-styles/ backed up when present ---
+echo "--- Test 12: lib/, bin/, output-styles/ backed up ---"
+
+LBO_TARGET="$TMPDIR/lbo-claude"
+mkdir -p "$LBO_TARGET/lib" "$LBO_TARGET/bin" "$LBO_TARGET/output-styles"
+echo "# lib file" > "$LBO_TARGET/lib/helper.sh"
+echo "# bin file" > "$LBO_TARGET/bin/tool.sh"
+echo "# style file" > "$LBO_TARGET/output-styles/custom.md"
+
+lbo_backup=$(create_backup "$LBO_TARGET")
+
+if [ -f "$lbo_backup/lib/helper.sh" ]; then
+  pass "lib/ backed up"
+else
+  fail "lib/ not found in backup"
+fi
+
+if [ -f "$lbo_backup/bin/tool.sh" ]; then
+  pass "bin/ backed up"
+else
+  fail "bin/ not found in backup"
+fi
+
+if [ -f "$lbo_backup/output-styles/custom.md" ]; then
+  pass "output-styles/ backed up"
+else
+  fail "output-styles/ not found in backup"
+fi
+echo ""
+
+# --- Test 13: restore_backup round-trips the newly-covered paths ---
+echo "--- Test 13: restore round-trips skills/, agents/, lib/, bin/ ---"
+
+RESTORE_DYN="$TMPDIR/restored-dyn"
+mkdir -p "$RESTORE_DYN"
+restore_backup "$dyn_backup" "$RESTORE_DYN"
+
+if [ -f "$RESTORE_DYN/skills/orrery/SKILL.md" ] && [ "$(cat "$RESTORE_DYN/skills/orrery/SKILL.md")" = "# Orrery skill" ]; then
+  pass "Restored skills/orrery/SKILL.md content matches original"
+else
+  fail "Restored skills/orrery/SKILL.md missing or content differs"
+fi
+
+if [ -f "$RESTORE_DYN/agents/orrery-scout.md" ] && [ "$(cat "$RESTORE_DYN/agents/orrery-scout.md")" = "# Orrery scout agent" ]; then
+  pass "Restored agents/orrery-scout.md content matches original"
+else
+  fail "Restored agents/orrery-scout.md missing or content differs"
+fi
+
+RESTORE_LBO="$TMPDIR/restored-lbo"
+mkdir -p "$RESTORE_LBO"
+restore_backup "$lbo_backup" "$RESTORE_LBO"
+
+if [ -f "$RESTORE_LBO/lib/helper.sh" ] && [ "$(cat "$RESTORE_LBO/lib/helper.sh")" = "# lib file" ]; then
+  pass "Restored lib/helper.sh content matches original"
+else
+  fail "Restored lib/helper.sh missing or content differs"
+fi
+
+if [ -f "$RESTORE_LBO/bin/tool.sh" ] && [ "$(cat "$RESTORE_LBO/bin/tool.sh")" = "# bin file" ]; then
+  pass "Restored bin/tool.sh content matches original"
+else
+  fail "Restored bin/tool.sh missing or content differs"
+fi
+echo ""
+
+# --- Test 14: retention still prunes to N with dynamic-coverage backups ---
+echo "--- Test 14: clean_backups prunes dynamic-coverage backups to N ---"
+
+RET_TARGET="$TMPDIR/ret-claude"
+RET_BASE="$RET_TARGET/backups"
+mkdir -p "$RET_BASE"
+rm -rf "$RET_BASE"/ccgm-*
+
+for i in 1 2 3 4 5 6; do
+  bdir="$RET_BASE/ccgm-2026060${i}-120000"
+  mkdir -p "$bdir/skills"
+  echo "skill snapshot $i" > "$bdir/skills/test.md"
+done
+
+ret_count_before=$(ls -1d "$RET_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ')
+if [ "$ret_count_before" -eq 6 ]; then
+  pass "Created 6 dynamic-coverage backups"
+else
+  fail "Expected 6 backups before pruning, found $ret_count_before"
+fi
+
+clean_backups 5 "$RET_TARGET"
+
+ret_count_after=$(ls -1d "$RET_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ')
+if [ "$ret_count_after" -eq 5 ]; then
+  pass "clean_backups(5) pruned dynamic-coverage backups to 5"
+else
+  fail "clean_backups(5) kept $ret_count_after backups, expected 5"
+fi
+
+if [ -d "$RET_BASE/ccgm-20260606-120000" ] && [ -f "$RET_BASE/ccgm-20260606-120000/skills/test.md" ]; then
+  pass "Newest dynamic-coverage backup (skills/) preserved after pruning"
+else
+  fail "Newest dynamic-coverage backup not preserved correctly"
+fi
+echo ""
+
+# --- Test 15: project-scope backups with dynamic coverage stay scoped ---
+echo "--- Test 15: project-scope backup isolation with dynamic coverage ---"
+
+DYN_PROJECT_DIR="$TMPDIR/dyn-project"
+DYN_PROJECT_TARGET="$DYN_PROJECT_DIR/.claude"
+mkdir -p "$DYN_PROJECT_TARGET/skills/orrery"
+echo "# project orrery skill" > "$DYN_PROJECT_TARGET/skills/orrery/SKILL.md"
+
+rm -rf "$HOME/.claude/backups"/ccgm-*
+dyn_project_backup=$(create_backup "$DYN_PROJECT_TARGET")
+
+if [[ "$dyn_project_backup" == "$DYN_PROJECT_TARGET/backups/"* ]]; then
+  pass "Dynamic-coverage project backup written under project scope"
+else
+  fail "Dynamic-coverage project backup not scoped to project target: $dyn_project_backup"
+fi
+
+if [ -f "$dyn_project_backup/skills/orrery/SKILL.md" ]; then
+  pass "Project-scope skills/orrery/SKILL.md backed up"
+else
+  fail "Project-scope skills/orrery/SKILL.md not found in backup"
+fi
+
+# find (not ls) here: the glob matches nothing in the expected case, and
+# under `set -euo pipefail` an `ls` with no matches would abort the script.
+global_backup_count=$(find "$HOME/.claude/backups" -maxdepth 1 -type d -name 'ccgm-*' 2>/dev/null | wc -l | tr -d ' ')
+if [ "$global_backup_count" -eq 0 ]; then
+  pass "No global-scope backup created for a project-scope backup"
+else
+  fail "Project-scope backup unexpectedly created $global_backup_count global-scope backup(s)"
+fi
+echo ""
+
+# --- Test 16: non-CCGM directories are not swept into the backup ---
+# Pins the manifest-derivation design decision: the backup set comes from
+# module.json targets, not a directory listing of the target dir. This is
+# what keeps ~/.claude/projects/ (session transcripts, memory) out of backups.
+echo "--- Test 16: non-CCGM directory (projects/) is not backed up ---"
+
+NONCCGM_TARGET="$TMPDIR/nonccgm-claude"
+mkdir -p "$NONCCGM_TARGET/skills"
+mkdir -p "$NONCCGM_TARGET/projects/some-project"
+echo "# real skill" > "$NONCCGM_TARGET/skills/test.md"
+echo "session transcript data" > "$NONCCGM_TARGET/projects/some-project/session.jsonl"
+
+nonccgm_backup=$(create_backup "$NONCCGM_TARGET")
+
+if [ -f "$nonccgm_backup/skills/test.md" ]; then
+  pass "CCGM-managed skills/ backed up"
+else
+  fail "CCGM-managed skills/ not found in backup"
+fi
+
+if [ ! -e "$nonccgm_backup/projects" ]; then
+  pass "Non-CCGM projects/ directory excluded from backup"
+else
+  fail "Non-CCGM projects/ directory was unexpectedly backed up"
+fi
+echo ""
+
 # --- Summary ---
 echo "==================================="
 echo "  Results: $PASS passed, $FAIL failed"
