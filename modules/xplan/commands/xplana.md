@@ -42,7 +42,7 @@ Autonomous mode affects these xplan phases:
 | Phase | What changes in autonomous mode |
 |-------|--------------------------------|
 | 0.4.0 (Source Freshness Guard) | Runs automatically with NO prompt when `--repo` is set: fetch, pin the origin default-branch anchor, expose a temp anchor worktree, and verify every repo fact against it. Never fast-forwards the user's clone. Skipped entirely for greenfield (no `--repo`). |
-| 0.5 (Discovery Interview) | Skipped. Defaults inferred per Phase 0.5 Inference Rules; recorded in `decisions.md`. |
+| 0.5 (Discovery Interview) | Skipped. Defaults inferred per Phase 0.5 Inference Rules; recorded in `decisions.md`. **Except Q8 (live-testing authorization)**, which cannot be inferred: plan §8.6 records `NOT AUTHORIZED` and 6.A surfaces it. |
 | 1.0 (Research Config) | Locked to Full - all 7 research agents fire. |
 | 1.5 (Research Review) | Skipped mid-flow; summary stashed for final walkthrough. |
 | 2 (Naming Ideation) | Runs silently. Top pick auto-selected; top-5 surfaced in final walkthrough. |
@@ -69,6 +69,7 @@ Autonomous mode is where these four plan tenets matter most: there is no human i
 - It does NOT skip research, naming, the standard reviews, the self-review loop, or the Phase 5.7 adversarial review sequence. Autonomous is the *deep* mode, not the fast one — the finished plan has survived 6 reviews (3 standard + 3 sequential adversarial) before you see it.
 - It does NOT skip the four execution tenets above. The adversarial review enforces minimal edge-bucketed human work (T1), a follow-up-completion contract (T2), enough decision context to direct unplanned work without a human (T3), and a comprehensive autonomous E2E suite over all testable surfaces (T4) — expanding the plan when any is missing.
 - It does NOT skip the final execution gate. 6.5 is non-bypassable.
+- It does NOT grant live-testing permission. Autonomous planning can infer a tech stack; it cannot approve running app launches, dictation, synthetic input, focus changes, machine-global input/audio overrides, or mic capture on the user's behalf. Plan §8.6 records `NOT AUTHORIZED`, the 6.A walkthrough shows the affected steps, and `/etp` or `/xplan-resume` holds each one and asks before running it. See `~/.claude/rules/live-testing-guard.md`.
 - It does NOT automatically proceed to execution. The default recommendation at 6.5 in autonomous mode leans toward "save plan, don't execute yet" so the user can review before committing to multi-agent work.
 - It does NOT leave a worktree behind on that gate-stop path. When `--repo` is set, Phase 0.4.0 creates a temp anchor worktree; because autonomous mode usually stops at the 6.5 gate *without* executing, run the Phase 8.7 worktree teardown on exit anyway (it is explicitly early-exit-safe). If any execution worktrees were created, `/worktree-sweep` reclaims the leaks. Nothing worktree-shaped outlives the run — see `git-worktrees.md`.
 

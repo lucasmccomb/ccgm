@@ -23,7 +23,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 77 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 78 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 
@@ -55,7 +55,7 @@ Steps:
 3. Read the available presets: ls ~/code/ccgm/presets/
    Available presets and what they include:
      - minimal  : global-claude-md, autonomy, git-workflow
-     - standard : the above + identity, hooks, branch-guard, ask-context, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline
+     - standard : the above + identity, hooks, branch-guard, ask-context, model-vetting, live-testing-guard, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline
      - team     : standard core + github-protocols, code-quality, systematic-debugging, verification
      - cloud-agent : large set for power users running autonomous agents
      - full     : every stable module
@@ -133,10 +133,10 @@ For a quick install with a preset:
 | Preset | Modules | Best For |
 |--------|---------|----------|
 | **minimal** | global-claude-md, autonomy, git-workflow | Getting started |
-| **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, ask-context, model-vetting, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline | Most users |
+| **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, ask-context, model-vetting, live-testing-guard, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline | Most users |
 | **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, ask-context, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, writing-system, ce-review, pr-feedback, pr-review-toolkit, document-review, compound-knowledge, skill-authoring, subagent-patterns (+ deps) | Teams |
 | **cloud-agent** | 55 modules | Autonomous/headless agents |
-| **full** | 73 modules | Power users |
+| **full** | 74 modules | Power users |
 
 ### Other install options
 
@@ -217,6 +217,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **ideate** | commands | `/ideate` | Structured ideation framework: Socratic interview to refine ideas to 95% clarity, then hand off to /deepresearch or /xplan | - |
 | **identity** | core | - | Two foundational context files: soul.md (AI personality and philosophy) and human-context.md (who you are, your goals, how you work) | - |
 | **launch** | workflow | `/launch` | Takes a one-page spec to a deployed Cloudflare Pages site, stopping only for the Connect-to-Git dashboard step | cloudflare, git-workflow, docs-for-agents |
+| **live-testing-guard** | core | - | Live/UI/app testing runs only on the dedicated runner machine, never the dev machine, and only under a permission grant recorded in the plan | - |
 | **make-interfaces-feel-better** | patterns | `/make-interfaces-feel-better` | Design-engineering details that compound into polished interfaces. Model-invoked skill covering design direction, typography, surfaces, animations, performance | - |
 | **mcp-development** | tech-specific | - | Building MCP servers: project structure, tool design, error handling, testing, evaluation patterns | - |
 | **model-vetting** | core | - | Security vetting gate for new AI models: weights provenance, format safety, license/data terms, serving path, staged agentic access | - |
@@ -376,7 +377,7 @@ The `docs/` directory contains comprehensive documentation:
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 77 modules |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 78 modules |
 | [Commands Reference](docs/commands.md) | All 84 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 31 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |

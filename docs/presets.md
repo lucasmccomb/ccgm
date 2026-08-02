@@ -19,7 +19,7 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **Best for**: Most individual developers. The recommended starting point.
 
-**Modules (15)**:
+**Modules (16)**:
 - Everything in **minimal**, plus:
 - `identity` - two foundational context files: soul.md and human-context.md
 - `settings` - base `settings.json` with 800+ pre-configured tool permissions
@@ -27,6 +27,7 @@ Presets are named collections of modules for quick installation. Each preset is 
 - `branch-guard` - hard PreToolUse gate: no edits or git mutations while HEAD is on the default branch
 - `ask-context` - hard PreToolUse gate: no AskUserQuestion whose decision context is invisible to the user
 - `model-vetting` - security vetting gate for new AI models before they touch the harness
+- `live-testing-guard` - live/UI/app testing runs only on the dedicated runner machine, never the dev machine
 - `statusline` - custom status line for Claude Code sessions
 - `commands-core` - essential slash commands (`/commit`, `/pr`, `/cpm`, `/gs`, `/ghi`)
 - `commands-utility` - utility commands (`/cws-submit`, `/ccgm-sync`, `/user-test`)
@@ -41,7 +42,7 @@ Presets are named collections of modules for quick installation. Each preset is 
 **Best for**: Teams with shared repositories who want consistent practices across contributors.
 
 **Modules (22)**:
-- Everything in **standard** (minus `identity`, `commands-utility`, `model-vetting`, `self-improving`, and `statusline`), plus:
+- Everything in **standard** (minus `identity`, `commands-utility`, `model-vetting`, `live-testing-guard`, `self-improving`, and `statusline`), plus:
 - `github-protocols` - issue-first workflow, PR conventions, label taxonomy, code review standards
 - `code-quality` - code standards, testing requirements, error handling, security, build verification
 - `systematic-debugging` - structured 4-phase debugging methodology
@@ -55,7 +56,7 @@ Presets are named collections of modules for quick installation. Each preset is 
 
 **Best for**: Power users who want the complete CCGM experience, including multi-agent coordination, brand research, and tech-specific guides.
 
-**Modules (73)**: Every stable module — `full` is defined as the set of all modules whose `module.json` status is not `beta` or `deprecated`. This includes **autoheal** (continuous self-improvement; opt-in real-time alerts and auto-apply), `cloud-dispatch`, and **orrery** (`/orrery` codebase system maps). The only modules omitted are the beta ones (`plugin-marketplace`, `relevance-injection`, `dreaming`) and the deprecated `agent-manager`; install those individually via the module selector if you need them.
+**Modules (74)**: Every stable module — `full` is defined as the set of all modules whose `module.json` status is not `beta` or `deprecated`. This includes **autoheal** (continuous self-improvement; opt-in real-time alerts and auto-apply), `cloud-dispatch`, and **orrery** (`/orrery` codebase system maps). The only modules omitted are the beta ones (`plugin-marketplace`, `relevance-injection`, `dreaming`) and the deprecated `agent-manager`; install those individually via the module selector if you need them.
 
 **What you get**: The full suite. Includes multi-agent workflows, planning frameworks, tech-specific patterns (Cloudflare, Supabase, Tailwind, shadcn, MCP development), specialized commands, and the autoheal observability loop with three opt-in toggles (`/autoheal-toggle realtime|autoapply|webhook`).
 

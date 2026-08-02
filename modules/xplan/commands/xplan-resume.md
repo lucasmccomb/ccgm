@@ -61,6 +61,12 @@ From the most recent checkpoint in progress.md, determine:
 - **Pending epics**: Which epics have not been started
 - **Resume context**: Key decisions, patterns, and gotchas noted in checkpoint
 
+### 3.5 Re-check Live-Testing Authorization
+
+A resumed run re-enters the plan mid-flight, so re-run the authorization check rather than assuming the interrupted session cleared it. Scan the remaining epics for **live-testing steps** — anything that launches or relaunches an app, fires dictation, posts synthetic input events, changes focus, sets a machine-global input/audio override, opens the mic or camera, or drives a simulator/attached device from the host — and read plan **§8.6 Live-Testing Authorization**.
+
+A step is authorized only by a `GRANTED by {user} on {date}` line naming the runner that step targets. Missing §8.6, `NOT AUTHORIZED`, a grant with no named runner, or a grant naming a different machine all mean **UNAUTHORIZED**: hold the step, list it in the Section 7 resume plan, and ask the user before running it. Live testing never runs on the dev machine, and a plan step that mandates a live test is not its own authorization. See `~/.claude/rules/live-testing-guard.md`.
+
 ### 4. Verify Live State
 
 Check actual state against checkpoint (things may have changed):
@@ -167,6 +173,9 @@ Remaining:
 
 Human-epics still needed:
   - Human-Epic 2: "Stripe Setup" (blocks Wave 4)
+
+Live-testing steps held (no recorded grant in §8.6):
+  - Epic 7: "dictation fixture preflight" - needs a named runner + your approval
 
 Resuming from: Wave N (continuing in-flight) / Wave N+1 (all prior complete)
 ```

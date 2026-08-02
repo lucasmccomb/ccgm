@@ -40,7 +40,7 @@ Five presets exist. The interactive menu currently offers four of them; **cloud-
 | **minimal** | Core autonomy + git workflow rules | Trying CCGM for the first time |
 | **standard** | Minimal + hooks, settings, core commands | Most individual developers |
 | **team** | Standard + github-protocols, code-quality, systematic-debugging, verification | Teams with shared repos |
-| **full** | 73 modules | Power users who want everything |
+| **full** | 74 modules | Power users who want everything |
 | **cloud-agent** | Full minus desktop-only modules, plus agent orchestration | Headless cloud VMs dispatching parallel agents |
 
 See [Presets](presets.md) for detailed breakdowns.
@@ -153,7 +153,7 @@ Removes only CCGM-installed files (tracked via a manifest). Your personal files 
 
 ## Next steps
 
-- [Module Catalog](modules.md) - explore all 77 modules in detail
+- [Module Catalog](modules.md) - explore all 78 modules in detail
 - [Commands Reference](commands.md) - learn every slash command
 - [Hooks Reference](hooks.md) - understand the workflow automation
 - [Configuration](configuration.md) - customize CCGM after installation
