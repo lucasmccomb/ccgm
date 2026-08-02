@@ -910,7 +910,7 @@ main() {
           if [ -n "$options" ]; then
             local opt_arr
             IFS=',' read -ra opt_arr <<< "$options"
-            value=$(ui_choose "$prompt" "${opt_arr[@]}")
+            value=$(ui_choose --default "$default" "$prompt" "${opt_arr[@]}")
           else
             case "$key" in
               __LOG_REPO__)

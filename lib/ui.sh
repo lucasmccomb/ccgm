@@ -143,13 +143,39 @@ _read_key() {
 
 # --- Single select ---
 # Usage: result=$(ui_choose "Pick one" "option1" "option2" "option3")
+#        result=$(ui_choose --default "option2" "Pick one" "option1" "option2" "option3")
+#
+# Optional leading "--default <value>" flag: under CCGM_NON_INTERACTIVE=1,
+# returns that value instead of options[0], as long as it is one of the
+# options. Ignored entirely in interactive mode - it never preselects or
+# reorders the menu. If the default is empty, or is not one of the options,
+# non-interactive mode falls back to options[0] (silently for an empty
+# default, with a warning to stderr for a non-empty one that doesn't match -
+# that shape means a manifest typo, not "no default declared").
 ui_choose() {
+  local non_interactive_default=""
+  if [ "$1" = "--default" ]; then
+    non_interactive_default="$2"
+    shift 2
+  fi
+
   local prompt="$1"
   shift
   local options=("$@")
 
   if _is_non_interactive; then
-    # Return first option in non-interactive mode
+    if [ -n "$non_interactive_default" ]; then
+      local opt
+      for opt in "${options[@]}"; do
+        if [ "$opt" = "$non_interactive_default" ]; then
+          echo "$opt"
+          return 0
+        fi
+      done
+      echo -e "${UI_YELLOW}  Warning: declared default '$non_interactive_default' for '$prompt' is not among its options; using '${options[0]}'${UI_RESET}" >&2
+    fi
+    # No default declared, or declared default didn't match any option:
+    # fall back to the first option.
     echo "${options[0]}"
     return 0
   fi

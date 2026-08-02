@@ -188,7 +188,7 @@ CCGM_NON_INTERACTIVE=1 \
 | `CCGM_CODE_DIR` | Code workspace directory | `~/code` |
 | `CCGM_TIMEZONE` | Timezone | auto-detected |
 
-In non-interactive mode, text and yes/no prompts use their default values. Choice prompts currently resolve to their first option, not their declared default (see #918).
+In non-interactive mode, all prompts use their declared default value: text and yes/no prompts return their default, and choice prompts (module `configPrompts` entries with an `options` list) return their declared `default` when it names one of the options. A choice prompt with no declared default, or a declared default that isn't one of its options, falls back to the first option (the latter also prints a warning naming the mismatch).
 
 ## Adding a module to an existing install
 
