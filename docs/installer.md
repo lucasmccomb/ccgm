@@ -159,13 +159,13 @@ The uninstaller:
 1. Reads `.ccgm-manifest.json` to find the exact files that were installed
 2. Creates a safety backup before removing anything
 3. Removes each file (handles both regular files and symlinks)
-4. Un-merges CCGM-contributed keys from merge targets like `settings.json`, leaving the file in place with your own keys intact - it is never deleted
+4. Un-merges CCGM-contributed keys from merge targets like `settings.json`. If any of your own keys remain afterward, the file stays in place with just those keys; if nothing remains (the common case if you never added your own permissions), the file itself is deleted
 5. Removes `.ccgm-manifest.json` and `.ccgm.env`
 6. Cleans up empty `rules/`, `commands/`, and `hooks/` directories
-7. Removes the `ccgm`/`ccgms` aliases from `~/.zshrc` and `~/.bashrc`, if present
-8. Offers to restore from the safety backup if you change your mind
+7. Offers to restore from the safety backup if you change your mind
+8. Removes the `ccgm`/`ccgms` aliases from `~/.zshrc` and `~/.bashrc`, if present
 
-Only CCGM-installed files are removed. Personal files you created in `~/.claude/` are untouched, and `settings.json` itself is never deleted - only the keys CCGM added are un-merged out of it.
+Only CCGM-installed files are removed. Personal files you created in `~/.claude/` are untouched. `settings.json` keeps any keys you added yourself - CCGM only un-merges out what it contributed, and removes the file itself if that leaves nothing behind.
 
 ## Installer library
 
