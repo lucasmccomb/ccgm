@@ -35,6 +35,7 @@ CCGM places files into `~/.claude/` (global) or `.claude/` (project-level):
 |-----------|------|-------------------|
 | `rules/*.md` | Behavior rules | Loaded automatically at session start |
 | `commands/*.md` | Slash commands | Available as `/commit`, `/pr`, etc. |
+| `skills/*/SKILL.md` | Packaged capabilities | Invoked by name, e.g. `/brainstorm`, `/ce-review` |
 | `agents/*.md` | Subagent prompts | Reusable prompts invoked by commands and skills via the Task tool |
 | `hooks/*.py` | Workflow hooks | Triggered on Claude Code events |
 | `settings.json` | Permissions | Controls tool access and auto-approval |
@@ -56,7 +57,7 @@ Steps:
    Available presets and what they include:
      - minimal  : global-claude-md, autonomy, git-workflow
      - standard : the above + identity, hooks, branch-guard, ask-context, model-vetting, live-testing-guard, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline
-     - team     : standard core + github-protocols, code-quality, systematic-debugging, verification
+     - team     : standard core (minus identity, commands-utility, model-vetting, live-testing-guard, self-improving, statusline) + github-protocols, code-quality, systematic-debugging, verification, autoheal, and review/compound-knowledge tooling (ce-review, pr-feedback, document-review, compound-knowledge, skill-authoring, subagent-patterns, pr-review-toolkit)
      - cloud-agent : large set for power users running autonomous agents
      - full     : every stable module
    Based on what you know about my workflow, recommend one preset. Ask me to confirm or pick a different one before continuing. (One question only — do not ask anything else.)
@@ -177,8 +178,8 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | Module | Category | Commands | Description | Dependencies |
 |--------|----------|----------|-------------|--------------|
 | **adversarial-review** | workflow | `/adrev` | Adversarial review of a plan or any entity (file, PR, issue, dir, concept). Separate reviewer agent attacks premises and failure modes; plan targets get findings incorporated automatically and four autonomous-execution tenets enforced (minimal human work, follow-up completion, decision context, comprehensive E2E coverage) unless told not to | subagent-patterns |
-| **agent-manager** | workflow | `/agents` | [DEPRECATED] Go-based terminal UI (/agents) for monitoring Claude Code agent processes via tmux. Unmaintained; not offered for new installs, kept in-repo for existing users | multi-agent |
-| **agent-native** | patterns | `/agent-native-audit` | Principles, audit skill, and a self-eval / red-team rubric for building applications where an agent is a first-class client | - |
+| **agent-manager** [DEPRECATED] | workflow | `/agents` | Go-based terminal UI (/agents) for monitoring Claude Code agent processes via tmux. Unmaintained; not offered for new installs, kept in-repo for existing users | multi-agent |
+| **agent-native** | patterns | `/agent-native-audit` | Principles, audit skill, and a self-eval / red-team rubric for building applications where an agent is a first-class client | subagent-patterns |
 | **argus** | workflow | `/argus` | Closed-loop visual-ATDD harness: deterministic gates plus a separate judge agent score UI renders against a design spec until convergence | subagent-patterns |
 | **ask-context** | core | - | Hard PreToolUse gate: no AskUserQuestion whose decision context is invisible to the user. Blocks deictic references, identical re-asks after pushback, and mid-workstream questions with no visible text | settings |
 | **atdd** | workflow | `/atdd` | Agentic Test-Driven Development. /atdd reads Playwright vision specs, iteratively builds app code until all tests pass, then ships | - |
@@ -190,16 +191,16 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **browser-automation** | patterns | - | Browser tool selection (Chrome, Playwright, WebMCP), verification priority, UI testing workflow | - |
 | **capability-router** | commands | `/capabilities` | Decision map for CCGM's overlapping command clusters (research, review, planning, debugging, knowledge), plus a tight always-on pointer rule | - |
 | **ccgm-doctor** | workflow | - | Audit tool for Claude Code installs: dangling hook/command refs, lexical overlap between command descriptions, and a routing eval | - |
-| **ce-review** | commands | `/ce-review` | /ce-review unified code-review orchestrator. Composes scope-drift, learnings-researcher, tier-sharpener, and review-synthesizer with structured JSON findings | - |
+| **ce-review** | commands | `/ce-review` | /ce-review unified code-review orchestrator. Composes scope-drift, learnings-researcher, tier-sharpener, and review-synthesizer with structured JSON findings | compound-knowledge, pr-review-toolkit, subagent-patterns |
 | **cloud-dispatch** | workflow | `/dispatch`, `/dispatch-status`, `/dispatch-stop`, `/vm-manage` | Delegate GitHub issues to autonomous Claude Code agents on Hetzner Cloud VMs. Includes /dispatch, /dispatch-status, /dispatch-stop, /vm-manage commands | - |
 | **cloudflare** | tech-specific | - | Pages vs Workers selection, deployment methods, Git integration requirements | - |
 | **code-quality** | patterns | - | Code standards, testing requirements, error handling, security, build verification | - |
 | **commands-core** | commands | `/commit`, `/cpm`, `/ghi`, `/gs`, `/pr`, `/pr-description` | The everyday git loop: commit with an issue-prefixed message, open a PR that closes its issue, or run commit-PR-merge end to end. Plus repo status, issue creation, and a pure PR-body writer callable by other commands | - |
 | **commands-extra** | commands | `/audit`, `/checkpoint`, `/freeze`, `/guard`, `/promote-rule`, `/pwv`, `/unfreeze`, `/walkthrough` | Codebase audit, Playwright visual verification, step-by-step walkthrough mode, promoting a repo rule to global, and scope control: `/freeze` locks edits to one directory until `/unfreeze`, `/guard` pairs that with careful mode, `/checkpoint` saves and resumes work-in-progress state | - |
-| **commands-preamble** | workflow | - | [EXPERIMENTAL] UserPromptSubmit hook that injects a compact preamble of iron-law principles into every prompt | - |
+| **commands-preamble** | workflow | - | [EXPERIMENTAL] UserPromptSubmit hook that injects a compact preamble of iron-law principles into every prompt | settings, autonomy, code-quality |
 | **commands-utility** | commands | `/ccgm-sync`, `/cws-submit`, `/user-test` | Chrome Web Store submission walkthrough, syncing local config changes back to the CCGM repo, and browser-driven user testing | - |
 | **common-mistakes** | patterns | - | 8 battle-tested anti-patterns: shallow exploration, dependency blindness, ESLint Fast Refresh, more | - |
-| **compound-knowledge** | workflow | `/compound`, `/compound-refresh`, `/compound-reproject` | Team-shared learnings in `docs/solutions/`. After solving a non-trivial problem, capture the pattern in a versioned schema | - |
+| **compound-knowledge** | workflow | `/compound`, `/compound-refresh`, `/compound-reproject` | Team-shared learnings in `docs/solutions/`. After solving a non-trivial problem, capture the pattern in a versioned schema | skill-authoring |
 | **copycat** | commands | `/copycat` | Analyzes external Claude Code config repos and reports the patterns, rules, and techniques worth adopting into CCGM | - |
 | **debugging** | commands | `/debug` | Structured root-cause debugging on Opus: reproduce, hypothesize, instrument, diagnose, fix, verify, instead of guessing at a fix | - |
 | **deepresearch** | commands | `/deepresearch` | Multi-query semantic research via the Exa MCP server: parallel query fan-out synthesized into a structured research.md | - |
@@ -221,7 +222,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **make-interfaces-feel-better** | patterns | `/make-interfaces-feel-better` | Design-engineering details that compound into polished interfaces. Model-invoked skill covering design direction, typography, surfaces, animations, performance | - |
 | **mcp-development** | tech-specific | - | Building MCP servers: project structure, tool design, error handling, testing, evaluation patterns | - |
 | **model-vetting** | core | - | Security vetting gate for new AI models: weights provenance, format safety, license/data terms, serving path, staged agentic access | - |
-| **multi-agent** | workflow | `/handoff`, `/mawf`, `/workspace-setup` | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | startup-dashboard |
+| **multi-agent** | workflow | `/handoff`, `/mawf`, `/workspace-setup` | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | startup-dashboard, hooks |
 | **onboarding** | commands | `/onboarding` | Analyzes a repository and generates a structured ONBOARDING.md for new contributors | - |
 | **orrery** | commands | `/orrery` | Deep-dives a codebase with parallel read-only scouts and renders an interactive, zoomable, embeddable system-design map as one self-contained HTML file: 4 zoom tiers, GitHub links pinned to an anchor SHA, per-node product prose; `/orrery update` refreshes it | - |
 | **output-formatting** | patterns | - | Copy-pasteable content goes in fenced code blocks, never blockquotes, so it pastes clean anywhere | - |
@@ -249,7 +250,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **tailwind** | tech-specific | - | Tailwind CSS v4 design system: CSS-first config, design tokens, CVA variants, dark mode, responsive grids | - |
 | **test-driven-development** | patterns | - | Strict red-green-refactor TDD discipline. No production code without a failing test first | - |
 | **test-vision** | workflow | `/e2e`, `/test-vision` | Vision-driven e2e test suite generation. /test-vision for full repo analysis + parallel test suite creation. /e2e for single-feature spec generation | browser-automation, multi-agent |
-| **todos** | workflow | `/todo-create`, `/todo-resolve`, `/todo-triage` | File-based review-finding tracker. Review findings, PR nitpicks, and tech debt tracked with structured YAML | - |
+| **todos** | workflow | `/todo-create`, `/todo-resolve`, `/todo-triage` | File-based review-finding tracker. Review findings, PR nitpicks, and tech debt tracked with structured YAML | skill-authoring, subagent-patterns |
 | **verification** | patterns | - | Evidence-before-claims: fresh execution of verification commands, read full output before asserting done | - |
 | **writing-system** | patterns | `/rewrite` | Orwell's six rules as the global prose standard for docs, PR text, commits, and reports, plus /rewrite (violations list, then rewrite; mode:landing swap test) | - |
 | **xplan** | workflow | `/etp`, `/xplan`, `/xplan-resume`, `/xplan-status`, `/xplana` | Interactive planning framework: discovery interview, deep research, tech stack sign-off, constructive peer review + a 3-pass sequential adversarial review that enforces four plan-execution tenets (minimal/edge-bucketed human work, follow-up completion, autonomous decision context, comprehensive autonomous E2E test suite), parallel agent execution. Requires [/deepresearch](#companion-module-deepresearch) | multi-agent, adversarial-review |
@@ -378,7 +379,7 @@ The `docs/` directory contains comprehensive documentation:
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
 | [Module Catalog](docs/modules.md) | Detailed reference for all 78 modules |
-| [Commands Reference](docs/commands.md) | All 84 slash commands with usage examples |
+| [Commands Reference](docs/commands.md) | All 89 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 31 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |

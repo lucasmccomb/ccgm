@@ -20,6 +20,8 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. Seven other modules add the rest: **self-improving** 3, **subagent-patterns** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, **commands-preamble**, and **relevance-injection**. Total: 25 hooks across 8 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 31).
 
+This count excludes `hooks/plugin-rule-inject.py`, which brings the true `"type": "hook"` file total to 32. It is the **plugin-marketplace** module's own hook, copied into every other rules-bearing module's `hooks/` directory so each module's generated Claude Code plugin manifest can register it independently - see [plugin-marketplace](../modules/plugin-marketplace/README.md) for what it does.
+
 ---
 
 ### enforce-git-workflow.py

@@ -39,20 +39,21 @@ Five presets exist, and the interactive menu offers all of them. You can also se
 |--------|-------------|----------|
 | **minimal** | Core autonomy + git workflow rules | Trying CCGM for the first time |
 | **standard** | Minimal + hooks, settings, core commands | Most individual developers |
-| **team** | Standard + github-protocols, code-quality, systematic-debugging, verification | Teams with shared repos |
+| **team** | Core workflow + code-quality, systematic-debugging, verification, autoheal, and PR-review/compound-knowledge tooling | Teams with shared repos |
 | **full** | 74 modules | Power users who want everything |
-| **cloud-agent** | Full minus desktop-only modules, plus agent orchestration | Headless cloud VMs dispatching parallel agents |
+| **cloud-agent** | Full minus 19 desktop/interactive-only modules (writing-system, capability-router, ccgm-doctor, skillify, todos, orrery, etc.) | Headless cloud VMs dispatching parallel agents |
 
 See [Presets](presets.md) for detailed breakdowns.
 
 ### 3. Answer configuration prompts
 
-Depending on which modules you selected, the installer may ask:
+The installer asks for a few values up front, before you pick modules:
 
-- **GitHub username** - auto-detected from `gh api user` if GitHub CLI is installed
+- **GitHub username** - auto-detected from `gh api user` if GitHub CLI is installed, otherwise prompted
 - **Code directory** - where your projects live (default: `~/code`)
 - **Timezone** - auto-detected from system settings
-- **Permission mode** - `ask` (confirm before risky actions) or `dontAsk` (full auto-approval)
+
+These three are always asked, regardless of which modules you select. After module selection, the installer asks any further questions the chosen modules define - currently just **Permission mode** (`ask` or `dontAsk`), from the **settings** module.
 
 ### 4. Restart Claude Code
 
@@ -75,7 +76,9 @@ CCGM can install to either or both of two locations:
 ./start.sh --scope both       # Both locations
 ```
 
-Global installation is the most common choice. Project-level installation is useful when you want different rules for a specific repo, or when sharing configuration with a team via version control.
+Global installation is the most common choice. Project-level installation is useful when you want different rules for a specific repo.
+
+Only 18 of the 78 modules declare `"project"` in their `scope`. A module that does not lists nothing to install at project scope: `start.sh` silently skips it and prints no message. If you install with `--scope project` alone, expect most of the modules you picked to install nothing - check each module's README for whether it supports project scope before relying on it.
 
 ## Install modes
 

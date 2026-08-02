@@ -107,7 +107,7 @@ Habit: always Read the workspace `modules/` path before any Edit, even if you re
 
 The `modules/autoheal/` directory holds CCGM's self-healing observability loop. It captures permission events, tool failures, and user-correction signals to a local JSONL log, runs a daily analyzer via direct Anthropic API call, and surfaces a digest of proposed configuration improvements.
 
-### Bring-up
+### Autoheal bring-up
 
 ```bash
 bash start.sh --add autoheal                         # install hooks/commands/rules/scripts
@@ -129,7 +129,7 @@ All four are **default OFF**. Autoheal stays observation-only until you opt in.
 
 Per-repo overrides live in `.autoheal/config.json` at the repo root. Both files are gitignored.
 
-### Slash commands
+### Autoheal slash commands
 
 | Command | Purpose |
 |---------|---------|
@@ -141,7 +141,7 @@ Per-repo overrides live in `.autoheal/config.json` at the repo root. Both files 
 | `/permission-fix [event-id\|latest]` | In-session root-cause sub-agent for a permission failure |
 | `/permission-audit` | Static audit of installed hooks + settings against the classification table |
 
-### Posture
+### Autoheal posture
 
 Autoheal is opt-in by design. The default install only captures events and surfaces a local digest. Nothing alerts mid-session, nothing auto-applies, no network calls leave the machine. Each opt-in is a deliberate `/autoheal-toggle` away.
 
@@ -149,7 +149,7 @@ Autoheal is opt-in by design. The default install only captures events and surfa
 
 The `modules/dreaming/` directory holds CCGM's nightly, cost-capped transcript-mining pipeline. It mines session transcripts into evidence-tagged `self-improving` learnings-store proposals. Every proposal is human-reviewed via `/dream-apply` by default; an opt-in **optimistic auto-integration** engine (`optimistic_integration.enabled`, default `false`) can integrate them instead, behind a per-op-kind posture (immediate for `verify`, a dwell window for `add`/`supersede`/`contradict`/`deprecate`), per-slug blast-radius caps, a batch-anomaly check, and a windowed circuit breaker.
 
-### Bring-up
+### Dreaming bring-up
 
 ```bash
 bash start.sh --add dreaming                          # install lib/bin/commands/rules
@@ -168,7 +168,7 @@ bash modules/self-improving/bin/memory-setup.sh       # activation prompts: read
 | `optimistic_integration.max_add_supersede_per_run` | `10` | Per-slug, per-night cap on `add` + `supersede` |
 | `optimistic_integration.max_eviction_absolute` / `max_eviction_fraction_per_run` | `3` / `0.20` | Per-slug, per-night cap on `contradict` + `deprecate` — the smaller of the two dominates |
 
-### Slash commands
+### Dreaming slash commands
 
 | Command | Purpose |
 |---------|---------|
@@ -180,7 +180,7 @@ bash modules/self-improving/bin/memory-setup.sh       # activation prompts: read
 
 Rollback for a bad auto-integrated batch is `ccgm-learnings-sync revert <sha>` (in `self-improving`) — not a raw `git revert`, which is unsound against this store's `merge=union` shard files.
 
-### Posture
+### Dreaming posture
 
 Human-gated apply (`/dream-apply`) is always on and requires no opt-in. Optimistic auto-integration is opt-in and off by default; every gate (eval regression, blast-radius caps, anomaly check, circuit breaker) is designed to hold even if the daily report is never read — only *undoing* an already-integrated row needs a read. See `modules/dreaming/rules/dreaming.md` for the full contract.
 
