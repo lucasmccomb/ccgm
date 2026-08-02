@@ -228,8 +228,19 @@ echo ""
 # sits on disk without a files[] entry, or it silently never installs. This is
 # the direction that actually catches #930's bug class (a shipped file with no
 # manifest entry at all) - the forward check above only catches the opposite
-# (a manifest entry pointing at a file that isn't there). Other file types
-# (README.md, terraform/, packer/, tests/) are intentionally not installed.
+# (a manifest entry pointing at a file that isn't there).
+#
+# Two different kinds of file types are NOT scanned here, and they are not
+# the same kind of "not scanned":
+#   - Genuinely never installed: README.md, terraform/, packer/, tests/.
+#     These have no files[] entry by design; a scan would just be noise.
+#   - Installed, but not yet covered by this gate: hooks/*.py, skills/*,
+#     agents/*, bin/*. Install location is driven purely by a files[]
+#     entry's `target` (type is advisory metadata only - see
+#     lib/modules.sh:189-190), so an undeclared hook or skill file fails to
+#     install exactly as silently as an undeclared rule did before this PR.
+#     Extending the scan to those subdirs is deliberately out of scope here;
+#     rules were the demonstrated gap for #930.
 echo "--- Checking manifest completeness (lib + commands + rules coverage) ---"
 for mod_dir in "$REPO_ROOT"/modules/*/; do
   [ ! -d "$mod_dir" ] && continue

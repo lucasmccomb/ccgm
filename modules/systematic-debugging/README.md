@@ -13,11 +13,12 @@ Installs a rules file that enforces structured debugging instead of random fix a
 
 Includes a three-strike rule: after 3 failed fix attempts, stop and question the architecture.
 
-The parent rule is backed by three focused sub-rules that give agents named moves during Phase 1-2:
+The parent rule is backed by four focused sub-rules that give agents named moves during Phase 1-2:
 
 - **Root Cause Tracing** - trace errors backward up the call chain to the originating trigger, not the surface symptom
 - **Defense-in-Depth Validation** - once the origin is found, add validation at every layer the bad value passed through so the same class of bug is structurally impossible
 - **Condition-Based Waiting** - replace arbitrary `sleep(N)` with `waitFor(condition)` to eliminate timing-based flaky tests
+- **Animals vs Ghosts** - name which RL circuit a task falls in before diagnosing a stuck agent, so degraded output reads as a distribution gap, not defiance
 
 ## Manual Installation
 
