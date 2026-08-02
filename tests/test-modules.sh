@@ -267,7 +267,12 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
       rel_path="${abs_path#"$mod_dir"}"
       rel_path="${rel_path#/}"
       shipped_count=$((shipped_count + 1))
-      if printf '%s\n' "$declared" | grep -qxF "$rel_path"; then
+      # Herestring, not a pipe: under `set -o pipefail`, `producer | grep -q`
+      # can die with SIGPIPE if grep exits on its first match before the
+      # producer finishes writing, turning a successful match into a
+      # pipeline failure (see #943). A herestring has no second process to
+      # race against, so there is no pipe to break.
+      if grep -qxF "$rel_path" <<< "$declared"; then
         :
       else
         fail "$mod_name: shipped '$rel_path' is not in module.json files[] (will never install)"
