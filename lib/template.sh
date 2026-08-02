@@ -9,13 +9,18 @@
 # would otherwise misparse a bare '' as the script and the real script as a
 # filename. Centralized here so every caller picks the right form once,
 # instead of re-deriving this detection at each call site.
+# The -- before the script guards against a script or filename that starts
+# with a dash: GNU sed permutes option scanning across the whole argument
+# list by default, so a later "-name" argument gets misread as an unknown
+# flag even though it is positional; BSD sed does not, but -- is a no-op
+# for it. Exits non-zero (propagated to the caller) if sed itself fails.
 sed_inplace() {
   local script="$1"
   shift
   if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' "$script" "$@"
+    sed -i '' -- "$script" "$@"
   else
-    sed -i "$script" "$@"
+    sed -i -- "$script" "$@"
   fi
 }
 

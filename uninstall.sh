@@ -15,19 +15,26 @@ source "${CCGM_ROOT}/lib/template.sh"
 
 # --- Remove CCGM shell aliases + comment header from a single rc file ---
 # Usage: remove_ccgm_alias_lines "/path/to/rc_file"
-# Returns 1 (no-op) when the file is missing or has no CCGM aliases.
+# Return codes:
+#   0 - CCGM aliases were present and removal succeeded
+#   1 - no-op: the file is missing or has no CCGM aliases (not an error)
+#   2 - CCGM aliases were present but sed failed to remove them (e.g. a
+#       read-only file or full disk) - the caller must surface this rather
+#       than report success
 # Only the alias step in start.sh ever writes a "# CCGM - " line to an rc
 # file, so matching the whole prefix (rather than specific trailing words)
 # is safe and also cleans up comment text left by older CCGM versions.
+# All three deletions run as one sed script/one sed_inplace call, so there
+# is a single exit status to check instead of three.
 remove_ccgm_alias_lines() {
   local rc="$1"
   if [ ! -f "$rc" ] || ! grep -qE 'alias ccgm(s)?=' "$rc" 2>/dev/null; then
     return 1
   fi
-  sed_inplace '/^# CCGM - /d' "$rc"
-  sed_inplace '/^alias ccgm=/d' "$rc"
-  sed_inplace '/^alias ccgms=/d' "$rc"
-  return 0
+  if sed_inplace '/^# CCGM - /d;/^alias ccgm=/d;/^alias ccgms=/d' "$rc"; then
+    return 0
+  fi
+  return 2
 }
 
 # ============================================================
@@ -288,11 +295,15 @@ main() {
   ui_header "Shell Aliases"
 
   local rc_files=("$HOME/.zshrc" "$HOME/.bashrc")
-  local rc alias_removed=false
+  local rc rc_status alias_removed=false
   for rc in "${rc_files[@]}"; do
-    if remove_ccgm_alias_lines "$rc"; then
+    rc_status=0
+    remove_ccgm_alias_lines "$rc" || rc_status=$?
+    if [ "$rc_status" -eq 0 ]; then
       ui_success "Removed CCGM aliases from $rc"
       alias_removed=true
+    elif [ "$rc_status" -eq 2 ]; then
+      ui_warn "Failed to remove CCGM aliases from $rc - check file permissions and remove manually"
     fi
   done
 

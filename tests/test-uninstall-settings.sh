@@ -438,6 +438,79 @@ else
 fi
 echo ""
 
+echo "--- Test 11: Alias removal reports failure (not success) when sed cannot write the rc file ---"
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "  SKIP: running as root - permission-based write failures cannot be forced"
+else
+  RO_DIR="$ALIAS_TMPDIR/readonly-dir"
+  mkdir -p "$RO_DIR"
+  RO_RC="$RO_DIR/.zshrc"
+  cat > "$RO_RC" << 'ZSHRC'
+export PATH="$PATH:/usr/local/bin"
+
+# CCGM - Claude Code launchers
+alias ccgm="claude --dangerously-skip-permissions"
+alias ccgms="claude /startup --dangerously-skip-permissions"
+ZSHRC
+
+  # sed -i writes via a temp file plus rename in the same directory, so
+  # chmod on the FILE alone does not force a write failure - the rename
+  # only needs the directory to be writable. Locking the directory does.
+  chmod 555 "$RO_DIR"
+
+  set +e
+  bash -c "source '$REPO_ROOT/uninstall.sh'; remove_ccgm_alias_lines '$RO_RC'" >/dev/null 2>&1
+  ro_exit=$?
+  set -e
+
+  chmod 755 "$RO_DIR"
+
+  if [ $ro_exit -eq 2 ]; then
+    pass "remove_ccgm_alias_lines reports failure (exit 2) instead of success when sed cannot write the file"
+  else
+    fail "Expected exit 2 (sed failure) on an unwritable directory, got $ro_exit"
+  fi
+
+  if grep -qE '^alias ccgm=' "$RO_RC"; then
+    pass "Aliases remain in the file sed could not write - the failed removal did not silently drop data"
+  else
+    fail "Aliases were removed even though the containing directory was read-only - test setup invalid"
+  fi
+fi
+echo ""
+
+echo "--- Test 12: sed_inplace does not misparse a dash-prefixed filename as an option ---"
+
+DASH_DIR="$ALIAS_TMPDIR/dash-test"
+mkdir -p "$DASH_DIR"
+DASH_FILE="$DASH_DIR/-leading-dash.txt"
+printf 'keep\nremove-me\n' > "$DASH_FILE"
+
+set +e
+dash_out=$(bash -c "cd '$DASH_DIR' && source '$REPO_ROOT/lib/template.sh' && sed_inplace '/remove-me/d' '-leading-dash.txt'" 2>&1)
+dash_exit=$?
+set -e
+
+if [ $dash_exit -eq 0 ]; then
+  pass "sed_inplace succeeds on a dash-prefixed filename instead of misparsing it as an option"
+else
+  fail "sed_inplace failed on a dash-prefixed filename (exit $dash_exit): $dash_out"
+fi
+
+if grep -qE '^remove-me$' -- "$DASH_FILE" 2>/dev/null; then
+  fail "sed_inplace did not actually remove the target line from the dash-prefixed file"
+else
+  pass "Target line removed from the dash-prefixed file"
+fi
+
+if grep -qE '^keep$' -- "$DASH_FILE" 2>/dev/null; then
+  pass "Unrelated line preserved in the dash-prefixed file"
+else
+  fail "Unrelated line lost from the dash-prefixed file"
+fi
+echo ""
+
 # NOTE (platform coverage): this suite runs on macOS, so the assertions
 # above only exercise sed_inplace's BSD (sed -i with an empty-string suffix
 # argument) branch via lib/template.sh. The GNU branch (sed -i with no
