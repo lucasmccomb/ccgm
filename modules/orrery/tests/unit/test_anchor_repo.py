@@ -123,17 +123,24 @@ def stub_gh(home, body):
 
 def stub_git_subcommand_failure(home, subcommand, exit_code):
     """Install a git stub on a PATH-prepend dir that exits `exit_code` when
-    invoked as `git -C <repo> <subcommand> ...` and execs the real git for
-    every other invocation. Returns the stub dir. Used to force a specific
-    git subcommand to fail without corrupting repo state (reviews finding
-    7a/7b need a failure the real git binary won't otherwise produce)."""
+    invoked as exactly `git -C <repo> <subcommand> ...` and execs the real
+    git for every other invocation. Returns the stub dir. Used to force a
+    specific git subcommand to fail without corrupting repo state (review
+    finding 7a/7b need a failure the real git binary won't otherwise
+    produce).
+
+    The `$1 = -C` check is load-bearing, not decorative: matching on `$3`
+    alone would also catch worktree_count()'s own
+    `git -C <repo> worktree list --porcelain` the moment a future test
+    stubs "worktree" - breaking the assertion helper instead of cleanly
+    failing the code under test."""
     stub_dir = home / "stub-bin"
     stub_dir.mkdir(parents=True, exist_ok=True)
     real_git = shutil.which("git")
     git_stub = stub_dir / "git"
     git_stub.write_text(
         "#!/bin/sh\n"
-        'if [ "$3" = "%s" ]; then\n'
+        'if [ "$1" = "-C" ] && [ "$3" = "%s" ]; then\n'
         "  exit %d\n"
         "fi\n"
         'exec "%s" "$@"\n' % (subcommand, exit_code, real_git)
