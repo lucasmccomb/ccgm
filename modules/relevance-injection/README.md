@@ -44,6 +44,30 @@ CCGM_RELEVANCE_LANGS=python,typescript        # optional
 CCGM_RELEVANCE_TASKTYPES=backend,testing      # optional
 ```
 
+## `/rules-scope`: generate a repo's `claudeMdExcludes` block
+
+A third, independent piece: `lib/rules_scope.py` (driven by the
+`/rules-scope` command) inspects a repo and proposes a `claudeMdExcludes`
+array for that repo's `.claude/settings.json`, suppressing installed CCGM
+rule files that are irrelevant to it (e.g. `tailwind`/`shadcn` rules in a
+backend-only repo). Dry run by default; `--write` applies the proposal.
+This is unrelated to the opt-in injection feature above and needs no flag
+to use — see `commands/rules-scope.md` for the full contract.
+
+```bash
+python3 lib/rules_scope.py             # print the proposal for cwd; write nothing
+python3 lib/rules_scope.py --write     # apply it to <cwd>/.claude/settings.json
+```
+
+**The generated file is machine-scoped.** `--write` puts this machine's
+absolute, resolved rule-file paths into `claudeMdExcludes`. Commit it and
+pull it on a different machine (a teammate, or the same operator with a
+different `ccgmRoot`), and none of those paths match — every "excluded"
+rule silently loads again there instead of staying suppressed. That is the
+safe failure direction (nothing is ever wrongly dropped), but it does mean
+the committed file only takes effect on the machine that generated it until
+re-run with `--write` there. See `commands/rules-scope.md` for detail.
+
 ## Manual Installation
 
 ```bash
@@ -52,7 +76,9 @@ cp hooks/relevance-inject.py           ~/.claude/hooks/relevance-inject.py
 cp hooks/instructions-loaded-log.py    ~/.claude/hooks/instructions-loaded-log.py
 cp lib/relevance_select.py             ~/.claude/lib/relevance_select.py
 cp lib/loaded_log.py                   ~/.claude/lib/loaded_log.py
+cp lib/rules_scope.py                  ~/.claude/lib/rules_scope.py
 cp lib/applicability-schema.json       ~/.claude/lib/applicability-schema.json
+cp commands/rules-scope.md             ~/.claude/commands/rules-scope.md
 # then merge settings.partial.json into ~/.claude/settings.json
 # (registers the SessionStart and InstructionsLoaded hooks)
 ```
@@ -66,5 +92,7 @@ cp lib/applicability-schema.json       ~/.claude/lib/applicability-schema.json
 | `hooks/instructions-loaded-log.py` | `InstructionsLoaded` hook; appends one JSONL record per loaded instruction file to `~/.claude/rule-loading/loaded-{date}.jsonl` |
 | `lib/relevance_select.py` | Pure, deterministic selection library (safety core + applicability matching) |
 | `lib/loaded_log.py` | Reads the rule-loading log: `parse_log()` and `assert_loaded()` |
+| `lib/rules_scope.py` | `/rules-scope` generator: `detect_repo_profile()`, `propose_excludes()`, `write_settings()` |
 | `lib/applicability-schema.json` | JSON Schema for the optional `module.json` `applicability` field |
+| `commands/rules-scope.md` | `/rules-scope` command: generate/apply a repo's `claudeMdExcludes` block |
 | `settings.partial.json` | Registers the SessionStart and InstructionsLoaded hooks |

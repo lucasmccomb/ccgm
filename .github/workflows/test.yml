@@ -82,6 +82,17 @@ jobs:
             bash "$t"
           done
 
+      - name: relevance-injection - /rules-scope pytest (Epic 0.5, issue #952)
+        run: |
+          set -e
+          python3 -m venv /tmp/ccgm-rules-scope-test-venv
+          source /tmp/ccgm-rules-scope-test-venv/bin/activate
+          python3 -m pip install --quiet pytest
+          python3 -m pytest modules/relevance-injection/tests/test_rules_scope.py -q
+
+      - name: relevance-injection - /rules-scope bash suite (E2E self-skips without an authenticated claude CLI)
+        run: bash modules/relevance-injection/tests/test-rules-scope.sh
+
       - name: Dreaming module tests (pytest + self-check + offline chain)
         env:
           # Some dreaming tests exercise real git repos via subprocess
@@ -227,6 +238,17 @@ jobs:
             echo "=== Running $t ==="
             bash "$t"
           done
+
+      - name: relevance-injection - /rules-scope pytest (Epic 0.5, issue #952)
+        run: |
+          set -e
+          python3 -m venv /tmp/ccgm-rules-scope-test-venv
+          source /tmp/ccgm-rules-scope-test-venv/bin/activate
+          python3 -m pip install --quiet pytest
+          python3 -m pytest modules/relevance-injection/tests/test_rules_scope.py -q
+
+      - name: relevance-injection - /rules-scope bash suite (E2E self-skips without an authenticated claude CLI)
+        run: bash modules/relevance-injection/tests/test-rules-scope.sh
 
       - name: Dreaming module tests (pytest + self-check + offline chain)
         env:

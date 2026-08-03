@@ -230,7 +230,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **plugin-marketplace** [BETA] | core | - | Maintainer tooling that projects CCGM modules into a native Claude Code plugin marketplace. The bash installer stays canonical | - |
 | **pr-feedback** | workflow | `/resolve-pr-feedback` | Fetches unresolved PR review threads via GraphQL, clusters 3+ items by category, dispatches parallel resolver agents | skill-authoring, subagent-patterns |
 | **pr-review-toolkit** | commands | `/scope-drift` | Augments the external pr-review-toolkit plugin with scope-drift detection on top of the standard code/test/comment/silent-failure/type passes | - |
-| **relevance-injection** [BETA] | workflow | - | Opt-in relevance-scoped rule injection with a tiered always-on safety core. Off by default | hooks |
+| **relevance-injection** [BETA] | workflow | `/rules-scope` | Opt-in relevance-scoped rule injection with a tiered always-on safety core. Off by default | hooks |
 | **remote-server** | workflow | `/onremote` | SSH access to a configured remote server with /onremote command for health checks and remote task execution | - |
 | **research** | commands | `/research` | Multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, Reddit. Zero dependencies.* | - |
 | **rule-authoring** | patterns | `/pressure-test` | Discipline for writing rules that hold up under pressure. Treats rule authoring as a first-class skill with iron-law structure | - |
@@ -379,7 +379,7 @@ The `docs/` directory contains comprehensive documentation:
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
 | [Module Catalog](docs/modules.md) | Detailed reference for all 78 modules |
-| [Commands Reference](docs/commands.md) | All 89 slash commands with usage examples |
+| [Commands Reference](docs/commands.md) | All 90 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 31 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |

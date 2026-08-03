@@ -13,7 +13,9 @@
     "hooks/instructions-loaded-log.py": { "target": "hooks/instructions-loaded-log.py", "type": "hook", "template": false },
     "lib/relevance_select.py": { "target": "lib/relevance_select.py", "type": "lib", "template": false },
     "lib/loaded_log.py": { "target": "lib/loaded_log.py", "type": "lib", "template": false },
+    "lib/rules_scope.py": { "target": "lib/rules_scope.py", "type": "lib", "template": false },
     "lib/applicability-schema.json": { "target": "lib/applicability-schema.json", "type": "lib", "template": false },
+    "commands/rules-scope.md": { "target": "commands/rules-scope.md", "type": "command", "template": false },
     "settings.partial.json": { "target": "settings.json", "type": "settings", "merge": true, "template": false }
   },
   "tags": ["rules", "tokens", "context", "safety-core", "opt-in", "session-start"],
