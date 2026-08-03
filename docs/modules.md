@@ -600,7 +600,7 @@ Commands installed:
 | `/mawf` | Multi-Agent Workflow - parse feedback into issues, spawn parallel agents |
 | `/workspace-setup` | Create workspace directory structure for a repo |
 
-**Dependencies**: startup-dashboard
+**Dependencies**: startup-dashboard, hooks
 
 ---
 
@@ -1005,12 +1005,13 @@ Unlike the statusline script bundled in `commands-utility` (which is never wired
 
 Opt-in, backward-compatible relevance-scoped rule injection plus a tiered always-on safety core.
 
-**Installs**: `rules/relevance-injection.md`, `hooks/relevance-inject.py`, `lib/relevance_select.py`, `lib/applicability-schema.json`, `settings.partial.json` (SessionStart hook)
+**Installs**: `rules/relevance-injection.md`, `hooks/relevance-inject.py`, `hooks/instructions-loaded-log.py`, `lib/relevance_select.py`, `lib/loaded_log.py`, `lib/rules_scope.py`, `lib/applicability-schema.json`, `commands/rules-scope.md`, `settings.partial.json` (SessionStart + InstructionsLoaded hooks)
 
-**What it does**: Addresses the always-on rule-token load without changing default behavior. Two pieces:
+**What it does**: Addresses the always-on rule-token load without changing default behavior. Three pieces:
 
 - **Tiered safety core**: an authoritative precedence for the always-on Iron Laws (safety/permissions > confusion protocol > TDD/verification > the rest), so they are tiered rather than nine-way flat. Documentation + metadata only.
 - **Opt-in injection**: when `CCGM_RELEVANCE_INJECTION=true` is set in `~/.claude/.ccgm.env`, a `SessionStart` hook emits an `additionalContext` pointer naming the safety core plus the modules relevant to an optional task profile (`CCGM_RELEVANCE_LANGS`, `CCGM_RELEVANCE_TASKTYPES`). When the flag is unset (the default), the hook no-ops and all rules load exactly as before.
+- **Measurement + repo scoping**: an `InstructionsLoaded` hook logs which instruction files Claude Code actually loads, as the deterministic oracle for whether injection is working. `/rules-scope` inspects a repo for tech-stack markers and the installed manifest, then proposes (and, with `--write`, applies) a `claudeMdExcludes` block that drops irrelevant tech-specific and niche meta-workflow rule files for that repo.
 
 Selection lives in a pure, deterministic, tested library (`relevance_select.py`). Modules may add an optional `applicability` field to their `module.json` (absent or `{"always": true}` == always applicable, preserving pre-feature behavior); otherwise `{"langs": [...]}` / `{"taskTypes": [...]}` scope the module to a profile.
 

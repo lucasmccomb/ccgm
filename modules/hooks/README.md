@@ -17,7 +17,7 @@ This module installs fifteen Python hooks, several Python libraries, and a setti
 | `agent-tracking-pre.py` | PreToolUse (Bash) | Warns when claiming an issue already claimed by another agent |
 | `agent-tracking-post.py` | PostToolUse (Bash) | Records issue claims and status transitions in tracking CSV |
 | `check-migration-timestamps.py` | PreToolUse | Validates Supabase migration file timestamps for duplicates before commit |
-| `orphan-process-check.py` | PreToolUse (Bash) | Detects and warns about orphaned background processes (stale dev servers, zombie workers) before running commands that would conflict with them |
+| `orphan-process-check.py` | Not a registered hook - invoked as a plain script by `/startup` (`startup-dashboard`'s `startup-gather.sh`) | Detects and warns about orphaned background processes (stale dev servers, zombie workers) before running commands that would conflict with them |
 | `check-careful.py` | PreToolUse (Bash) | Prompts before destructive Bash commands (rm -rf, SQL DROP/TRUNCATE, force push, hard reset, kubectl delete, docker prune). Build-artifact directories (node_modules, dist, .next, build, __pycache__, .cache, .turbo, coverage) are whitelisted for `rm -rf` |
 | `check-freeze.py` | PreToolUse (Edit/Write) | Denies Edit/Write outside the frozen directory when `~/.claude/freeze-dir.txt` is set. Pair with `/freeze`, `/unfreeze`, `/guard` from `commands-extra` |
 | `session-start-enforce.py` | SessionStart (startup) | Experimental. Injects an Iron-Law rule-enforcement meta-instruction at fresh session start so discipline rules activate under pressure. OFF by default; opt in via `CCGM_RULE_ENFORCEMENT=true` in `~/.claude/.ccgm.env` |
