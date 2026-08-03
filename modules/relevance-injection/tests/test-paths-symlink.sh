@@ -88,6 +88,29 @@ LOCK_MAIN_TIMEOUT_SECS=120
 LOCK_HELD=0
 PID_PREFIX="zzz-ccgm-test-$$-"
 
+# Explicit opt-in, checked before ANY state is captured or trap registered,
+# because running this is neither free nor local-only: it spends real API
+# budget and symlinks canary rules into the operator's REAL ~/.claude/rules/
+# while other Claude Code sessions may be live.
+#
+# tests/run-unit-tests.sh discovers every modules/*/tests/test-*.sh by glob,
+# so without this gate a developer running the ordinary unit-test sweep on a
+# machine that happens to have an authenticated claude CLI would silently
+# trigger a paid experiment against their live config. Skip loudly and exit 0
+# so the sweep stays green; anyone actually running plan.md section 8.4's
+# Gate 2 sets the variable named below.
+#
+# This sits above `trap cleanup EXIT` deliberately -- registering the trap
+# first would fire cleanup() on the skip path and report a spurious
+# "not back to its pre-run file list" failure against an empty snapshot.
+if [ "${CCGM_RUN_MODEL_GATE:-}" != "1" ]; then
+  echo "SKIP: ${0##*/} is a model-in-the-loop gate (plan.md section 8.4 Gate 2)."
+  echo "  It spends API budget and writes into ${RULES_DIR}, so it does not run"
+  echo "  as part of an ordinary unit-test sweep."
+  echo "  To run it deliberately:  CCGM_RUN_MODEL_GATE=1 bash ${0##*/}"
+  exit 0
+fi
+
 TMP_ROOT=""
 PRE_RUN_LISTING=""
 CLEANUP_RAN=0

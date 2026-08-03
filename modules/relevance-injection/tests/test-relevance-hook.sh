@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# test_relevance_hook.sh — verify the SessionStart hook is a strict no-op
+# test-relevance-hook.sh — verify the SessionStart hook is a strict no-op
 # unless the opt-in flag is set, and emits the safety core when enabled.
 #
 # Property (a) at the hook level: default (no flag) => zero output, behavior
@@ -103,5 +103,5 @@ else
 fi
 
 echo ""
-echo "test_relevance_hook.sh: $PASS passed, $FAIL failed"
+echo "test-relevance-hook.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
