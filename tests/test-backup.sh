@@ -686,6 +686,8 @@ JSON
 
 scope_targets=$(_backup_files_block "$SCOPE_FIXTURE" | grep -o '"target"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/^"target"[[:space:]]*:[[:space:]]*"//; s/"$//')
 
+# Herestrings here too -- see the identical rationale on the fixture_paths
+# checks above (#943, #945).
 if grep -qx 'real/path.md' <<< "$scope_targets"; then
   pass "_backup_files_block includes the real files[].target"
 else

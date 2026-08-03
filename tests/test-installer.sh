@@ -872,6 +872,8 @@ if [ -x /bin/bash ]; then
   confirm_out=$(printf 'yes\n' | /bin/bash -c \
     "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' && echo CONFIRMED || echo DECLINED" 2>&1)
   set -e
+  # Herestrings through this whole block -- see the identical rationale at
+  # the top of the file (#943, #945).
   if grep -q "bad substitution" <<< "$confirm_out"; then
     fail "ui_confirm under /bin/bash hit a bash-4 'bad substitution' abort (answer: yes): $confirm_out"
   elif grep -q "CONFIRMED" <<< "$confirm_out"; then

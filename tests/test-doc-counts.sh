@@ -134,21 +134,14 @@ check_no_wrong_count_phrasing() {
     [ -n "$line" ] || continue
     # Extract the first integer that the phrasing wraps.
     #
-    # No pipe into `head -1`: under `set -o pipefail`, a downstream consumer
-    # that exits after its first line (`head -1`) can SIGPIPE-kill an
-    # upstream `grep` mid-write if more than one match/digit-run exists,
-    # turning a successful extraction into a pipeline failure. This
-    # assignment has no `|| true` guard, so under `set -e` that failure
-    # would abort the entire test run silently partway through (see #943,
-    # #945). Use herestrings for both greps -- neither is early-exiting
-    # (`-oE` alone drains to EOF), so there is no live pipe left to race --
-    # then take the first line with bash parameter expansion instead of a
-    # piped `head -1`. (Named line_match/line_digits, not "matches", so this
-    # per-line extraction never shadows the outer $matches the loop reads
-    # its input from.)
+    # A *live pipe* into an early-exiting consumer (`grep -q`, `head -1`)
+    # can SIGPIPE-kill an upstream writer under `pipefail` (see #943, #945).
+    # Herestrings remove the pipe entirely, so nothing races.
+    # $matches is already bound by the enclosing loop; these must not reuse
+    # that name.
     line_match=$(grep -oE "$regex" <<< "$line" || true)
     line_digits=$(grep -oE '[0-9]+' <<< "$line_match" || true)
-    n="${line_digits%%$'\n'*}"
+    n=$(head -1 <<< "$line_digits")
     if [ -n "$n" ] && [ "$n" != "$MODULE_COUNT" ]; then
       fail "stale '$label' count ($n, expected $MODULE_COUNT): $line"
       found_wrong=1
