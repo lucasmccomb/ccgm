@@ -106,6 +106,9 @@ chmod +x ~/.claude/bin/ccgm-doctor
 
 mkdir -p ~/.claude/lib
 cp lib/doctor.py ~/.claude/lib/doctor.py
+
+mkdir -p ~/.claude/evals
+cp evals/routing.json ~/.claude/evals/routing.json
 ```
 
 `ccgm-doctor` expects `doctor.py` to sit in `../lib/` relative to the executable. If you install it elsewhere, adjust `sys.path` accordingly or run via `python3 -m doctor` with the lib dir on your PYTHONPATH.
