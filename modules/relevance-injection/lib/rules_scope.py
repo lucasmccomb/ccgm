@@ -68,6 +68,7 @@ import fnmatch
 import json
 import os
 import sys
+import tempfile
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
@@ -396,9 +397,35 @@ def write_settings(settings_path: str, exclude_paths: "list[str]") -> dict:
     parent = os.path.dirname(settings_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    with open(settings_path, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(existing, indent=2, sort_keys=True))
-        fh.write("\n")
+
+    # Write atomically: tempfile in the same directory, then os.replace().
+    #
+    # open(path, "w") truncates to zero bytes AT OPEN TIME, before any content
+    # is written. An interrupt between the open and the close -- Ctrl-C, an OOM
+    # kill, a full disk -- would leave the user's settings.json empty or
+    # half-written, destroying every pre-existing key: hook registrations,
+    # permission rules, a hand-maintained claudeMdExcludes. This function's
+    # whole contract is to merge into that file without disturbing anything
+    # else, so losing it on a crash is the one failure it must not have.
+    #
+    # os.replace() is atomic within a filesystem, and the tempfile is created
+    # alongside the target so the rename never crosses a device boundary. Same
+    # pattern as modules/dreaming/lib/dream_analyze.py::_write_json_atomic.
+    fd, tmp_path = tempfile.mkstemp(
+        dir=parent or ".", prefix=".settings-", suffix=".json.tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(existing, indent=2, sort_keys=True))
+            fh.write("\n")
+        os.replace(tmp_path, settings_path)
+    except BaseException:
+        # Leave the original untouched on any failure, KeyboardInterrupt included.
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
     return existing
 
 

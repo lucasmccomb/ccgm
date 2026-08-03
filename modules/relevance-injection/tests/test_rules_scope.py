@@ -373,6 +373,51 @@ class WriteSettingsTests(unittest.TestCase):
             with open(settings_path, encoding="utf-8") as fh:
                 self.assertEqual(fh.read(), "{not valid json")
 
+    def test_interrupted_write_leaves_the_original_file_intact(self):
+        """A crash mid-write must not destroy the user's existing settings.
+
+        open(path, "w") truncates at open time, so a naive implementation
+        loses every pre-existing key -- hooks, permissions, prior excludes --
+        if the process dies before the write completes. The write is done to
+        a tempfile and renamed, so the original is only ever replaced by a
+        complete file.
+        """
+        original = json.dumps(
+            {"hooks": {"SessionStart": ["x"]}, "claudeMdExcludes": ["/keep.md"]},
+            indent=2,
+            sort_keys=True,
+        ) + "\n"
+        for boom_at in ("os.replace", "json.dumps"):
+            with self.subTest(boom_at=boom_at):
+                with tempfile.TemporaryDirectory() as repo:
+                    settings_path = os.path.join(repo, ".claude", "settings.json")
+                    os.makedirs(os.path.dirname(settings_path))
+                    with open(settings_path, "w", encoding="utf-8") as fh:
+                        fh.write(original)
+
+                    target = getattr(rules_scope, "os" if boom_at == "os.replace" else "json")
+                    attr = "replace" if boom_at == "os.replace" else "dumps"
+                    real = getattr(target, attr)
+
+                    def explode(*_a, **_kw):
+                        raise KeyboardInterrupt("simulated interrupt mid-write")
+
+                    setattr(target, attr, explode)
+                    try:
+                        with self.assertRaises(KeyboardInterrupt):
+                            rules_scope.write_settings(settings_path, ["/new.md"])
+                    finally:
+                        setattr(target, attr, real)
+
+                    with open(settings_path, encoding="utf-8") as fh:
+                        self.assertEqual(fh.read(), original)
+                    # No tempfile left behind next to the target.
+                    leftovers = [
+                        n for n in os.listdir(os.path.dirname(settings_path))
+                        if n.startswith(".settings-")
+                    ]
+                    self.assertEqual(leftovers, [])
+
 
 class CliDryRunTests(unittest.TestCase):
     """The default CLI invocation must never write anything (Epic 0.5's own
