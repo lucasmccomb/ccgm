@@ -12,7 +12,7 @@ This module installs fifteen Python hooks, several Python libraries, and a setti
 | `enforce-issue-workflow.py` | UserPromptSubmit | Injects a workflow reminder when Claude detects a work request (create issue first, create branch, then implement) |
 | `auto-approve-bash.py` | PreToolUse (Bash) | Reads allow/deny patterns from settings.json and auto-approves matching Bash commands |
 | `auto-approve-file-ops.py` | PreToolUse (Read/Edit/Write) | Reads path patterns from settings.json and auto-approves file operations on allowed paths |
-| `ccgm-update-check.py` | PreToolUse | Daily check for CCGM upstream updates |
+| `ccgm-update-check.py` | UserPromptSubmit | Daily check for CCGM upstream updates |
 | `port-check.py` | PreToolUse (Bash) | Warns about dev server port conflicts in multi-clone setups |
 | `agent-tracking-pre.py` | PreToolUse (Bash) | Warns when claiming an issue already claimed by another agent |
 | `agent-tracking-post.py` | PostToolUse (Bash) | Records issue claims and status transitions in tracking CSV |

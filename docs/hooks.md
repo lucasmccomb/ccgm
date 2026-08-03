@@ -208,11 +208,11 @@ Validates Supabase migration file timestamps before a commit is created, prevent
 
 ### orphan-process-check.py
 
-**Type**: Not a registered Claude Code hook - invoked as a plain script by `/startup` (`modules/startup-dashboard/lib/startup-gather.sh`)
+**Type**: Not a hook - invoked by `/startup` (`startup-dashboard`'s `startup-gather.sh`)
 **Module**: hooks
 **Can block**: No (warning only)
 
-Detects orphaned test worker processes (vitest, jest) left behind when a previous Claude Code session exited mid-test-run.
+Detects orphaned test worker processes (vitest, jest) left behind when a previous Claude Code session exited mid-test-run. It carries no `settings.partial.json` registration in any module - it runs only when `/startup` runs, not on any Claude Code hook event.
 
 **How it works**:
 1. Scans running processes for node processes with PPID 1 (re-parented to launchd/init)

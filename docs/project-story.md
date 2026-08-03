@@ -17,15 +17,15 @@ At a higher level, CCGM is an answer to a question: **what does a fully-configur
 | Fact | Value |
 |------|-------|
 | First commit | 2026-03-19 |
-| Modules | 74 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
+| Modules | 78 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
 | Slash commands | 76 |
-| Hooks | 23 Python hooks across 7 Claude Code events |
-| Presets | 5 (minimal, standard 13 modules, team, cloud-agent 54, full 70) |
+| Hooks | 33 Python hooks across 11 Claude Code events |
+| Presets | 5 (minimal, standard 16 modules, team, cloud-agent 55, full 74) |
 | Commits / issues | 430+ commits, 870+ issues and PRs in the first 4 months |
 | Base permission policy | 800+ allow entries, curated deny list, bypass-proof destructive-command blocks |
 | Audit engine | 21 audit packs over a deterministic tool spine + LLM triage |
 | Test infrastructure | 15 structural test scripts, per-module pytest/bash suites, 4 CI workflows, dual-OS (ubuntu + macos) |
-| Documentation | 11-file `docs/` directory (~5,300 lines) with CI-guarded counts |
+| Documentation | 12-file `docs/` directory (~5,300 lines) with CI-guarded counts |
 | Distribution | Interactive bash installer (canonical), non-interactive agent mode, native Claude Code plugin marketplace (generated projection), per-module manual copy |
 | License | MIT, public repo with a CI-enforced no-personal-data scan |
 
