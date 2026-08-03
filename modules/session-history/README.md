@@ -40,10 +40,14 @@ Cursor is intentionally out of scope for this module (different transcript forma
 # From the CCGM repo root:
 
 mkdir -p ~/.claude/agents
+mkdir -p ~/.claude/commands
 mkdir -p ~/.claude/scripts
 
 cp modules/session-history/agents/session-historian.md \
    ~/.claude/agents/session-historian.md
+
+cp modules/session-history/commands/recall.md \
+   ~/.claude/commands/recall.md
 
 cp modules/session-history/scripts/discover-sessions.sh \
    ~/.claude/scripts/discover-sessions.sh
@@ -52,6 +56,12 @@ chmod +x ~/.claude/scripts/discover-sessions.sh
 cp modules/session-history/scripts/extract-metadata.py \
    ~/.claude/scripts/extract-metadata.py
 chmod +x ~/.claude/scripts/extract-metadata.py
+
+cp modules/session-history/scripts/recall.py \
+   ~/.claude/scripts/recall.py
+
+cp modules/session-history/scripts/repo_detect.py \
+   ~/.claude/scripts/repo_detect.py
 
 cp modules/session-history/scripts/add-agents-md-symlinks.sh \
    ~/.claude/scripts/add-agents-md-symlinks.sh

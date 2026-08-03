@@ -360,11 +360,15 @@ echo ""
 # never ran) instead of producing a readable failure line.
 #
 # KNOWN_GAPS lists modules this check found to have a real, pre-existing gap
-# that is out of scope for the PR that introduced this check (#951 touched
-# six specific READMEs; these three were discovered by the new check but
-# belong to a different PR). Tracked in #970. A module here whose gap has
-# since been fixed makes this check FAIL (stale allowlist entry) so the
-# list cannot silently outlive the bugs it excuses.
+# that is out of scope for the PR that introduced this check. A module here
+# whose gap has since been fixed makes this check FAIL (stale allowlist
+# entry) so the list cannot silently outlive the bugs it excuses.
+#
+# #951 introduced this check across six specific READMEs; three further
+# gaps it also found (ccgm-doctor, documentation, session-history) were out
+# of scope for that PR and tracked as #970. #970 fixed all three READMEs,
+# so the list is empty again -- add an entry here only for a newly
+# discovered, genuinely out-of-scope gap.
 echo "--- Checking Manual Installation cp-block coverage (module.json vs README) ---"
 MANUAL_INSTALL_REPORT=$(REPO_ROOT="$REPO_ROOT" python3 - <<'PYEOF'
 import json
@@ -381,11 +385,7 @@ CP_LINE_RE = re.compile(r'cp\s+(-[A-Za-z]+\s+)?"?(?:modules/[\w.-]+/)?([\w${}/.*
 EXEMPT_FILENAMES = {"settings.partial.json"}
 
 # module -> tracking issue for a known, out-of-scope pre-existing gap.
-KNOWN_GAPS = {
-    "ccgm-doctor": "#970",
-    "documentation": "#970",
-    "session-history": "#970",
-}
+KNOWN_GAPS = {}
 
 
 def shellvar_to_regex(src):

@@ -30,6 +30,9 @@ Spawns 4 parallel audit agents to find every gap between your documentation and 
 
 ```bash
 cp commands/docupdate.md ~/.claude/commands/docupdate.md
+
+mkdir -p ~/.claude/lib
+cp lib/docupdate-discover.sh ~/.claude/lib/docupdate-discover.sh
 ```
 
 ## How It Works
