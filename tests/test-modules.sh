@@ -254,19 +254,38 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
 
   shipped_count=0
   missing_count=0
+  contributed_labels=""
   for subdir in lib commands rules; do
     [ -d "$mod_dir/$subdir" ] || continue
-    # Match shell scripts in lib/, markdown in commands/ and rules/.
+    # Match shell scripts in lib/, markdown in commands/ and rules/. label is
+    # the singular noun for the VERBOSE pass message below.
     if [ "$subdir" = "lib" ]; then
       pattern="*.sh"
+      label="lib"
+    elif [ "$subdir" = "commands" ]; then
+      pattern="*.md"
+      label="command"
     else
       pattern="*.md"
+      label="rule"
     fi
+    subdir_shipped=0
+    # -L follows symlinks, so a shipped rule/command/lib file installed as a
+    # symlink (not a plain file) is still found and checked against the
+    # manifest - this is the fix for #938. A BROKEN symlink stays invisible
+    # here: under -L, find only reports -type l for a link whose target does
+    # not exist, so it never matches -type f. That is deliberate, not an
+    # oversight - if the broken symlink IS declared, the manifest-existence
+    # gate above already fails it by name (it uses [ -e ], which a broken
+    # symlink fails); if it is NOT declared, it cannot install as a working
+    # file either way, so there is nothing this gate would prevent by also
+    # flagging it.
     while IFS= read -r abs_path; do
       [ -z "$abs_path" ] && continue
       rel_path="${abs_path#"$mod_dir"}"
       rel_path="${rel_path#/}"
       shipped_count=$((shipped_count + 1))
+      subdir_shipped=$((subdir_shipped + 1))
       # Herestring, not a pipe: under `set -o pipefail`, `producer | grep -q`
       # can die with SIGPIPE if grep exits on its first match before the
       # producer finishes writing, turning a successful match into a
@@ -278,11 +297,18 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
         fail "$mod_name: shipped '$rel_path' is not in module.json files[] (will never install)"
         missing_count=$((missing_count + 1))
       fi
-    done < <(find "$mod_dir/$subdir" -maxdepth 1 -type f -name "$pattern" 2>/dev/null)
+    done < <(find -L "$mod_dir/$subdir" -maxdepth 1 -type f -name "$pattern" 2>/dev/null)
+    if [ "$subdir_shipped" -gt 0 ]; then
+      if [ -z "$contributed_labels" ]; then
+        contributed_labels="$label"
+      else
+        contributed_labels="$contributed_labels/$label"
+      fi
+    fi
   done
 
   if [ "$shipped_count" -gt 0 ] && [ "$missing_count" -eq 0 ]; then
-    pass "$mod_name: all $shipped_count shipped lib/command/rule file(s) declared in manifest"
+    pass "$mod_name: all $shipped_count shipped $contributed_labels file(s) declared in manifest"
   fi
 done
 echo ""
