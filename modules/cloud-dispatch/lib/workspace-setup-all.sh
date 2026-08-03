@@ -93,8 +93,10 @@ fi
 if [[ -n "${REPO_OVERRIDE}" ]]; then
   REPO="${REPO_OVERRIDE}"
 else
-  # Strip https://github.com/ prefix and .git suffix
-  REPO=$(echo "${REPO_URL}" | sed 's|https://github.com/||;s|\.git$||')
+  # Strip https://github.com/ prefix and .git suffix. printf '%s', not echo:
+  # bash's builtin echo flag-parses a leading -n/-e, so a repo-url of
+  # exactly "-n" would silently strip to empty here (#946).
+  REPO=$(printf '%s' "${REPO_URL}" | sed 's|https://github.com/||;s|\.git$||')
 fi
 
 # SSH_KEY is passed via SSH_KEY_PATH env to child scripts (workspace-setup.sh, workspace-assign.sh)
@@ -129,7 +131,9 @@ else
     exit 1
   fi
   for issue_num in "${ISSUE_LIST[@]}"; do
-    issue_num=$(echo "${issue_num}" | tr -d '[:space:]')
+    # printf '%s', not echo: bash's builtin echo flag-parses a leading -n/-e,
+    # so an issue number of exactly "-n" would silently strip to empty here.
+    issue_num=$(printf '%s' "${issue_num}" | tr -d '[:space:]')
     title=$(gh issue view "${issue_num}" --repo "${REPO}" --json title --jq '.title' 2>/dev/null || echo "issue-${issue_num}")
     ISSUE_TITLES["${issue_num}"]="${title}"
   done
@@ -168,7 +172,8 @@ AGENTS_PER_VM=4
 
 slot=0
 for issue_num in "${ISSUE_LIST[@]}"; do
-  issue_num=$(echo "${issue_num}" | tr -d '[:space:]')
+  # printf '%s', same reasoning as the identical strip above (#946).
+  issue_num=$(printf '%s' "${issue_num}" | tr -d '[:space:]')
   vm_index=$(( slot / AGENTS_PER_VM ))
   agent_index=$(( slot % AGENTS_PER_VM ))
 
@@ -201,7 +206,9 @@ printf "  %-6s  %-8s  %-20s  %s\n" "------" "--------" "--------------------" "-
 for i in "${!PLAN_ISSUE_NUMBERS[@]}"; do
   num="${PLAN_ISSUE_NUMBERS[$i]}"
   title="${ISSUE_TITLES[$num]:-issue-${num}}"
-  slug=$(echo "${title}" \
+  # printf '%s', not echo: bash's builtin echo flag-parses a leading -n/-e,
+  # so a title of exactly "-n" would silently produce an empty slug.
+  slug=$(printf '%s' "${title}" \
     | tr '[:upper:]' '[:lower:]' \
     | sed 's/[^a-z0-9]/-/g' \
     | sed 's/-\{2,\}/-/g' \

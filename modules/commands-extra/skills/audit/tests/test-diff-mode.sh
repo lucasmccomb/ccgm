@@ -87,6 +87,15 @@ for p in paths:
 PYEOF
 }
 
+# Join newline-separated paths with '|'. printf '%s', not echo: bash's
+# builtin echo flag-parses a value of exactly "-n"/"-e" into empty output,
+# which would silently drop a legitimately dash-named path (#946). Shared
+# by GROUP 1's byte-exact round-trip check and GROUP 1b's regression guard
+# below, so a regression in the join is caught wherever it is used.
+join_pipe() {
+  printf '%s' "$1" | tr '\n' '|' | sed 's/|$//'
+}
+
 # Apply the documented diff filter step to spine JSONL.
 # Reads null-delimited changed-files.z; outputs filtered JSONL.
 apply_diff_filter() {
@@ -220,12 +229,47 @@ fi
 # Verify byte-exact round-trip: reading back the -z file should produce the same paths
 Z_PATHS=$(read_z_file "$CHANGES_Z1")
 TXT_PATHS=$(cat "$CHANGES_TXT1" | tr '\n' '|' | sed 's/|$//')
-Z_PATHS_PIPE=$(echo "$Z_PATHS" | tr '\n' '|' | sed 's/|$//')
+Z_PATHS_PIPE=$(join_pipe "$Z_PATHS")
 
 if [ "$Z_PATHS_PIPE" = "$TXT_PATHS" ]; then
   pass "python3 -z parse: paths round-trip byte-exact between .z and .txt"
 else
   fail "python3 -z parse: paths differ between .z and .txt (z='$Z_PATHS_PIPE' txt='$TXT_PATHS')"
+fi
+
+# ---------------------------------------------------------------------------
+# GROUP 1b: Dash-prefixed path name -- echo flag-parsing regression guard
+# (issue #946). A changed file literally named "-n" is a legal git path.
+# Exercises the SAME join_pipe() helper GROUP 1's round-trip check uses
+# above (not a duplicated copy of its body) -- if join_pipe regresses from
+# `printf '%s'` back to `echo`, bash's builtin echo flag-parses a
+# single-line "-n" value into empty output, and this assertion catches it.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- [1b] Dash-prefixed path name: echo flag-parsing regression guard ---"
+echo ""
+
+REPO1B=$(make_repo)
+printf 'const x = 1;\n' > "$REPO1B/clean.js"
+git -C "$REPO1B" add -A
+git -C "$REPO1B" commit -q -m "base"
+
+# A file literally named "-n" -- a legal git path, and the exact value that
+# bash's builtin echo flag-parses into empty output.
+printf 'const evil = 1;\n' > "$REPO1B/-n"
+git -C "$REPO1B" add -- "-n"
+git -C "$REPO1B" commit -q -m "add dash-prefixed file"
+
+DASH_Z=$(make_tmp)/dash-changed.z
+git -C "$REPO1B" diff --name-only -z "HEAD~1...HEAD" > "$DASH_Z"
+
+DASH_PATHS=$(read_z_file "$DASH_Z")
+DASH_PATHS_PIPE=$(join_pipe "$DASH_PATHS")
+
+if [ "$DASH_PATHS_PIPE" = "-n" ]; then
+  pass "dash-prefixed path '-n': join_pipe() preserves it (echo would flag-parse it to empty)"
+else
+  fail "dash-prefixed path '-n': should survive join_pipe() as '-n', got '$DASH_PATHS_PIPE'"
 fi
 
 # Test --staged: stage a new file and verify git diff --staged detects it

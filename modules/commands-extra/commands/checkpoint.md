@@ -52,7 +52,9 @@ title was given):
 
 ```bash
 TITLE="${ARG:-$BRANCH}"
-SLUG=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' \
+# printf '%s', not echo: bash's builtin echo flag-parses a leading -n/-e,
+# so a title of exactly "-n" would silently produce an empty slug.
+SLUG=$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]' \
   | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' \
   | cut -c1-60)
 [ -z "$SLUG" ] && SLUG="checkpoint"

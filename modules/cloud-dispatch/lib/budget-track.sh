@@ -78,7 +78,10 @@ require_cmd jq
 # hourly_rate <server-type> — print the USD/hr rate for a given server type
 hourly_rate() {
   local stype
-  stype=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+  # printf '%s', not echo: bash's builtin echo flag-parses a leading -n/-e,
+  # so a server-type of exactly "-n" would silently normalize to empty and
+  # fall through to DEFAULT_RATE for the wrong reason.
+  stype=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   echo "${HOURLY_RATES[$stype]:-${DEFAULT_RATE}}"
 }
 

@@ -79,7 +79,9 @@ SSH_KEY="${SSH_KEY_PATH:-${HOME}/.ssh/id_ed25519}"
 
 # Build branch slug: lowercase, replace spaces/non-alphanumeric with hyphens,
 # trim leading/trailing hyphens, collapse repeated hyphens.
-SLUG=$(echo "${ISSUE_TITLE}" \
+# printf '%s', not echo: bash's builtin echo flag-parses a leading -n/-e,
+# so a title of exactly "-n" would silently produce an empty slug.
+SLUG=$(printf '%s' "${ISSUE_TITLE}" \
   | tr '[:upper:]' '[:lower:]' \
   | sed 's/[^a-z0-9]/-/g' \
   | sed 's/-\{2,\}/-/g' \
