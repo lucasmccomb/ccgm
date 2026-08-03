@@ -395,6 +395,52 @@ else
   ok "README catalog Commands column matches every module.json"
 fi
 
+# --- (f3) README catalog Dependencies column matches module.json ------------
+# Same shape as (f2): the Dependencies column is pure fact, derived from each
+# module.json's own dependencies[] array. A module whose deps change without
+# the catalog row following fails here.
+
+CATALOG_DEP_DIFF=$(python3 - <<'PYEOF'
+import json, pathlib, re, sys
+
+def declared(mod):
+    d = json.load(open(f"modules/{mod}/module.json"))
+    return list(d.get("dependencies", []))
+
+lines = pathlib.Path("README.md").read_text().split("\n")
+SEP = "|--------|----------|----------|-------------|--------------|"
+try:
+    s = lines.index(SEP)
+except ValueError:
+    print("catalog separator not found; the column layout changed")
+    sys.exit(0)
+
+e = s + 1
+problems = []
+while e < len(lines) and lines[e].startswith("| **"):
+    cells = [c.strip() for c in lines[e].strip().strip("|").split(" | ")]
+    name = re.match(r"\*\*([^*]+)\*\*", cells[0]).group(1)
+    want = ", ".join(declared(name)) or "-"
+    if len(cells) != 5:
+        # Already reported by the (f2) cell-count check above; skip here.
+        pass
+    elif cells[4] != want:
+        problems.append(f"{name}: column says [{cells[4]}], module.json declares [{want}]")
+    e += 1
+
+for p in problems:
+    print(p)
+PYEOF
+)
+
+if [ -n "$CATALOG_DEP_DIFF" ]; then
+  fail "README catalog Dependencies column disagrees with module.json:
+$CATALOG_DEP_DIFF
+  -> update the Dependencies cell so it lists every entry in the module's dependencies[] array."
+else
+  ok "README catalog Dependencies column matches every module.json"
+fi
+
 # --- (g) command + hook count claims track the reference docs ---------------
 # README advertises how many commands and hooks the reference docs cover. Derive
 # both from the docs themselves so the advertised number cannot go stale.

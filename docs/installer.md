@@ -2,6 +2,8 @@
 
 The CCGM installer (`start.sh`) is an interactive bash script that handles prerequisite checking, module selection, dependency resolution, file installation, and verification.
 
+Requires bash 3.2+ - the installer scripts always run under bash via their shebang, regardless of your login shell.
+
 ## Installation flow
 
 The installer runs 15 sequential steps, plus a conditional Step 14b (legacy MCP migration):
@@ -48,7 +50,7 @@ Choose a preset (the menu lists every file under `presets/`, alphabetically: clo
 
 Automatically adds any modules required by your selection. Uses a depth-first topological sort with cycle detection. Reports any automatically added dependencies.
 
-For example, selecting `xplan` automatically adds its dependencies `multi-agent` and `adversarial-review`, which in turn add `startup-dashboard` (multi-agent's dependency) and `subagent-patterns` (adversarial-review's dependency). `startup-dashboard` then adds `session-history`.
+For example, selecting `xplan` automatically adds its dependencies `multi-agent` and `adversarial-review`, which in turn add `startup-dashboard` and `hooks` (multi-agent's dependencies) and `subagent-patterns` (adversarial-review's dependency). `startup-dashboard` then adds `session-history`, and `hooks` adds `settings`. The full closure is 8 modules: `session-history`, `startup-dashboard`, `settings`, `hooks`, `multi-agent`, `subagent-patterns`, `adversarial-review`, `xplan`.
 
 ### Step 7: Module config prompts
 
@@ -157,9 +159,11 @@ The uninstaller:
 1. Reads `.ccgm-manifest.json` to find the exact files that were installed
 2. Creates a safety backup before removing anything
 3. Removes each file (handles both regular files and symlinks)
-4. Removes `.ccgm-manifest.json` and `.ccgm.env`
-5. Cleans up empty `rules/`, `commands/`, and `hooks/` directories
-6. Offers to restore from the safety backup if you change your mind
+4. Un-merges CCGM-contributed keys from merge targets like `settings.json`. If any of your own keys remain afterward, the file stays in place with just those keys; if nothing remains (the common case if you never added your own permissions), the file itself is deleted
+5. Removes `.ccgm-manifest.json` and `.ccgm.env`
+6. Cleans up empty `rules/`, `commands/`, and `hooks/` directories
+7. Offers to restore from the safety backup if you change your mind
+8. Removes the `ccgm`/`ccgms` aliases from `~/.zshrc` and `~/.bashrc`, if present
 
 Only CCGM-installed files are removed. Personal files you created in `~/.claude/` are untouched.
 

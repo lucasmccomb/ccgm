@@ -57,6 +57,7 @@ Every module needs a `module.json` manifest. Here is the full schema:
   "category": "core",
   "scope": ["global", "project"],
   "dependencies": [],
+  "status": "stable",
   "files": {
     "rules/your-module.md": {
       "target": "rules/your-module.md",
@@ -141,6 +142,7 @@ The runner discovers these automatically, so no registration is needed.
 | `category` | string | yes | Module category (see categories below). |
 | `scope` | string[] | yes | Where the module can be installed: `"global"`, `"project"`, or both. |
 | `dependencies` | string[] | yes | Module names that must be installed first. Use `[]` for no dependencies. |
+| `status` | string | no | Gates whether the module is offered. Omit for a stable module; set to `"beta"` or `"deprecated"` otherwise. Recognized by the installer's module menu and by the preset-coverage test (a `beta`/`deprecated` module is auto-excluded from the "every stable module belongs in a preset" check). |
 | `files` | object | yes | Map of source paths to file descriptors (see below). |
 | `tags` | string[] | yes | Searchable tags for discovery. |
 | `configPrompts` | object[] | yes | Configuration questions asked during installation. Use `[]` for none. |

@@ -756,6 +756,85 @@ Synthesizes what shipped in a time window by walking the git log, surfacing hots
 
 ---
 
+## Dreaming commands
+
+Installed by the **dreaming** module. Dreaming mines session transcripts nightly into evidence-tagged proposals against the self-improving learnings store. Every proposal is human-gated by default (`/dream-apply`); an opt-in optimistic auto-integration engine can apply proposals unattended instead, behind a dwell window and blast-radius caps.
+
+---
+
+### /dream
+
+**Status overview for the dreaming pipeline.**
+
+Read-only. Shows the slash command surface, current config flags, the last-mined watermark per project slug, today's digest path, pending/accepted/rejected proposal counts, any active canary incident, whether the nightly LaunchAgent is loaded, and (when optimistic auto-integration is on) its enabled/suspended state and dwelling-row count.
+
+**Usage**:
+```
+/dream
+```
+
+**Installed by**: dreaming module
+
+---
+
+### /dream-digest
+
+**Render today's dreaming digest, or a specific past date's.**
+
+Prints the markdown digest generated from that day's mined proposals. Falls back to materializing the digest from the day's proposals file if it has not been rendered yet.
+
+**Usage**: `/dream-digest` (today) or `/dream-digest 2026-05-15`.
+
+**Installed by**: dreaming module
+
+---
+
+### /dream-apply
+
+**List, apply, or reject pending dreaming proposals.**
+
+The always-available, human-gated write path from a mined proposal into the learnings store — including the only path a `_global` proposal can ever be promoted through. `/dream-apply` (no args) lists pending proposals; `/dream-apply <id>` shows and applies one; `/dream-apply <id> reject` dismisses it without a store write.
+
+**Usage**:
+```
+/dream-apply
+/dream-apply <proposal-id>
+/dream-apply <proposal-id> reject
+```
+
+**Installed by**: dreaming module
+
+---
+
+### /dream-review
+
+**Review auto-integrated and still-dwelling rows; veto or revert.**
+
+The post-hoc control surface for opt-in optimistic auto-integration: lists rows that auto-applied on their own plus rows still inside their dwell window (written, not yet read-eligible), reverses a single bad row (`veto <id>`), or reverts an entire night's batch (`revert <batch_id|sha>`).
+
+**Usage**:
+```
+/dream-review
+/dream-review veto <id>
+/dream-review revert <batch_id>
+```
+
+**Installed by**: dreaming module
+
+---
+
+### /dream-scorecard
+
+**Weekly observability scorecard for the memory system.**
+
+Renders deterministic figures for the 7 days ending on a given date (default today): captured, injected, and reused learnings; applied proposals; optimistic-integration safety signals (auto-integrated, mid-dwell, reverted-after-review, circuit-breaker trips); and overall store health.
+
+**Usage**: `/dream-scorecard` (last 7 days) or `/dream-scorecard 2026-06-30`.
+
+**Installed by**: dreaming module
+
+---
+
 ## Autoheal commands
 
 Installed by the **autoheal** module. The autoheal pipeline observes hook events, runs a daily transcript analyzer, and surfaces actionable proposals through these commands.
