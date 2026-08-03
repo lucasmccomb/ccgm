@@ -110,6 +110,35 @@ record_msg() {
 
 # --- machine-wide lock (mkdir-based; see header comment) ---------------
 
+# Break a lock whose recorded holder is no longer running.
+#
+# This is the one property a mkdir-based lock does NOT inherit from real
+# flock: flock lives on the holder's open file descriptor, so the kernel
+# releases it when the process dies for any reason, SIGKILL included. A
+# directory has no such teardown -- without this check, one `kill -9`
+# while the lock is held would deadlock every future run of this suite
+# until a human removed the directory by hand.
+#
+# Only ever breaks a lock we can PROVE is dead: `kill -0` must report the
+# recorded pid as gone. An unreadable, empty, or non-numeric holder.pid
+# is treated as live, so a lock caught mid-write (directory created, pid
+# not yet recorded) is never stolen from a running holder.
+break_stale_lock() {
+  [ -d "${LOCK_DIR}" ] || return 1
+  local holder
+  holder="$(cat "${LOCK_DIR}/holder.pid" 2>/dev/null || true)"
+  case "${holder}" in
+    ''|*[!0-9]*) return 1 ;;   # absent or non-numeric -- assume live
+  esac
+  if kill -0 "${holder}" 2>/dev/null; then
+    return 1                    # holder is alive; genuine contention
+  fi
+  echo "NOTE: breaking stale lock ${LOCK_DIR} (holder pid ${holder} is gone)" >&2
+  rm -f "${LOCK_DIR}/holder.pid" 2>/dev/null
+  rmdir "${LOCK_DIR}" 2>/dev/null
+  return 0
+}
+
 acquire_lock() {
   # args: timeout_secs
   local timeout_secs="$1"
@@ -118,6 +147,10 @@ acquire_lock() {
     if mkdir "${LOCK_DIR}" 2>/dev/null; then
       echo "$$" > "${LOCK_DIR}/holder.pid" 2>/dev/null
       return 0
+    fi
+    # Retry immediately if the blocker turned out to be a dead holder.
+    if break_stale_lock; then
+      continue
     fi
     if [ "${waited}" -ge "${timeout_secs}" ]; then
       local holder
