@@ -133,7 +133,15 @@ check_no_wrong_count_phrasing() {
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     # Extract the first integer that the phrasing wraps.
-    n=$(printf '%s' "$line" | grep -oE "$regex" | grep -oE '[0-9]+' | head -1)
+    #
+    # A *live pipe* into an early-exiting consumer (`grep -q`, `head -1`)
+    # can SIGPIPE-kill an upstream writer under `pipefail` (see #943, #945).
+    # Herestrings remove the pipe entirely, so nothing races.
+    # $matches is already bound by the enclosing loop; these must not reuse
+    # that name.
+    line_match=$(grep -oE "$regex" <<< "$line" || true)
+    line_digits=$(grep -oE '[0-9]+' <<< "$line_match" || true)
+    n=$(head -1 <<< "$line_digits")
     if [ -n "$n" ] && [ "$n" != "$MODULE_COUNT" ]; then
       fail "stale '$label' count ($n, expected $MODULE_COUNT): $line"
       found_wrong=1
@@ -259,7 +267,11 @@ while IFS= read -r mod; do
     continue
   fi
   # allowlisted?
-  if printf '%s\n' "$ALLOWLIST" | grep -qx "$mod"; then
+  # Herestring, not a pipe: `producer | grep -qx` can SIGPIPE-kill the
+  # producer if grep exits on its first match before the producer finishes
+  # writing, turning a successful match into a reported failure (see #943,
+  # #945). A herestring has no second process to race against.
+  if grep -qx "$mod" <<< "$ALLOWLIST"; then
     ok "$mod in zero presets but allowlisted"
     continue
   fi
@@ -284,7 +296,9 @@ while IFS= read -r mod; do
     STALE="$STALE $mod(missing-module)"
     continue
   fi
-  if printf '%s\n' "$PRESET_MEMBERS" | grep -qx "$mod"; then
+  # Herestring, not a pipe: see the identical rationale on the allowlist
+  # check above (#943, #945).
+  if grep -qx "$mod" <<< "$PRESET_MEMBERS"; then
     STALE="$STALE $mod(now-in-preset)"
   fi
 done <<EOF

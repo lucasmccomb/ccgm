@@ -507,7 +507,11 @@ else
   fail "--add with unwired placeholders unexpectedly succeeded"
 fi
 
-if echo "$add7_out" | grep -qiE "unexpanded placeholder"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a successful match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if grep -qiE "unexpanded placeholder" <<< "$add7_out"; then
   pass "Failure message names the unexpanded placeholder"
 else
   fail "Failure message did not mention unexpanded placeholder"
@@ -624,7 +628,7 @@ if grep -q "WARNING:" "$mismatch_stderr"; then
 else
   fail "ui_choose --default with an unmatched value did not print a 'WARNING:'-prefixed message: $(cat "$mismatch_stderr")"
 fi
-if echo "$result" | grep -qi "warning"; then
+if grep -qi "warning" <<< "$result"; then
   fail "Warning text leaked into ui_choose's returned value"
 else
   pass "Warning text did not leak into ui_choose's returned value"
@@ -868,9 +872,11 @@ if [ -x /bin/bash ]; then
   confirm_out=$(printf 'yes\n' | /bin/bash -c \
     "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' && echo CONFIRMED || echo DECLINED" 2>&1)
   set -e
-  if echo "$confirm_out" | grep -q "bad substitution"; then
+  # Herestrings through this whole block -- see the identical rationale at
+  # the top of the file (#943, #945).
+  if grep -q "bad substitution" <<< "$confirm_out"; then
     fail "ui_confirm under /bin/bash hit a bash-4 'bad substitution' abort (answer: yes): $confirm_out"
-  elif echo "$confirm_out" | grep -q "CONFIRMED"; then
+  elif grep -q "CONFIRMED" <<< "$confirm_out"; then
     pass "ui_confirm under /bin/bash returns confirmed for 'yes'"
   else
     fail "ui_confirm under /bin/bash did not confirm 'yes': $confirm_out"
@@ -880,9 +886,9 @@ if [ -x /bin/bash ]; then
   decline_out=$(printf 'no\n' | /bin/bash -c \
     "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' && echo CONFIRMED || echo DECLINED" 2>&1)
   set -e
-  if echo "$decline_out" | grep -q "bad substitution"; then
+  if grep -q "bad substitution" <<< "$decline_out"; then
     fail "ui_confirm under /bin/bash hit a bash-4 'bad substitution' abort (answer: no): $decline_out"
-  elif echo "$decline_out" | grep -q "DECLINED"; then
+  elif grep -q "DECLINED" <<< "$decline_out"; then
     pass "ui_confirm under /bin/bash returns declined for 'no'"
   else
     fail "ui_confirm under /bin/bash did not decline 'no': $decline_out"
@@ -892,7 +898,7 @@ if [ -x /bin/bash ]; then
   mixed_out=$(printf 'YES\n' | /bin/bash -c \
     "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' && echo CONFIRMED || echo DECLINED" 2>&1)
   set -e
-  if echo "$mixed_out" | grep -q "CONFIRMED"; then
+  if grep -q "CONFIRMED" <<< "$mixed_out"; then
     pass "ui_confirm under /bin/bash lowercases mixed-case 'YES' before matching"
   else
     fail "ui_confirm under /bin/bash did not confirm mixed-case 'YES': $mixed_out"
@@ -909,12 +915,12 @@ if [ -x /bin/bash ]; then
   dashn_out=$(printf -- '-n\nyes\n' | /bin/bash -c \
     "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' 'no' && echo CONFIRMED || echo DECLINED" 2>&1)
   set -e
-  if echo "$dashn_out" | grep -q "Please answer yes or no"; then
+  if grep -q "Please answer yes or no" <<< "$dashn_out"; then
     pass "ui_confirm under /bin/bash re-prompts on a literal '-n' answer instead of silently taking the default"
   else
     fail "ui_confirm under /bin/bash did not re-prompt on '-n' (silently took the default): $dashn_out"
   fi
-  if echo "$dashn_out" | grep -q "CONFIRMED"; then
+  if grep -q "CONFIRMED" <<< "$dashn_out"; then
     pass "ui_confirm under /bin/bash accepts the real answer ('yes') after rejecting '-n'"
   else
     fail "ui_confirm under /bin/bash did not resolve to the real answer after '-n': $dashn_out"
@@ -924,12 +930,12 @@ if [ -x /bin/bash ]; then
   dashe_out=$(printf -- '-e\nno\n' | /bin/bash -c \
     "source '$REPO_ROOT/lib/ui.sh'; ui_confirm 'Proceed?' 'yes' && echo CONFIRMED || echo DECLINED" 2>&1)
   set -e
-  if echo "$dashe_out" | grep -q "Please answer yes or no"; then
+  if grep -q "Please answer yes or no" <<< "$dashe_out"; then
     pass "ui_confirm under /bin/bash re-prompts on a literal '-e' answer instead of silently taking the default"
   else
     fail "ui_confirm under /bin/bash did not re-prompt on '-e' (silently took the default): $dashe_out"
   fi
-  if echo "$dashe_out" | grep -q "DECLINED"; then
+  if grep -q "DECLINED" <<< "$dashe_out"; then
     pass "ui_confirm under /bin/bash accepts the real answer ('no') after rejecting '-e'"
   else
     fail "ui_confirm under /bin/bash did not resolve to the real answer after '-e': $dashe_out"
@@ -977,7 +983,7 @@ MANIFEST_EOF
   update_exit=$?
   set -e
 
-  if echo "$update_out" | grep -qE "invalid option|bad substitution"; then
+  if grep -qE "invalid option|bad substitution" <<< "$update_out"; then
     fail "update.sh's _install_missing hit a bash-4-only construct under /bin/bash: $update_out"
   elif [ $update_exit -ne 0 ]; then
     fail "update.sh's _check_installed_drift/_install_missing exited $update_exit under /bin/bash: $update_out"

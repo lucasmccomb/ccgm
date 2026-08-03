@@ -592,25 +592,30 @@ JSON
 
 fixture_paths=$(CCGM_ROOT="$FIXTURE_ROOT" managed_backup_paths 2>/dev/null)
 
-if ! echo "$fixture_paths" | grep -qx '\.'; then
+# Herestring, not a pipe: `producer | grep -qx` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a successful match (or non-match) into a wrongly
+# reported result (see #943, #945). A herestring has no second process to
+# race against.
+if ! grep -qx '\.' <<< "$fixture_paths"; then
   pass "Derived path list does not contain a literal '.' segment"
 else
   fail "Derived path list contains a dangerous literal '.' segment"
 fi
 
-if ! echo "$fixture_paths" | grep -qx '\.\.'; then
+if ! grep -qx '\.\.' <<< "$fixture_paths"; then
   pass "Derived path list does not contain a literal '..' segment"
 else
   fail "Derived path list contains a dangerous literal '..' segment"
 fi
 
-if ! echo "$fixture_paths" | grep -qx ''; then
+if ! grep -qx '' <<< "$fixture_paths"; then
   pass "Derived path list does not contain an empty segment"
 else
   fail "Derived path list contains an empty segment"
 fi
 
-if echo "$fixture_paths" | grep -qx 'skills'; then
+if grep -qx 'skills' <<< "$fixture_paths"; then
   pass "Legitimate sibling target (skills/) still passes through"
 else
   fail "Legitimate sibling target (skills/) was dropped by the safety filter"
@@ -681,13 +686,15 @@ JSON
 
 scope_targets=$(_backup_files_block "$SCOPE_FIXTURE" | grep -o '"target"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/^"target"[[:space:]]*:[[:space:]]*"//; s/"$//')
 
-if echo "$scope_targets" | grep -qx 'real/path.md'; then
+# Herestrings here too -- see the identical rationale on the fixture_paths
+# checks above (#943, #945).
+if grep -qx 'real/path.md' <<< "$scope_targets"; then
   pass "_backup_files_block includes the real files[].target"
 else
   fail "_backup_files_block missed the real files[].target"
 fi
 
-if ! echo "$scope_targets" | grep -qx 'unrelated-decoy'; then
+if ! grep -qx 'unrelated-decoy' <<< "$scope_targets"; then
   pass "_backup_files_block excludes a decoy 'target' key outside files"
 else
   fail "_backup_files_block leaked a decoy 'target' key outside files"
