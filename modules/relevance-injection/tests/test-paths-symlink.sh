@@ -343,6 +343,18 @@ arm_remove_symlink() {
 # (portable bash 3.2 pattern -- no dependency on GNU `timeout`/`gtimeout`,
 # neither of which is guaranteed present on stock macOS).
 #
+# --verbose is REQUIRED here, not optional. `--output-format json` alone
+# emits exactly one `type: "result"` object; the full per-turn message
+# array (including `assistant` messages with `tool_use` blocks, which
+# arm C's self-discovery check in arm_check.py depends on) is only
+# emitted when verbose mode is on. Confirmed empirically on this CLI
+# (2.1.220): identical `claude -p --output-format json` invocations
+# produced a bare `result` dict when the effective verbose setting was
+# false, and the full message array once `--verbose` forced it true --
+# regardless of the operator's own ~/.claude/settings.json "verbose"
+# value, which must NOT be what makes this deterministic across
+# machines.
+#
 # args: arm_id, prompt, tools_csv
 arm_run_claude() {
   local arm_id="$1" prompt="$2" tools="$3"
@@ -353,6 +365,7 @@ arm_run_claude() {
     claude -p "${prompt}" \
       --model haiku \
       --output-format json \
+      --verbose \
       --permission-mode bypassPermissions \
       --tools "${tools}" \
       --strict-mcp-config \

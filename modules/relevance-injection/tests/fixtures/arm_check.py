@@ -12,7 +12,10 @@ the caller (test-paths-symlink.sh) reads stdout to distinguish outcomes,
 never the exit code. This matters most for `check-loaded`, where
 LOG_MISSING is itself a meaningful, distinct outcome (see
 lib/loaded_log.py's LogMissingError vs RuleNotLoadedError split) rather
-than a script failure.
+than a script failure. `check-no-self-read` follows the same one-line
+stdout contract; any diagnostic detail it emits (the assistant-message
+count it examined) goes to stderr instead, so the caller's `$(...)`
+capture of stdout is never polluted.
 
 Subcommands
 -----------
@@ -28,12 +31,26 @@ Subcommands
                         lib/loaded_log.py's design)
 
   check-no-self-read <out_json> <real_path> <basename>
-      Scans the `claude -p --output-format json` event array in
-      <out_json> for an assistant `tool_use` block named "Read" whose
-      `input.file_path` contains <real_path> or <basename>. Prints:
-        OK                        -- no such Read call found
+      Scans the `claude -p --output-format json --verbose` event array
+      in <out_json> for an assistant `tool_use` block named "Read" whose
+      `input.file_path` contains <real_path> or <basename>. --verbose is
+      required on the `claude -p` invocation for this check to mean
+      anything: without it, `--output-format json` emits a single
+      `type: "result"` object with no `assistant`-typed entries at all,
+      and a check that finds zero would otherwise report the same "OK"
+      as a check that genuinely examined N assistant turns and found no
+      self-read -- passing vacuously on every run. Prints:
+        OK                         -- examined >=1 assistant-type
+                                       entry, no self-read found
         SELF_READ_DETECTED: <path> -- the first matching Read call
-        CHECK_ERROR: <detail>      -- <out_json> could not be parsed
+        CHECK_ERROR: <detail>      -- <out_json> could not be parsed,
+                                      OR zero assistant-type entries
+                                      were present to examine (the
+                                      shape this check depends on was
+                                      never emitted -- most likely
+                                      `--verbose` was not honored)
+      Also writes a one-line diagnostic to stderr reporting how many
+      assistant-type entries were examined, regardless of outcome.
 """
 from __future__ import annotations
 
@@ -75,9 +92,11 @@ def check_no_self_read(out_json_path: str, real_path: str, basename: str) -> Non
     if not isinstance(data, list):
         data = [data]
 
+    assistant_count = 0
     for item in data:
         if not isinstance(item, dict) or item.get("type") != "assistant":
             continue
+        assistant_count += 1
         message = item.get("message")
         if not isinstance(message, dict):
             continue
@@ -89,8 +108,21 @@ def check_no_self_read(out_json_path: str, real_path: str, basename: str) -> Non
             tool_input = block.get("input") or {}
             file_path = str(tool_input.get("file_path", ""))
             if (real_path and real_path in file_path) or (basename and basename in file_path):
+                print(f"  (examined {assistant_count} assistant-type entries before the match)", file=sys.stderr)
                 print(f"SELF_READ_DETECTED: {file_path}")
                 return
+
+    print(f"  (examined {assistant_count} assistant-type entries)", file=sys.stderr)
+    if assistant_count == 0:
+        # `--output-format json` without `--verbose` emits a single
+        # `type: "result"` object and no `assistant`-typed entries at
+        # all -- this check has nothing to examine and must not report
+        # the same "OK" a genuine pass would. See module docstring.
+        print(
+            f"CHECK_ERROR: no assistant-type entries found in {out_json_path} "
+            "-- was `claude -p` invoked with --output-format json --verbose?"
+        )
+        return
     print("OK")
 
 
