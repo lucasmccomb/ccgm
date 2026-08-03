@@ -1515,6 +1515,26 @@ Single-pass rewrite under the Orwell rules in `rules/writing-system.md`. Lists e
 
 ---
 
+## Relevance injection commands
+
+Installed by the **relevance-injection** module.
+
+---
+
+### /rules-scope
+
+**Propose (and optionally write) a `claudeMdExcludes` block for this repo's installed CCGM rules.**
+
+Inspects the repo for language/framework markers and the installed CCGM manifest, then proposes excluding installed rule files that are irrelevant here: `tech-specific` rule files (`tailwind`, `shadcn`, `supabase`, `cloudflare`, `mcp-development`) when the repo shows no marker for that tech, plus a small conservative `niche` set of CCGM meta-workflow rules (the nightly dreaming pipeline, Argus, SSH to a remote box, ...) that apply regardless of tech stack. Never proposes a `PINNED_FLOOR` (safety-core) module's rules. Dry run by default - nothing is written until `--write` is passed, which merges the proposal into `<repo>/.claude/settings.json`'s `claudeMdExcludes` array, preserving every other key.
+
+**Usage**:
+```
+/rules-scope             # print the proposal; write nothing
+/rules-scope --write     # print the proposal AND write it to .claude/settings.json
+```
+
+---
+
 ## Skills
 
 Skills are packaged capabilities invokable by name (e.g. `/brainstorm`). Each skill installs to `~/.claude/skills/{name}/SKILL.md` and lives under `modules/<name>/skills/<skill>/SKILL.md` in the CCGM source.
