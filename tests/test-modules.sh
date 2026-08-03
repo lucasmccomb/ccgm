@@ -302,6 +302,17 @@ echo ""
 # interpolation as used in a `for` loop) and verifies every declared file
 # (module.json files[] key) is covered by at least one of them.
 #
+# This check is COVERAGE-ONLY, deliberately one-directional: it verifies
+# every declared file is copied by *something* in the cp block, but does
+# NOT verify the block copies *nothing else*. A block that recursively
+# globs a whole directory (e.g. `cp -R skills/foo/*`) passes this check even
+# if that directory also contains an undeclared subtree (a bundled test
+# suite, stray __pycache__ output) the block should not sweep in -- #951's
+# own commands-extra fix over-copied exactly this way on first attempt and
+# this guard could not have caught it. Over-copy is a separate property this
+# check does not verify; check it by hand (or diff against a real install)
+# whenever a README uses a recursive or glob `cp`.
+#
 # Deliberately NOT flagged, by design, not oversight:
 #   - `settings.partial.json` -- a jq-merge fragment, never `cp`'d whole in
 #     any of the 11 modules that declare it (verified empirically); every
@@ -309,11 +320,18 @@ echo ""
 #   - A module whose Manual Installation section contains zero `cp`
 #     invocations at all (prose-only steps, e.g. "Copy `skills/argus/` into
 #     `~/.claude/`", or cloud-dispatch's numbered-bullet instructions) is
-#     left unparsed, not failed -- turning prose into a false failure would
-#     make this check untrustworthy for the READMEs that use it legitimately.
+#     skipped, not failed -- turning prose into a false failure would make
+#     this check untrustworthy for the READMEs that use it legitimately.
 #   - A module with no Manual Installation/Install/Installation heading at
 #     all (autoheal, deepresearch, dreaming, global-claude-md,
 #     plugin-marketplace, startup-dashboard) has nothing to check.
+# Every skip is counted and reasoned (see SKIPPED_COUNT below) so the
+# "checked" number never silently implies more coverage than it has.
+#
+# A README that is not valid UTF-8 is reported as a FAIL naming the module,
+# not an uncaught exception -- an unhandled decode error previously took
+# down the rest of test-modules.sh (every check after this one silently
+# never ran) instead of producing a readable failure line.
 #
 # KNOWN_GAPS lists modules this check found to have a real, pre-existing gap
 # that is out of scope for the PR that introduced this check (#951 touched
@@ -390,7 +408,19 @@ def covers(relpath, cp_lines):
     return False
 
 
+def read_text_safe(path):
+    """Return (text, error) -- error is None on success. Never raises."""
+    try:
+        return path.read_text(), None
+    except UnicodeDecodeError as e:
+        return None, f"not valid UTF-8 ({e})"
+    except OSError as e:
+        return None, f"unreadable ({e})"
+
+
 checked = 0
+skipped = 0
+skip_reasons = []
 for mod_dir in sorted(MODULES.iterdir()):
     if not mod_dir.is_dir():
         continue
@@ -398,20 +428,45 @@ for mod_dir in sorted(MODULES.iterdir()):
     manifest = mod_dir / "module.json"
     readme = mod_dir / "README.md"
     if not manifest.exists():
-        continue
-    try:
-        data = json.loads(manifest.read_text())
-    except Exception:
-        continue
-    declared = [k for k in data.get("files", {}) if Path(k).name not in EXEMPT_FILENAMES]
-    if not declared or not readme.exists():
+        skipped += 1
+        skip_reasons.append((mod_name, "no module.json"))
         continue
 
-    section = extract_install_section(readme.read_text())
+    manifest_text, err = read_text_safe(manifest)
+    if err:
+        print(f"DECODE_FAIL\t{mod_name}\tmodule.json {err}")
+        continue
+    try:
+        data = json.loads(manifest_text)
+    except Exception as e:
+        skipped += 1
+        skip_reasons.append((mod_name, f"invalid module.json ({e})"))
+        continue
+
+    declared = [k for k in data.get("files", {}) if Path(k).name not in EXEMPT_FILENAMES]
+    if not declared:
+        skipped += 1
+        skip_reasons.append((mod_name, "no declared files to check"))
+        continue
+    if not readme.exists():
+        skipped += 1
+        skip_reasons.append((mod_name, "no README.md"))
+        continue
+
+    readme_text, err = read_text_safe(readme)
+    if err:
+        print(f"DECODE_FAIL\t{mod_name}\tREADME.md {err}")
+        continue
+
+    section = extract_install_section(readme_text)
     if section is None:
+        skipped += 1
+        skip_reasons.append((mod_name, "no Manual Installation/Install/Installation heading"))
         continue
     cp_lines = parse_cp_lines(section)
     if not cp_lines:
+        skipped += 1
+        skip_reasons.append((mod_name, "no parseable cp invocation (prose-only or whole-dir instructions)"))
         continue
 
     checked += 1
@@ -425,6 +480,9 @@ for mod_dir in sorted(MODULES.iterdir()):
             print(f"MISSING\t{mod_name}\t{relpath}")
 
 print(f"CHECKED\t{checked}")
+print(f"SKIPPED_COUNT\t{skipped}")
+for mod_name, reason in skip_reasons:
+    print(f"SKIPPED_DETAIL\t{mod_name}\t{reason}")
 PYEOF
 )
 
@@ -437,12 +495,26 @@ while IFS=$'\t' read -r kind mod_name detail; do
     STALE)
       fail "$mod_name: $detail"
       ;;
+    DECODE_FAIL)
+      fail "$mod_name: $detail -- cannot check Manual Installation coverage"
+      ;;
   esac
-done < <(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep -E '^(MISSING|STALE)')
+done < <(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep -E '^(MISSING|STALE|DECODE_FAIL)')
 
 checked_count=$(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep '^CHECKED' | cut -f2)
+skipped_count=$(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep '^SKIPPED_COUNT' | cut -f2)
+# Unconditional, like the "Checked N declared files[] entries..." line above
+# -- a guard's coverage must never be invisible in default (non-VERBOSE)
+# output, or its silence gets mistaken for completeness.
+echo "  Checked $checked_count module(s), skipped ${skipped_count:-0} (no install section or no parseable cp command)"
 if [ -n "$checked_count" ] && [ "$checked_count" -gt 0 ]; then
-  pass "Manual Installation cp-block coverage checked across $checked_count module(s) with a parseable install section"
+  pass "Manual Installation cp-block coverage checked across $checked_count module(s)"
+fi
+if [ "$VERBOSE" = "1" ] && [ -n "$skipped_count" ] && [ "$skipped_count" -gt 0 ]; then
+  echo "  Skipped modules:"
+  printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep '^SKIPPED_DETAIL' | while IFS=$'\t' read -r _ mod_name reason; do
+    echo "    - $mod_name: $reason"
+  done
 fi
 echo ""
 

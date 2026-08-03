@@ -88,8 +88,17 @@ cp commands/guard.md ~/.claude/commands/guard.md
 cp commands/checkpoint.md ~/.claude/commands/checkpoint.md
 
 # Skill (pack registry, detectors/wrappers, schemas, reference docs)
+# Copies exactly what module.json declares under skills/audit/ -- not a
+# blanket `cp -R skills/audit/*`, which would also sweep in the skill's own
+# bundled test suite (skills/audit/tests/) and any __pycache__/ droppings,
+# neither of which start.sh installs.
 mkdir -p ~/.claude/skills/audit
-cp -R skills/audit/* ~/.claude/skills/audit/
+cp skills/audit/SKILL.md ~/.claude/skills/audit/SKILL.md
+cp -R skills/audit/packs ~/.claude/skills/audit/packs
+cp -R skills/audit/reference ~/.claude/skills/audit/reference
+cp -R skills/audit/schemas ~/.claude/skills/audit/schemas
+cp -R skills/audit/scripts ~/.claude/skills/audit/scripts
+find ~/.claude/skills/audit/scripts -type d -name '__pycache__' -exec rm -rf {} +
 
 # Project-level
 cp commands/audit.md .claude/commands/audit.md
