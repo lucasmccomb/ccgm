@@ -191,8 +191,11 @@ PYEOF
   if [ -n "${raw_ws:-}" ]; then
     while IFS= read -r pattern; do
       [ -z "$pattern" ] && continue
-      # Strip trailing /* or /** to get a base directory
-      dir_pattern=$(echo "$pattern" | sed 's|/\*\*$||; s|/\*$||')
+      # Strip trailing /* or /** to get a base directory. printf '%s', not
+      # echo: bash's builtin echo flag-parses a leading -n/-e, so a
+      # workspaces[] glob of exactly "-n" would silently strip to empty
+      # here (#946).
+      dir_pattern=$(printf '%s' "$pattern" | sed 's|/\*\*$||; s|/\*$||')
       # Expand to concrete child directories
       while IFS= read -r -d $'\0' d; do
         rel="${d#"$TARGET_DIR"/}"
@@ -230,7 +233,10 @@ PYEOF
   if [ -n "${raw_ws:-}" ]; then
     while IFS= read -r pattern; do
       [ -z "$pattern" ] && continue
-      dir_pattern=$(echo "$pattern" | sed 's|/\*\*$||; s|/\*$||')
+      # printf '%s', not echo: bash's builtin echo flag-parses a leading
+      # -n/-e, so a pnpm-workspace.yaml packages[] glob of exactly "-n"
+      # would silently strip to empty here (#946).
+      dir_pattern=$(printf '%s' "$pattern" | sed 's|/\*\*$||; s|/\*$||')
       while IFS= read -r -d $'\0' d; do
         rel="${d#"$TARGET_DIR"/}"
         monorepo_packages+=("$rel")
@@ -294,7 +300,15 @@ fi
 if [ -f "$TARGET_DIR/requirements.txt" ]; then
   content=$(cat "$TARGET_DIR/requirements.txt")
   for fw in django flask fastapi starlette tornado sanic; do
-    if echo "$content" | grep -qi "^[[:space:]]*${fw}[>=<!\[]"; then
+    # Herestring, not a pipe: under `set -euo pipefail` (line 35), `echo
+    # "$content" | grep -qi ...` can have grep exit on its first match
+    # before echo finishes writing a large requirements.txt, SIGPIPE-killing
+    # echo and making pipefail report a genuine match as a failure (#943,
+    # #945). It is also the echo flag-parsing defect (#946): a
+    # requirements.txt whose entire content is exactly "-n"/"-e" would
+    # silently become empty. A herestring has no second process to race
+    # against and never flag-parses its argument.
+    if grep -qi "^[[:space:]]*${fw}[>=<!\[]" <<< "$content"; then
       frameworks+=("$fw")
     fi
   done
@@ -305,7 +319,9 @@ if has_file "go.mod"; then
   content=$(cat "$TARGET_DIR/go.mod")
   for fw_path in "gin-gonic/gin" "labstack/echo" "gofiber/fiber" "go-chi/chi"; do
     fw_label="${fw_path##*/}"
-    if echo "$content" | grep -q "$fw_path"; then
+    # Herestring, not a pipe: same SIGPIPE-under-pipefail (#943, #945) and
+    # echo flag-parsing (#946) reasoning as the requirements.txt loop above.
+    if grep -q "$fw_path" <<< "$content"; then
       frameworks+=("$fw_label")
     fi
   done

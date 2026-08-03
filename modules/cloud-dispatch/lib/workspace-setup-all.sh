@@ -93,8 +93,10 @@ fi
 if [[ -n "${REPO_OVERRIDE}" ]]; then
   REPO="${REPO_OVERRIDE}"
 else
-  # Strip https://github.com/ prefix and .git suffix
-  REPO=$(echo "${REPO_URL}" | sed 's|https://github.com/||;s|\.git$||')
+  # Strip https://github.com/ prefix and .git suffix. printf '%s', not echo:
+  # bash's builtin echo flag-parses a leading -n/-e, so a repo-url of
+  # exactly "-n" would silently strip to empty here (#946).
+  REPO=$(printf '%s' "${REPO_URL}" | sed 's|https://github.com/||;s|\.git$||')
 fi
 
 # SSH_KEY is passed via SSH_KEY_PATH env to child scripts (workspace-setup.sh, workspace-assign.sh)
