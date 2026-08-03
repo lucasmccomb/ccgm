@@ -59,8 +59,17 @@ def parse_log(path: "str | os.PathLike") -> "list[dict]":
       valid ones written before it. With replacement, the undecodable
       bytes become U+FFFD and the line is then treated like any other:
       kept if it still parses as a JSON object, dropped if it does not.
-      A retained record cannot cause a false positive in assert_loaded()
-      because no real rule path contains U+FFFD.
+
+      A retained record is safe for assert_loaded() for two reasons, and
+      the weaker one is not sufficient alone. Exact and bare-form matches
+      compare the whole path, which cannot equal a real rule path once it
+      contains U+FFFD. The suffix branch compares only the tail, so in
+      principle a record could carry corruption in its leading directories
+      and still match a real rule -- but that record names the rule it
+      claims to name, so treating it as loaded is correct, and the hook's
+      own writes use ensure_ascii=True and can never emit invalid bytes at
+      all. Corruption reaching this path is external, and it does not
+      respect path boundaries.
     - A line that parses to a JSON object is appended to the result
       as-is.
     """

@@ -110,8 +110,13 @@ class ParseLogTests(unittest.TestCase):
             self.assertEqual(len(records), 1)
             self.assertEqual(records[0]["file_path"], "/a/b/c.md")
 
-    def test_invalid_utf8_line_is_skipped_not_raised(self):
+    def test_invalid_utf8_line_does_not_discard_the_rest_of_the_log(self):
         """One corrupt byte must not discard the rest of the day's log.
+
+        Deliberately asserts only that the surrounding records survive,
+        not the corrupt line's own retain/drop disposition -- that is
+        data-dependent (the replaced line may or may not still parse as
+        JSON) and is not a property callers should rely on.
 
         The decode happens in the line iterator, outside the json.loads()
         guard, so without errors="replace" this raises UnicodeDecodeError
