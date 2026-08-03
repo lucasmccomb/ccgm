@@ -47,11 +47,14 @@ CCGM_RELEVANCE_TASKTYPES=backend,testing      # optional
 ## Manual Installation
 
 ```bash
-cp rules/relevance-injection.md   ~/.claude/rules/relevance-injection.md
-cp hooks/relevance-inject.py      ~/.claude/hooks/relevance-inject.py
-cp lib/relevance_select.py        ~/.claude/lib/relevance_select.py
-cp lib/applicability-schema.json  ~/.claude/lib/applicability-schema.json
-# then merge settings.partial.json into ~/.claude/settings.json (SessionStart hook)
+cp rules/relevance-injection.md        ~/.claude/rules/relevance-injection.md
+cp hooks/relevance-inject.py           ~/.claude/hooks/relevance-inject.py
+cp hooks/instructions-loaded-log.py    ~/.claude/hooks/instructions-loaded-log.py
+cp lib/relevance_select.py             ~/.claude/lib/relevance_select.py
+cp lib/loaded_log.py                   ~/.claude/lib/loaded_log.py
+cp lib/applicability-schema.json       ~/.claude/lib/applicability-schema.json
+# then merge settings.partial.json into ~/.claude/settings.json
+# (registers the SessionStart and InstructionsLoaded hooks)
 ```
 
 ## Files
@@ -60,6 +63,8 @@ cp lib/applicability-schema.json  ~/.claude/lib/applicability-schema.json
 |------|-------------|
 | `rules/relevance-injection.md` | Tiered safety-core precedence + how the opt-in feature works |
 | `hooks/relevance-inject.py` | SessionStart hook; no-op unless the opt-in flag is set |
+| `hooks/instructions-loaded-log.py` | `InstructionsLoaded` hook; appends one JSONL record per loaded instruction file to `~/.claude/rule-loading/loaded-{date}.jsonl` |
 | `lib/relevance_select.py` | Pure, deterministic selection library (safety core + applicability matching) |
+| `lib/loaded_log.py` | Reads the rule-loading log: `parse_log()` and `assert_loaded()` |
 | `lib/applicability-schema.json` | JSON Schema for the optional `module.json` `applicability` field |
-| `settings.partial.json` | Registers the SessionStart hook |
+| `settings.partial.json` | Registers the SessionStart and InstructionsLoaded hooks |
