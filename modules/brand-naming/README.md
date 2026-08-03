@@ -34,6 +34,8 @@ Deep verification of one or more specific brand name candidates. Checks everythi
 - Social media handles on 8 platforms
 - Existing business/company web presence
 
+`/brand-check` shells out to `lib/brand-check-gather.sh` (installed to `~/.claude/lib/brand-check-gather.sh`) to run the DNS/whois/social checks concurrently; WebSearch-backed checks stay in the agent.
+
 **Example:**
 ```
 /brand-check lifebldr
@@ -68,11 +70,13 @@ All APIs used by these commands are free with no authentication required:
 
 ## Manual Installation
 
-Copy the command files to your Claude Code commands directory:
+Copy the command files and the `/brand-check` gather script to your Claude Code config directory:
 
 ```bash
 cp commands/brand.md ~/.claude/commands/brand.md
 cp commands/brand-check.md ~/.claude/commands/brand-check.md
+mkdir -p ~/.claude/lib
+cp lib/brand-check-gather.sh ~/.claude/lib/brand-check-gather.sh
 ```
 
 Optionally register the MCP server:

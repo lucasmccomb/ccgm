@@ -287,6 +287,237 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
 done
 echo ""
 
+# --- Test: Manual Installation cp-block coverage (#951) ---
+# Both checks above compare module.json against the DISK (declared file
+# exists / shipped file is declared). Neither one looks at the README's
+# human-facing "Manual Installation" cp block, which is a hand-maintained
+# subset of module.json's files[] and can drift independently -- #951 found
+# two modules (commands-extra, brand-naming) whose Manual Installation block
+# omitted files that DO install via `bash start.sh --add`, silently breaking
+# the documented manual-install path.
+#
+# This check parses each README's Manual Installation/Install/Installation
+# section for `cp` invocations (literal paths, `cp -R dir/*` recursive
+# globs, `cp dir/*.ext` non-recursive globs, and `$VAR`/`${VAR}` shell
+# interpolation as used in a `for` loop) and verifies every declared file
+# (module.json files[] key) is covered by at least one of them.
+#
+# This check is COVERAGE-ONLY, deliberately one-directional: it verifies
+# every declared file is copied by *something* in the cp block, but does
+# NOT verify the block copies *nothing else*. A block that recursively
+# globs a whole directory (e.g. `cp -R skills/foo/*`) passes this check even
+# if that directory also contains an undeclared subtree (a bundled test
+# suite, stray __pycache__ output) the block should not sweep in -- #951's
+# own commands-extra fix over-copied exactly this way on first attempt and
+# this guard could not have caught it. Over-copy is a separate property this
+# check does not verify; check it by hand (or diff against a real install)
+# whenever a README uses a recursive or glob `cp`.
+#
+# Deliberately NOT flagged, by design, not oversight:
+#   - `settings.partial.json` -- a jq-merge fragment, never `cp`'d whole in
+#     any of the 11 modules that declare it (verified empirically); every
+#     README instead documents merging it into settings.json.
+#   - A module whose Manual Installation section contains zero `cp`
+#     invocations at all (prose-only steps, e.g. "Copy `skills/argus/` into
+#     `~/.claude/`", or cloud-dispatch's numbered-bullet instructions) is
+#     skipped, not failed -- turning prose into a false failure would make
+#     this check untrustworthy for the READMEs that use it legitimately.
+#   - A module with no Manual Installation/Install/Installation heading at
+#     all (autoheal, deepresearch, dreaming, global-claude-md,
+#     plugin-marketplace, startup-dashboard) has nothing to check.
+# Every skip is counted and reasoned (see SKIPPED_COUNT below) so the
+# "checked" number never silently implies more coverage than it has.
+#
+# A README that is not valid UTF-8 is reported as a FAIL naming the module,
+# not an uncaught exception -- an unhandled decode error previously took
+# down the rest of test-modules.sh (every check after this one silently
+# never ran) instead of producing a readable failure line.
+#
+# KNOWN_GAPS lists modules this check found to have a real, pre-existing gap
+# that is out of scope for the PR that introduced this check (#951 touched
+# six specific READMEs; these three were discovered by the new check but
+# belong to a different PR). Tracked in #970. A module here whose gap has
+# since been fixed makes this check FAIL (stale allowlist entry) so the
+# list cannot silently outlive the bugs it excuses.
+echo "--- Checking Manual Installation cp-block coverage (module.json vs README) ---"
+MANUAL_INSTALL_REPORT=$(REPO_ROOT="$REPO_ROOT" python3 - <<'PYEOF'
+import json
+import os
+import re
+from pathlib import Path
+
+REPO_ROOT = Path(os.environ["REPO_ROOT"])
+MODULES = REPO_ROOT / "modules"
+
+HEADING_RE = re.compile(r'^##\s+(Manual Installation|Install|Installation)\s*$', re.MULTILINE)
+ANY_HEADING_RE = re.compile(r'^##\s+', re.MULTILINE)
+CP_LINE_RE = re.compile(r'cp\s+(-[A-Za-z]+\s+)?"?(?:modules/[\w.-]+/)?([\w${}/.*-]+)"?')
+EXEMPT_FILENAMES = {"settings.partial.json"}
+
+# module -> tracking issue for a known, out-of-scope pre-existing gap.
+KNOWN_GAPS = {
+    "ccgm-doctor": "#970",
+    "documentation": "#970",
+    "session-history": "#970",
+}
+
+
+def shellvar_to_regex(src):
+    pattern = re.escape(src)
+    pattern = pattern.replace(re.escape('*'), '.*')
+    pattern = re.sub(r'\\\$\\\{\w+\\\}', '.*', pattern)  # \$\{var\} -> .*
+    pattern = re.sub(r'\\\$\w+', '.*', pattern)           # \$var -> .*
+    return re.compile('^' + pattern + '$')
+
+
+def extract_install_section(readme_text):
+    m = HEADING_RE.search(readme_text)
+    if not m:
+        return None
+    rest = readme_text[m.end():]
+    m2 = ANY_HEADING_RE.search(rest)
+    return rest[:m2.start()] if m2 else rest
+
+
+def parse_cp_lines(section):
+    out = []
+    for m in CP_LINE_RE.finditer(section):
+        flags = m.group(1) or ""
+        out.append((bool(re.search(r'[Rr]', flags)), m.group(2)))
+    return out
+
+
+def covers(relpath, cp_lines):
+    reldir = str(Path(relpath).parent)
+    relname = Path(relpath).name
+    for is_recursive, src in cp_lines:
+        if '*' in src or '$' in src:
+            src_dir = str(Path(src).parent)
+            src_dir = '' if src_dir == '.' else src_dir
+            if is_recursive:
+                if src_dir == '' or reldir == src_dir or reldir.startswith(src_dir + '/'):
+                    if reldir == src_dir or src_dir == '':
+                        if shellvar_to_regex(Path(src).name).match(relname):
+                            return True
+                    else:
+                        return True
+            elif reldir == src_dir and shellvar_to_regex(Path(src).name).match(relname):
+                return True
+        elif src == relpath:
+            return True
+    return False
+
+
+def read_text_safe(path):
+    """Return (text, error) -- error is None on success. Never raises."""
+    try:
+        return path.read_text(), None
+    except UnicodeDecodeError as e:
+        return None, f"not valid UTF-8 ({e})"
+    except OSError as e:
+        return None, f"unreadable ({e})"
+
+
+checked = 0
+skipped = 0
+skip_reasons = []
+for mod_dir in sorted(MODULES.iterdir()):
+    if not mod_dir.is_dir():
+        continue
+    mod_name = mod_dir.name
+    manifest = mod_dir / "module.json"
+    readme = mod_dir / "README.md"
+    if not manifest.exists():
+        skipped += 1
+        skip_reasons.append((mod_name, "no module.json"))
+        continue
+
+    manifest_text, err = read_text_safe(manifest)
+    if err:
+        print(f"DECODE_FAIL\t{mod_name}\tmodule.json {err}")
+        continue
+    try:
+        data = json.loads(manifest_text)
+    except Exception as e:
+        skipped += 1
+        skip_reasons.append((mod_name, f"invalid module.json ({e})"))
+        continue
+
+    declared = [k for k in data.get("files", {}) if Path(k).name not in EXEMPT_FILENAMES]
+    if not declared:
+        skipped += 1
+        skip_reasons.append((mod_name, "no declared files to check"))
+        continue
+    if not readme.exists():
+        skipped += 1
+        skip_reasons.append((mod_name, "no README.md"))
+        continue
+
+    readme_text, err = read_text_safe(readme)
+    if err:
+        print(f"DECODE_FAIL\t{mod_name}\tREADME.md {err}")
+        continue
+
+    section = extract_install_section(readme_text)
+    if section is None:
+        skipped += 1
+        skip_reasons.append((mod_name, "no Manual Installation/Install/Installation heading"))
+        continue
+    cp_lines = parse_cp_lines(section)
+    if not cp_lines:
+        skipped += 1
+        skip_reasons.append((mod_name, "no parseable cp invocation (prose-only or whole-dir instructions)"))
+        continue
+
+    checked += 1
+    missing = [r for r in declared if not covers(r, cp_lines)]
+    if mod_name in KNOWN_GAPS:
+        if not missing:
+            print(f"STALE\t{mod_name}\tallowlisted for {KNOWN_GAPS[mod_name]} but has no missing files now -- remove from KNOWN_GAPS")
+        # else: known, tracked, intentionally silent.
+    else:
+        for relpath in missing:
+            print(f"MISSING\t{mod_name}\t{relpath}")
+
+print(f"CHECKED\t{checked}")
+print(f"SKIPPED_COUNT\t{skipped}")
+for mod_name, reason in skip_reasons:
+    print(f"SKIPPED_DETAIL\t{mod_name}\t{reason}")
+PYEOF
+)
+
+while IFS=$'\t' read -r kind mod_name detail; do
+  [ -z "$kind" ] && continue
+  case "$kind" in
+    MISSING)
+      fail "$mod_name: Manual Installation cp block never installs '$detail' (declared in module.json but no cp/glob covers it)"
+      ;;
+    STALE)
+      fail "$mod_name: $detail"
+      ;;
+    DECODE_FAIL)
+      fail "$mod_name: $detail -- cannot check Manual Installation coverage"
+      ;;
+  esac
+done < <(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep -E '^(MISSING|STALE|DECODE_FAIL)')
+
+checked_count=$(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep '^CHECKED' | cut -f2)
+skipped_count=$(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep '^SKIPPED_COUNT' | cut -f2)
+# Unconditional, like the "Checked N declared files[] entries..." line above
+# -- a guard's coverage must never be invisible in default (non-VERBOSE)
+# output, or its silence gets mistaken for completeness.
+echo "  Checked $checked_count module(s), skipped ${skipped_count:-0} (no install section or no parseable cp command)"
+if [ -n "$checked_count" ] && [ "$checked_count" -gt 0 ]; then
+  pass "Manual Installation cp-block coverage checked across $checked_count module(s)"
+fi
+if [ "$VERBOSE" = "1" ] && [ -n "$skipped_count" ] && [ "$skipped_count" -gt 0 ]; then
+  echo "  Skipped modules:"
+  printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep '^SKIPPED_DETAIL' | while IFS=$'\t' read -r _ mod_name reason; do
+    echo "    - $mod_name: $reason"
+  done
+fi
+echo ""
+
 # --- Test: Dependencies reference real modules ---
 echo "--- Checking dependencies ---"
 for mod_dir in "$REPO_ROOT"/modules/*/; do

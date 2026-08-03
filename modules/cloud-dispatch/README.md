@@ -298,6 +298,7 @@ VMs are billed per second on Hetzner. Destroy them when done to stop charges. Th
 | `lib/workspace-assign.sh` | `workspace-assign.sh <ip> <agent-index> <issue-num> <title>` | Write assignment.json to one slot |
 | `lib/workspace-collect.sh` | `workspace-collect.sh --all [--json]` | Pull PR URLs and git state from all agents |
 | `lib/workspace-cleanup.sh` | `workspace-cleanup.sh --all` | Remove workspace dirs from VMs |
+| `lib/ccgm-headless-install.sh` | `ccgm-headless-install.sh <ccgm-repo-path> <preset> <target-user-home>` | Non-interactive CCGM installer for a cloud agent user; runs on the VM, invoked internally by `workspace-setup.sh` |
 
 ### Agent Management
 
@@ -308,6 +309,13 @@ VMs are billed per second on Hetzner. Destroy them when done to stop charges. Th
 | `lib/agent-status.sh` | `agent-status.sh --all` | Report status, issue, last log, PR URL per agent |
 | `lib/agent-stop.sh` | `agent-stop.sh --all` | Kill tmux sessions and write AGENT_STOPPED |
 | `lib/agent-collect.sh` | `agent-collect.sh --all [--json]` | Collect agent results (status, PR, log tail) |
+| `lib/recovery.sh` | `recovery.sh check` \| `recovery.sh retry <ip> <agent-index>` \| `recovery.sh retry-all` | Scan agents for failures (rate-limited, crashed, timeout, error) and re-dispatch failed ones |
+
+### Cost Reporting
+
+| Script | Usage | Description |
+|--------|-------|-------------|
+| `lib/cost-report.sh` | `cost-report.sh session [--json]` \| `cost-report.sh monthly [--json]` | Cost report for the current/last session or the current calendar month, from `/tmp/ccgm-budget*.json` |
 
 ### VM Auto-Shutdown
 
