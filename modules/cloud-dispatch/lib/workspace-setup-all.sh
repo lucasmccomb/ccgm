@@ -172,6 +172,7 @@ AGENTS_PER_VM=4
 
 slot=0
 for issue_num in "${ISSUE_LIST[@]}"; do
+  # printf '%s', same reasoning as the identical strip above (#946).
   issue_num=$(printf '%s' "${issue_num}" | tr -d '[:space:]')
   vm_index=$(( slot / AGENTS_PER_VM ))
   agent_index=$(( slot % AGENTS_PER_VM ))
