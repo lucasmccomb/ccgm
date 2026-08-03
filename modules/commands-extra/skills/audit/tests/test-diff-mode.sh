@@ -220,12 +220,51 @@ fi
 # Verify byte-exact round-trip: reading back the -z file should produce the same paths
 Z_PATHS=$(read_z_file "$CHANGES_Z1")
 TXT_PATHS=$(cat "$CHANGES_TXT1" | tr '\n' '|' | sed 's/|$//')
-Z_PATHS_PIPE=$(echo "$Z_PATHS" | tr '\n' '|' | sed 's/|$//')
+# printf '%s', not echo: bash's builtin echo flag-parses a leading -n/-e,
+# so a path of exactly "-n" would silently drop out of this comparison.
+Z_PATHS_PIPE=$(printf '%s' "$Z_PATHS" | tr '\n' '|' | sed 's/|$//')
 
 if [ "$Z_PATHS_PIPE" = "$TXT_PATHS" ]; then
   pass "python3 -z parse: paths round-trip byte-exact between .z and .txt"
 else
   fail "python3 -z parse: paths differ between .z and .txt (z='$Z_PATHS_PIPE' txt='$TXT_PATHS')"
+fi
+
+# ---------------------------------------------------------------------------
+# GROUP 1b: Dash-prefixed path name -- echo flag-parsing regression guard
+# (issue #946). A changed file literally named "-n" is a legal git path. If
+# the Z_PATHS_PIPE join above used `echo "$Z_PATHS"` instead of
+# `printf '%s' "$Z_PATHS"`, bash's builtin echo would flag-parse a
+# single-line "-n" value and print nothing, silently dropping the path from
+# every downstream pipe-joined comparison. Pin the printf-based join here so
+# a future regression back to echo fails loudly instead of returning an
+# empty string that reads as "no changed files."
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- [1b] Dash-prefixed path name: echo flag-parsing regression guard ---"
+echo ""
+
+REPO1B=$(make_repo)
+printf 'const x = 1;\n' > "$REPO1B/clean.js"
+git -C "$REPO1B" add -A
+git -C "$REPO1B" commit -q -m "base"
+
+# A file literally named "-n" -- a legal git path, and the exact value that
+# bash's builtin echo flag-parses into empty output.
+printf 'const evil = 1;\n' > "$REPO1B/-n"
+git -C "$REPO1B" add -- "-n"
+git -C "$REPO1B" commit -q -m "add dash-prefixed file"
+
+DASH_Z=$(make_tmp)/dash-changed.z
+git -C "$REPO1B" diff --name-only -z "HEAD~1...HEAD" > "$DASH_Z"
+
+DASH_PATHS=$(read_z_file "$DASH_Z")
+DASH_PATHS_PIPE=$(printf '%s' "$DASH_PATHS" | tr '\n' '|' | sed 's/|$//')
+
+if [ "$DASH_PATHS_PIPE" = "-n" ]; then
+  pass "dash-prefixed path '-n': printf '%s' preserves it through the pipe-join (echo would flag-parse it to empty)"
+else
+  fail "dash-prefixed path '-n': should survive the pipe-join as '-n', got '$DASH_PATHS_PIPE'"
 fi
 
 # Test --staged: stage a new file and verify git diff --staged detects it

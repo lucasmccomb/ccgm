@@ -9,8 +9,11 @@ if [ -z "$NAME" ]; then
   exit 1
 fi
 
-# Normalize to lowercase
-NAME=$(echo "$NAME" | tr '[:upper:]' '[:lower:]')
+# Normalize to lowercase. printf '%s', not echo: bash's builtin echo
+# flag-parses a leading -n/-e, so a name of exactly "-n" would silently
+# become empty output here (bypassing the emptiness guard above, which
+# runs before this normalization).
+NAME=$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')
 
 # TLDs from arg or defaults
 if [ -n "$2" ]; then
