@@ -327,48 +327,33 @@ cp modules/commands-core/commands/*.md ~/.claude/commands/
 
 ## Utilities
 
-### statusline.sh - Claude Code Session Monitor
+### Statusline - Claude Code Session Monitor
 
-Display live session metrics at the bottom of your Claude Code terminal. Shows model, directory, git branch, context usage, and rate limits with reset countdowns.
+Display live session metrics at the bottom of your Claude Code terminal: model + effort, multi-clone identity, directory + git branch, context usage, session cost, and rate limits with reset countdowns.
 
 **Usage:**
 
 ```bash
-# Copy to your Claude Code config
-cp lib/statusline.sh ~/.claude/statusline-command.sh
-chmod +x ~/.claude/statusline-command.sh
+./start.sh --add statusline
 ```
 
-Then configure Claude Code settings:
-
-```bash
-/statusline use ~/.claude/statusline-command.sh
-```
-
-Or manually add to `~/.claude/settings.json`:
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "~/.claude/statusline-command.sh"
-  }
-}
-```
+This installs `~/.claude/statusline.sh` and wires the `statusLine` setting in `~/.claude/settings.json` automatically - no manual editing needed.
 
 **Display Example:**
 
 ```
-🧠 O-4.8 | code main | ctx:8% | 5h:62% ███░░ 2h26m | 7d:79% ████░ 3d8h
+🧠 O-4.8 Max | ⛓ agent-2 | ccgm main | ctx:42% | $1.23 | 5h:62% ███░░ 2h26m | 7d:79% ████░ 3d8h
 ```
 
 **Features:**
-- Model with tier emoji (🧠 Opus, 🐢 Sonnet, ⚠️ Haiku) and abbreviation (O-4.8, S-4.6, H-4.5, etc.)
+- Model with tier emoji (🧠 flagship - Opus ≥4.6 or Fable, 🐢 Sonnet, ⚠️ Haiku) and abbreviation (O-4.8, S-4.6, H-4.5, F-5, etc.), plus a color-coded effort-level suffix (L/M/H/XH/Max)
+- Multi-clone identity (`⛓ agent-N`, read from `.env.clone`) when present
 - Current directory and git branch
-- Context window usage (0-100%)
-- 5-hour rate limit with bar and reset countdown
-- 7-day rate limit with bar and reset countdown
+- Context usage measured against the auto-compact budget (`ctx:42%`), with a `⚠ COMPACT SOON` warning near the threshold
+- Session cost in USD
+- 5-hour and 7-day rate limit bars with reset countdowns
 - Color-coded by usage: green <60%, yellow <85%, red 85%+
+- Every field is optional - a missing JSON key drops its section, so the bar degrades gracefully on older Claude Code versions
 
 ## Documentation
 
@@ -380,7 +365,7 @@ The `docs/` directory contains comprehensive documentation:
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
 | [Module Catalog](docs/modules.md) | Detailed reference for all 78 modules |
 | [Commands Reference](docs/commands.md) | All 90 slash commands with usage examples |
-| [Hooks Reference](docs/hooks.md) | All 31 hooks explained - what they do and when they fire |
+| [Hooks Reference](docs/hooks.md) | All 32 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |
 | [Configuration](docs/configuration.md) | Customization, template variables, settings overrides |

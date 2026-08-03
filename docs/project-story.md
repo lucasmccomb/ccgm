@@ -8,7 +8,7 @@ For user-facing documentation, see the [README](../README.md) and the rest of [`
 
 ## What CCGM Is
 
-CCGM is a modular configuration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Instead of hand-crafting rules, hooks, slash commands, and permissions from scratch, users pick from a catalog of 74 self-contained modules and install them with a single command. Each module packages one coherent capability — a behavioral discipline, a workflow command, an enforcement hook, an entire subsystem — with its own manifest, README, tests, and manual-install path.
+CCGM is a modular configuration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Instead of hand-crafting rules, hooks, slash commands, and permissions from scratch, users pick from a catalog of 78 self-contained modules and install them with a single command. Each module packages one coherent capability — a behavioral discipline, a workflow command, an enforcement hook, an entire subsystem — with its own manifest, README, tests, and manual-install path.
 
 At a higher level, CCGM is an answer to a question: **what does a fully-configured, safety-railed, self-improving AI coding environment look like when you treat the configuration itself as a serious software project?** It applies production engineering practice — issue-first workflow, CI, adversarial review, append-only data models, deterministic gates, incident postmortems — to the layer most people treat as dotfiles.
 
@@ -17,15 +17,15 @@ At a higher level, CCGM is an answer to a question: **what does a fully-configur
 | Fact | Value |
 |------|-------|
 | First commit | 2026-03-19 |
-| Modules | 74 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
+| Modules | 78 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
 | Slash commands | 76 |
-| Hooks | 23 Python hooks across 7 Claude Code events |
-| Presets | 5 (minimal, standard 13 modules, team, cloud-agent 54, full 70) |
+| Hooks | 33 Python hooks across 11 Claude Code events |
+| Presets | 5 (minimal, standard 16 modules, team, cloud-agent 55, full 74) |
 | Commits / issues | 430+ commits, 870+ issues and PRs in the first 4 months |
 | Base permission policy | 800+ allow entries, curated deny list, bypass-proof destructive-command blocks |
 | Audit engine | 21 audit packs over a deterministic tool spine + LLM triage |
 | Test infrastructure | 15 structural test scripts, per-module pytest/bash suites, 4 CI workflows, dual-OS (ubuntu + macos) |
-| Documentation | 11-file `docs/` directory (~5,300 lines) with CI-guarded counts |
+| Documentation | 12-file `docs/` directory (~5,300 lines) with CI-guarded counts |
 | Distribution | Interactive bash installer (canonical), non-interactive agent mode, native Claude Code plugin marketplace (generated projection), per-module manual copy |
 | License | MIT, public repo with a CI-enforced no-personal-data scan |
 
@@ -93,7 +93,7 @@ Notable mechanics:
 
 ### Presets
 
-Named module collections for different personas: `minimal` (get started), `standard` (most users — includes the safety hooks, identity, memory read path), `team` (adds review tooling and shared-knowledge modules), `cloud-agent` (54 modules for autonomous/headless VM agents), `full` (every stable module). Preset membership is CI-checked: a stable module in zero presets fails the build unless allowlisted.
+Named module collections for different personas: `minimal` (get started), `standard` (most users — includes the safety hooks, identity, memory read path), `team` (adds review tooling and shared-knowledge modules), `cloud-agent` (55 modules for autonomous/headless VM agents), `full` (every stable module). Preset membership is CI-checked: a stable module in zero presets fails the build unless allowlisted.
 
 ---
 
@@ -288,6 +288,9 @@ Every one of these produced a durable control, not just a fix:
 | Database pooler circuit breaker locked out all CLI operations after retried auth failures | Retry-once rule with explicit re-auth handoff |
 | Stale documentation counts recurring across README/docs | Derived counts + CI guard; mandatory post-merge `/docupdate` |
 | Memory store recognized as a prompt-injection/poisoning surface before shipping auto-writes | Write-time sanitizer, read-time quarantine-on-projection, transcript-verified origin binding, dwell windows, caps, breaker, and a published adversarial poisoning analysis with red-team tests |
+| A manifest-completeness gate walked shipped files with `find -type f`, which never matches a symlink, so a file shipped as a symlink was invisible to the check meant to catch it | `find -L` to follow symlinks, landed as a regression guard while zero such symlinks existed |
+| An early-exiting consumer under `set -o pipefail` could SIGPIPE-kill a still-writing producer across 21 sites in three test suites; one was a bare assignment that aborted the run partway through, so a truncated run still read green | Herestrings in place of piped consumers, removing the second process there was nothing to race |
+| Bash's builtin `echo` flag-parses an argument of exactly `-n`/`-e` into empty output; what was filed as 7 sites became 13 once the sweep widened past piped `tr` calls | `printf '%s'` for flag-shaped values, and a regression test built on a git file literally named `-n` |
 
 ## Iteration Case Studies
 
@@ -326,7 +329,7 @@ CCGM's most distinctive property is that it is built *by* the environment it con
 
 ## Notable Engineering Highlights
 
-- Designed and shipped a 74-module configuration platform with dependency resolution, deep JSON settings merging, template expansion, manifest-tracked install/update/uninstall, and four distribution surfaces — in pure bash + jq with no runtime dependencies.
+- Designed and shipped a 78-module configuration platform with dependency resolution, deep JSON settings merging, template expansion, manifest-tracked install/update/uninstall, and four distribution surfaces — in pure bash + jq with no runtime dependencies.
 - Built a durable cross-session memory system on an append-only op-event log with read-time projection, confidence decay, conflict-free multi-writer git sync, computed rollback, three independent anti-poisoning layers, and a published adversarial security analysis — then held its automation behind an eval gate its own results hadn't yet passed.
 - Built two autonomous observe-analyze-propose loops (permission friction; session transcripts) that run nightly under cost caps with direct API calls, layered defenses (dwell windows, blast-radius caps, anomaly checks, self-healing circuit breakers), and human-gated apply paths.
 - Rebuilt a codebase auditor as a 21-pack engine over a deterministic multi-tool spine with schema-validated, fingerprinted findings, baseline/delta classification, and suppression/provenance workflows.

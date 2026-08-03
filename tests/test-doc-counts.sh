@@ -455,17 +455,59 @@ else
   ok "README catalog Dependencies column matches every module.json"
 fi
 
-# --- (g) command + hook count claims track the reference docs ---------------
-# README advertises how many commands and hooks the reference docs cover. Derive
-# both from the docs themselves so the advertised number cannot go stale.
+# --- (g) command + hook count claims track reality --------------------------
+# README advertises how many commands and hooks the reference docs cover.
+#
+# Commands: still derived from docs/commands.md's own section count (a
+# doc-vs-doc comparison, not a filesystem one). Left alone deliberately (#988)
+# -- the command surface is 69 command files + 24 skills with 3 dual-shipped
+# as both, netting to the documented 90, and reconciling that split against
+# the manifests needs its own decision. This asymmetry with the hooks check
+# below is intentional, not an oversight.
+#
+# Hooks: derived from the module.json manifests themselves (every
+# "type": "hook" file across modules/*/module.json), excluding
+# hooks/plugin-rule-inject.py -- docs/hooks.md documents that exclusion
+# explicitly (plugin-marketplace's own hook, copied into every other
+# rules-bearing module's hooks/ directory so its generated plugin manifest
+# can register it, not a hook a user installs once). Asserting against the
+# manifests -- instead of asserting docs/hooks.md's own section count against
+# itself -- is the #988 fix: a hook could previously be added to a
+# module.json and documented nowhere, and README + docs/hooks.md would still
+# agree with each other forever.
 
 COMMANDS_DOC_COUNT=$(grep -cE '^### /' docs/commands.md 2>/dev/null | tr -d ' ' || true)
-HOOKS_DOC_COUNT=$(grep -cE '^### .*\.py$' docs/hooks.md 2>/dev/null | tr -d ' ' || true)
 echo "Derived commands-doc count: $COMMANDS_DOC_COUNT"
-echo "Derived hooks-doc count: $HOOKS_DOC_COUNT"
-
 check_count_claim "README.md" "All __N__ slash commands" "$COMMANDS_DOC_COUNT"
-check_count_claim "README.md" "All __N__ hooks explained" "$HOOKS_DOC_COUNT"
+
+HOOK_MANIFEST_COUNT=$(python3 - <<'PYEOF'
+import glob
+import json
+
+total = 0
+for path in sorted(glob.glob("modules/*/module.json")):
+    data = json.load(open(path))
+    for file_path, meta in data.get("files", {}).items():
+        if not isinstance(meta, dict) or meta.get("type") != "hook":
+            continue
+        if file_path == "hooks/plugin-rule-inject.py":
+            continue
+        total += 1
+print(total)
+PYEOF
+)
+HOOKS_DOC_COUNT=$(grep -cE '^### .*\.py$' docs/hooks.md 2>/dev/null | tr -d ' ' || true)
+echo "Derived hook manifest count (excluding plugin-rule-inject.py): $HOOK_MANIFEST_COUNT"
+echo "Derived hooks-doc section count: $HOOKS_DOC_COUNT"
+
+if [ "$HOOKS_DOC_COUNT" = "$HOOK_MANIFEST_COUNT" ]; then
+  ok "docs/hooks.md documents $HOOKS_DOC_COUNT hooks, matching the module.json manifests"
+else
+  fail "docs/hooks.md documents $HOOKS_DOC_COUNT hooks (### *.py sections), but modules/*/module.json declare $HOOK_MANIFEST_COUNT hooks (excluding plugin-rule-inject.py)
+  -> add a ### section for the missing hook(s), or remove a stale one."
+fi
+
+check_count_claim "README.md" "All __N__ hooks explained" "$HOOK_MANIFEST_COUNT"
 
 # --- Result -----------------------------------------------------------------
 echo ""

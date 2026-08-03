@@ -61,9 +61,10 @@ During installation, CCGM expands placeholder tokens in configuration files. The
 | Variable | Description | Where it's used |
 |----------|-------------|-----------------|
 | `__HOME__` | Your home directory path (e.g., `/Users/jane`) | `settings.json` - path patterns in allow/deny lists |
-| `__USERNAME__` | GitHub username (e.g., `janedoe`) | `enforce-git-workflow.py` - direct-to-main repo allowlist |
+| `__USERNAME__` | GitHub username (e.g., `janedoe`) | LaunchAgent plist filenames for the `autoheal`/`dreaming` daily jobs (`com.__USERNAME__.ccgm.{autoheal,dreaming}.daily.plist`) |
 | `__CODE_DIR__` | Code workspace directory (e.g., `~/code`) | `settings.json` - path patterns, port registry |
 | `__DEFAULT_MODE__` | Permission mode: `ask` or `dontAsk` | `settings.json` - `defaultMode` field |
+| `__TIMEZONE__` | Your timezone (e.g., `America/New_York`) | Collected during install and stored in `.ccgm.env` as `CCGM_TIMEZONE`; the substitution mechanism supports it but no shipped module file currently contains the token |
 
 Values are collected during installation and stored in `~/.claude/.ccgm.env`. They are applied via `sed` substitution when files are copied.
 

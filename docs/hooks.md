@@ -10,17 +10,23 @@ Claude Code supports these hook types:
 |-----------|---------------|------------|
 | **PreToolUse** | Before a tool call is executed | Yes - can approve, deny, or modify |
 | **PostToolUse** | After a tool call completes | No - advisory only |
+| **PostToolUseFailure** | After a tool call fails | No - advisory only |
+| **PermissionRequest** | When Claude Code asks the user for a permission decision | Yes - can auto-allow |
 | **UserPromptSubmit** | When the user submits a message | No - can inject context |
 | **SessionStart** | When a new session begins | No - can inject context |
 | **PreCompact** | Before context compaction | No - can inject context |
+| **InstructionsLoaded** | Once per instruction file Claude Code loads | No - observational only |
+| **Stop** | When Claude finishes responding | No - can emit a suggestion |
+| **SubagentStop** | When a subagent finishes responding | Yes - one narrow empty-message case |
+| **TaskCompleted** | When a delegated task completes | No - always allows |
 
 Hooks are registered in `settings.json` under the `hooks` key. Each hook specifies its type, an optional matcher (e.g., `Bash` to only fire on Bash tool calls), and the command to run.
 
 ## Installed hooks
 
-The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. Seven other modules add the rest: **self-improving** 3, **subagent-patterns** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, **commands-preamble**, and **relevance-injection**. Total: 25 hooks across 8 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 31).
+The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. Seven other modules add the rest: **self-improving** 3, **subagent-patterns** 2, **relevance-injection** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, and **commands-preamble**. Total: 26 hooks across 8 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 32).
 
-This count excludes `hooks/plugin-rule-inject.py`, which brings the true `"type": "hook"` file total to 32. It is the **plugin-marketplace** module's own hook, copied into every other rules-bearing module's `hooks/` directory so each module's generated Claude Code plugin manifest can register it independently - see [plugin-marketplace](../modules/plugin-marketplace/README.md) for what it does.
+This count excludes `hooks/plugin-rule-inject.py`, which brings the true `"type": "hook"` file total to 33. It is the **plugin-marketplace** module's own hook, copied into every other rules-bearing module's `hooks/` directory so each module's generated Claude Code plugin manifest can register it independently - see [plugin-marketplace](../modules/plugin-marketplace/README.md) for what it does.
 
 ---
 
@@ -101,7 +107,7 @@ Enforces path-based permissions for file read/edit/write operations. Another wor
 
 ### ccgm-update-check.py
 
-**Type**: PreToolUse (any tool, fires once per day)
+**Type**: UserPromptSubmit (fires once per day)
 **Module**: hooks
 **Can block**: No (advisory only)
 
@@ -202,11 +208,11 @@ Validates Supabase migration file timestamps before a commit is created, prevent
 
 ### orphan-process-check.py
 
-**Type**: SessionStart
+**Type**: Not a hook - invoked by `/startup` (`startup-dashboard`'s `startup-gather.sh`)
 **Module**: hooks
 **Can block**: No (warning only)
 
-Detects orphaned test worker processes (vitest, jest) left behind when a previous Claude Code session exited mid-test-run.
+Detects orphaned test worker processes (vitest, jest) left behind when a previous Claude Code session exited mid-test-run. It carries no `settings.partial.json` registration in any module - it runs only when `/startup` runs, not on any Claude Code hook event.
 
 **How it works**:
 1. Scans running processes for node processes with PPID 1 (re-parented to launchd/init)
@@ -423,6 +429,20 @@ Opt-in and off by default. CCGM installs every selected module's rules to `~/.cl
 
 ---
 
+### instructions-loaded-log.py
+
+**Type**: InstructionsLoaded (no matcher)
+**Module**: relevance-injection
+**Can block**: No (observational only)
+
+Deterministic measurement oracle for the rest of the dynamic rule-loading work: turns "did the right rule load?" from a model judgment into a fact recorded on disk. Claude Code invokes this hook once per loaded instruction file (not once per session with a batched list), so it appends one JSONL record per invocation to `~/.claude/rule-loading/loaded-{date}.jsonl`.
+
+**Record shape**: `hook_event_name`, `timestamp`, `session_id`, `cwd`, `file_path`, `memory_type`, and `load_reason` extracted directly from the payload, plus the full redacted raw payload under `raw` as a forward-compat safety net.
+
+**Safety properties**: always exits 0, even on malformed or empty stdin. Redacts the payload via `hook_utils.redact_secrets()` before writing, and uses `hook_utils.file_locked_append()` so concurrent clones or invocations cannot interleave or tear a write.
+
+---
+
 ### subagent-stop-check.py
 
 **Type**: SubagentStop
@@ -461,11 +481,11 @@ Appends one JSONL record per event to `~/.claude/autoheal/events/{date}.jsonl`, 
 
 ### failure-logger.py
 
-**Type**: PostToolUseFailure (no matcher)
+**Type**: PostToolUse + PostToolUseFailure (no matcher)
 **Module**: autoheal
 **Can block**: No
 
-Specialization of the event logger for tool failures — captures `exit_code` and a redacted `stderr_excerpt` (≤200 chars) for analyzer context.
+Specialization of the event logger for tool failures — captures `exit_code` and a redacted `stderr_excerpt` (≤200 chars) for analyzer context. Registered on both surfaces so a client that omits `hook_event_name` is still caught: on `PostToolUseFailure` it always logs, and on plain `PostToolUse` it logs only if `exit_code` is a nonzero int; otherwise it exits silently and leaves the success record to `permission-event-logger.py`.
 
 ### user-correction-detector.py
 
