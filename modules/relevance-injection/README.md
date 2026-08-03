@@ -59,6 +59,15 @@ python3 lib/rules_scope.py             # print the proposal for cwd; write nothi
 python3 lib/rules_scope.py --write     # apply it to <cwd>/.claude/settings.json
 ```
 
+**The generated file is machine-scoped.** `--write` puts this machine's
+absolute, resolved rule-file paths into `claudeMdExcludes`. Commit it and
+pull it on a different machine (a teammate, or the same operator with a
+different `ccgmRoot`), and none of those paths match — every "excluded"
+rule silently loads again there instead of staying suppressed. That is the
+safe failure direction (nothing is ever wrongly dropped), but it does mean
+the committed file only takes effect on the machine that generated it until
+re-run with `--write` there. See `commands/rules-scope.md` for detail.
+
 ## Manual Installation
 
 ```bash

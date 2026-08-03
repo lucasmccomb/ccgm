@@ -165,6 +165,31 @@ echo "--- Proposal against this repo's real module set (non-web profile) ---"
 cat "$WORKDIR/real-out.txt"
 echo "---"
 
+# --- Test 7: propose_excludes() never returns a PINNED_FLOOR rule, scanned
+# against the REAL, full installed manifest (all 78 modules) -- this is the
+# plan.md Epic 0.5 test bullet's literal wording ("asserted against the full
+# installed set"), not just the 21-module adversarial fixture in
+# test_rules_scope.py. PINNED_FLOOR is derived here from rules_scope.py
+# itself (never re-typed), so this stays accurate if the list ever changes.
+PINNED_FLOOR_MODULES=$(python3 -c "
+import sys
+sys.path.insert(0, '$LIB_DIR')
+import rules_scope
+print('\n'.join(rules_scope.PINNED_FLOOR))
+")
+PINNED_HITS=""
+while IFS= read -r mod; do
+  [ -z "$mod" ] && continue
+  if grep -qE "^${mod} " "$WORKDIR/real-out.txt"; then
+    PINNED_HITS="$PINNED_HITS $mod"
+  fi
+done <<< "$PINNED_FLOOR_MODULES"
+if [ -z "$PINNED_HITS" ]; then
+  pass "propose_excludes() against the full real installed manifest (all 78 modules) never proposes a PINNED_FLOOR rule"
+else
+  fail "PINNED_FLOOR module(s) proposed for exclusion against the real manifest:$PINNED_HITS"
+fi
+
 echo ""
 echo "=== Part 2: end-to-end via InstructionsLoaded (Gate 2, model-in-the-loop) ==="
 

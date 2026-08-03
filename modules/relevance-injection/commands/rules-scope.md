@@ -106,6 +106,24 @@ oracle): excluding the symlink path did nothing; excluding the real,
 resolved path worked. `rules_scope.py` handles this automatically
 (`os.path.realpath()` on the installed location) — nothing to configure.
 
+## Another load-bearing detail: the generated file is machine-scoped
+
+Every path `--write` puts into `claudeMdExcludes` is an absolute,
+machine-specific path (this machine's `ccgmRoot` plus the module's
+rule-file target, realpath-resolved). If `<repo>/.claude/settings.json` is
+committed and pulled onto a **different machine** — a teammate, or the same
+operator with a different `ccgmRoot` — none of those absolute paths will
+match that machine's own installed rule files.
+
+**The failure direction is safe.** A path that resolves to nothing simply
+does not match anything Claude Code loads, so on a mismatched machine every
+"excluded" rule silently **loads again** — the opposite of the failure this
+tool exists to prevent. Nothing is dropped that should have loaded. Nothing
+in this generator currently detects or warns about the mismatch; re-running
+`/rules-scope --write` on the second machine regenerates the file with that
+machine's own resolved paths. Decide with that in mind before committing a
+generated `.claude/settings.json` to a repo other machines will check out.
+
 ## Cross-references
 
 - Library: `modules/relevance-injection/lib/rules_scope.py`

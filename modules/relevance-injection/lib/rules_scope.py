@@ -353,6 +353,23 @@ def write_settings(settings_path: str, exclude_paths: "list[str]") -> dict:
 
     Raises ValueError if `settings_path` exists but is not a JSON object --
     refusing to guess is safer than silently clobbering a hand-edited file.
+
+    MACHINE-SCOPED OUTPUT -- read before committing this file. Every path
+    this writes is the ABSOLUTE, machine-specific real path resolved by
+    `_resolved_rule_path()` at generation time (this machine's `ccgmRoot`,
+    realpath-resolved). If `<repo>/.claude/settings.json` is committed and
+    pulled onto a different machine -- a teammate, or the same operator with
+    a different `ccgmRoot` -- none of the absolute paths will match that
+    machine's own installed rule files. The failure direction is safe: a
+    path that resolves to nothing simply does not match anything Claude Code
+    loads, so every "excluded" rule silently LOADS again for that user rather
+    than some other rule being wrongly dropped. This generator does not
+    detect or warn about that mismatch at write time; regenerating with
+    `/rules-scope --write` on the second machine re-resolves the paths
+    correctly. A relative or environment-variable-templated path form would
+    remove this footgun if Claude Code's `claudeMdExcludes` supports one --
+    that has not been tested here, and building it is a design change beyond
+    this fix's scope.
     """
     existing: dict = {}
     if os.path.exists(settings_path):
