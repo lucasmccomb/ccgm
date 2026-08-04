@@ -98,6 +98,10 @@ The generated test suite supports building features test-first:
 
 ## Manual Installation
 
-1. Copy `commands/test-vision.md` to `~/.claude/commands/test-vision.md`
-2. Copy `commands/e2e.md` to `~/.claude/commands/e2e.md`
-3. Ensure `browser-automation` and `multi-agent` modules are installed
+```bash
+mkdir -p ~/.claude/commands
+cp commands/test-vision.md ~/.claude/commands/test-vision.md
+cp commands/e2e.md ~/.claude/commands/e2e.md
+```
+
+Then ensure the `browser-automation` and `multi-agent` modules are installed — both are required at runtime.

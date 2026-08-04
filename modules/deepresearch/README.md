@@ -51,6 +51,15 @@ Topic -> Claude generates N diverse queries
 4. **Restart Claude Code** so the MCP server loads.
 5. Verify with `claude mcp get exa` - expect `Status: ✓ Connected`. In a fresh Claude Code session, the `web_search_exa` tool (and friends) should be callable.
 
+## Manual Installation
+
+Replaces step 1 above if you are not using the CCGM installer. Steps 2-5 still apply — the command is useless without the Exa MCP server registered.
+
+```bash
+mkdir -p ~/.claude/commands
+cp commands/deepresearch.md ~/.claude/commands/deepresearch.md
+```
+
 ## Usage
 
 ```

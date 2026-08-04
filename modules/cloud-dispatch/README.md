@@ -487,11 +487,23 @@ hcloud ssh-key delete ccgm-session-TIMESTAMP
 
 ## Manual Installation
 
-If you are not using the CCGM installer, copy these files manually:
+If you are not using the CCGM installer, copy the files manually. The `lib/` scripts install into
+their own `~/.claude/lib/cloud-dispatch/` subdirectory — the slash commands invoke them by that
+hardcoded path (`bash ~/.claude/lib/cloud-dispatch/<script>.sh`), and a flat `~/.claude/lib/` would
+collide with other modules' files (e.g. `common.sh`).
 
-1. Copy `modules/cloud-dispatch/` to a location of your choice
-2. Copy `modules/cloud-dispatch/commands/*.md` to `~/.claude/commands/`
-3. Copy `modules/cloud-dispatch/rules/cloud-dispatch.md` to `~/.claude/rules/`
-4. Ensure all scripts in `lib/` are executable: `chmod +x lib/*.sh`
-5. Set `HCLOUD_TOKEN` in your environment
-6. Build the golden image (see Quick Start)
+```bash
+mkdir -p ~/.claude/commands ~/.claude/rules ~/.claude/lib/cloud-dispatch
+cp commands/*.md ~/.claude/commands/
+cp rules/cloud-dispatch.md ~/.claude/rules/cloud-dispatch.md
+cp lib/*.sh ~/.claude/lib/cloud-dispatch/
+chmod +x ~/.claude/lib/cloud-dispatch/*.sh
+```
+
+Then:
+
+1. Set `HCLOUD_TOKEN` in your environment
+2. Build the golden image (see Quick Start)
+
+The `packer/`, `terraform/`, and `tests/` directories stay in the repo — they are build and
+infrastructure sources, not installed files. Run them from a checkout.

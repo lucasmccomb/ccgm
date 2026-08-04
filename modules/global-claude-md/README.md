@@ -13,5 +13,6 @@ All behavioral rules live in their own files under `~/.claude/rules/`. Duplicati
 ## Manual installation
 
 ```bash
+mkdir -p ~/.claude
 cp CLAUDE.md ~/.claude/CLAUDE.md
 ```

@@ -60,5 +60,8 @@ Pipeline: `/test-vision` or `/e2e` (write specs) -> `/atdd` (build code to pass 
 
 ## Manual Installation
 
-1. Copy `commands/atdd.md` to `~/.claude/commands/atdd.md`
-2. Copy `rules/atdd.md` to `~/.claude/rules/atdd.md`
+```bash
+mkdir -p ~/.claude/commands ~/.claude/rules
+cp commands/atdd.md ~/.claude/commands/atdd.md
+cp rules/atdd.md ~/.claude/rules/atdd.md
+```
