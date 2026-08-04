@@ -212,7 +212,16 @@ fi
 if [ -f "$CONFIG_FILE" ]; then
   # Check that --ours only appears in a prohibition context, not as an instruction
   # A line that uses --ours without "NEVER" before it on the same line is the old behaviour
-  if grep 'git checkout --ours' "$CONFIG_FILE" | grep -qv 'NEVER'; then
+  # Capture the producer's output, then herestring into the early-exiting
+  # `grep -qv`: a live `producer | grep -q...` pipe can SIGPIPE-kill the
+  # producer if grep exits on its first match before the producer finishes
+  # writing (see #943, #945). A herestring has no second process to race
+  # against. `|| true` preserves the original no-match-is-fine behavior.
+  # The `-n` guard matters here specifically because of `-v`: a herestring
+  # of an empty string is one blank line, not zero bytes, and a blank line
+  # does not contain "NEVER" -- `-v` would wrongly select it as a match.
+  OURS_LINES=$(grep 'git checkout --ours' "$CONFIG_FILE" || true)
+  if [ -n "$OURS_LINES" ] && grep -qv 'NEVER' <<< "$OURS_LINES"; then
     fail "multi-agent-config.md must not instruct 'git checkout --ours' (use NEVER... to prohibit it)" \
       "found in $CONFIG_FILE"
   else

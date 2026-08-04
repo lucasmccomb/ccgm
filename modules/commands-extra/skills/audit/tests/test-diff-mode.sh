@@ -194,13 +194,17 @@ git -C "$REPO1" diff --name-only -z "HEAD~1...HEAD" > "$CHANGES_Z1"
 
 PATHS1=$(read_z_file "$CHANGES_Z1")
 
-if echo "$PATHS1" | grep -qxF "modified.js"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if grep -qxF "modified.js" <<< "$PATHS1"; then
   pass "git diff --name-only -z HEAD~1...HEAD includes 'modified.js'"
 else
   fail "git diff --name-only -z HEAD~1...HEAD should include 'modified.js' (got: $PATHS1)"
 fi
 
-if ! echo "$PATHS1" | grep -qxF "clean.js"; then
+if ! grep -qxF "clean.js" <<< "$PATHS1"; then
   pass "git diff --name-only -z HEAD~1...HEAD does NOT include 'clean.js' (unchanged)"
 else
   fail "git diff --name-only -z HEAD~1...HEAD should NOT include 'clean.js'"
@@ -220,7 +224,8 @@ with open(sys.argv[2], "w", encoding="utf-8") as out:
 PYEOF
 
 TXT1_CONTENT=$(cat "$CHANGES_TXT1")
-if echo "$TXT1_CONTENT" | grep -qxF "modified.js"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -qxF "modified.js" <<< "$TXT1_CONTENT"; then
   pass "changed-files.txt (from python3 -z parse) contains 'modified.js'"
 else
   fail "changed-files.txt should contain 'modified.js'"
@@ -281,13 +286,14 @@ git -C "$REPO1" diff --name-only -z --staged > "$STAGED_Z1"
 
 STAGED_PATHS=$(read_z_file "$STAGED_Z1")
 
-if echo "$STAGED_PATHS" | grep -qxF "staged.js"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -qxF "staged.js" <<< "$STAGED_PATHS"; then
   pass "git diff --name-only -z --staged includes 'staged.js'"
 else
   fail "git diff --name-only -z --staged should include 'staged.js' (got: $STAGED_PATHS)"
 fi
 
-if ! echo "$STAGED_PATHS" | grep -qxF "modified.js"; then
+if ! grep -qxF "modified.js" <<< "$STAGED_PATHS"; then
   pass "git diff --name-only -z --staged does NOT include committed 'modified.js'"
 else
   fail "git diff --name-only -z --staged should NOT include already-committed 'modified.js'"
@@ -325,7 +331,8 @@ git -C "$REPO2" diff --name-only -z "HEAD~1...HEAD" > "$EVIL_Z"
 EVIL_PATHS=$(read_z_file "$EVIL_Z")
 
 # The hostile file should appear as inert data
-if echo "$EVIL_PATHS" | grep -qF "$EVIL_NAME"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -qF "$EVIL_NAME" <<< "$EVIL_PATHS"; then
   pass "hostile filename '$EVIL_NAME' appears in changed-set as inert data"
 else
   fail "hostile filename '$EVIL_NAME' missing from changed-set (got: $EVIL_PATHS)"
@@ -517,7 +524,13 @@ else
 fi
 
 # Critical: path round-trips byte-exact through .z and back
-EVIL_Z_ROUNDTRIP=$(read_z_file "$EVIL_Z" | head -1)
+# `|| true` guards the bare assignment: `producer | head -1` can SIGPIPE-kill
+# the producer (read_z_file's python3) once head has read its one line, and
+# under pipefail that turns a genuine, correct result into a script abort
+# instead of a reported failure (see #943, #945; the priority case for this
+# shape was test-doc-counts.sh:136). The captured value is unaffected --
+# head's output is what command substitution captures, not python3's exit.
+EVIL_Z_ROUNDTRIP=$(read_z_file "$EVIL_Z" | head -1 || true)
 if [ "$EVIL_Z_ROUNDTRIP" = "$EVIL_NAME" ]; then
   pass "hostile filename: path round-trips byte-exact through null-delimited .z file"
 else
@@ -762,13 +775,14 @@ if command -v gitleaks >/dev/null 2>&1; then
 
   CHANGED_PATHS3=$(read_z_file "$CHANGES_Z3")
 
-  if echo "$CHANGED_PATHS3" | grep -qxF "changed.js"; then
+  # Herestring, not a pipe: see the identical rationale above (#943, #945).
+  if grep -qxF "changed.js" <<< "$CHANGED_PATHS3"; then
     pass "spine post-filter fixture: 'changed.js' in changed set"
   else
     fail "spine post-filter fixture: 'changed.js' should be in changed set (got: $CHANGED_PATHS3)"
   fi
 
-  if ! echo "$CHANGED_PATHS3" | grep -qxF "unchanged.js"; then
+  if ! grep -qxF "unchanged.js" <<< "$CHANGED_PATHS3"; then
     pass "spine post-filter fixture: 'unchanged.js' NOT in changed set"
   else
     fail "spine post-filter fixture: 'unchanged.js' should NOT be in changed set"
@@ -974,7 +988,8 @@ sys.exit(1)
 PYEOF
 )
 
-if echo "$EMPTY_OUTPUT" | grep -q "no changed files"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "no changed files" <<< "$EMPTY_OUTPUT"; then
   pass "empty diff: documented exit message 'no changed files -- nothing to audit' emitted"
 else
   fail "empty diff: expected 'no changed files' message from empty-set guard"
@@ -1051,26 +1066,27 @@ M_SECTION=$(awk '/^### Phase M2\.1/,/^### Phase M2\.5/' "$SKILL_MD" 2>/dev/null 
 SINGLE_SECTION=$(awk '/^### Phase 1\.5/,/^### Phase 2/' "$SKILL_MD" 2>/dev/null || true)
 set -e
 
-if echo "$M_SECTION" | grep -q "changed-files.z"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "changed-files.z" <<< "$M_SECTION"; then
   pass "SKILL.md M-phase: changed-files.z artifact is documented"
 else
   fail "SKILL.md M-phase: Phase M2.1 must document the changed-files.z artifact"
 fi
 
-if echo "$SINGLE_SECTION" | grep -q "changed-files.z"; then
+if grep -q "changed-files.z" <<< "$SINGLE_SECTION"; then
   pass "SKILL.md --single path: changed-files.z artifact is documented"
 else
   fail "SKILL.md --single path: Phase 1.5 must document the changed-files.z artifact"
 fi
 
 # 5d. The diff-filter step (post-filter model) appears in BOTH paths
-if echo "$M_SECTION" | grep -q "diff.filter\|diff_filter\|filter.*spine\|spine.*filter"; then
+if grep -q "diff.filter\|diff_filter\|filter.*spine\|spine.*filter" <<< "$M_SECTION"; then
   pass "SKILL.md M-phase: spine post-filter step is documented"
 else
   fail "SKILL.md M-phase: Phase M2.1 must document the spine post-filter step"
 fi
 
-if echo "$SINGLE_SECTION" | grep -q "diff.filter\|diff_filter\|filter.*spine\|spine.*filter\|post.filter\|postfilter"; then
+if grep -q "diff.filter\|diff_filter\|filter.*spine\|spine.*filter\|post.filter\|postfilter" <<< "$SINGLE_SECTION"; then
   pass "SKILL.md --single path: spine post-filter step is documented"
 else
   fail "SKILL.md --single path: Phase 1.5 must document the spine post-filter step"

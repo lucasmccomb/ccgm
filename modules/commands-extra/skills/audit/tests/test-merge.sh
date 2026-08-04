@@ -1005,7 +1005,11 @@ else
   fail "t8a: tool-detection finding was incorrectly dropped by dismissed verdict"
 fi
 
-if echo "$T8A_STDERR" | grep -q "WARNING.*non-hybrid\|WARNING.*not dismissible"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if grep -q "WARNING.*non-hybrid\|WARNING.*not dismissible" <<< "$T8A_STDERR"; then
   pass "t8a: stderr warning emitted for attempted non-hybrid dismissal"
 else
   fail "t8a: no warning on stderr for attempted non-hybrid dismissal (got: $T8A_STDERR)"
@@ -1069,7 +1073,8 @@ else
 fi
 
 # No bare traceback should ever leak.
-if echo "$T8B_STDERR" | grep -q "Traceback\|TypeError"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "Traceback\|TypeError" <<< "$T8B_STDERR"; then
   fail "t8b: bare Python traceback leaked to stderr (got: $T8B_STDERR)"
 else
   pass "t8b: no bare traceback in stderr"
@@ -1234,13 +1239,14 @@ else
   fail "t8d: finding unexpectedly dropped -- AB=$T8D_PRESENT_AB, BA=$T8D_PRESENT_BA"
 fi
 
-if echo "$T8D_STDERR_AB" | grep -q "WARNING.*conflict\|WARNING.*unanimity\|WARNING.*dismissal"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "WARNING.*conflict\|WARNING.*unanimity\|WARNING.*dismissal" <<< "$T8D_STDERR_AB"; then
   pass "t8d: warning emitted for conflicting verdicts (A+B order)"
 else
   fail "t8d: no conflict warning in A+B order (stderr: $T8D_STDERR_AB)"
 fi
 
-if echo "$T8D_STDERR_BA" | grep -q "WARNING.*conflict\|WARNING.*unanimity\|WARNING.*dismissal"; then
+if grep -q "WARNING.*conflict\|WARNING.*unanimity\|WARNING.*dismissal" <<< "$T8D_STDERR_BA"; then
   pass "t8d: warning emitted for conflicting verdicts (B+A order)"
 else
   fail "t8d: no conflict warning in B+A order (stderr: $T8D_STDERR_BA)"
@@ -1321,37 +1327,38 @@ print("none")
 PYEOF
 )"
 
-if echo "$T9_FIELDS" | grep -q "path=src/util.js"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "path=src/util.js" <<< "$T9_FIELDS"; then
   pass "t9: absolute worktree path normalized to repo-relative (src/util.js)"
 else
   fail "t9: path not normalized ($T9_FIELDS)"
 fi
-if echo "$T9_FIELDS" | grep -q "line=60"; then
+if grep -q "line=60" <<< "$T9_FIELDS"; then
   pass "t9: comma-list line coerced to first integer (60)"
 else
   fail "t9: line not coerced ($T9_FIELDS)"
 fi
-if echo "$T9_FIELDS" | grep -q "det=llm"; then
+if grep -q "det=llm" <<< "$T9_FIELDS"; then
   pass "t9: missing detection defaulted to llm"
 else
   fail "t9: detection not defaulted ($T9_FIELDS)"
 fi
-if echo "$T9_FIELDS" | grep -q "msg=yes"; then
+if grep -q "msg=yes" <<< "$T9_FIELDS"; then
   pass "t9: message synthesized from title/description"
 else
   fail "t9: message not synthesized ($T9_FIELDS)"
 fi
-if echo "$T9_FIELDS" | grep -q "extra=none"; then
+if grep -q "extra=none" <<< "$T9_FIELDS"; then
   pass "t9: redundant flat keys stripped (schema-clean output)"
 else
   fail "t9: flat keys leaked into output ($T9_FIELDS)"
 fi
-if echo "$T9_STDERR" | grep -q "dropped 0 invalid"; then
+if grep -q "dropped 0 invalid" <<< "$T9_STDERR"; then
   pass "t9: summary reports 'dropped 0' (no silent loss)"
 else
   # 'dropped 0' only prints in the write summary; without --output the loud
   # line is suppressed when total_dropped==0. Accept either: no drop warning.
-  if echo "$T9_STDERR" | grep -q "dropped [1-9]"; then
+  if grep -q "dropped [1-9]" <<< "$T9_STDERR"; then
     fail "t9: merge reported a nonzero drop for a recoverable finding ($T9_STDERR)"
   else
     pass "t9: no nonzero-drop warning emitted (variant fully recovered)"
@@ -1400,7 +1407,8 @@ if [[ $T10_EXIT -eq 0 ]]; then
 else
   fail "t10: merge exits $T10_EXIT (expected 0)"
 fi
-if echo "$T10_STDERR" | grep -q "dropped 1 invalid finding"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "dropped 1 invalid finding" <<< "$T10_STDERR"; then
   pass "t10: loud 'dropped 1 invalid finding(s)' headline emitted"
 else
   fail "t10: no loud dropped-count headline (got: $T10_STDERR)"

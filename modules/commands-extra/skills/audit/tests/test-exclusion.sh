@@ -211,7 +211,11 @@ else
   fail "t2: $TYPE_RECS type records survived (expected 2)"
 fi
 
-if echo "$FILTER_STDERR" | grep -q "dropped 2 junk-path"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if grep -q "dropped 2 junk-path" <<< "$FILTER_STDERR"; then
   pass "t2: stderr reports dropped count (2)"
 else
   fail "t2: stderr drop count wrong (got: $FILTER_STDERR)"

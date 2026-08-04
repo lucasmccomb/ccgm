@@ -332,7 +332,11 @@ else
 fi
 
 # A warning must be emitted to stderr
-if echo "$TC_STDERR" | grep -qi "warning\|WARNING\|reason\|missing"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if grep -qi "warning\|WARNING\|reason\|missing" <<< "$TC_STDERR"; then
   pass "(c): warning emitted to stderr for missing reason"
 else
   fail "(c): no warning on stderr for missing reason (got: $TC_STDERR)"
@@ -397,7 +401,8 @@ else
 fi
 
 # A warning must be emitted
-if echo "$TD_STDERR" | grep -qi "warning\|WARNING\|expir"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -qi "warning\|WARNING\|expir" <<< "$TD_STDERR"; then
   pass "(d): warning emitted for expired suppression"
 else
   fail "(d): no warning for expired suppression (got: $TD_STDERR)"

@@ -114,9 +114,13 @@ LINT_OUTPUT="$(python3 "${SCRIPTS_DIR}/lint-pack.py" \
   --packs-dir "${AUDIT_DIR}/packs" \
   --rubric "${RUBRIC}" 2>&1)" || LINT_EXIT=$?
 
-if echo "$LINT_OUTPUT" | grep -q "^PASS: ci-cd"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if grep -q "^PASS: ci-cd" <<< "$LINT_OUTPUT"; then
   pass "lint-pack.py PASS for ci-cd pack"
-elif echo "$LINT_OUTPUT" | grep -q "^FAIL: ci-cd"; then
+elif grep -q "^FAIL: ci-cd" <<< "$LINT_OUTPUT"; then
   fail "lint-pack.py FAIL for ci-cd pack: ${LINT_OUTPUT}"
 else
   # lint-pack may print a NOTE and still pass overall
@@ -282,7 +286,8 @@ print(' '.join(sorted(set(ids))))
 " "$ZI_OUT" 2>/dev/null || true)"
 
 for EXPECTED_CID in cicd/dangerous-trigger cicd/excessive-permissions cicd/script-injection; do
-  if echo "$CHECKS" | grep -q "$EXPECTED_CID"; then
+  # Herestring, not a pipe: see the identical rationale above (#943, #945).
+  if grep -q "$EXPECTED_CID" <<< "$CHECKS"; then
     pass "parse-zizmor.py emits $EXPECTED_CID"
   else
     fail "parse-zizmor.py did not emit $EXPECTED_CID (got: $CHECKS)"
@@ -564,7 +569,8 @@ print(" ".join(ids))
 PYEOF
 )" || SELECTED_TRUE=""
 
-if echo "$SELECTED_TRUE" | grep -q "ccgm/ci-cd"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "ccgm/ci-cd" <<< "$SELECTED_TRUE"; then
   pass "ci-cd pack selected when has_workflows=true"
 else
   fail "ci-cd pack NOT selected when has_workflows=true (got: $SELECTED_TRUE)"
@@ -604,7 +610,8 @@ print(" ".join(ids))
 PYEOF
 )" || SELECTED_FALSE=""
 
-if ! echo "$SELECTED_FALSE" | grep -q "ccgm/ci-cd"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if ! grep -q "ccgm/ci-cd" <<< "$SELECTED_FALSE"; then
   pass "ci-cd pack NOT selected when has_workflows=false"
 else
   fail "ci-cd pack selected when has_workflows=false (should be excluded)"

@@ -83,14 +83,18 @@ else
 fi
 
 # Check for lint/eqeqeq finding
-if printf '%s\n' "$PARSE_OUTPUT" | grep -q '"lint/eqeqeq"'; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if grep -q '"lint/eqeqeq"' <<< "$PARSE_OUTPUT"; then
   pass "parse-eslint.py emits lint/eqeqeq check_id"
 else
   fail "parse-eslint.py did not emit lint/eqeqeq check_id"
 fi
 
 # Check for lint/no-unreachable finding
-if printf '%s\n' "$PARSE_OUTPUT" | grep -q '"lint/no-unreachable"'; then
+if grep -q '"lint/no-unreachable"' <<< "$PARSE_OUTPUT"; then
   pass "parse-eslint.py emits lint/no-unreachable check_id"
 else
   fail "parse-eslint.py did not emit lint/no-unreachable check_id"
@@ -252,7 +256,8 @@ else
 fi
 
 # Explicitly check that correctness pack is PASS (not just that there are no errors)
-if printf '%s\n' "$LINT_OUTPUT" | grep -q '^PASS: correctness$'; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q '^PASS: correctness$' <<< "$LINT_OUTPUT"; then
   pass "lint-pack.py reports PASS: correctness"
 else
   fail "lint-pack.py did not report PASS: correctness (output: ${LINT_OUTPUT})"
@@ -269,7 +274,12 @@ CHECKS_MD="${PACK_DIR}/checks.md"
 LLM_CHECKS=("off-by-one" "float-equality" "wrong-branch-logic")
 for check in "${LLM_CHECKS[@]}"; do
   # Look for the check section and verify LOW confidence is mentioned
-  if grep -A 5 "correctness/${check}" "$CHECKS_MD" | grep -qi "low"; then
+  # Producer is a real command (grep -A5 on a file), not an echo/printf of
+  # a variable: capture its output to a variable first, then herestring
+  # into the early-exiting `grep -qi` (see #943, #945). `|| true` keeps a
+  # not-found section from aborting this now-bare assignment.
+  _SECTION=$(grep -A 5 "correctness/${check}" "$CHECKS_MD" || true)
+  if grep -qi "low" <<< "$_SECTION"; then
     pass "checks.md marks correctness/${check} as low confidence"
   else
     fail "checks.md does not mark correctness/${check} as low confidence"
@@ -311,7 +321,10 @@ if command -v shellcheck > /dev/null 2>&1; then
     pass "shellcheck clean: wrap-eslint.sh"
   else
     fail "shellcheck issues in wrap-eslint.sh:"
-    printf '%s\n' "$SC_OUTPUT" | head -10
+    # Herestring, not a pipe: `producer | head` can SIGPIPE-kill the
+    # producer once head has read its N lines and closes early (see #943,
+    # #945). A herestring has no second process to race against.
+    head -10 <<< "$SC_OUTPUT"
   fi
 else
   pass "shellcheck not installed -- shell safety check skipped (install shellcheck for full coverage)"

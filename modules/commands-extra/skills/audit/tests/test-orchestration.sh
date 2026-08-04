@@ -319,7 +319,11 @@ PYEOF
 )
 set -e
 
-if echo "$BALANCE_CHECK" | grep -q "^OK"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if grep -q "^OK" <<< "$BALANCE_CHECK"; then
   pass "assign-packs.py: worker pack distribution is balanced (no overload, no starvation) ($BALANCE_CHECK)"
 else
   fail "assign-packs.py: pack distribution imbalanced ($BALANCE_CHECK)"
@@ -367,7 +371,8 @@ PYEOF
 )
 set -e
 
-if echo "$SMALL_CHECK" | grep -q "^OK"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "^OK" <<< "$SMALL_CHECK"; then
   pass "assign-packs.py: surplus workers get empty lists ($SMALL_CHECK)"
 else
   fail "assign-packs.py: surplus workers check failed: $SMALL_CHECK"
@@ -716,13 +721,14 @@ done
 set +e
 SINGLE_SECTION=$(awk 'found && /^## /{exit} /^## Single-Session Mode/{found=1} found' "$SKILL_MD" 2>/dev/null || true)
 set -e
-if echo "$SINGLE_SECTION" | grep -q "spine/run.sh\|spine.*run.sh"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "spine/run.sh\|spine.*run.sh" <<< "$SINGLE_SECTION"; then
   pass "SKILL.md: --single section references spine/run.sh"
 else
   fail "SKILL.md: --single section must reference spine/run.sh"
 fi
 
-if echo "$SINGLE_SECTION" | grep -q "merge-findings.py"; then
+if grep -q "merge-findings.py" <<< "$SINGLE_SECTION"; then
   pass "SKILL.md: --single section references merge-findings.py"
 else
   fail "SKILL.md: --single section must reference merge-findings.py"

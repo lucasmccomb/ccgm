@@ -156,7 +156,11 @@ JSON
 T1_OUT=$(AUDIT_FINDINGS_PATH="$T1_DIR/findings.jsonl" \
   python3 "$EMIT_SCRIPT" "$T1_INPUT" 2>&1 && echo "exit:0" || echo "exit:1")
 
-if echo "$T1_OUT" | grep -q "exit:1"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if grep -q "exit:1" <<< "$T1_OUT"; then
   fail "t1: emitter exit code" "$T1_OUT"
 else
   pass "t1: emitter exited 0"

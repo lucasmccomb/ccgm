@@ -78,7 +78,11 @@ _T1_RESULT=""
 _T1_EXIT=0
 _T1_RESULT=$(python3 "${_T_PY}" "${REGISTRY}" "${PRIVACY_PACK_DIR}/pack.json" 2>&1) || _T1_EXIT=$?
 
-if [ "${_T1_EXIT}" -eq 0 ] && echo "${_T1_RESULT}" | grep -q "^VALID$"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if [ "${_T1_EXIT}" -eq 0 ] && grep -q "^VALID$" <<< "${_T1_RESULT}"; then
     pass "privacy/pack.json validates against pack.schema.json"
 else
     fail "privacy/pack.json failed validation: ${_T1_RESULT}"
@@ -93,7 +97,8 @@ _T2_RESULT=""
 _T2_EXIT=0
 _T2_RESULT=$(python3 "${_T_PY}" "${REGISTRY}" "${OBS_PACK_DIR}/pack.json" 2>&1) || _T2_EXIT=$?
 
-if [ "${_T2_EXIT}" -eq 0 ] && echo "${_T2_RESULT}" | grep -q "^VALID$"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${_T2_EXIT}" -eq 0 ] && grep -q "^VALID$" <<< "${_T2_RESULT}"; then
     pass "observability/pack.json validates against pack.schema.json"
 else
     fail "observability/pack.json failed validation: ${_T2_RESULT}"
@@ -112,7 +117,11 @@ PRIVACY_IDS=(
 
 _T3_MISSING=""
 for check_id in "${PRIVACY_IDS[@]}"; do
-    if ! python3 -c "
+    # Producer is a real command (python3), not an echo/printf of a
+    # variable: capture its output to a variable first, then herestring
+    # into the early-exiting `grep -q` (see #943, #945). `|| true` keeps
+    # python3's exit-1-on-missing from aborting this now-bare assignment.
+    _T3_CHECK=$(python3 -c "
 import json, sys
 rubric = json.load(open('${RUBRIC}', encoding='utf-8'))
 checks = rubric.get('checks', {})
@@ -121,7 +130,8 @@ if '${check_id}' not in checks:
     sys.exit(1)
 print('FOUND')
 sys.exit(0)
-" 2>/dev/null | grep -q "^FOUND$"; then
+" 2>/dev/null || true)
+    if ! grep -q "^FOUND$" <<< "${_T3_CHECK}"; then
         _T3_MISSING="${_T3_MISSING} ${check_id}"
     fi
 done
@@ -145,7 +155,9 @@ OBS_IDS=(
 
 _T4_MISSING=""
 for check_id in "${OBS_IDS[@]}"; do
-    if ! python3 -c "
+    # Producer is a real command (python3): see the identical rationale
+    # above (#943, #945).
+    _T4_CHECK=$(python3 -c "
 import json, sys
 rubric = json.load(open('${RUBRIC}', encoding='utf-8'))
 checks = rubric.get('checks', {})
@@ -154,7 +166,8 @@ if '${check_id}' not in checks:
     sys.exit(1)
 print('FOUND')
 sys.exit(0)
-" 2>/dev/null | grep -q "^FOUND$"; then
+" 2>/dev/null || true)
+    if ! grep -q "^FOUND$" <<< "${_T4_CHECK}"; then
         _T4_MISSING="${_T4_MISSING} ${check_id}"
     fi
 done
@@ -176,7 +189,8 @@ _T5_OUTPUT=$(python3 "${LINTER}" \
     --packs-dir "${AUDIT_DIR}/packs" \
     --rubric "${RUBRIC}" 2>&1) || _T5_EXIT=$?
 
-if [ "${_T5_EXIT}" -eq 0 ] && echo "${_T5_OUTPUT}" | grep -q "^PASS: privacy"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${_T5_EXIT}" -eq 0 ] && grep -q "^PASS: privacy" <<< "${_T5_OUTPUT}"; then
     pass "lint-pack.py reports PASS for privacy pack"
 else
     fail "lint-pack.py did not report PASS for privacy: exit=${_T5_EXIT}, output=${_T5_OUTPUT}"
@@ -193,7 +207,8 @@ _T6_OUTPUT=$(python3 "${LINTER}" \
     --packs-dir "${AUDIT_DIR}/packs" \
     --rubric "${RUBRIC}" 2>&1) || _T6_EXIT=$?
 
-if [ "${_T6_EXIT}" -eq 0 ] && echo "${_T6_OUTPUT}" | grep -q "^PASS: observability"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${_T6_EXIT}" -eq 0 ] && grep -q "^PASS: observability" <<< "${_T6_OUTPUT}"; then
     pass "lint-pack.py reports PASS for observability pack"
 else
     fail "lint-pack.py did not report PASS for observability: exit=${_T6_EXIT}, output=${_T6_OUTPUT}"
@@ -268,11 +283,12 @@ if m:
 PYEOF
 )
 
-    if ! echo "${_SECTION}" | grep -q "True positive\|FINDS:"; then
+    # Herestring, not a pipe: see the identical rationale above (#943, #945).
+    if ! grep -q "True positive\|FINDS:" <<< "${_SECTION}"; then
         _T9_ERRORS="${_T9_ERRORS}\n  no True positive fixture found for '${check_id}'"
     fi
 
-    if ! echo "${_SECTION}" | grep -q "True negative\|should produce NO"; then
+    if ! grep -q "True negative\|should produce NO" <<< "${_SECTION}"; then
         _T9_ERRORS="${_T9_ERRORS}\n  no True negative fixture found for '${check_id}'"
     fi
 done
@@ -307,11 +323,12 @@ if m:
 PYEOF
 )
 
-    if ! echo "${_SECTION}" | grep -q "True positive\|FINDS:"; then
+    # Herestring, not a pipe: see the identical rationale above (#943, #945).
+    if ! grep -q "True positive\|FINDS:" <<< "${_SECTION}"; then
         _T10_ERRORS="${_T10_ERRORS}\n  no True positive fixture found for '${check_id}'"
     fi
 
-    if ! echo "${_SECTION}" | grep -q "True negative\|should produce NO"; then
+    if ! grep -q "True negative\|should produce NO" <<< "${_SECTION}"; then
         _T10_ERRORS="${_T10_ERRORS}\n  no True negative fixture found for '${check_id}'"
     fi
 done
@@ -339,7 +356,8 @@ if aw == ['always']:
 else:
     print('WRONG: ' + str(aw))
 " 2>/dev/null)
-    if ! echo "${_AW}" | grep -q "^OK$"; then
+    # Herestring, not a pipe: see the identical rationale above (#943, #945).
+    if ! grep -q "^OK$" <<< "${_AW}"; then
         _PACK_NAME=$(basename "$(dirname "${pack_path}")")
         _T11_ERRORS="${_T11_ERRORS}\n  ${_PACK_NAME}/pack.json applies_when is not [\"always\"]: ${_AW}"
     fi
@@ -467,7 +485,8 @@ else:
 PYEOF
 )
 
-if echo "${_T15_OVERLAP}" | grep -q "^DISTINCT$"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "^DISTINCT$" <<< "${_T15_OVERLAP}"; then
     pass "privacy check ids are fully distinct from tos-compliance check ids"
 else
     fail "privacy and tos-compliance share check ids: ${_T15_OVERLAP}"

@@ -64,7 +64,11 @@ if [[ ! -f "$PACK_DIR/pack.json" ]]; then
 else
   # Use lint-pack.py with a nonexistent rubric to test schema validation only
   OUT="$(python3 "$LINTER" --packs-dir "$(dirname "$PACK_DIR")" --rubric "$TESTRUN_TMPDIR/no-rubric.json" 2>&1 || true)"
-  if echo "$OUT" | grep -q "^PASS: data-migrations"; then
+  # Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+  # producer if grep exits on its first match before the producer finishes
+  # writing, turning a genuine match into a reported failure (see #943,
+  # #945). A herestring has no second process to race against.
+  if grep -q "^PASS: data-migrations" <<< "$OUT"; then
     pass "pack.json passes schema validation (no rubric)"
   else
     fail "pack.json schema validation failed: $OUT"
@@ -133,7 +137,8 @@ fi
 printf '\nTest 4: lint-pack.py PASS on data-migrations pack (real rubric)\n'
 
 OUT="$(python3 "$LINTER" --packs-dir "$(dirname "$PACK_DIR")" --rubric "$RUBRIC" 2>&1 || true)"
-if echo "$OUT" | grep -q "^PASS: data-migrations"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "^PASS: data-migrations" <<< "$OUT"; then
   pass "lint-pack.py reports PASS for data-migrations with real rubric"
 else
   fail "lint-pack.py did NOT report PASS for data-migrations: $OUT"

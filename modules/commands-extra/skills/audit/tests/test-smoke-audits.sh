@@ -377,14 +377,18 @@ print(",".join(ids))
 PYEOF
 )"
 
-if echo "$SELECTED_A_IDS" | grep -q "ccgm/secrets"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if grep -q "ccgm/secrets" <<< "$SELECTED_A_IDS"; then
   pass "smoke-A: registry selected ccgm/secrets (always pack)"
 else
   fail "smoke-A: registry did not select ccgm/secrets (expected for JS fixture)"
 fi
 
 # JS-gated packs must be present: at least ccgm/typescript-react or ccgm/accessibility
-if echo "$SELECTED_A_IDS" | grep -qE "ccgm/typescript-react|ccgm/accessibility"; then
+if grep -qE "ccgm/typescript-react|ccgm/accessibility" <<< "$SELECTED_A_IDS"; then
   pass "smoke-A: registry selected at least one language:javascript-gated pack"
 else
   fail "smoke-A: no language:javascript-gated packs selected (expected for JS+TS fixture)"
@@ -438,14 +442,15 @@ print(",".join(ids))
 PYEOF
 )"
 
-if echo "$SELECTED_B_IDS" | grep -q "ccgm/secrets"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "ccgm/secrets" <<< "$SELECTED_B_IDS"; then
   pass "smoke-B: registry selected ccgm/secrets (always pack)"
 else
   fail "smoke-B: registry did not select ccgm/secrets"
 fi
 
 # Go fixture must NOT select JS-only packs (typescript-react is JS-gated)
-if echo "$SELECTED_B_IDS" | grep -q "ccgm/typescript-react"; then
+if grep -q "ccgm/typescript-react" <<< "$SELECTED_B_IDS"; then
   fail "smoke-B: registry selected ccgm/typescript-react for a Go-only fixture (unexpected)"
 else
   pass "smoke-B: registry did not select JS-gated pack ccgm/typescript-react (correct for Go fixture)"
@@ -503,13 +508,14 @@ print(",".join(ids))
 PYEOF
 )"
 
-if echo "$SELECTED_C_IDS" | grep -q "ccgm/data-migrations"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "ccgm/data-migrations" <<< "$SELECTED_C_IDS"; then
   pass "smoke-C: registry selected ccgm/data-migrations (has_migrations pack)"
 else
   fail "smoke-C: registry did not select ccgm/data-migrations (expected for supabase/migrations/ fixture)"
 fi
 
-if echo "$SELECTED_C_IDS" | grep -q "ccgm/secrets"; then
+if grep -q "ccgm/secrets" <<< "$SELECTED_C_IDS"; then
   pass "smoke-C: registry selected ccgm/secrets (always pack)"
 else
   fail "smoke-C: registry did not select ccgm/secrets"

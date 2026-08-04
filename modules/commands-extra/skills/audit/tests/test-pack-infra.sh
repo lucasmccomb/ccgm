@@ -541,7 +541,10 @@ if command -v shellcheck > /dev/null 2>&1; then
     pass "shellcheck clean: wrap-checkov.sh"
   else
     fail "shellcheck issues in wrap-checkov.sh:"
-    printf '%s\n' "$SC_OUTPUT" | head -10
+    # Herestring, not a pipe: `producer | head` can SIGPIPE-kill the
+    # producer once head has read its N lines and closes early (see #943,
+    # #945). A herestring has no second process to race against.
+    head -10 <<< "$SC_OUTPUT"
   fi
 else
   skip "shellcheck not installed -- wrap-checkov.sh shell-safety check skipped"
