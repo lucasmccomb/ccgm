@@ -18,11 +18,13 @@ Covers tests, linting, builds, bug fixes, deployments, and type checking. Preven
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/verification.md ~/.claude/rules/verification.md
 cp rules/evidence-tier-gate.md ~/.claude/rules/evidence-tier-gate.md
 cp rules/config-change-detection.md ~/.claude/rules/config-change-detection.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/verification.md .claude/rules/verification.md
 cp rules/evidence-tier-gate.md .claude/rules/evidence-tier-gate.md
 cp rules/config-change-detection.md .claude/rules/config-change-detection.md

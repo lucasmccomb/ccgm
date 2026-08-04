@@ -17,9 +17,11 @@ Copy `rules/supabase.md` into your Claude configuration:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/supabase.md ~/.claude/rules/supabase.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/supabase.md .claude/rules/supabase.md
 ```
 

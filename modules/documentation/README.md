@@ -29,6 +29,7 @@ Spawns 4 parallel audit agents to find every gap between your documentation and 
 ## Manual Installation
 
 ```bash
+mkdir -p ~/.claude/commands
 cp commands/docupdate.md ~/.claude/commands/docupdate.md
 
 mkdir -p ~/.claude/lib

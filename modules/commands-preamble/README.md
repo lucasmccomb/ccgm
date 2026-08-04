@@ -62,6 +62,7 @@ Edit `~/.claude/preamble/preamble.md` to change what gets injected. Keep it comp
 
 ```bash
 # Copy the hook
+mkdir -p ~/.claude/hooks
 cp hooks/inject-preamble.py ~/.claude/hooks/
 chmod +x ~/.claude/hooks/inject-preamble.py
 

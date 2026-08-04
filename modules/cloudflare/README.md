@@ -18,9 +18,11 @@ Copy `rules/cloudflare.md` into your Claude configuration:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/cloudflare.md ~/.claude/rules/cloudflare.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/cloudflare.md .claude/rules/cloudflare.md
 ```
 

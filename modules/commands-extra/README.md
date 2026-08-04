@@ -78,6 +78,7 @@ Copy the command files into your Claude configuration:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/commands
 cp commands/audit.md ~/.claude/commands/audit.md
 cp commands/pwv.md ~/.claude/commands/pwv.md
 cp commands/walkthrough.md ~/.claude/commands/walkthrough.md
@@ -101,6 +102,7 @@ cp -R skills/audit/scripts ~/.claude/skills/audit/scripts
 find ~/.claude/skills/audit/scripts -type d -name '__pycache__' -exec rm -rf {} +
 
 # Project-level
+mkdir -p .claude/commands
 cp commands/audit.md .claude/commands/audit.md
 cp commands/pwv.md .claude/commands/pwv.md
 cp commands/walkthrough.md .claude/commands/walkthrough.md

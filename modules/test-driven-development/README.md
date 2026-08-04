@@ -16,10 +16,12 @@ Covers new features (test each behavior incrementally), bug fixes (reproduce fir
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/test-driven-development.md ~/.claude/rules/test-driven-development.md
 cp rules/testing-anti-patterns.md ~/.claude/rules/testing-anti-patterns.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/test-driven-development.md .claude/rules/test-driven-development.md
 cp rules/testing-anti-patterns.md .claude/rules/testing-anti-patterns.md
 ```

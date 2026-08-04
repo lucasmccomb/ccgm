@@ -74,10 +74,12 @@ These are soft references, not hard dependencies. The self-improving module work
 
 ```bash
 # Rules
+mkdir -p ~/.claude/rules
 cp rules/self-improving.md ~/.claude/rules/self-improving.md
 cp rules/learnings-store.md ~/.claude/rules/learnings-store.md
 
 # Commands
+mkdir -p ~/.claude/commands
 cp commands/reflect.md ~/.claude/commands/reflect.md
 cp commands/consolidate.md ~/.claude/commands/consolidate.md
 cp commands/retro.md ~/.claude/commands/retro.md
@@ -95,6 +97,7 @@ mkdir -p ~/.claude/lib
 cp lib/learnings_store.py ~/.claude/lib/learnings_store.py
 
 # Hooks
+mkdir -p ~/.claude/hooks
 cp hooks/reflection-trigger.py ~/.claude/hooks/reflection-trigger.py
 cp hooks/precompact-reflection.py ~/.claude/hooks/precompact-reflection.py
 cp hooks/learnings-inject.py ~/.claude/hooks/learnings-inject.py

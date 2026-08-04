@@ -35,6 +35,7 @@ The map notes which entries depend on external tooling and skips anything not in
 ## Manual Installation
 
 ```bash
+mkdir -p ~/.claude/commands ~/.claude/rules
 cp commands/capabilities.md ~/.claude/commands/capabilities.md
 cp rules/capability-map.md ~/.claude/rules/capability-map.md
 ```

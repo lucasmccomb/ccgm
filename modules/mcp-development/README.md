@@ -17,9 +17,11 @@ Installs a rules file covering MCP server development:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/mcp-development.md ~/.claude/rules/mcp-development.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/mcp-development.md .claude/rules/mcp-development.md
 ```
 

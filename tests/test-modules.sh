@@ -313,7 +313,7 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
 done
 echo ""
 
-# --- Test: Manual Installation cp-block coverage (#951) ---
+# --- Test: Manual Installation cp block -- coverage (#951) + bootstrap (#980) ---
 # Both checks above compare module.json against the DISK (declared file
 # exists / shipped file is declared). Neither one looks at the README's
 # human-facing "Manual Installation" cp block, which is a hand-maintained
@@ -328,7 +328,49 @@ echo ""
 # interpolation as used in a `for` loop) and verifies every declared file
 # (module.json files[] key) is covered by at least one of them.
 #
-# This check is COVERAGE-ONLY, deliberately one-directional: it verifies
+# It checks TWO dimensions of the same block:
+#
+#   1. COVERAGE (#951) -- every declared file is copied by some `cp`.
+#   2. DIRECTORY BOOTSTRAP (#980) -- every `cp` destination directory is
+#      created by a preceding `mkdir -p` in the same section. #980 measured
+#      ~40 READMEs copying into `~/.claude/commands`, `~/.claude/rules`,
+#      `~/.claude/bin` and friends with no `mkdir -p`, so the documented
+#      from-scratch path died on its first line with "No such file or
+#      directory" for anyone who had not already run start.sh once.
+#
+# Bootstrap resolves a `cp`'s required destination directory statically:
+# a dest ending in '/' IS the directory; a dest whose basename matches the
+# source's is the copied file/dir itself, so its PARENT is the directory;
+# any other single-source non-recursive copy is a renaming file copy
+# (`cp settings.base.json ~/.claude/settings.json`) -- on a fresh tree the
+# dest directory never pre-exists, so real cp treats dest as a file path
+# and again only its PARENT must exist; anything else (multi-source or
+# recursive with a differing basename) is treated as a directory target.
+# A directory counts as bootstrapped by an earlier `mkdir -p X` where X is
+# that directory or any descendant of it (mkdir -p creates ancestors), by
+# any arg of a multi-arg `mkdir -p a b c`, or by an earlier `cp -R` that
+# already created it.
+#
+# Bootstrap is checked by STATIC PARSING, not by executing the block into a
+# scratch HOME (the approach #980 floats, and the method #970 used by hand).
+# README install blocks are not hermetic and not side-effect-free: across
+# the module set they `curl | tar -xz` from GitHub Releases, `git clone`,
+# call `gh`, run `claude mcp add`, `bash postInstall.sh`, `npm install`,
+# `source ~/.zshrc`, and `touch` opt-in flag files. Executing them in CI
+# would make this suite network-dependent, slow, and capable of mutating
+# the developer's real environment when a `~` slipped past the HOME
+# redirect. Static parsing gives the same signal for the property actually
+# under test -- "is the destination directory created first?" -- with none
+# of that exposure.
+#
+# When a `cp` destination cannot be resolved with confidence, bootstrap
+# SKIPS the line rather than guessing: `$VAR`/`${VAR}` or glob destinations
+# (document-review's `for agent in ...; do cp ... "~/.claude/agents/${agent}-reviewer.md"`)
+# and absolute paths outside `~` (docs-for-agents' `/path/to/your/project`
+# placeholder). A false failure here would train readers to ignore this
+# guard; a miss only leaves an already-existing gap unreported.
+#
+# The COVERAGE check is one-directional, deliberately: it verifies
 # every declared file is copied by *something* in the cp block, but does
 # NOT verify the block copies *nothing else*. A block that recursively
 # globs a whole directory (e.g. `cp -R skills/foo/*`) passes this check even
@@ -369,11 +411,12 @@ echo ""
 # of scope for that PR and tracked as #970. #970 fixed all three READMEs,
 # so the list is empty again -- add an entry here only for a newly
 # discovered, genuinely out-of-scope gap.
-echo "--- Checking Manual Installation cp-block coverage (module.json vs README) ---"
+echo "--- Checking Manual Installation cp blocks (file coverage + directory bootstrap) ---"
 MANUAL_INSTALL_REPORT=$(REPO_ROOT="$REPO_ROOT" python3 - <<'PYEOF'
 import json
 import os
 import re
+import shlex
 from pathlib import Path
 
 REPO_ROOT = Path(os.environ["REPO_ROOT"])
@@ -383,6 +426,10 @@ HEADING_RE = re.compile(r'^##\s+(Manual Installation|Install|Installation)\s*$',
 ANY_HEADING_RE = re.compile(r'^##\s+', re.MULTILINE)
 CP_LINE_RE = re.compile(r'cp\s+(-[A-Za-z]+\s+)?"?(?:modules/[\w.-]+/)?([\w${}/.*-]+)"?')
 EXEMPT_FILENAMES = {"settings.partial.json"}
+
+FENCE_RE = re.compile(r'^\s*```')
+SHELL_SPLIT_RE = re.compile(r'&&|\|\||;|\|')
+SHELL_LEAD_TOKENS = {"do", "then", "else", "sudo"}
 
 # module -> tracking issue for a known, out-of-scope pre-existing gap.
 KNOWN_GAPS = {}
@@ -411,6 +458,146 @@ def parse_cp_lines(section):
         flags = m.group(1) or ""
         out.append((bool(re.search(r'[Rr]', flags)), m.group(2)))
     return out
+
+
+def shell_lines(section):
+    """Yield logical shell lines from the section's fenced code blocks.
+
+    Physical lines ending in `\\` are joined with the following line first, so
+    a `cp <src> \\` / `<dest>` pair (agent-native, ce-review,
+    compound-knowledge, document-review, onboarding, pr-feedback,
+    session-history, ship-readiness, todos all wrap this way) parses as one
+    command that has a destination, instead of two half-commands that do not.
+    Restricting to fenced blocks keeps prose that merely mentions `cp` out of
+    the parse.
+    """
+    in_fence = False
+    pending = ""
+    for raw in section.split("\n"):
+        if FENCE_RE.match(raw):
+            in_fence = not in_fence
+            pending = ""
+            continue
+        if not in_fence:
+            continue
+        line = raw.rstrip()
+        if line.endswith("\\"):
+            pending += line[:-1].rstrip() + " "
+            continue
+        yield pending + line
+        pending = ""
+    if pending:
+        yield pending
+
+
+def shell_commands(section):
+    """Yield an argv token list for each shell command in the install block."""
+    for line in shell_lines(section):
+        text = line.strip()
+        if text.startswith("#"):
+            continue
+        for part in SHELL_SPLIT_RE.split(text):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                tokens = shlex.split(part, posix=True)
+            except ValueError:
+                continue  # unbalanced quotes -- not confidently parseable
+            while tokens and tokens[0] in SHELL_LEAD_TOKENS:
+                tokens = tokens[1:]
+            if tokens:
+                yield tokens
+
+
+def norm_dir(path):
+    stripped = path.rstrip('/')
+    return stripped if stripped else '/'
+
+
+def is_unresolvable(path):
+    return '$' in path or '*' in path or '?' in path
+
+
+def required_dest_dir(recursive, sources, dest):
+    """The directory a `cp` needs to already exist. See the header comment."""
+    if dest.endswith('/'):
+        return norm_dir(dest)
+    if len(sources) == 1 and not is_unresolvable(sources[0]):
+        src = sources[0]
+        # Same basename: dest names the copied file/dir itself, so only its
+        # parent has to pre-exist (with -R, cp creates the last component).
+        if Path(src).name == Path(dest).name:
+            return norm_dir(str(Path(dest).parent))
+        # Renaming file copy (`cp settings.base.json ~/.claude/settings.json`):
+        # with a single non-recursive source, real cp only treats dest as a
+        # directory when that directory already exists -- which on a fresh
+        # tree it never does -- so dest is a file path and its parent is what
+        # must pre-exist. Restricting this to matching extensions would
+        # misfire on extensionless renames (`cp bin/tool ~/.claude/bin/t2`),
+        # demanding a mkdir of the destination FILE. The residual trade-off
+        # (a doc line intending dest as a bare directory, `cp a.md ~/x/dir`,
+        # is under-required to its parent) is a mis-install cp would not
+        # error on, so bootstrap cannot see it either way; 0 instances exist.
+        if not recursive:
+            return norm_dir(str(Path(dest).parent))
+    return norm_dir(dest)
+
+
+def dirs_created_by(recursive, sources, dest):
+    """Directories a `cp -R` itself creates, satisfying later copies into them."""
+    if not recursive:
+        return []
+    made = []
+    for src in sources:
+        if is_unresolvable(src):
+            continue
+        if dest.endswith('/') or Path(src).name != Path(dest).name:
+            made.append(norm_dir(dest.rstrip('/') + '/' + Path(src).name))
+        else:
+            made.append(norm_dir(dest))
+    return made
+
+
+def is_bootstrapped(needed, made):
+    # `mkdir -p a/b/c` creates a/b too, so a descendant entry satisfies it.
+    return any(d == needed or d.startswith(needed + '/') for d in made)
+
+
+def missing_bootstrap(section):
+    """Return [(directory, offending destination)] for un-mkdir'd cp targets."""
+    made = []
+    missing = []
+    reported = set()
+    for tokens in shell_commands(section):
+        if tokens[0] == 'mkdir':
+            for arg in tokens[1:]:
+                if not arg.startswith('-'):
+                    made.append(norm_dir(arg))
+            continue
+        if tokens[0] != 'cp':
+            continue
+        flags = ''
+        operands = []
+        for tok in tokens[1:]:
+            if tok.startswith('-') and len(tok) > 1:
+                flags += tok
+            else:
+                operands.append(tok)
+        if len(operands) < 2:
+            continue
+        recursive = bool(re.search(r'[Rr]', flags))
+        sources, dest = operands[:-1], operands[-1]
+        # Unresolvable or user-supplied absolute destinations are skipped,
+        # never guessed at -- a false failure is worse than a miss here.
+        if is_unresolvable(dest) or dest.startswith('/'):
+            continue
+        needed = required_dest_dir(recursive, sources, dest)
+        if not is_bootstrapped(needed, made) and needed not in reported:
+            reported.add(needed)
+            missing.append((needed, dest))
+        made.extend(dirs_created_by(recursive, sources, dest))
+    return missing
 
 
 def covers(relpath, cp_lines):
@@ -505,6 +692,11 @@ for mod_dir in sorted(MODULES.iterdir()):
         for relpath in missing:
             print(f"MISSING\t{mod_name}\t{relpath}")
 
+    # Dimension 2 (#980): destination directories must be created first.
+    # KNOWN_GAPS allowlists file-coverage gaps only, so it does not apply.
+    for needed, dest in missing_bootstrap(section):
+        print(f"NOMKDIR\t{mod_name}\t'{needed}' (copy destination: {dest})")
+
 print(f"CHECKED\t{checked}")
 print(f"SKIPPED_COUNT\t{skipped}")
 for mod_name, reason in skip_reasons:
@@ -518,6 +710,9 @@ while IFS=$'\t' read -r kind mod_name detail; do
     MISSING)
       fail "$mod_name: Manual Installation cp block never installs '$detail' (declared in module.json but no cp/glob covers it)"
       ;;
+    NOMKDIR)
+      fail "$mod_name: Manual Installation block copies into $detail with no preceding 'mkdir -p' -- the documented steps fail against a fresh ~/.claude"
+      ;;
     STALE)
       fail "$mod_name: $detail"
       ;;
@@ -525,7 +720,7 @@ while IFS=$'\t' read -r kind mod_name detail; do
       fail "$mod_name: $detail -- cannot check Manual Installation coverage"
       ;;
   esac
-done < <(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep -E '^(MISSING|STALE|DECODE_FAIL)')
+done < <(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep -E '^(MISSING|NOMKDIR|STALE|DECODE_FAIL)')
 
 checked_count=$(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep '^CHECKED' | cut -f2)
 skipped_count=$(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep '^SKIPPED_COUNT' | cut -f2)
@@ -534,7 +729,7 @@ skipped_count=$(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep '^SKIPPED_COUNT' |
 # output, or its silence gets mistaken for completeness.
 echo "  Checked $checked_count module(s), skipped ${skipped_count:-0} (no install section or no parseable cp command)"
 if [ -n "$checked_count" ] && [ "$checked_count" -gt 0 ]; then
-  pass "Manual Installation cp-block coverage checked across $checked_count module(s)"
+  pass "Manual Installation cp-block coverage + directory bootstrap checked across $checked_count module(s)"
 fi
 if [ "$VERBOSE" = "1" ] && [ -n "$skipped_count" ] && [ "$skipped_count" -gt 0 ]; then
   echo "  Skipped modules:"

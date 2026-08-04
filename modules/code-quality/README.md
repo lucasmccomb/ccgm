@@ -22,6 +22,7 @@ Copy `rules/code-quality.md` into your Claude configuration:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/code-quality.md ~/.claude/rules/code-quality.md
 cp rules/change-philosophy.md ~/.claude/rules/change-philosophy.md
 cp rules/latent-vs-deterministic.md ~/.claude/rules/latent-vs-deterministic.md
@@ -32,6 +33,7 @@ cp rules/spec-is-the-artifact.md ~/.claude/rules/spec-is-the-artifact.md
 cp rules/menu-gen-test.md ~/.claude/rules/menu-gen-test.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/code-quality.md .claude/rules/code-quality.md
 cp rules/change-philosophy.md .claude/rules/change-philosophy.md
 cp rules/latent-vs-deterministic.md .claude/rules/latent-vs-deterministic.md

@@ -22,6 +22,7 @@ Installs rules covering subagent coordination:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/subagent-patterns.md ~/.claude/rules/subagent-patterns.md
 cp rules/concurrency-and-rate-limits.md ~/.claude/rules/concurrency-and-rate-limits.md
 mkdir -p ~/.claude/agents

@@ -21,9 +21,11 @@ Ported from the cross-platform skill-authoring checklist in EveryInc/compound-en
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/skill-authoring.md ~/.claude/rules/skill-authoring.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/skill-authoring.md .claude/rules/skill-authoring.md
 ```
 

@@ -20,10 +20,12 @@ Installs two rules files covering Tailwind v4 architecture and a known gotcha:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/tailwind.md ~/.claude/rules/tailwind.md
 cp rules/frontend-css.md ~/.claude/rules/frontend-css.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/tailwind.md .claude/rules/tailwind.md
 cp rules/frontend-css.md .claude/rules/frontend-css.md
 ```

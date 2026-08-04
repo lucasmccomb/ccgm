@@ -55,6 +55,7 @@ The allow list intentionally does **not** grant these prefixes:
 
 ```bash
 # 1. Copy the base settings
+mkdir -p ~/.claude
 cp settings.base.json ~/.claude/settings.json
 
 # 2. Replace template variables

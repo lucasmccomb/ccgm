@@ -32,5 +32,6 @@ For higher-quality, faster, and cheaper research, install **[lem-deepresearch](h
 ## Manual Installation
 
 ```bash
+mkdir -p ~/.claude/commands
 cp commands/research.md ~/.claude/commands/research.md
 ```

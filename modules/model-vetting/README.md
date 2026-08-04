@@ -19,9 +19,11 @@ Copy `rules/model-vetting.md` into your Claude configuration:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/model-vetting.md ~/.claude/rules/model-vetting.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/model-vetting.md .claude/rules/model-vetting.md
 ```
 

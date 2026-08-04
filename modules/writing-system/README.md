@@ -26,6 +26,7 @@ The rules never touch code, identifiers, API names, or technical terms whose pla
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules ~/.claude/commands
 cp rules/writing-system.md ~/.claude/rules/writing-system.md
 cp commands/rewrite.md ~/.claude/commands/rewrite.md
 ```

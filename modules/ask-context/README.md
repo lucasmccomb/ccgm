@@ -38,6 +38,7 @@ Transcript parsing details: every content block in a Claude Code transcript flus
 ## Manual Installation
 
 ```bash
+mkdir -p ~/.claude/hooks ~/.claude/rules
 cp modules/ask-context/hooks/ask-context-gate.py ~/.claude/hooks/
 cp modules/ask-context/rules/ask-context.md ~/.claude/rules/
 # Merge modules/ask-context/settings.partial.json into ~/.claude/settings.json

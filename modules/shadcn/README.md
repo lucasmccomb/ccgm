@@ -16,9 +16,11 @@ Installs a rules file covering shadcn/ui workflows:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/shadcn.md ~/.claude/rules/shadcn.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/shadcn.md .claude/rules/shadcn.md
 ```
 

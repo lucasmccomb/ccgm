@@ -27,6 +27,7 @@ This module packages the statusline as a **first-class, installable unit**: it s
 ## Manual Installation
 
 ```bash
+mkdir -p ~/.claude
 cp statusline.sh ~/.claude/statusline.sh
 chmod +x ~/.claude/statusline.sh
 ```
