@@ -156,7 +156,7 @@ for i in 1 2 3 4 5; do
 done
 
 # Verify we have 5
-count_before=$(ls -1d "$BACKUP_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ')
+count_before=$(ls -1d "$BACKUP_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ' || true)
 if [ "$count_before" -eq 5 ]; then
   pass "Created 5 test backups"
 else
@@ -166,7 +166,7 @@ fi
 # Clean keeping only 2
 clean_backups 2
 
-count_after=$(ls -1d "$BACKUP_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ')
+count_after=$(ls -1d "$BACKUP_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ' || true)
 if [ "$count_after" -eq 2 ]; then
   pass "clean_backups(2) kept exactly 2 backups"
 else
@@ -311,7 +311,7 @@ done
 
 clean_backups 2 "$PROJECT_TARGET"
 
-scoped_after=$(ls -1d "$SCOPE_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ')
+scoped_after=$(ls -1d "$SCOPE_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ' || true)
 if [ "$scoped_after" -eq 2 ]; then
   pass "clean_backups(2) scoped to project kept exactly 2 backups"
 else
@@ -482,7 +482,7 @@ for i in 1 2 3 4 5 6; do
   echo "skill snapshot $i" > "$bdir/skills/test.md"
 done
 
-ret_count_before=$(ls -1d "$RET_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ')
+ret_count_before=$(ls -1d "$RET_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ' || true)
 if [ "$ret_count_before" -eq 6 ]; then
   pass "Created 6 dynamic-coverage backups"
 else
@@ -491,7 +491,7 @@ fi
 
 clean_backups 5 "$RET_TARGET"
 
-ret_count_after=$(ls -1d "$RET_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ')
+ret_count_after=$(ls -1d "$RET_BASE"/ccgm-* 2>/dev/null | wc -l | tr -d ' ' || true)
 if [ "$ret_count_after" -eq 5 ]; then
   pass "clean_backups(5) pruned dynamic-coverage backups to 5"
 else
@@ -684,7 +684,7 @@ cat > "$SCOPE_FIXTURE" <<'JSON'
 }
 JSON
 
-scope_targets=$(_backup_files_block "$SCOPE_FIXTURE" | grep -o '"target"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/^"target"[[:space:]]*:[[:space:]]*"//; s/"$//')
+scope_targets=$(_backup_files_block "$SCOPE_FIXTURE" | grep -o '"target"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/^"target"[[:space:]]*:[[:space:]]*"//; s/"$//' || true)
 
 # Herestrings here too -- see the identical rationale on the fixture_paths
 # checks above (#943, #945).
@@ -726,7 +726,7 @@ cat > "$DEDUPE_ROOT/modules/mod-b/module.json" <<'JSON'
 JSON
 
 dedupe_output=$(CCGM_ROOT="$DEDUPE_ROOT" managed_backup_paths 2>/dev/null)
-skills_count=$(echo "$dedupe_output" | grep -cx 'skills')
+skills_count=$(echo "$dedupe_output" | grep -cx 'skills' || true)
 
 if [ "$skills_count" -eq 1 ]; then
   pass "managed_backup_paths lists 'skills' exactly once across two modules"
