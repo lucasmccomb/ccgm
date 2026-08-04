@@ -330,7 +330,7 @@ CATALOG_NAMES=$(awk '
   in_tbl { exit }
 ' README.md)
 
-CATALOG_ROW_COUNT=$(printf '%s\n' "$CATALOG_NAMES" | grep -c . | tr -d ' ')
+CATALOG_ROW_COUNT=$(printf '%s\n' "$CATALOG_NAMES" | grep -c . | tr -d ' ' || true)
 
 if [ "$CATALOG_ROW_COUNT" != "$MODULE_COUNT" ]; then
   fail "README module catalog has $CATALOG_ROW_COUNT rows, expected $MODULE_COUNT
