@@ -34,5 +34,6 @@ Clones (or reads) an external Claude Code config repo, analyzes its contents wit
 ## Manual Installation
 
 ```bash
+mkdir -p ~/.claude/commands
 cp commands/copycat.md ~/.claude/commands/copycat.md
 ```

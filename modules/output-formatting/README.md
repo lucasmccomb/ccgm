@@ -20,9 +20,11 @@ Copy `rules/copy-paste-output.md` into your Claude configuration:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/copy-paste-output.md ~/.claude/rules/copy-paste-output.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/copy-paste-output.md .claude/rules/copy-paste-output.md
 ```
 

@@ -30,11 +30,13 @@ The methodology is adapted from obra/superpowers' `writing-skills` discipline, w
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules ~/.claude/commands
 cp rules/rule-authoring.md ~/.claude/rules/rule-authoring.md
 cp rules/pressure-testing.md ~/.claude/rules/pressure-testing.md
 cp commands/pressure-test.md ~/.claude/commands/pressure-test.md
 
 # Project-level
+mkdir -p .claude/rules .claude/commands
 cp rules/rule-authoring.md .claude/rules/rule-authoring.md
 cp rules/pressure-testing.md .claude/rules/pressure-testing.md
 cp commands/pressure-test.md .claude/commands/pressure-test.md

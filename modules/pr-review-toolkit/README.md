@@ -38,6 +38,7 @@ mkdir -p ~/.claude/skills/scope-drift
 cp skills/scope-drift/SKILL.md ~/.claude/skills/scope-drift/SKILL.md
 
 # Rule
+mkdir -p ~/.claude/rules
 cp rules/fix-first-review.md ~/.claude/rules/fix-first-review.md
 ```
 

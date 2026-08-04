@@ -73,6 +73,7 @@ All APIs used by these commands are free with no authentication required:
 Copy the command files and the `/brand-check` gather script to your Claude Code config directory:
 
 ```bash
+mkdir -p ~/.claude/commands
 cp commands/brand.md ~/.claude/commands/brand.md
 cp commands/brand-check.md ~/.claude/commands/brand-check.md
 mkdir -p ~/.claude/lib

@@ -60,6 +60,7 @@ If not using the CCGM installer:
 
 ```bash
 # Copy template files to your Claude Code rules directory
+mkdir -p ~/.claude/rules
 cp rules/soul.md ~/.claude/rules/soul.md
 cp rules/human-context.md ~/.claude/rules/human-context.md
 

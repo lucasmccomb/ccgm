@@ -22,6 +22,7 @@ Delegates to an Opus 4.6 agent for deep root-cause analysis. Follows a strict 7-
 ## Manual Installation
 
 ```bash
+mkdir -p ~/.claude/commands
 cp commands/debug.md ~/.claude/commands/debug.md
 ```
 

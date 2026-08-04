@@ -24,6 +24,7 @@ The parent rule is backed by four focused sub-rules that give agents named moves
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/systematic-debugging.md ~/.claude/rules/systematic-debugging.md
 cp rules/debugging.md ~/.claude/rules/debugging.md
 cp rules/root-cause-tracing.md ~/.claude/rules/root-cause-tracing.md
@@ -32,6 +33,7 @@ cp rules/condition-based-waiting.md ~/.claude/rules/condition-based-waiting.md
 cp rules/animals-vs-ghosts.md ~/.claude/rules/animals-vs-ghosts.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/systematic-debugging.md .claude/rules/systematic-debugging.md
 cp rules/debugging.md .claude/rules/debugging.md
 cp rules/root-cause-tracing.md .claude/rules/root-cause-tracing.md

@@ -18,10 +18,12 @@ Copy the rule files into your Claude configuration:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/autonomy.md ~/.claude/rules/autonomy.md
 cp rules/confusion-protocol.md ~/.claude/rules/confusion-protocol.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/autonomy.md .claude/rules/autonomy.md
 cp rules/confusion-protocol.md .claude/rules/confusion-protocol.md
 ```

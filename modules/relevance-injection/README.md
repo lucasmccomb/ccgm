@@ -71,6 +71,7 @@ re-run with `--write` there. See `commands/rules-scope.md` for detail.
 ## Manual Installation
 
 ```bash
+mkdir -p ~/.claude/rules ~/.claude/hooks ~/.claude/lib ~/.claude/commands
 cp rules/relevance-injection.md        ~/.claude/rules/relevance-injection.md
 cp hooks/relevance-inject.py           ~/.claude/hooks/relevance-inject.py
 cp hooks/instructions-loaded-log.py    ~/.claude/hooks/instructions-loaded-log.py

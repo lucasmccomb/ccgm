@@ -21,9 +21,11 @@ Copy `rules/live-testing-guard.md` into your Claude configuration:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/live-testing-guard.md ~/.claude/rules/live-testing-guard.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/live-testing-guard.md .claude/rules/live-testing-guard.md
 ```
 

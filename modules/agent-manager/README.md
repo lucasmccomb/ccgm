@@ -67,6 +67,7 @@ source ~/.zshrc
 4. Copy the slash command to your Claude commands directory:
 
 ```bash
+mkdir -p ~/.claude/commands
 cp modules/agent-manager/commands/agents.md ~/.claude/commands/agents.md
 ```
 

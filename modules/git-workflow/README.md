@@ -19,9 +19,11 @@ Copy `rules/git-workflow.md` into your Claude configuration:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/git-workflow.md ~/.claude/rules/git-workflow.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/git-workflow.md .claude/rules/git-workflow.md
 ```
 

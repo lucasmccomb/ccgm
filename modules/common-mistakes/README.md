@@ -21,9 +21,11 @@ Copy `rules/common-mistakes.md` into your Claude configuration:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/common-mistakes.md ~/.claude/rules/common-mistakes.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/common-mistakes.md .claude/rules/common-mistakes.md
 ```
 

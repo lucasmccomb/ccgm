@@ -42,6 +42,7 @@ Produces `docs/user-test-problems.md` and `docs/user-test-solutions.md` in the p
 ## Manual Installation
 
 ```bash
+mkdir -p ~/.claude/commands
 cp commands/cws-submit.md ~/.claude/commands/cws-submit.md
 cp commands/ccgm-sync.md ~/.claude/commands/ccgm-sync.md
 cp commands/user-test.md ~/.claude/commands/user-test.md

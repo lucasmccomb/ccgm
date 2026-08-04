@@ -18,9 +18,11 @@ Copy `rules/browser-automation.md` into your Claude configuration:
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/rules
 cp rules/browser-automation.md ~/.claude/rules/browser-automation.md
 
 # Project-level
+mkdir -p .claude/rules
 cp rules/browser-automation.md .claude/rules/browser-automation.md
 ```
 

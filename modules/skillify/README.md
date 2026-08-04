@@ -23,11 +23,13 @@ Inspired by the skillify pattern: every repeated failure becomes structurally un
 
 ```bash
 # Global (all projects)
+mkdir -p ~/.claude/commands ~/.claude/bin
 cp commands/skillify.md ~/.claude/commands/skillify.md
 cp bin/ccgm-skillify-check ~/.claude/bin/ccgm-skillify-check
 chmod +x ~/.claude/bin/ccgm-skillify-check
 
 # Project-level
+mkdir -p .claude/commands
 cp commands/skillify.md .claude/commands/skillify.md
 ```
 

@@ -101,6 +101,7 @@ The checks are pure functions of the filesystem. They run in milliseconds and re
 ## Manual Installation
 
 ```bash
+mkdir -p ~/.claude/bin
 cp bin/ccgm-doctor ~/.claude/bin/ccgm-doctor
 chmod +x ~/.claude/bin/ccgm-doctor
 
