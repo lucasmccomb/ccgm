@@ -93,6 +93,8 @@ Every module must have a README.md that explains:
 - Dependencies, if any
 - Template variables, if any
 
+The Manual Installation block is machine-checked by `tests/test-modules.sh`: every file declared in `module.json` must be covered by a `cp`, every `cp` destination directory needs a preceding `mkdir -p`, and the block must copy nothing `module.json` does not declare. If your module's install is genuinely not a flat copy (templated files, merge steps), the guard skips it — add the reason to the guard's documented skip list rather than writing a misleading block.
+
 Look at `modules/autonomy/README.md` for a minimal example and `modules/hooks/README.md` for a full-featured example.
 
 ### 5. Add to relevant presets
