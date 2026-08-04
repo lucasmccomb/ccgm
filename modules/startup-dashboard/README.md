@@ -33,6 +33,21 @@ work on next. Deterministic data gather + model-powered summarization.
 
 - `session-history` — supplies `~/.claude/scripts/recall.py`, which powers the Recent Activity block.
 
+## Manual Installation
+
+```bash
+mkdir -p ~/.claude/commands ~/.claude/lib ~/.claude/hooks
+cp commands/startup.md ~/.claude/commands/startup.md
+cp lib/startup-gather.sh ~/.claude/lib/startup-gather.sh
+cp lib/startup-summary.sh ~/.claude/lib/startup-summary.sh
+cp lib/startup-dashboard.sh ~/.claude/lib/startup-dashboard.sh
+cp lib/startup-summary-prompt.md ~/.claude/lib/startup-summary-prompt.md
+cp hooks/auto-startup.py ~/.claude/hooks/auto-startup.py
+chmod +x ~/.claude/lib/startup-gather.sh ~/.claude/lib/startup-summary.sh ~/.claude/lib/startup-dashboard.sh
+```
+
+Then merge `settings.partial.json` into `~/.claude/settings.json` — it wires the `SessionStart` hook that runs `/startup` automatically. It is a fragment, not a whole file; copying it over `settings.json` would drop everything else.
+
 ## Running
 
 ```

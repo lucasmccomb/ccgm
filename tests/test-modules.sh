@@ -313,7 +313,8 @@ for mod_dir in "$REPO_ROOT"/modules/*/; do
 done
 echo ""
 
-# --- Test: Manual Installation cp block -- coverage (#951) + bootstrap (#980) ---
+# --- Test: Manual Installation cp block -- coverage (#951) + bootstrap (#980)
+#           + over-copy (#983) ---
 # Both checks above compare module.json against the DISK (declared file
 # exists / shipped file is declared). Neither one looks at the README's
 # human-facing "Manual Installation" cp block, which is a hand-maintained
@@ -323,12 +324,13 @@ echo ""
 # the documented manual-install path.
 #
 # This check parses each README's Manual Installation/Install/Installation
-# section for `cp` invocations (literal paths, `cp -R dir/*` recursive
-# globs, `cp dir/*.ext` non-recursive globs, and `$VAR`/`${VAR}` shell
-# interpolation as used in a `for` loop) and verifies every declared file
-# (module.json files[] key) is covered by at least one of them.
+# section for `cp` invocations (literal paths, `cp -R dir` whole-directory
+# copies, `cp -R dir/*` recursive globs, `cp dir/*.ext` non-recursive globs,
+# and `$VAR`/`${VAR}` shell interpolation as used in a `for` loop) and
+# verifies every declared file (module.json files[] key) is covered by at
+# least one of them.
 #
-# It checks TWO dimensions of the same block:
+# It checks THREE dimensions of the same block:
 #
 #   1. COVERAGE (#951) -- every declared file is copied by some `cp`.
 #   2. DIRECTORY BOOTSTRAP (#980) -- every `cp` destination directory is
@@ -337,6 +339,10 @@ echo ""
 #      `~/.claude/bin` and friends with no `mkdir -p`, so the documented
 #      from-scratch path died on its first line with "No such file or
 #      directory" for anyone who had not already run start.sh once.
+#   3. OVER-COPY (#983) -- the block copies NOTHING beyond what module.json
+#      declares. Coverage and over-copy are opposite directions of the same
+#      containment: coverage catches an under-install, over-copy catches an
+#      over-install.
 #
 # Bootstrap resolves a `cp`'s required destination directory statically:
 # a dest ending in '/' IS the directory; a dest whose basename matches the
@@ -370,29 +376,80 @@ echo ""
 # placeholder). A false failure here would train readers to ignore this
 # guard; a miss only leaves an already-existing gap unreported.
 #
-# The COVERAGE check is one-directional, deliberately: it verifies
-# every declared file is copied by *something* in the cp block, but does
-# NOT verify the block copies *nothing else*. A block that recursively
-# globs a whole directory (e.g. `cp -R skills/foo/*`) passes this check even
-# if that directory also contains an undeclared subtree (a bundled test
-# suite, stray __pycache__ output) the block should not sweep in -- #951's
-# own commands-extra fix over-copied exactly this way on first attempt and
-# this guard could not have caught it. Over-copy is a separate property this
-# check does not verify; check it by hand (or diff against a real install)
-# whenever a README uses a recursive or glob `cp`.
+# Over-copy resolves each `cp`'s SOURCES against the module directory on
+# disk -- literal paths as-is, glob sources via pathlib, `-R` directory
+# sources by walking every file underneath -- and reports any resolved file
+# that module.json's files{} does not declare. The motivating incident: #951's
+# own commands-extra fix over-copied on its first attempt, sweeping 40
+# undeclared files (644K, including a fixture named `evil; touch PWNED`) into
+# ~/.claude via `cp -R skills/audit/*`; the guard as it then stood was
+# coverage-only and stayed green throughout. It can now see that.
+#
+# The property is bidirectional but not total. Its honest limits:
+#   - A source containing `$VAR`/`${VAR}` is NOT expanded (its value is not
+#     knowable statically), so extras hiding behind an interpolated source
+#     are invisible. Coverage already treats such a source as a wildcard, so
+#     the two dimensions fail in opposite, safe directions there: coverage
+#     over-credits it, over-copy under-reports it.
+#   - A nonexistent literal source contributes nothing rather than failing;
+#     "the README names a file that does not exist" is a different check
+#     and deliberately not this one.
+#   - Extras are computed against the FULL files{} key set, not the
+#     coverage-filtered one, so `settings.partial.json` needs no special
+#     case: were a block ever to `cp` it, it IS declared. (Empirically none
+#     does -- confirmed by running this check across every module.)
 #
 # Deliberately NOT flagged, by design, not oversight:
 #   - `settings.partial.json` -- a jq-merge fragment, never `cp`'d whole in
 #     any of the 11 modules that declare it (verified empirically); every
 #     README instead documents merging it into settings.json.
+#   - `__pycache__/` directories and `*.pyc`/`*.pyo` files are dropped from
+#     every source expansion. They are build droppings: start.sh never
+#     installs them, and commands-extra's own block documents deleting them
+#     after a recursive copy. Counting them would make over-copy fire on
+#     whether someone had recently run a module's tests.
+#   - GITIGNORED extras are dropped (one batched `git check-ignore --stdin`
+#     per module with extras). A gitignored file can never be committed, so
+#     it structurally cannot ship in a fresh clone -- a local `.DS_Store` or
+#     editor swap file inside a `cp -R` source is working-copy noise, not an
+#     over-copy. check-ignore never reports TRACKED files as ignored, so a
+#     tracked file matching an ignore pattern is still flagged. Like
+#     branch-guard's gitignore exemption, this fails CLOSED: on any git
+#     error nothing is exempted and the guard stays loud.
+#   - A `cp` whose destination is an ABSOLUTE path outside `~` is a
+#     scaffold-into-someone-else's-project copy, not an install into the
+#     CCGM tree, so its sources do not count toward the installed set.
+#     One instance exists: docs-for-agents copies `templates/AGENTS.md` to
+#     `/path/to/your/project/AGENTS.md`. That file is correctly undeclared
+#     (start.sh does not install it; it is a template the reader copies into
+#     their own repo). Bootstrap already skips this same class of line for
+#     the same reason. Relative project-level destinations (`.claude/rules/`)
+#     are NOT excluded -- those blocks re-copy the same declared sources the
+#     `~/.claude` block does, so they add nothing to the installed set.
 #   - A module whose Manual Installation section contains zero `cp`
-#     invocations at all (prose-only steps, e.g. "Copy `skills/argus/` into
-#     `~/.claude/`", or cloud-dispatch's numbered-bullet instructions) is
-#     skipped, not failed -- turning prose into a false failure would make
-#     this check untrustworthy for the READMEs that use it legitimately.
+#     invocations at all is skipped, not failed -- turning prose into a
+#     false failure would make this check untrustworthy for the READMEs
+#     that use it legitimately. Where the install genuinely IS "copy these
+#     declared files", #983 converted the prose-only sections it found into
+#     literal blocks (argus, atdd, cloud-dispatch, test-vision) and added a
+#     Manual Installation section where none existed at all (deepresearch,
+#     startup-dashboard). The ones that remain are skipped because their
+#     install is NOT a flat copy, each for a named reason:
+#       * autoheal, dreaming -- each ships 2 `__USERNAME__`-templated files
+#         and requires LaunchAgent registration (autoheal additionally has a
+#         settings.partial.json jq merge); the README points at
+#         `start.sh --add` because a cp sequence would be a lie about what
+#         installing them takes.
+#       * remote-server -- `commands/onremote.md` is templated
+#         (`__REMOTE_HOST__`/`__REMOTE_USER__`/`__REMOTE_ALIAS__`); copying
+#         it verbatim installs a broken command, so the README documents the
+#         substitution instead.
 #   - A module with no Manual Installation/Install/Installation heading at
-#     all (autoheal, deepresearch, dreaming, global-claude-md,
-#     plugin-marketplace, startup-dashboard) has nothing to check.
+#     all has nothing to check. #983 also widened that heading match to be
+#     case-insensitive and to tolerate a trailing parenthetical qualifier
+#     (`## Manual installation (development clone)`), which recovered four
+#     READMEs -- autoheal, dreaming, global-claude-md, plugin-marketplace --
+#     that had install sections this check was simply failing to find.
 # Every skip is counted and reasoned (see SKIPPED_COUNT below) so the
 # "checked" number never silently implies more coverage than it has.
 #
@@ -411,18 +468,33 @@ echo ""
 # of scope for that PR and tracked as #970. #970 fixed all three READMEs,
 # so the list is empty again -- add an entry here only for a newly
 # discovered, genuinely out-of-scope gap.
-echo "--- Checking Manual Installation cp blocks (file coverage + directory bootstrap) ---"
+#
+# OVERCOPY_KNOWN is the same construct for dimension 3, with the same
+# stale-entry semantics: an allowlisted module that has no extras FAILS, so
+# the allowlist cannot outlive the bug it excuses. It starts empty -- #983
+# found zero real over-copies across the module set.
+echo "--- Checking Manual Installation cp blocks (coverage + bootstrap + over-copy) ---"
 MANUAL_INSTALL_REPORT=$(REPO_ROOT="$REPO_ROOT" python3 - <<'PYEOF'
 import json
 import os
 import re
 import shlex
+import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(os.environ["REPO_ROOT"])
 MODULES = REPO_ROOT / "modules"
 
-HEADING_RE = re.compile(r'^##\s+(Manual Installation|Install|Installation)\s*$', re.MULTILINE)
+# Case-insensitive, and tolerant of a trailing parenthetical qualifier: four
+# READMEs write `## Manual installation` or `## Manual installation
+# (development clone)`, which the original case-sensitive, no-suffix pattern
+# silently classed as "no install section at all" (#983). The trailing
+# `\s*$` anchor is what keeps `## Installing CCGM as a marketplace` from
+# matching -- only a qualifier in parentheses is accepted after the words.
+HEADING_RE = re.compile(
+    r'^##\s+(?:Manual\s+Installation|Installation|Install)\s*(?:\([^)\n]*\))?\s*$',
+    re.MULTILINE | re.IGNORECASE,
+)
 ANY_HEADING_RE = re.compile(r'^##\s+', re.MULTILINE)
 CP_LINE_RE = re.compile(r'cp\s+(-[A-Za-z]+\s+)?"?(?:modules/[\w.-]+/)?([\w${}/.*-]+)"?')
 EXEMPT_FILENAMES = {"settings.partial.json"}
@@ -431,8 +503,19 @@ FENCE_RE = re.compile(r'^\s*```')
 SHELL_SPLIT_RE = re.compile(r'&&|\|\||;|\|')
 SHELL_LEAD_TOKENS = {"do", "then", "else", "sudo"}
 
+# Build droppings: never installed by start.sh, so never an over-copy.
+PYCACHE_DIR = "__pycache__"
+DROPPING_SUFFIXES = (".pyc", ".pyo")
+
 # module -> tracking issue for a known, out-of-scope pre-existing gap.
 KNOWN_GAPS = {}
+
+# Same, for dimension 3 (over-copy). Same stale-entry semantics.
+OVERCOPY_KNOWN = {}
+
+# Cap per-module OVERCOPY lines so one runaway glob cannot bury the rest of
+# the suite's output; the remainder is summarized on a single line.
+OVERCOPY_REPORT_CAP = 20
 
 
 def shellvar_to_regex(src):
@@ -564,6 +647,24 @@ def is_bootstrapped(needed, made):
     return any(d == needed or d.startswith(needed + '/') for d in made)
 
 
+def split_cp_flags_operands(tokens):
+    """Split a tokenized `cp` command into (flags, operands), or None if it
+    has fewer than two operands. Shared by bootstrap and over-copy so the
+    two dimensions can never drift on how a `cp` line is parsed -- the same
+    concern that motivated covers()'s literal-recursive branch.
+    """
+    flags = ''
+    operands = []
+    for tok in tokens[1:]:
+        if tok.startswith('-') and len(tok) > 1:
+            flags += tok
+        else:
+            operands.append(tok)
+    if len(operands) < 2:
+        return None
+    return flags, operands
+
+
 def missing_bootstrap(section):
     """Return [(directory, offending destination)] for un-mkdir'd cp targets."""
     made = []
@@ -577,15 +678,10 @@ def missing_bootstrap(section):
             continue
         if tokens[0] != 'cp':
             continue
-        flags = ''
-        operands = []
-        for tok in tokens[1:]:
-            if tok.startswith('-') and len(tok) > 1:
-                flags += tok
-            else:
-                operands.append(tok)
-        if len(operands) < 2:
+        parsed = split_cp_flags_operands(tokens)
+        if parsed is None:
             continue
+        flags, operands = parsed
         recursive = bool(re.search(r'[Rr]', flags))
         sources, dest = operands[:-1], operands[-1]
         # Unresolvable or user-supplied absolute destinations are skipped,
@@ -598,6 +694,115 @@ def missing_bootstrap(section):
             missing.append((needed, dest))
         made.extend(dirs_created_by(recursive, sources, dest))
     return missing
+
+
+def is_build_dropping(relpath):
+    """__pycache__ output -- present on disk after a test run, never installed."""
+    parts = Path(relpath).parts
+    return PYCACHE_DIR in parts or Path(relpath).suffix in DROPPING_SUFFIXES
+
+
+def strip_module_prefix(mod_name, src):
+    """`modules/<name>/x` and `x` name the same file; READMEs use both forms."""
+    prefix = "modules/" + mod_name + "/"
+    return src[len(prefix):] if src.startswith(prefix) else src
+
+
+def expand_source(mod_dir, recursive, src):
+    """Module-relative files a `cp` source resolves to on disk.
+
+    Literal file -> itself. Glob -> pathlib expansion (with -R, a matched
+    directory contributes everything under it). Literal directory -> its
+    whole subtree, but only with -R (without -R, cp would refuse it).
+    A `$VAR` source resolves to nothing: its value is not knowable
+    statically, so no extra can be attributed to it with confidence.
+    A nonexistent literal source also resolves to nothing -- see the header.
+    """
+    if '$' in src:
+        return []
+    found = []
+    if '*' in src or '?' in src:
+        try:
+            matches = sorted(mod_dir.glob(src))
+        except (ValueError, OSError):
+            return []
+        for p in matches:
+            if p.is_file():
+                found.append(p)
+            elif p.is_dir() and recursive:
+                found.extend(q for q in sorted(p.rglob('*')) if q.is_file())
+    else:
+        p = mod_dir / src
+        if p.is_file():
+            found.append(p)
+        elif p.is_dir() and recursive:
+            found.extend(q for q in sorted(p.rglob('*')) if q.is_file())
+    out = []
+    for p in found:
+        try:
+            rel = str(p.relative_to(mod_dir))
+        except ValueError:
+            # Not lexically under the module dir (absolute source) -- skip.
+            continue
+        # A `../` source survives the check above (lexical prefix holds) and
+        # is appended below as a reported extra: loud, the safe direction.
+        # No README uses either shape today.
+        if not is_build_dropping(rel):
+            out.append(rel)
+    return out
+
+
+def installed_sources(mod_dir, section):
+    """Map module-relative file -> the `cp` command that installs it.
+
+    Keyed on SOURCE, not destination, so a README that documents both a
+    `~/.claude` block and a project-level `.claude` block collapses to one
+    entry per file instead of reporting each twice.
+    """
+    installed = {}
+    for tokens in shell_commands(section):
+        if tokens[0] != 'cp':
+            continue
+        parsed = split_cp_flags_operands(tokens)
+        if parsed is None:
+            continue
+        flags, operands = parsed
+        dest = operands[-1]
+        # An absolute destination outside `~` scaffolds a file into an
+        # unrelated project; it is not an install into the CCGM tree.
+        if dest.startswith('/'):
+            continue
+        recursive = bool(re.search(r'[Rr]', flags))
+        for src in operands[:-1]:
+            src = strip_module_prefix(mod_dir.name, src)
+            for rel in expand_source(mod_dir, recursive, src):
+                installed.setdefault(rel, ' '.join(tokens))
+    return installed
+
+
+def drop_gitignored(mod_dir, extras):
+    """Filter gitignored paths out of the over-copy extras.
+
+    A gitignored file can never be committed, so it cannot ship in a fresh
+    clone -- a local .DS_Store or editor swap file swept up by a `cp -R`
+    source is working-copy noise, not a real over-copy. check-ignore never
+    reports tracked files as ignored, so a tracked file that matches an
+    ignore pattern is still flagged. Fails CLOSED: on any git error nothing
+    is exempted and every extra stays reported.
+    """
+    if not extras:
+        return extras
+    try:
+        proc = subprocess.run(
+            ['git', 'check-ignore', '--stdin', '-z'],
+            input='\0'.join(extras).encode() + b'\0',
+            capture_output=True, cwd=mod_dir, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return extras
+    if proc.returncode not in (0, 1):
+        return extras
+    ignored = {p.decode() for p in proc.stdout.split(b'\0') if p}
+    return [e for e in extras if e not in ignored]
 
 
 def covers(relpath, cp_lines):
@@ -617,6 +822,13 @@ def covers(relpath, cp_lines):
             elif reldir == src_dir and shellvar_to_regex(Path(src).name).match(relname):
                 return True
         elif src == relpath:
+            return True
+        elif is_recursive and relpath.startswith(src.rstrip('/') + '/'):
+            # `cp -R skills/argus <dest>` copies the whole subtree, so every
+            # file under it is covered. Without this, a literal recursive
+            # directory source was invisible to coverage while over-copy
+            # (which resolves sources on disk) saw straight through it --
+            # the two dimensions have to agree on what a `cp` copies.
             return True
     return False
 
@@ -656,6 +868,7 @@ for mod_dir in sorted(MODULES.iterdir()):
         skip_reasons.append((mod_name, f"invalid module.json ({e})"))
         continue
 
+    all_declared = set(data.get("files", {}))
     declared = [k for k in data.get("files", {}) if Path(k).name not in EXEMPT_FILENAMES]
     if not declared:
         skipped += 1
@@ -697,6 +910,20 @@ for mod_dir in sorted(MODULES.iterdir()):
     for needed, dest in missing_bootstrap(section):
         print(f"NOMKDIR\t{mod_name}\t'{needed}' (copy destination: {dest})")
 
+    # Dimension 3 (#983): the block must copy nothing beyond files{}.
+    installed = installed_sources(mod_dir, section)
+    extras = drop_gitignored(mod_dir, sorted(set(installed) - all_declared))
+    if mod_name in OVERCOPY_KNOWN:
+        if not extras:
+            print(f"STALE\t{mod_name}\tallowlisted for {OVERCOPY_KNOWN[mod_name]} but copies nothing undeclared now -- remove from OVERCOPY_KNOWN")
+        # else: known, tracked, intentionally silent.
+    else:
+        for relpath in extras[:OVERCOPY_REPORT_CAP]:
+            print(f"OVERCOPY\t{mod_name}\t{relpath}\t{installed[relpath]}")
+        if len(extras) > OVERCOPY_REPORT_CAP:
+            rest = len(extras) - OVERCOPY_REPORT_CAP
+            print(f"OVERCOPY\t{mod_name}\t(and {rest} more undeclared file(s))\t-")
+
 print(f"CHECKED\t{checked}")
 print(f"SKIPPED_COUNT\t{skipped}")
 for mod_name, reason in skip_reasons:
@@ -704,7 +931,7 @@ for mod_name, reason in skip_reasons:
 PYEOF
 )
 
-while IFS=$'\t' read -r kind mod_name detail; do
+while IFS=$'\t' read -r kind mod_name detail source_cmd; do
   [ -z "$kind" ] && continue
   case "$kind" in
     MISSING)
@@ -713,6 +940,15 @@ while IFS=$'\t' read -r kind mod_name detail; do
     NOMKDIR)
       fail "$mod_name: Manual Installation block copies into $detail with no preceding 'mkdir -p' -- the documented steps fail against a fresh ~/.claude"
       ;;
+    OVERCOPY)
+      if [ "$source_cmd" = "-" ]; then
+        # The per-module cap's summary line ("(and N more undeclared
+        # file(s))") is not a file path; render it bare.
+        fail "$mod_name: $detail"
+      else
+        fail "$mod_name: Manual Installation block installs '$detail', which module.json does not declare (swept in by: $source_cmd)"
+      fi
+      ;;
     STALE)
       fail "$mod_name: $detail"
       ;;
@@ -720,7 +956,7 @@ while IFS=$'\t' read -r kind mod_name detail; do
       fail "$mod_name: $detail -- cannot check Manual Installation coverage"
       ;;
   esac
-done < <(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep -E '^(MISSING|NOMKDIR|STALE|DECODE_FAIL)')
+done < <(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep -E '^(MISSING|NOMKDIR|OVERCOPY|STALE|DECODE_FAIL)')
 
 checked_count=$(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep '^CHECKED' | cut -f2)
 skipped_count=$(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep '^SKIPPED_COUNT' | cut -f2)
@@ -729,7 +965,7 @@ skipped_count=$(printf '%s\n' "$MANUAL_INSTALL_REPORT" | grep '^SKIPPED_COUNT' |
 # output, or its silence gets mistaken for completeness.
 echo "  Checked $checked_count module(s), skipped ${skipped_count:-0} (no install section or no parseable cp command)"
 if [ -n "$checked_count" ] && [ "$checked_count" -gt 0 ]; then
-  pass "Manual Installation cp-block coverage + directory bootstrap checked across $checked_count module(s)"
+  pass "Manual Installation cp-block coverage + directory bootstrap + over-copy checked across $checked_count module(s)"
 fi
 if [ "$VERBOSE" = "1" ] && [ -n "$skipped_count" ] && [ "$skipped_count" -gt 0 ]; then
   echo "  Skipped modules:"

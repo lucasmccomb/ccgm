@@ -79,8 +79,21 @@ Part of the `full` preset. Standalone:
 bash start.sh --add argus      # pulls subagent-patterns as a dependency
 ```
 
-Or copy `skills/argus/`, `agents/argus-judge.md`, and `rules/argus.md` into `~/.claude/` and ensure
-`subagent-patterns` is installed (for the `implementer` agent + the four-state status protocol).
+Or manually:
+
+```bash
+mkdir -p ~/.claude/skills ~/.claude/agents ~/.claude/rules
+cp -R skills/argus ~/.claude/skills/argus
+cp agents/argus-judge.md ~/.claude/agents/argus-judge.md
+cp rules/argus.md ~/.claude/rules/argus.md
+chmod +x ~/.claude/skills/argus/scripts/gates.sh ~/.claude/skills/argus/scripts/image_unchanged.sh
+```
+
+Re-running the block? Remove `~/.claude/skills/argus` first — `cp -R` into an existing directory
+nests a second `argus/` inside it instead of overwriting.
+
+Either way, ensure `subagent-patterns` is installed (for the `implementer` agent + the four-state
+status protocol).
 
 ## Usage
 

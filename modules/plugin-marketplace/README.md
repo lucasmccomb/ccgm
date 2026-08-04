@@ -48,7 +48,8 @@ echo 'CCGM_PLUGIN_RULE_INJECTION=true' >> ~/.claude/.ccgm.env
 
 ```bash
 mkdir -p ~/.claude/lib ~/.claude/hooks ~/.claude/rules
-cp lib/gen_marketplace.py lib/validate_marketplace.py ~/.claude/lib/
+cp lib/gen_marketplace.py ~/.claude/lib/
+cp lib/validate_marketplace.py ~/.claude/lib/
 cp hooks/plugin-rule-inject.py ~/.claude/hooks/
 cp rules/plugin-marketplace.md ~/.claude/rules/
 ```
