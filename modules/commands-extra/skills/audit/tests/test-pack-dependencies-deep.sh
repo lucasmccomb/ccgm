@@ -94,7 +94,11 @@ if [[ ! -f "$PACK_DIR/pack.json" ]]; then
   fail "pack.json does not exist at $PACK_DIR/pack.json"
 else
   OUT="$(python3 "$LINTER" --packs-dir "$(dirname "$PACK_DIR")" --rubric "$TESTRUN_TMPDIR/no-rubric.json" 2>&1 || true)"
-  if echo "$OUT" | grep -q "^PASS: dependencies"; then
+  # Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+  # producer if grep exits on its first match before the producer finishes
+  # writing, turning a genuine match into a reported failure (see #943,
+  # #945). A herestring has no second process to race against.
+  if grep -q "^PASS: dependencies" <<< "$OUT"; then
     pass "pack.json passes schema validation (no rubric)"
   else
     fail "pack.json schema validation failed: $OUT"
@@ -162,7 +166,8 @@ fi
 printf '\nTest 4: lint-pack.py PASS on dependencies pack (real rubric)\n'
 
 OUT="$(python3 "$LINTER" --packs-dir "$(dirname "$PACK_DIR")" --rubric "$RUBRIC" 2>&1 || true)"
-if echo "$OUT" | grep -q "^PASS: dependencies"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "^PASS: dependencies" <<< "$OUT"; then
   pass "lint-pack.py reports PASS for dependencies with real rubric"
 else
   fail "lint-pack.py did NOT report PASS for dependencies: $OUT"

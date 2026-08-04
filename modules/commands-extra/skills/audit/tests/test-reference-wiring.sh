@@ -313,7 +313,13 @@ else
   # shellcheck disable=SC2016  # literal backtick in pattern is intentional, not a variable
   FIX_TABLE_DOC=$(grep -A1 '| `documentation`' "$FIX_PATTERNS_DOC" 2>/dev/null | head -2 || true)
   set -e
-  if echo "$FIX_TABLE_DOC" | grep -q 'No\|no'; then
+  # Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+  # producer if grep exits on its first match before the producer finishes
+  # writing, turning a genuine match into a reported failure (see #943,
+  # #945). A herestring has no second process to race against. (The
+  # FIX_TABLE_DOC capture above is left as-is: already `|| true`-guarded
+  # and feeds diagnostic-only text -- same exclusion as test-doc-counts.sh:64.)
+  if grep -q 'No\|no' <<< "$FIX_TABLE_DOC"; then
     pass "fix-patterns.md Fix Type Reference confirms documentation is not auto-fixable (No)"
   else
     fail "fix-patterns.md Fix Type Reference should list documentation as 'No' for auto-fixable" \

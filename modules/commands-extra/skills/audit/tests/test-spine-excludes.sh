@@ -195,7 +195,18 @@ for f in leaked:
 PYEOF
 )"
 
-get() { printf '%s\n' "$ANALYSIS" | grep "^$1=" | head -1 | cut -d= -f2; }
+# `producer | head` can SIGPIPE-kill the producer once head has read its
+# one line and closes early, and under pipefail that turns a genuine,
+# correct result into a script abort for every bare `$(get ...)` call site
+# below (see #943, #945 -- the priority case for this shape was
+# test-doc-counts.sh:136). Herestring the grep stage (echo/printf of a
+# variable converts directly); the trailing head|cut stays a plain pipe
+# since cut never exits early, so there is nothing left to race.
+get() {
+  local matched
+  matched=$(grep "^$1=" <<< "$ANALYSIS" || true)
+  head -1 <<< "$matched" | cut -d= -f2
+}
 
 TOTAL="$(get TOTAL)"
 EXCLUDED="$(get EXCLUDED)"

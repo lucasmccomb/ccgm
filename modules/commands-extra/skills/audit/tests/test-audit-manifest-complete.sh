@@ -133,7 +133,11 @@ rm -f "$FAKE_FILE"
 
 if [[ $PROBE_EXIT -ne 0 ]]; then
   # Gate correctly detected the unregistered file
-  if echo "$PROBE_OUTPUT" | grep -q "_unregistered_test_fixture.py"; then
+  # Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+  # producer if grep exits on its first match before the producer finishes
+  # writing, turning a genuine match into a reported failure (see #943,
+  # #945). A herestring has no second process to race against.
+  if grep -q "_unregistered_test_fixture.py" <<< "$PROBE_OUTPUT"; then
     pass "non-vacuity: gate FAILS when an unregistered file is present (correctly detected ${FAKE_FILE##*/})"
   else
     pass "non-vacuity: gate FAILS when an unregistered file is present (exit ${PROBE_EXIT})"

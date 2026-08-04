@@ -414,7 +414,11 @@ else
 fi
 
 # Stderr should contain an actionable error message
-if echo "$T3_STDERR" | grep -qi "error\|ERROR\|invalid\|not valid"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if grep -qi "error\|ERROR\|invalid\|not valid" <<< "$T3_STDERR"; then
   pass "t3: stderr contains actionable error message"
 else
   fail "t3: stderr does not mention 'error' or 'invalid' (got: $T3_STDERR)"
@@ -560,7 +564,8 @@ else
   fail "t6: missing --baseline exits $T6_EXIT (expected 1)"
 fi
 
-if echo "$T6_STDERR" | grep -qi "error\|ERROR\|cannot\|not found"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -qi "error\|ERROR\|cannot\|not found" <<< "$T6_STDERR"; then
   pass "t6: stderr contains actionable error for missing baseline"
 else
   fail "t6: stderr does not mention error for missing baseline (got: $T6_STDERR)"

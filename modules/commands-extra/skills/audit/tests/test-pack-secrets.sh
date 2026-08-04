@@ -64,9 +64,13 @@ LINT_EXIT=$?
 set -e
 
 # Grep for the secrets pack specifically
-if echo "$LINT_OUT" | grep -q "PASS: secrets"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if grep -q "PASS: secrets" <<< "$LINT_OUT"; then
   pass "t1: lint-pack PASS for secrets pack"
-elif echo "$LINT_OUT" | grep -q "FAIL: secrets"; then
+elif grep -q "FAIL: secrets" <<< "$LINT_OUT"; then
   fail "t1: lint-pack FAIL for secrets pack"
   printf '    Output: %s\n' "$LINT_OUT" >&2
 else

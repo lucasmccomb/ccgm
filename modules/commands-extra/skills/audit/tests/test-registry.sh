@@ -106,7 +106,11 @@ assert '$pack_id' not in ids, '$pack_id should NOT be in result, got: ' + str(id
 # ---------------------------------------------------------------------------
 echo "--- Test 1: pack-go.json validates (stdlib)"
 result=""
-if result=$(validate_pack_file "${FIXTURES}/pack-go.json" 2>&1) && echo "${result}" | grep -q "^VALID$"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if result=$(validate_pack_file "${FIXTURES}/pack-go.json" 2>&1) && grep -q "^VALID$" <<< "${result}"; then
     pass "pack-go.json is valid"
 else
     fail "pack-go.json failed validation: ${result}"
@@ -117,7 +121,8 @@ fi
 # ---------------------------------------------------------------------------
 echo "--- Test 2: pack-secrets.json validates (stdlib)"
 result=""
-if result=$(validate_pack_file "${FIXTURES}/pack-secrets.json" 2>&1) && echo "${result}" | grep -q "^VALID$"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if result=$(validate_pack_file "${FIXTURES}/pack-secrets.json" 2>&1) && grep -q "^VALID$" <<< "${result}"; then
     pass "pack-secrets.json is valid"
 else
     fail "pack-secrets.json failed validation: ${result}"
@@ -166,7 +171,8 @@ result=""
 if result=$(validate_pack_file "${FIXTURES}/pack-malformed.json" 2>&1); then
     fail "pack-malformed.json should have failed validation but passed: ${result}"
 else
-    if echo "${result}" | grep -q "INVALID:"; then
+    # Herestring, not a pipe: see the identical rationale above (#943, #945).
+    if grep -q "INVALID:" <<< "${result}"; then
         pass "pack-malformed.json correctly rejected with clear error: ${result}"
     else
         fail "pack-malformed.json rejected but error message unclear: ${result}"
@@ -288,10 +294,11 @@ cat > "${_T6_PACK}" <<'JSON'
 }
 JSON
 result=""
-if result=$(validate_pack_from_file "${_T6_PACK}" 2>&1) && echo "${result}" | grep -q "^VALID$"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if result=$(validate_pack_from_file "${_T6_PACK}" 2>&1) && grep -q "^VALID$" <<< "${result}"; then
     fail "check-id 'bad/check,id' should have been rejected but was VALID"
 else
-    if echo "${result}" | grep -q "INVALID:"; then
+    if grep -q "INVALID:" <<< "${result}"; then
         pass "check-id 'bad/check,id' correctly rejected: ${result}"
     else
         fail "check-id 'bad/check,id' rejected but error unclear: ${result}"
@@ -320,7 +327,8 @@ cat > "${_T7A_FINDING}" <<JSON
 }
 JSON
 result=""
-if result=$(validate_finding_file "${_T7A_FINDING}" 2>&1) && echo "${result}" | grep -q "^VALID$"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if result=$(validate_finding_file "${_T7A_FINDING}" 2>&1) && grep -q "^VALID$" <<< "${result}"; then
     pass "tool-native fingerprint '${TOOL_NATIVE_FINGERPRINT}' accepted by finding.schema.json"
 else
     fail "tool-native fingerprint '${TOOL_NATIVE_FINGERPRINT}' was incorrectly rejected: ${result}"
@@ -346,10 +354,11 @@ cat > "${_T7B_FINDING}" <<'JSON'
 }
 JSON
 result=""
-if result=$(validate_finding_file "${_T7B_FINDING}" 2>&1) && echo "${result}" | grep -q "^VALID$"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if result=$(validate_finding_file "${_T7B_FINDING}" 2>&1) && grep -q "^VALID$" <<< "${result}"; then
     fail "empty fingerprint should have been rejected but was VALID"
 else
-    if echo "${result}" | grep -q "INVALID:"; then
+    if grep -q "INVALID:" <<< "${result}"; then
         pass "empty fingerprint correctly rejected: ${result}"
     else
         fail "empty fingerprint rejected but error unclear: ${result}"

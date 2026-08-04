@@ -207,7 +207,11 @@ output=""
 exit_code=0
 output=$(python3 "${LINTER}" --packs-dir "${_T1_DIR}" --rubric "${_T1_DIR}/nonexistent-rubric.json" 2>&1) || exit_code=$?
 
-if [ "${exit_code}" -eq 0 ] && echo "${output}" | grep -q "^PASS: test-valid"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if [ "${exit_code}" -eq 0 ] && grep -q "^PASS: test-valid" <<< "${output}"; then
     pass "well-formed pack passes linter (no rubric)"
 else
     fail "well-formed pack should pass but exit_code=${exit_code}: ${output}"
@@ -227,8 +231,9 @@ output=""
 exit_code=0
 output=$(python3 "${LINTER}" --packs-dir "${_T2_DIR}" --rubric "${_T2_DIR}/nonexistent-rubric.json" 2>&1) || exit_code=$?
 
-if [ "${exit_code}" -ne 0 ] && echo "${output}" | grep -q "^FAIL: test-missing"; then
-    if echo "${output}" | grep -qi "missing required section"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${exit_code}" -ne 0 ] && grep -q "^FAIL: test-missing" <<< "${output}"; then
+    if grep -qi "missing required section" <<< "${output}"; then
         pass "pack missing section correctly rejected with clear error"
     else
         fail "pack missing section rejected but error message unclear: ${output}"
@@ -251,8 +256,9 @@ output=""
 exit_code=0
 output=$(python3 "${LINTER}" --packs-dir "${_T3_DIR}" --rubric "${_T3_DIR}/nonexistent-rubric.json" 2>&1) || exit_code=$?
 
-if [ "${exit_code}" -ne 0 ] && echo "${output}" | grep -q "^FAIL: test-invalid"; then
-    if echo "${output}" | grep -qi "schema validation failed\|missing required"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${exit_code}" -ne 0 ] && grep -q "^FAIL: test-invalid" <<< "${output}"; then
+    if grep -qi "schema validation failed\|missing required" <<< "${output}"; then
         pass "invalid pack.json correctly rejected with clear error"
     else
         fail "invalid pack.json rejected but error message unclear: ${output}"
@@ -282,8 +288,9 @@ output=""
 exit_code=0
 output=$(python3 "${LINTER}" --packs-dir "${_T4_DIR}" --rubric "${_T4_DIR}/rubric.json" 2>&1) || exit_code=$?
 
-if [ "${exit_code}" -ne 0 ] && echo "${output}" | grep -q "^FAIL: test-orphan"; then
-    if echo "${output}" | grep -qi "no entry in severity-rubric"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${exit_code}" -ne 0 ] && grep -q "^FAIL: test-orphan" <<< "${output}"; then
+    if grep -qi "no entry in severity-rubric" <<< "${output}"; then
         pass "orphan check-id correctly rejected when rubric is present"
     else
         fail "orphan check-id rejected but error message unclear: ${output}"
@@ -312,7 +319,8 @@ output=""
 exit_code=0
 output=$(python3 "${LINTER}" --packs-dir "${_T5_DIR}" --rubric "${_T5_DIR}/rubric.json" 2>&1) || exit_code=$?
 
-if [ "${exit_code}" -eq 0 ] && echo "${output}" | grep -q "^PASS: test-covered"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${exit_code}" -eq 0 ] && grep -q "^PASS: test-covered" <<< "${output}"; then
     pass "well-formed pack with matching rubric passes linter"
 else
     fail "well-formed pack + matching rubric should pass but exit_code=${exit_code}: ${output}"
@@ -337,7 +345,8 @@ output=""
 exit_code=0
 output=$(python3 "${LINTER}" --packs-dir "${_T6_DIR}" --rubric "${_T6_DIR}/nonexistent-rubric.json" 2>&1) || exit_code=$?
 
-if [ "${exit_code}" -eq 0 ] && ! echo "${output}" | grep -q "^FAIL: _TEMPLATE"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${exit_code}" -eq 0 ] && ! grep -q "^FAIL: _TEMPLATE" <<< "${output}"; then
     pass "_TEMPLATE directory is skipped by linter"
 else
     fail "_TEMPLATE should be skipped but exit_code=${exit_code}: ${output}"
@@ -355,7 +364,8 @@ output=""
 exit_code=0
 output=$(python3 "${LINTER}" --packs-dir "${_T7_DIR}/nonexistent" --rubric "${_T7_DIR}/nonexistent-rubric.json" 2>&1) || exit_code=$?
 
-if [ "${exit_code}" -eq 0 ] && echo "${output}" | grep -qi "packs directory not found\|nothing to lint"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${exit_code}" -eq 0 ] && grep -qi "packs directory not found\|nothing to lint" <<< "${output}"; then
     pass "absent packs/ directory handled gracefully (exit 0)"
 else
     fail "absent packs/ directory should exit 0 with NOTE but exit_code=${exit_code}: ${output}"

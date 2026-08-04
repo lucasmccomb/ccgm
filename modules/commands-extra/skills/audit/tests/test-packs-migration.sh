@@ -135,10 +135,16 @@ for pack_name in "${CANONICAL_PACKS[@]}"; do
 
     # ---- 3. lint-pack.py result for this pack (from pre-run output above) ----
     # Filter the single lint run's output to this pack's result line
-    if echo "${LINT_OUTPUT}" | grep -q "^PASS: ${pack_name}$"; then
+    # Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+    # producer if grep exits on its first match before the producer finishes
+    # writing, turning a genuine match into a reported failure (see #943,
+    # #945). A herestring has no second process to race against.
+    if grep -q "^PASS: ${pack_name}$" <<< "${LINT_OUTPUT}"; then
         pass "${pack_name}: lint-pack.py passed"
-    elif echo "${LINT_OUTPUT}" | grep -q "^FAIL: ${pack_name}$"; then
+    elif grep -q "^FAIL: ${pack_name}$" <<< "${LINT_OUTPUT}"; then
         # Extract error lines specific to this pack (stop at the next PASS:/FAIL:/blank boundary)
+        # pack_errors below is left as-is: already `|| true`-guarded and
+        # feeds diagnostic-only text -- same exclusion as test-doc-counts.sh:64.
         pack_errors=$(echo "${LINT_OUTPUT}" | awk "/^FAIL: ${pack_name}$/{found=1; next} found && /^(PASS:|FAIL:|$)/{exit} found && /ERROR:/{print}" | head -10 || true)
         fail "${pack_name}: lint-pack.py failed — ${pack_errors}"
     else

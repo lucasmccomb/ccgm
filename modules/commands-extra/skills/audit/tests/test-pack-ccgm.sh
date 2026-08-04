@@ -76,7 +76,11 @@ _T1_RESULT=""
 _T1_EXIT=0
 _T1_RESULT=$(python3 "${_VALIDATE_PY}" "${REGISTRY}" "${HYGIENE_PACK}/pack.json" 2>&1) || _T1_EXIT=$?
 
-if [ "${_T1_EXIT}" -eq 0 ] && echo "${_T1_RESULT}" | grep -q "^VALID$"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if [ "${_T1_EXIT}" -eq 0 ] && grep -q "^VALID$" <<< "${_T1_RESULT}"; then
     pass "ccgm-hygiene/pack.json validates against pack.schema.json"
 else
     fail "ccgm-hygiene/pack.json failed validation: ${_T1_RESULT}"
@@ -91,7 +95,8 @@ _T2_RESULT=""
 _T2_EXIT=0
 _T2_RESULT=$(python3 "${_VALIDATE_PY}" "${REGISTRY}" "${STANDARDS_PACK}/pack.json" 2>&1) || _T2_EXIT=$?
 
-if [ "${_T2_EXIT}" -eq 0 ] && echo "${_T2_RESULT}" | grep -q "^VALID$"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${_T2_EXIT}" -eq 0 ] && grep -q "^VALID$" <<< "${_T2_RESULT}"; then
     pass "ccgm-standards/pack.json validates against pack.schema.json"
 else
     fail "ccgm-standards/pack.json failed validation: ${_T2_RESULT}"
@@ -112,7 +117,11 @@ EXPECTED_IDS=(
 
 _T3_MISSING=""
 for check_id in "${EXPECTED_IDS[@]}"; do
-    if ! python3 -c "
+    # Producer is a real command (python3), not an echo/printf of a
+    # variable: capture its output to a variable first, then herestring
+    # into the early-exiting `grep -q` (see #943, #945). `|| true` keeps
+    # python3's exit-1-on-missing from aborting this now-bare assignment.
+    _T3_CHECK=$(python3 -c "
 import json, sys
 rubric = json.load(open('${RUBRIC}', encoding='utf-8'))
 checks = rubric.get('checks', {})
@@ -121,7 +130,8 @@ if '${check_id}' not in checks:
     sys.exit(1)
 print('FOUND')
 sys.exit(0)
-" 2>/dev/null | grep -q "^FOUND$"; then
+" 2>/dev/null || true)
+    if ! grep -q "^FOUND$" <<< "${_T3_CHECK}"; then
         _T3_MISSING="${_T3_MISSING} ${check_id}"
     fi
 done
@@ -144,7 +154,8 @@ _T4_OUTPUT=$(python3 "${LINTER}" \
     --packs-dir "${AUDIT_DIR}/packs" \
     --rubric "${RUBRIC}" 2>&1) || _T4_EXIT=$?
 
-if [ "${_T4_EXIT}" -eq 0 ] && echo "${_T4_OUTPUT}" | grep -q "^PASS: ccgm-hygiene"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${_T4_EXIT}" -eq 0 ] && grep -q "^PASS: ccgm-hygiene" <<< "${_T4_OUTPUT}"; then
     pass "lint-pack.py reports PASS for ccgm-hygiene"
 else
     fail "lint-pack.py did not PASS for ccgm-hygiene: exit=${_T4_EXIT}, output=${_T4_OUTPUT}"
@@ -155,7 +166,8 @@ fi
 # ---------------------------------------------------------------------------
 echo "--- Test 5: lint-pack.py passes on ccgm-standards pack"
 
-if [ "${_T4_EXIT}" -eq 0 ] && echo "${_T4_OUTPUT}" | grep -q "^PASS: ccgm-standards"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${_T4_EXIT}" -eq 0 ] && grep -q "^PASS: ccgm-standards" <<< "${_T4_OUTPUT}"; then
     pass "lint-pack.py reports PASS for ccgm-standards"
 else
     fail "lint-pack.py did not PASS for ccgm-standards: exit=${_T4_EXIT}, output=${_T4_OUTPUT}"
@@ -252,11 +264,12 @@ if m:
 PYEOF
 )
 
-    if ! echo "${_SECTION}" | grep -q "True positive\|FINDS:"; then
+    # Herestring, not a pipe: see the identical rationale above (#943, #945).
+    if ! grep -q "True positive\|FINDS:" <<< "${_SECTION}"; then
         _T8_ERRORS="${_T8_ERRORS}\n  no True positive fixture found for '${check_id}'"
     fi
 
-    if ! echo "${_SECTION}" | grep -q "True negative\|should produce NO"; then
+    if ! grep -q "True negative\|should produce NO" <<< "${_SECTION}"; then
         _T8_ERRORS="${_T8_ERRORS}\n  no True negative fixture found for '${check_id}'"
     fi
 done

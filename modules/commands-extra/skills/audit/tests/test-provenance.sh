@@ -233,7 +233,11 @@ run_scenario_a() {
   # optional_checks_ran contains the passed check id
   local got_opts
   got_opts="$(jsonl_header_field "$out_file" optional_checks_ran)"
-  if echo "$got_opts" | grep -q "security/extra-check"; then
+  # Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+  # producer if grep exits on its first match before the producer finishes
+  # writing, turning a genuine match into a reported failure (see #943,
+  # #945). A herestring has no second process to race against.
+  if grep -q "security/extra-check" <<< "$got_opts"; then
     pass "scenario-a: optional_checks_ran contains passed id"
   else
     fail "scenario-a: optional_checks_ran='$got_opts' missing 'security/extra-check'"

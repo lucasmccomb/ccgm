@@ -82,7 +82,11 @@ run_registry_with_a11y_pack() {
 # ---------------------------------------------------------------------------
 echo "--- Test 1: pack.json validates (stdlib)"
 result=""
-if result=$(validate_pack_file "${PACK_DIR}/pack.json" 2>&1) && echo "${result}" | grep -q "^VALID$"; then
+# Herestring, not a pipe: `producer | grep -q` can SIGPIPE-kill the
+# producer if grep exits on its first match before the producer finishes
+# writing, turning a genuine match into a reported failure (see #943,
+# #945). A herestring has no second process to race against.
+if result=$(validate_pack_file "${PACK_DIR}/pack.json" 2>&1) && grep -q "^VALID$" <<< "${result}"; then
     pass "accessibility/pack.json validates against pack.schema.json"
 else
     fail "accessibility/pack.json failed validation: ${result}"
@@ -99,9 +103,10 @@ output=$(python3 "${LINTER}" \
     --rubric "${RUBRIC}" 2>&1) || exit_code=$?
 
 # We want accessibility to appear as PASS (not FAIL) in linter output
-if echo "${output}" | grep -q "^PASS: accessibility"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if grep -q "^PASS: accessibility" <<< "${output}"; then
     pass "checks.md contains all required sections (lint-pack.py passes)"
-elif echo "${output}" | grep -q "^FAIL: accessibility"; then
+elif grep -q "^FAIL: accessibility" <<< "${output}"; then
     fail "checks.md missing required section: ${output}"
 else
     fail "lint-pack.py output did not mention accessibility pack: ${output}"
@@ -147,9 +152,10 @@ output=$(python3 "${LINTER}" \
     --packs-dir "${AUDIT_DIR}/packs" \
     --rubric "${RUBRIC}" 2>&1) || exit_code=$?
 
-if [ "${exit_code}" -eq 0 ] && echo "${output}" | grep -q "^PASS: accessibility"; then
+# Herestring, not a pipe: see the identical rationale above (#943, #945).
+if [ "${exit_code}" -eq 0 ] && grep -q "^PASS: accessibility" <<< "${output}"; then
     pass "lint-pack.py exits 0 and reports PASS: accessibility"
-elif echo "${output}" | grep -q "^FAIL: accessibility"; then
+elif grep -q "^FAIL: accessibility" <<< "${output}"; then
     fail "lint-pack.py reports FAIL for accessibility: ${output}"
 else
     # Other packs may fail; we only care that accessibility is PASS and no error
@@ -169,7 +175,8 @@ else
     solo_out=$(python3 "${LINTER}" \
         --packs-dir "${solo_tmp}" \
         --rubric "${RUBRIC}" 2>&1) || solo_exit=$?
-    if [ "${solo_exit}" -eq 0 ] && echo "${solo_out}" | grep -q "^PASS: accessibility"; then
+    # Herestring, not a pipe: see the identical rationale above (#943, #945).
+    if [ "${solo_exit}" -eq 0 ] && grep -q "^PASS: accessibility" <<< "${solo_out}"; then
         pass "lint-pack.py exits 0 and reports PASS: accessibility (solo run)"
     else
         fail "lint-pack.py solo run failed for accessibility (exit=${solo_exit}): ${solo_out}"
