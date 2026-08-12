@@ -1023,6 +1023,61 @@ for preset_file in "$REPO_ROOT"/presets/*.json; do
 done
 echo ""
 
+# --- Test: docs/preset-descriptions.json key set matches presets/*.json ---
+# The ccgm.dev site ingests per-preset descriptions from this file, since
+# presets/*.json are bare arrays with nowhere to carry prose and presets/
+# itself is glob-enumerated (any new file there becomes a bogus preset -- see
+# list_preset_names() in lib/modules.sh). The file is optional: it is only
+# checked if present, so this is a no-op until the file exists. Once it
+# exists, its keys must exactly equal the live preset name set in both
+# directions -- no preset without a description, no description for a
+# preset that no longer exists.
+echo "--- Checking docs/preset-descriptions.json key set ---"
+DESCRIPTIONS_FILE="$REPO_ROOT/docs/preset-descriptions.json"
+if [ -f "$DESCRIPTIONS_FILE" ]; then
+  if jq empty "$DESCRIPTIONS_FILE" 2>/dev/null; then
+    pass "docs/preset-descriptions.json: valid JSON"
+
+    # jq empty only checks JSON syntax; a top-level scalar/array/null is
+    # still syntactically valid but breaks the `keys` call below. Gate on
+    # shape before touching keys so a malformed file fails cleanly instead
+    # of aborting the whole suite under set -e.
+    if jq -e 'type == "object"' "$DESCRIPTIONS_FILE" >/dev/null 2>&1; then
+      live_names=()
+      for preset_file in "$REPO_ROOT"/presets/*.json; do
+        [ -f "$preset_file" ] || continue
+        live_names+=("$(basename "$preset_file" .json)")
+      done
+      # bash 3.2 (this repo's documented minimum) treats "${arr[@]}" on an
+      # empty array as an unbound variable under set -u -- guard it.
+      if [ "${#live_names[@]}" -gt 0 ]; then
+        live_presets_json=$(printf '%s\n' "${live_names[@]}" | jq -R . | jq -s .)
+      else
+        live_presets_json='[]'
+      fi
+
+      missing_from_doc=$(jq -r --argjson live "$live_presets_json" '($live - keys) | .[]' "$DESCRIPTIONS_FILE" 2>/dev/null)
+      extra_in_doc=$(jq -r --argjson live "$live_presets_json" '(keys - $live) | .[]' "$DESCRIPTIONS_FILE" 2>/dev/null)
+
+      if [ -z "$missing_from_doc" ] && [ -z "$extra_in_doc" ]; then
+        pass "docs/preset-descriptions.json: key set matches presets/*.json exactly"
+      else
+        if [ -n "$missing_from_doc" ]; then
+          fail "docs/preset-descriptions.json: missing description(s) for preset(s):$(printf ' %s' $missing_from_doc)"
+        fi
+        if [ -n "$extra_in_doc" ]; then
+          fail "docs/preset-descriptions.json: description(s) for non-existent preset(s):$(printf ' %s' $extra_in_doc)"
+        fi
+      fi
+    else
+      fail "docs/preset-descriptions.json: top-level value must be a JSON object"
+    fi
+  else
+    fail "docs/preset-descriptions.json: invalid JSON"
+  fi
+fi
+echo ""
+
 # --- Test: every tests/test-*.sh suite is wired into CI, in every job ---
 # tests/run-all.sh discovers suites by globbing "$SCRIPT_DIR"/test-*.sh, but
 # .github/workflows/test.yml enumerates each suite by hand as its own step,
