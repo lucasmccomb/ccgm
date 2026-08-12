@@ -1,0 +1,7 @@
+{
+  "minimal": "Trying CCGM for the first time, or environments where you want light-touch guidance with no hooks or settings changes.",
+  "standard": "Most individual developers. The recommended starting point.",
+  "team": "Teams with shared repositories who want consistent practices across contributors.",
+  "full": "Power users who want the complete CCGM experience, including multi-agent coordination, brand research, and tech-specific guides.",
+  "cloud-agent": "Running CCGM on headless cloud VMs that dispatch parallel agents to work on GitHub issues."
+}
