@@ -2,6 +2,8 @@
 
 Presets are named collections of modules for quick installation. Each preset is a JSON array in the `presets/` directory listing module names.
 
+Machine-readable one-line descriptions of these presets live in `docs/preset-descriptions.json` (consumed by the ccgm.dev site). CI asserts its keys match `presets/*.json` exactly, so adding or renaming a preset requires updating that file in the same PR.
+
 ## Available presets
 
 ### minimal
