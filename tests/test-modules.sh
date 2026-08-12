@@ -1038,25 +1038,39 @@ if [ -f "$DESCRIPTIONS_FILE" ]; then
   if jq empty "$DESCRIPTIONS_FILE" 2>/dev/null; then
     pass "docs/preset-descriptions.json: valid JSON"
 
-    live_names=()
-    for preset_file in "$REPO_ROOT"/presets/*.json; do
-      [ -f "$preset_file" ] || continue
-      live_names+=("$(basename "$preset_file" .json)")
-    done
-    live_presets_json=$(printf '%s\n' "${live_names[@]}" | jq -R . | jq -s .)
+    # jq empty only checks JSON syntax; a top-level scalar/array/null is
+    # still syntactically valid but breaks the `keys` call below. Gate on
+    # shape before touching keys so a malformed file fails cleanly instead
+    # of aborting the whole suite under set -e.
+    if jq -e 'type == "object"' "$DESCRIPTIONS_FILE" >/dev/null 2>&1; then
+      live_names=()
+      for preset_file in "$REPO_ROOT"/presets/*.json; do
+        [ -f "$preset_file" ] || continue
+        live_names+=("$(basename "$preset_file" .json)")
+      done
+      # bash 3.2 (this repo's documented minimum) treats "${arr[@]}" on an
+      # empty array as an unbound variable under set -u -- guard it.
+      if [ "${#live_names[@]}" -gt 0 ]; then
+        live_presets_json=$(printf '%s\n' "${live_names[@]}" | jq -R . | jq -s .)
+      else
+        live_presets_json='[]'
+      fi
 
-    missing_from_doc=$(jq -r --argjson live "$live_presets_json" '($live - keys) | .[]' "$DESCRIPTIONS_FILE" 2>/dev/null)
-    extra_in_doc=$(jq -r --argjson live "$live_presets_json" '(keys - $live) | .[]' "$DESCRIPTIONS_FILE" 2>/dev/null)
+      missing_from_doc=$(jq -r --argjson live "$live_presets_json" '($live - keys) | .[]' "$DESCRIPTIONS_FILE" 2>/dev/null)
+      extra_in_doc=$(jq -r --argjson live "$live_presets_json" '(keys - $live) | .[]' "$DESCRIPTIONS_FILE" 2>/dev/null)
 
-    if [ -z "$missing_from_doc" ] && [ -z "$extra_in_doc" ]; then
-      pass "docs/preset-descriptions.json: key set matches presets/*.json exactly"
+      if [ -z "$missing_from_doc" ] && [ -z "$extra_in_doc" ]; then
+        pass "docs/preset-descriptions.json: key set matches presets/*.json exactly"
+      else
+        if [ -n "$missing_from_doc" ]; then
+          fail "docs/preset-descriptions.json: missing description(s) for preset(s):$(printf ' %s' $missing_from_doc)"
+        fi
+        if [ -n "$extra_in_doc" ]; then
+          fail "docs/preset-descriptions.json: description(s) for non-existent preset(s):$(printf ' %s' $extra_in_doc)"
+        fi
+      fi
     else
-      if [ -n "$missing_from_doc" ]; then
-        fail "docs/preset-descriptions.json: missing description(s) for preset(s):$(printf ' %s' $missing_from_doc)"
-      fi
-      if [ -n "$extra_in_doc" ]; then
-        fail "docs/preset-descriptions.json: description(s) for non-existent preset(s):$(printf ' %s' $extra_in_doc)"
-      fi
+      fail "docs/preset-descriptions.json: top-level value must be a JSON object"
     fi
   else
     fail "docs/preset-descriptions.json: invalid JSON"
