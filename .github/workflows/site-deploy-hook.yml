@@ -1,0 +1,130 @@
+name: site-deploy-hook
+
+# Notifies ccgm-site's Cloudflare Pages deployment on every push to main,
+# and verifies the resulting deployment actually picked up this commit.
+#
+# This workflow is a GUEST in ccgm (ccgm-site plan.md §1.4 principle 16):
+#   - it may not fail ccgm's main-branch CI for a ccgm-site-side or
+#     Cloudflare-side problem (the POST and the poll both run
+#     continue-on-error: true)
+#   - it may not require a credential ccgm does not already have (a
+#     verification failure opens an issue ON CCGM using ccgm's own
+#     GITHUB_TOKEN -- never a cross-repo PAT)
+#   - no secret beyond CCGM_SITE_DEPLOY_HOOK_URL is introduced
+#
+# workflow_dispatch exists because ccgm-site plan.md §9.4 step 6 (final
+# bring-up) and this workflow's own acceptance criterion both invoke
+# `gh workflow run site-deploy-hook.yml`, which errors on a push-only
+# workflow.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  notify-site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the sourceSha-descendant check below (a merge
+          # landing mid-poll must not raise a false alarm) can resolve any
+          # commit ccgm-site reports, not only the one that triggered this run.
+          fetch-depth: 0
+
+      - name: Check deploy hook secret
+        id: check-secret
+        env:
+          HOOK_URL: ${{ secrets.CCGM_SITE_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK_URL" ]; then
+            echo "::notice::deploy hook not configured, skipping"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger ccgm-site rebuild
+        id: trigger
+        if: steps.check-secret.outputs.configured == 'true'
+        continue-on-error: true
+        env:
+          HOOK_URL: ${{ secrets.CCGM_SITE_DEPLOY_HOOK_URL }}
+        run: |
+          curl -fsS --retry 3 --retry-all-errors --retry-delay 5 -X POST "$HOOK_URL"
+
+      - name: Poll ccgm-site for the new deployment
+        id: verify
+        if: steps.check-secret.outputs.configured == 'true'
+        continue-on-error: true
+        run: |
+          set -u
+          SITE_URL="https://ccgm-site.pages.dev"
+          START_HEAD="$(git rev-parse HEAD)"
+          TIMEOUT_SECONDS=$((15 * 60))
+          POLL_INTERVAL_SECONDS=20
+          DEADLINE=$(( $(date +%s) + TIMEOUT_SECONDS ))
+
+          fetch_meta() {
+            curl -fsS "$SITE_URL/modules.json" 2>/dev/null | python3 -c '
+          import json, sys
+          try:
+              meta = json.load(sys.stdin)["meta"]
+              print(meta.get("generatedAt", ""))
+              print(meta.get("sourceSha", ""))
+          except Exception:
+              print("")
+              print("")
+          '
+          }
+
+          BASELINE="$(fetch_meta)"
+          BASELINE_GENERATED_AT="$(printf '%s\n' "$BASELINE" | sed -n '1p')"
+
+          echo "polling $SITE_URL/modules.json for generatedAt to advance past '${BASELINE_GENERATED_AT:-<none>}' (timeout ${TIMEOUT_SECONDS}s)"
+          while true; do
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "timed out waiting for generatedAt to advance" >&2
+              exit 1
+            fi
+            sleep "$POLL_INTERVAL_SECONDS"
+            META="$(fetch_meta)"
+            GENERATED_AT="$(printf '%s\n' "$META" | sed -n '1p')"
+            SOURCE_SHA="$(printf '%s\n' "$META" | sed -n '2p')"
+            if [ -n "$GENERATED_AT" ] && [ "$GENERATED_AT" != "$BASELINE_GENERATED_AT" ]; then
+              # sourceSha must be the commit that triggered this run, or a
+              # descendant of it (a later push landed and got built instead
+              # -- still fresh, never a false "stale" alarm). is-ancestor
+              # treats a commit as its own ancestor, so this covers equal too.
+              if [ -n "$SOURCE_SHA" ] && git merge-base --is-ancestor "$START_HEAD" "$SOURCE_SHA" 2>/dev/null; then
+                echo "verified: generatedAt advanced ('${BASELINE_GENERATED_AT:-<none>}' -> '$GENERATED_AT'); sourceSha ($SOURCE_SHA) is $START_HEAD or a descendant of it"
+                exit 0
+              fi
+              echo "generatedAt advanced but sourceSha ($SOURCE_SHA) is not $START_HEAD or a descendant of it -- still polling"
+            fi
+          done
+
+      - name: Open or update ccgm-site-deploy-stale issue on failure
+        if: steps.check-secret.outputs.configured == 'true' && (steps.trigger.outcome == 'failure' || steps.verify.outcome == 'failure')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -u
+          HEAD_SHA="$(git rev-parse HEAD)"
+          TITLE="ccgm-site deploy hook did not verify"
+          BODY="The push to main at $HEAD_SHA triggered .github/workflows/site-deploy-hook.yml, but the deploy hook POST or the post-deploy verification poll against https://ccgm-site.pages.dev failed (workflow run: $RUN_URL).
+
+          See https://github.com/lucasmccomb/ccgm-site for the site repo. This does not fail ccgm's own CI (continue-on-error) but the live site may be stale."
+          EXISTING="$(gh issue list -R lucasmccomb/ccgm --state open --label ccgm-site-deploy-stale --json number --jq '.[0].number' 2>/dev/null || echo "")"
+          if [ -n "$EXISTING" ]; then
+            gh issue comment -R lucasmccomb/ccgm "$EXISTING" --body "$BODY"
+          else
+            gh issue create -R lucasmccomb/ccgm --title "$TITLE" --label ccgm-site-deploy-stale --body "$BODY"
+          fi
