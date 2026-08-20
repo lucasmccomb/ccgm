@@ -1,6 +1,6 @@
 ---
 description: Toggle advisor mode - the orchestrator delegates implementation to cheaper agents and reviews their work; a hard PreToolUse gate blocks its own edits while the mode is on
-argument-hint: "[on | off | status]"
+argument-hint: "[on | off | status] (bare /advisor toggles)"
 ---
 
 # /advisor - Advisor Mode Toggle
@@ -19,16 +19,20 @@ denials).
 ## Usage
 
 ```
-/advisor            # same as /advisor on
-/advisor on         # enable advisor mode
-/advisor off        # disable advisor mode
+/advisor            # TOGGLE: on if off, off if on
+/advisor on         # enable explicitly (idempotent)
+/advisor off        # disable explicitly (idempotent)
 /advisor status     # report current state
 ```
 
 ## Workflow
 
-Parse the argument (default `on`):
+Parse the argument:
 
+- **No argument (the default) — toggle.** Check the flag:
+  `test -f ~/.claude/advisor-mode` → flag present means run the `off` branch;
+  absent means run the `on` branch. The explicit verbs exist for scripting and
+  for saying exactly what you mean; the bare command never requires them.
 - **`on`** — write the flag with a timestamp:
   `printf 'on %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > ~/.claude/advisor-mode`
   (the guard allowlists writes under `~/.claude/`, so this passes even when the
