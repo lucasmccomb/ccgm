@@ -308,6 +308,28 @@ Hard gate against work on a repo's default branch (main/master, per `origin/HEAD
 
 ---
 
+### advisor-guard.py
+
+**Type**: PreToolUse:Edit/MultiEdit/Write/NotebookEdit/filesystem-MCP writes + PreToolUse:Bash
+**Module**: advisor-mode
+**Can block**: Yes (exit 2 — survives bypass mode)
+
+Hard gate for advisor mode: while `~/.claude/advisor-mode` exists, the MAIN agent cannot implement — file edits are confined to orchestrator work-product paths (`~/.claude/`, temp/scratchpad roots, `~/code/plans/`, `~/code/docs/`, worktree checkouts, plan-mode plan files) and Bash is default-deny outside read-only inspection plus orchestration verbs (read-only git; `checkout`/`switch`/`pull`/`fetch`/`worktree` lifecycle; `gh` PR/issue/run/label management including merge; redirection and scratch file-ops scoped to the allowed write roots). Subagent tool calls pass untouched — their hook input carries `agent_id`/`agent_type`, the main agent's does not. Discriminator drift is asymmetric: main-agent inputs gaining the fields makes the guard inert (fails open, visibly); subagent inputs losing them would deny subagents too — loud, and recoverable with `/advisor off`. Command/process substitution, shells, interpreters, and wrapper commands are denied outright. Every denial names the delegation recipe.
+
+**Exemptions**: flag file absent (mode off), subagent calls, `ADVISOR_DIRECT=1` (env or inline), unparseable input and missing paths (fail open).
+
+---
+
+### advisor-posture.py
+
+**Type**: UserPromptSubmit
+**Module**: advisor-mode
+**Can block**: No
+
+While the advisor-mode flag exists, injects a short per-turn posture reminder (`additionalContext`): the session is an orchestrator — spec, delegate to implementers, review via separate agents, triage, merge; trivial or conversational turns are answered directly; a guard denial means delegate, never shell-trick around it. One `stat()` per prompt when the mode is off. The guard enforces; this injection is what keeps the model delegating instead of fighting denials.
+
+---
+
 ### ask-context-gate.py
 
 **Type**: PreToolUse:AskUserQuestion

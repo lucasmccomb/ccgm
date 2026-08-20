@@ -24,6 +24,20 @@
     },
     {
       "category": "workflow",
+      "description": "Session posture for expensive orchestrator models (Fable/Opus): /advisor puts the main agent into a delegation-only mode - it writes specs, dispatches cheaper implementer agents, reviews through separate reviewer agents, triages findings, and merges, while a hard PreToolUse gate (exit 2, bypass-surviving) blocks its own file edits and non-orchestration Bash. Subagent calls pass untouched; a per-turn posture injection keeps the model delegating instead of fighting denials. ADVISOR_DIRECT=1 one-off hatch.",
+      "name": "advisor-mode",
+      "source": "./advisor-mode",
+      "tags": [
+        "cost",
+        "delegation",
+        "enforcement",
+        "hooks",
+        "multi-agent",
+        "orchestration"
+      ]
+    },
+    {
+      "category": "workflow",
       "description": "[DEPRECATED] Go-based terminal UI for managing Claude Code agent processes via tmux panes. Unmaintained and no longer offered for new installs; a GUI-based replacement is being pursued instead. Kept in-repo for existing users.",
       "keywords": [
         "status:deprecated"
