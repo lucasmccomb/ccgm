@@ -343,10 +343,12 @@ def bash_segment_allowed(segment):
     if first == "find":
         return not any(w in FIND_WRITE_PREDICATES for w in words[1:])
     if first == "sort":
-        # `sort -o FILE` writes/truncates FILE; `sort > FILE` goes through
-        # the path-checked redirect scan instead, so deny only the flag.
-        return not any(w == "-o" or w.startswith("--output")
-                       for w in words[1:])
+        # `sort -o FILE` writes/truncates FILE — in bare, attached (-oFILE),
+        # and clustered (-ro) forms, like the sed -i handling. `sort > FILE`
+        # goes through the path-checked redirect scan instead.
+        return not any(
+            re.match(r"^-[a-zA-Z]*o", w) or w.startswith("--output")
+            for w in words[1:])
     if first in READ_ONLY:
         return True
     if first in SCRATCH_OPS:

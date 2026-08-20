@@ -166,6 +166,8 @@ assert_exit 2 "find -delete denied" "$(bash_json "find ${HOME}/code/repo -name '
 assert_exit 2 "find -execdir denied" "$(bash_json 'find . -execdir rm {} +')"
 assert_exit 2 "sort -o denied" "$(bash_json "sort -o ${HOME}/code/repo/src/app.py /dev/null")"
 assert_exit 2 "sort --output denied" "$(bash_json "sort --output=${HOME}/code/repo/src/app.py /dev/null")"
+assert_exit 2 "sort attached -oFILE denied" "$(bash_json "sort -o${HOME}/code/repo/src/app.py /dev/null")"
+assert_exit 2 "sort clustered -ro denied" "$(bash_json "sort -ro ${HOME}/code/repo/src/app.py /dev/null")"
 assert_exit 0 "plain find allowed" "$(bash_json 'find . -name "*.py" -newer ref')"
 assert_exit 0 "plain sort in pipe allowed" "$(bash_json 'git diff --stat | sort | head -5')"
 assert_exit 0 "git for-each-ref allowed" "$(bash_json 'git for-each-ref --contains HEAD')"
