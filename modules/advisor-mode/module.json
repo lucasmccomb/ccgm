@@ -1,0 +1,50 @@
+{
+  "name": "advisor-mode",
+  "displayName": "Advisor Mode",
+  "description": "Session posture for expensive orchestrator models (Fable/Opus): /advisor puts the main agent into a delegation-only mode - it writes specs, dispatches cheaper implementer agents, reviews through separate reviewer agents, triages findings, and merges, while a hard PreToolUse gate (exit 2, bypass-surviving) blocks its own file edits and non-orchestration Bash. Subagent calls pass untouched; a per-turn posture injection keeps the model delegating instead of fighting denials. ADVISOR_DIRECT=1 one-off hatch.",
+  "category": "workflow",
+  "scope": [
+    "global"
+  ],
+  "dependencies": [
+    "settings",
+    "subagent-patterns"
+  ],
+  "files": {
+    "commands/advisor.md": {
+      "target": "commands/advisor.md",
+      "type": "command",
+      "template": false
+    },
+    "rules/advisor-mode.md": {
+      "target": "rules/advisor-mode.md",
+      "type": "rule",
+      "template": false
+    },
+    "hooks/advisor-guard.py": {
+      "target": "hooks/advisor-guard.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/advisor-posture.py": {
+      "target": "hooks/advisor-posture.py",
+      "type": "hook",
+      "template": false
+    },
+    "settings.partial.json": {
+      "target": "settings.json",
+      "type": "config",
+      "merge": true,
+      "template": false
+    }
+  },
+  "tags": [
+    "orchestration",
+    "delegation",
+    "hooks",
+    "enforcement",
+    "multi-agent",
+    "cost"
+  ],
+  "configPrompts": []
+}

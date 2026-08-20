@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 78 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 79 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -888,6 +888,18 @@ One hostile lens against a plan or any entity, with automatic plan incorporation
 **What it does**: `/adrev` resolves a target (plan, doc, PR, issue, code directory, or stated concept) and dispatches a fresh-context adrev-reviewer agent that attacks premises, hunts failure modes, steelmans the strongest opposing case, and checks falsifiability and reversal costs. When the target is a plan, the reviewing agent incorporates its findings into the plan automatically - high-confidence findings revise sections directly, judgment calls land in `## Risks & Open Questions`, and the full review is written to the plan's `reviews/` directory - unless invoked with `--no-apply`. Plan targets also get four **autonomous-execution tenets** enforced (not just noted - the reviewer expands the plan to satisfy them): T1 human work minimized and bucketed to the edges, T2 a follow-up-completion contract, T3 enough decision context to direct unplanned work without a human, T4 a comprehensive autonomous E2E test suite over every testable surface. Non-plan targets are never modified. The single-lens, any-entity counterpart to document-review's 7-lens doc gate.
 
 **Dependencies**: subagent-patterns
+
+---
+
+### advisor-mode
+
+Delegation-only session posture for expensive orchestrator models (Fable/Opus), mechanically enforced.
+
+**Installs**: `commands/advisor.md`, `rules/advisor-mode.md`, `hooks/advisor-guard.py`, `hooks/advisor-posture.py`, hook registrations
+
+**What it does**: `/advisor on` writes a flag file that flips the session into an orchestrator posture: the main agent writes four-field specs, dispatches cheaper implementer agents (worktree isolation), reviews through the standard two-stage separate-agent review, triages findings, delegates fixes (max 3 rounds), and merges — it never implements. While the flag exists, `advisor-guard.py` hard-blocks (exit 2, survives bypass mode) the main agent's file edits outside its work-product paths (`~/.claude/`, scratchpads, `~/code/plans/`, `~/code/docs/`, worktrees, plan-mode files) and any Bash beyond read-only inspection plus orchestration verbs (read-only git, branch/worktree/pull lifecycle, `gh` PR/issue/run/label management including merge). Subagent tool calls pass untouched (their hook input carries `agent_id`), so delegated workers are unaffected, and `advisor-posture.py` re-injects the posture each turn so the model delegates instead of fighting denials. Plan- or issue-shaped work is routed to `/etp`, which already runs this loop at full ceremony. Escape hatches: `/advisor off` and a one-off `ADVISOR_DIRECT=1`.
+
+**Dependencies**: settings, subagent-patterns
 
 ---
 

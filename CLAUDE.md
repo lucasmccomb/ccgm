@@ -4,7 +4,7 @@ Instructions for Claude Code when working on the CCGM (Claude Code God Mode) rep
 
 ## What This Repo Is
 
-CCGM is a modular Claude Code configuration system. It contains 78 modules that users can selectively install to configure Claude Code's behavior, hooks, commands, and permissions.
+CCGM is a modular Claude Code configuration system. It contains 79 modules that users can selectively install to configure Claude Code's behavior, hooks, commands, and permissions.
 
 ## Repository Structure
 
@@ -22,7 +22,7 @@ ccgm/
 │   ├── mcp-migrate.sh  # Legacy mcp.json re-registration
 │   ├── repair.sh       # Stale symlink repair
 │   └── statusline.sh   # Status line script
-├── modules/            # 78 self-contained modules
+├── modules/            # 79 self-contained modules
 │   └── {name}/
 │       ├── module.json # Manifest
 │       ├── README.md   # Module docs
