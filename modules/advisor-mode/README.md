@@ -20,8 +20,10 @@ for that drift was capability removal, not better prompting. Full prior-art
 research: `~/code/docs/research/claude-code-advisor-delegation-mode/research.md`.
 The guard's main/subagent discriminator (hook-input `agent_id`/`agent_type`,
 absent on main-agent calls) and the per-turn posture injection are adapted from
-the `baton` plugin's design; if the discriminator ever changes upstream the
-guard fails OPEN (mode inert, visible), never closed.
+the `baton` plugin's design. Discriminator drift is asymmetric: main-agent
+inputs gaining the fields makes the guard inert (fails open, visibly); subagent
+inputs losing them would deny subagents too — loud and recoverable with
+`/advisor off`, never a silent misroute.
 
 ## Files
 

@@ -28,8 +28,11 @@ ALLOWS:
   - Everything when the flag file is absent (mode off)
   - SUBAGENT tool calls — their hook input carries a non-empty `agent_id`
     (and usually `agent_type`); the main agent's carries neither. These are
-    documented common hook-input fields; if the discriminator ever changes,
-    this guard fails OPEN (mode inert, visibly), never closed.
+    documented common hook-input fields. Discriminator drift is asymmetric:
+    if main-agent inputs ever start carrying the fields, the guard goes
+    inert (fails open, visibly denies nothing); if subagent inputs ever
+    stopped carrying them, subagents would be denied too — loud, immediate,
+    and recoverable with /advisor off, never a silent misroute.
   - ADVISOR_DIRECT=1 — in the environment or inline on a Bash command —
     the one-off escape hatch (mirrors ALLOW_MAIN_COMMIT)
   - Orchestrator work-product writes: under ~/.claude/ (memory, todos, the

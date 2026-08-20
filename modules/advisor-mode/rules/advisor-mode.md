@@ -53,7 +53,7 @@ Be honest about the economics: delegation's wins are context protection (impleme
 
 ## Enforcement Mechanics and Known Gaps
 
-- The guard distinguishes main-agent from subagent calls by the hook input's `agent_id`/`agent_type` fields (subagent calls carry them; main-agent calls do not). If that discriminator ever changes upstream, the guard fails OPEN — the mode goes inert and visibly denies nothing; it never blocks subagents.
+- The guard distinguishes main-agent from subagent calls by the hook input's `agent_id`/`agent_type` fields (subagent calls carry them; main-agent calls do not). Discriminator drift is asymmetric: if main-agent inputs ever start carrying the fields, the guard goes inert (fails open, visibly denies nothing); if subagent inputs ever stopped carrying them, subagents would be denied too — loud, immediate, and recoverable with `/advisor off`, never a silent misroute.
 - File writes are allowed to orchestrator work-product paths only: `~/.claude/`, temp/scratchpad roots, `~/code/plans/`, `~/code/docs/`, worktree checkouts, and plan-mode plan files.
 - Bash is default-deny: read-only inspection, read-only git plus branch/worktree/pull lifecycle, and gh PR/issue/run/label management (merge included) are allowed; redirection and scratch file-ops only into the allowed write roots. Command substitution, shells, interpreters, and wrapper commands (`env`, `xargs`) are denied outright rather than unwrapped.
 - Known gaps: `awk` bodies and heredoc content can smuggle writes past the segment scan; over-denial (quoted metacharacters, heredocs) is the accepted direction — the denial names the delegation recipe.
