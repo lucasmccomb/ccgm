@@ -4,7 +4,7 @@
 
 Advisor mode puts an expensive orchestrator session (usually Fable or Opus) into a delegation posture: implementation goes to cheaper agents, review goes to separate reviewer agents, fixes are delegated until the work is complete — follow-ups included. The posture is mechanical, not aspirational: while the mode flag exists, a PreToolUse hook (`advisor-guard.py`, exit 2, bypass-surviving) blocks the main agent's file edits and non-orchestration Bash. Subagent tool calls pass untouched.
 
-This rule binds only while `~/.claude/advisor-mode` exists. Toggle with `/advisor on|off|status`.
+This rule binds only while `~/.claude/advisor-mode` exists. Bare `/advisor` toggles the mode; explicit `on|off|status` are also accepted.
 
 ## Why the Gate Is Hard, Not Advisory
 

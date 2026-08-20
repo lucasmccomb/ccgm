@@ -29,7 +29,7 @@ inputs losing them would deny subagents too — loud and recoverable with
 
 | File | Role |
 |------|------|
-| `commands/advisor.md` | `/advisor [on\|off\|status]` — flag file `~/.claude/advisor-mode` |
+| `commands/advisor.md` | `/advisor` toggles; explicit `on\|off\|status` accepted — flag file `~/.claude/advisor-mode` |
 | `rules/advisor-mode.md` | The posture contract: loop, delegation ladder, floor, review contract |
 | `hooks/advisor-guard.py` | PreToolUse exit-2 gate: file writes confined to work-product paths; Bash default-deny with read-only + orchestration allowlist |
 | `hooks/advisor-posture.py` | UserPromptSubmit injection while the flag exists |
