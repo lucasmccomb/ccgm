@@ -159,6 +159,21 @@ assert_exit 2 "git checkout -- pathspec denied" "$(bash_json 'git checkout -- sr
 assert_exit 0 "git checkout -b branch allowed" "$(bash_json 'git checkout -b 42-fix origin/main')"
 assert_exit 0 "fd dup still allowed after ampersand split" "$(bash_json 'git log --oneline 2>&1')"
 
+# Stage-2 review findings (PR #1004): find/sort write-and-exec escapes.
+assert_exit 2 "find -exec denied" "$(bash_json 'find . -maxdepth 0 -exec git commit -m x +')"
+assert_exit 2 "find -exec shell denied" "$(bash_json "find . -maxdepth 0 -exec bash -c 'echo pwn' +")"
+assert_exit 2 "find -delete denied" "$(bash_json "find ${HOME}/code/repo -name '*.py' -delete")"
+assert_exit 2 "find -execdir denied" "$(bash_json 'find . -execdir rm {} +')"
+assert_exit 2 "sort -o denied" "$(bash_json "sort -o ${HOME}/code/repo/src/app.py /dev/null")"
+assert_exit 2 "sort --output denied" "$(bash_json "sort --output=${HOME}/code/repo/src/app.py /dev/null")"
+assert_exit 0 "plain find allowed" "$(bash_json 'find . -name "*.py" -newer ref')"
+assert_exit 0 "plain sort in pipe allowed" "$(bash_json 'git diff --stat | sort | head -5')"
+assert_exit 0 "git for-each-ref allowed" "$(bash_json 'git for-each-ref --contains HEAD')"
+assert_exit 0 "git cat-file allowed" "$(bash_json 'git cat-file -p HEAD')"
+assert_exit 0 "git merge-base allowed" "$(bash_json 'git merge-base HEAD origin/main')"
+assert_exit 0 "non-string command fails open" '{"tool_name":"Bash","tool_input":{"command":123}}'
+assert_exit 0 "non-string file_path fails open" '{"tool_name":"Write","tool_input":{"file_path":42}}'
+
 # ─── Bash: redirection targets scoped to allowed roots ───────────────────────
 
 assert_exit 2 "redirect into repo denied" "$(bash_json "echo hi > ${HOME}/code/repo/out.txt")"

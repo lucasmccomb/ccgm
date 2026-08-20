@@ -70,29 +70,41 @@ FILE_TOOLS = {
 # First words allowed unconditionally: read-only inspection.
 READ_ONLY = {
     "ls", "tree", "pwd", "wc", "du", "df", "file", "stat", "head", "tail",
-    "cat", "less", "more", "grep", "egrep", "fgrep", "rg", "find", "which",
+    "cat", "less", "more", "grep", "egrep", "fgrep", "rg", "which",
     "whereis", "date", "diff", "cmp", "echo", "printf", "true", "false",
-    "test", "[", "sleep", "jq", "sort", "uniq", "cut", "tr", "column",
+    "test", "[", "sleep", "jq", "uniq", "cut", "tr", "column",
     "basename", "dirname", "realpath", "readlink", "shasum", "sha256sum",
     "md5", "cksum", "strings", "nl", "od", "hexdump", "xxd", "uname",
     "hostname", "id", "whoami", "type", "man", "cd", "awk", "comm", "tac",
 }
+# find and sort are allowed too, but through flag-checked branches in
+# bash_segment_allowed (write/exec predicates and -o denied), not this set.
 
 # Scratch file-ops: allowed only when every path argument resolves inside an
 # allowed write root.
 SCRATCH_OPS = {"mkdir", "touch", "rm", "rmdir", "mv", "cp", "ln", "chmod"}
+
+# find predicates that execute commands or write to disk (pure traversal
+# stays allowed). Without this, `find -exec` is a general escape from the
+# entire allowlist — the functional twin of the already-denied xargs.
+FIND_WRITE_PREDICATES = {"-exec", "-execdir", "-ok", "-okdir", "-delete",
+                         "-fprint", "-fprintf", "-fls", "-fprint0"}
 
 # git subcommands allowed for every argument combination.
 GIT_ALLOWED = {
     "status", "diff", "log", "show", "blame", "remote", "fetch", "ls-files",
     "ls-remote", "ls-tree", "rev-parse", "rev-list", "describe",
     "check-ignore", "shortlog", "reflog", "grep", "var", "version", "help",
-    "switch", "pull", "worktree",
+    "switch", "pull", "worktree", "for-each-ref", "cat-file", "merge-base",
+    "symbolic-ref", "show-ref", "name-rev",
 }
 GIT_BRANCH_MUTATORS = {"-d", "-D", "-m", "-M", "-f", "--delete", "--move",
                        "--force", "-c", "-C", "--copy"}
 
 # gh: allowed (group, verb) pairs; verb None means the bare group.
+# `gh pr create` is deliberately absent: the orchestrator's own work never
+# becomes a PR (implementer subagents open PRs from their worktrees), and
+# main-agent `git push` is denied anyway.
 GH_ALLOWED = {
     "pr": {"list", "view", "checks", "diff", "status", "merge",
            "update-branch", "comment", "ready", "edit", "close", "reopen"},
@@ -148,7 +160,7 @@ ALLOWED_SEGMENTS = ("/.claude/worktrees/", "/.worktrees/", "/.claude/plans/")
 
 def path_allowed(raw_path):
     """True when the path is an orchestrator work-product location."""
-    if not raw_path:
+    if not raw_path or not isinstance(raw_path, str):
         return True  # fail open: nothing to judge
     path = os.path.realpath(os.path.expanduser(
         os.path.expandvars(raw_path.strip().strip("'\""))))
@@ -328,6 +340,13 @@ def bash_segment_allowed(segment):
         return not any(
             re.match(r"^-[a-zA-Z]*i", w) or w.startswith("--in-place")
             for w in words[1:])
+    if first == "find":
+        return not any(w in FIND_WRITE_PREDICATES for w in words[1:])
+    if first == "sort":
+        # `sort -o FILE` writes/truncates FILE; `sort > FILE` goes through
+        # the path-checked redirect scan instead, so deny only the flag.
+        return not any(w == "-o" or w.startswith("--output")
+                       for w in words[1:])
     if first in READ_ONLY:
         return True
     if first in SCRATCH_OPS:
@@ -394,9 +413,10 @@ def main():
     if tool in FILE_TOOLS:
         check_file_tool(tool, tool_input)
     elif tool == "Bash":
-        command = tool_input.get("command") or ""
-        if command:
-            check_bash(command)
+        command = tool_input.get("command")
+        if command and isinstance(command, str):
+            check_bash(command)  # non-string command: fail open like any
+            # other malformed shape — never an uncaught traceback
     sys.exit(0)
 
 
