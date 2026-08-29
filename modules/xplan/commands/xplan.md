@@ -1040,6 +1040,26 @@ Create `~/code/plans/{concept-name}/decisions.md`:
 
 Include all stack decisions from Phase 2.5 and scope decisions from Phase 2.6.
 
+### 3.7.1 Alternatives Register (MANDATORY) — and test the cheap dismissals
+
+Every alternative the plan rejects gets a row here, with the one column that matters: **what it would cost to find out.** A dismissal written once, early, is inherited as fact by every later reader — including every review agent — so it is the most likely place a plan is quietly wrong.
+
+```markdown
+## Alternatives Considered and Dismissed
+
+| # | Alternative | Why dismissed | Cost to test | Tested? | Result |
+|---|-------------|---------------|--------------|---------|--------|
+| A1 | ... | ... | minutes / hours / not bounded | yes/no | ... |
+```
+
+**Fill `Cost to test` honestly, then run every row marked `minutes`.** A dismissal is cheaply testable when the experiment takes minutes, needs no permanent change, and is fully reversible — does this flag scope that file, does this command take that argument, does that API return that shape, does the suite pass. Run it in a scratch dir; if you must touch shared state, make the change inert by construction, remove it immediately, and verify the removal.
+
+Rows that are **not** bounded ("would a different database have been better", "will users like it") are recorded as **untested assumptions and labelled as such**. That is a valid outcome. Silently presenting an untested dismissal as a settled decision is not.
+
+**Why this exists.** On one `/xplana` run, a dismissed alternative was recorded as a risk-register row and survived **six reviews** — three constructive and three sequential adversarial passes at maximum effort, two of which cited the row directly. None ran it. A two-minute experiment then falsified half the dismissal, confirmed and strengthened the other half, and added a new first-shippable epic. Reviewing a testable claim again is the expensive way to not answer it. See `latent-vs-deterministic.md` > "The Same Rule Applies to Claims".
+
+Feed this register to the Phase 4 and Phase 5.7 reviewers as a named reference file, so they attack the dismissals rather than re-deriving them.
+
 ---
 
 ## Phase 4: Plan Review
@@ -1800,6 +1820,15 @@ If any selected review file is missing, STOP. Go back to Phase 4. If Phase 5.7 w
 If the Phase 5.7 final pass left unresolved P0/P1 findings, surface them in the gate summary so the user decides to execute with eyes open — do not bury them.
 
 Also re-read plan §8.6. If it lists live-testing steps whose permission line is `NOT AUTHORIZED`, name those steps in the gate summary and state that the executor will stop on each one until the user approves it and names a runner. **Proceeding through this gate approves execution; it does not grant live-testing permission** — only an explicit Q8 answer recorded in §8.6 does that.
+
+Then re-read the **Alternatives Register** (Phase 3.7.1) and check it before gating:
+
+```bash
+# Any row whose cost-to-test is "minutes" MUST show Tested = yes.
+grep -A 40 "Alternatives Considered and Dismissed" ~/code/plans/{concept-name}/decisions.md
+```
+
+If a cheaply-testable dismissal is still untested, **run it now** — it takes minutes and this is the last point before the plan is committed to. A dismissal that survived every review without anyone executing it is the plan's most likely quiet error, and the reviews cannot have caught it, because argument is not observation. If a row is genuinely not bounded, confirm it reads as an **untested assumption** rather than a settled decision, and name it in the gate summary alongside any unresolved P0/P1 findings so the user decides with the uncertainty visible.
 
 Use AskUserQuestion:
 
