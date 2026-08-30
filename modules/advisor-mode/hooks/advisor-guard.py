@@ -266,38 +266,39 @@ def scan_states(cmd):
     under one rule: a backslash escapes the next character everywhere except
     inside single quotes, where nothing escapes.
 
+    Yielded lazily so a caller that stops early pays only for what it read;
+    find_substitutions, which needs to jump over spans, materializes a list.
+
     mask_quotes, find_substitutions and match_paren all read these states.
     Keeping the rule here is the point: when each of them carried its own
     copy, `mask_quotes` disagreed with the span finder about `\\"` and a
     trailing command went unchecked (issue #1012), and `match_backtick`
     disagreed about `\\`` and a nested command ran unchecked.
     """
-    states = []
     quote = None
     i, n = 0, len(cmd)
     while i < n:
         c = cmd[i]
         if quote == "'":
-            states.append(("'", False))
+            yield ("'", False)
             if c == "'":
                 quote = None
             i += 1
             continue
         if c == "\\" and i + 1 < n:
-            states.append((quote, True))
-            states.append((quote, True))
+            yield (quote, True)
+            yield (quote, True)
             i += 2
             continue
         if quote is None and c in ("'", '"'):
             quote = c
         elif c == quote:
-            states.append((quote, False))
+            yield (quote, False)
             quote = None
             i += 1
             continue
-        states.append((quote, False))
+        yield (quote, False)
         i += 1
-    return states
 
 
 def mask_quotes(cmd):
@@ -512,6 +513,8 @@ def match_paren(cmd, start):
     body = cmd[start:]
     depth = 1
     for j, (c, (quote, escaped)) in enumerate(zip(body, scan_states(body))):
+        # scan_states is lazy, so this stops at the closing paren rather than
+        # scanning the rest of the command for every span.
         if escaped or quote is not None:
             continue
         if c == "(":
@@ -554,7 +557,7 @@ def find_substitutions(cmd):
     `"$(git commit -m x)"` — which the shell does expand.
     """
     spans = []
-    states = scan_states(cmd)
+    states = list(scan_states(cmd))  # indexed: this loop jumps over spans
     i, n = 0, len(cmd)
     while i < n:
         quote, escaped = states[i]
