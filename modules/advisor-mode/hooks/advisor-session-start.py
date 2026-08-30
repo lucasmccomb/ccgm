@@ -8,15 +8,22 @@ Advisor-mode state is one flag file per session,
 another's. This hook owns three jobs, in order:
 
   1. Migration — the mode used to be a single regular file at
-     `~/.claude/advisor-mode`. If that file is still there, delete it; the
-     path becomes the state directory.
+     `~/.claude/advisor-mode`. If that file (or a symlink where the
+     directory belongs) is still there, delete it; the path becomes the
+     state directory. Leaving it would be silent and total: makedirs,
+     listdir and the flag write all fail, and every session runs un-gated.
   2. Garbage collection — a session that crashed never ran SessionEnd, so its
      flag would sit there forever. A flag whose session has no transcript
      under `~/.claude/projects/*/<session_id>.jsonl` is removed once it is
      more than an hour old (the grace period keeps a session that started
      seconds ago, and has not written its transcript yet, from being swept).
      A flag whose transcript has not been touched in three days is removed
-     too. The current session's flag is never touched.
+     too — including a session that is still alive but has been idle that
+     long, which loses its gate until it runs `/advisor on` again (recorded
+     as a known gap in rules/advisor-mode.md). The current session's flag is
+     never touched; when no session id resolves there is no current session
+     to exempt, so GC runs over every flag, which only reaches flags the
+     rules above would sweep anyway.
   3. Auto-on — create this session's flag, so every session starts in advisor
      mode. Opt out with CCGM_ADVISOR_AUTO=false in the environment or in
      `~/.claude/.ccgm.env` (environment wins; unset means on), matching
@@ -71,27 +78,46 @@ def session_id(data):
 
 
 def auto_on_enabled():
-    """CCGM_ADVISOR_AUTO: environment wins over .ccgm.env; unset means on."""
+    """CCGM_ADVISOR_AUTO: environment wins over .ccgm.env; unset means on.
+
+    This is the project's first opt-OUT flag in `.ccgm.env`, so the parser is
+    deliberately more tolerant than the opt-in flags' `startswith("KEY=")`:
+    a line the operator meant as "off" that fails to parse turns the mode ON
+    against their wish. `export`, a trailing comment, spaces around `=`, and
+    quotes are all accepted, and the last matching line wins, as a shell
+    would read the file.
+    """
     value = os.environ.get(AUTO_ENV)
     if isinstance(value, str) and value.strip():
         return value.strip().lower() not in FALSE_VALUES
+    setting = None
     env_file = os.path.join(home(), ".claude", ".ccgm.env")
     try:
         with open(env_file) as handle:
             for line in handle:
-                line = line.strip()
-                if line.startswith(AUTO_ENV + "="):
-                    setting = line.split("=", 1)[1].strip().strip("'\"").lower()
-                    return setting not in FALSE_VALUES
+                line = line.split("#", 1)[0].strip()
+                if line.startswith("export "):
+                    line = line[len("export "):].strip()
+                key, sep, raw = line.partition("=")
+                if sep and key.strip() == AUTO_ENV:
+                    setting = raw.strip().strip("'\"").lower()
     except (OSError, IOError):
         pass
-    return True
+    if setting is None:
+        return True
+    return setting not in FALSE_VALUES
 
 
 def migrate_legacy_file(directory):
-    """The pre-per-session state was a regular file at this exact path."""
+    """The pre-per-session state was a regular file at this exact path.
+
+    A symlink is removed too: unlinking it never touches its target, and a
+    symlink standing where the state directory belongs is the same silent
+    dead end as the legacy file (makedirs raises, listdir raises, the flag
+    write raises, and the mode is off everywhere with no signal).
+    """
     try:
-        if os.path.isfile(directory) and not os.path.islink(directory):
+        if os.path.islink(directory) or os.path.isfile(directory):
             os.remove(directory)
     except OSError:
         pass

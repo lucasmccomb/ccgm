@@ -34,10 +34,10 @@ single machine-global file meant one session's `/advisor off` removed the gate
 from all of them.
 
 Every session starts in advisor mode. Opt out with `CCGM_ADVISOR_AUTO=false` in
-the environment or in `~/.claude/.ccgm.env`; compaction never re-enables a mode
-the session turned off with `/advisor off`. The flag is removed when the
-session ends, and flags left by sessions that died are swept at the next
-session start.
+the environment or in `~/.claude/.ccgm.env`. Only compaction is exempt from the
+auto-on, so `/advisor off` survives a compaction but a resume or a `/clear`
+starts the mode again. The flag is removed when the session ends, and flags
+left by sessions that died are swept at the next session start.
 
 ## Files
 

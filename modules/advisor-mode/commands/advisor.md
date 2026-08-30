@@ -68,9 +68,18 @@ Then parse the argument:
 - **`status`** — report this session first, then the machine:
   `cat ~/.claude/advisor-mode/$CLAUDE_CODE_SESSION_ID` (on, with the timestamp
   it started) or note that it exits 1 when the mode is off. Then list every
-  session currently in the mode with its start timestamp —
-  `grep '' ~/.claude/advisor-mode/*` (or `head -n1 ~/.claude/advisor-mode/*`;
-  both are allowlisted) — and mark which line is this session.
+  session currently in the mode with its start timestamp:
+
+  ```
+  grep -H '' ~/.claude/advisor-mode/*
+  ```
+
+  and mark which line is this session. `-H` is load-bearing — `grep` prints
+  the filename only when it is given more than one file, and exactly one
+  session in the mode is the common case, so without it the output has no
+  session id to mark. When no session is in the mode the glob does not expand
+  and the command reports `No such file or directory`: that is "no sessions in
+  advisor mode", not an error to report as a failure.
 
 Then stop — the toggle is the whole command. Do not begin decomposing or
 delegating anything until the user gives actual work.
@@ -80,12 +89,18 @@ delegating anything until the user gives actual work.
 - **The mode is per session.** Turning it on or off here never touches another
   running session. A fresh, resumed, or cleared session starts in advisor mode
   by default; opt out with `CCGM_ADVISOR_AUTO=false` in the environment or in
-  `~/.claude/.ccgm.env`. Compaction never re-enables a mode the session turned
-  off.
-- **Legacy state.** The mode used to be a single file at
-  `~/.claude/advisor-mode`. The SessionStart hook deletes it on first run; if
-  you hit `mkdir: ... File exists` or `Not a directory`, run
-  `rm ~/.claude/advisor-mode` once and retry.
+  `~/.claude/.ccgm.env`. Only compaction is exempt: it never re-enables a mode
+  the session turned off, but a resume or a `/clear` does start the mode again,
+  so `/advisor off` lasts until the session restarts.
+- **Legacy state, and other ways the state directory can be missing.** The mode
+  used to be a single file at `~/.claude/advisor-mode`. The SessionStart hook
+  deletes that file — and a symlink standing in the same place — on first run.
+  If `status` reports off in a session that never turned it off, check that
+  `~/.claude/advisor-mode` is a writable directory: a leftover file, a symlink,
+  or a permission problem each disables the auto-on silently, and the hook
+  cannot report it (SessionStart hooks write no output). `rm
+  ~/.claude/advisor-mode` once, or fix the permissions, and start a new
+  session.
 - Flags outlive nothing: the SessionEnd hook removes this session's flag, and
   SessionStart sweeps flags whose session is gone.
 - One-off escape hatch: `ADVISOR_DIRECT=1` (env or inline on a Bash command) —

@@ -24,9 +24,9 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. Seven other modules add the rest: **self-improving** 3, **subagent-patterns** 2, **relevance-injection** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, and **commands-preamble**. Total: 26 hooks across 8 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 32).
+The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. Eight other modules add the rest: **advisor-mode** 4, **self-improving** 3, **subagent-patterns** 2, **relevance-injection** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, and **commands-preamble**. Total: 30 hooks across 9 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 36).
 
-This count excludes `hooks/plugin-rule-inject.py`, which brings the true `"type": "hook"` file total to 33. It is the **plugin-marketplace** module's own hook, copied into every other rules-bearing module's `hooks/` directory so each module's generated Claude Code plugin manifest can register it independently - see [plugin-marketplace](../modules/plugin-marketplace/README.md) for what it does.
+This count excludes `hooks/plugin-rule-inject.py`, which brings the true `"type": "hook"` file total to 37. It is the **plugin-marketplace** module's own hook, copied into every other rules-bearing module's `hooks/` directory so each module's generated Claude Code plugin manifest can register it independently - see [plugin-marketplace](../modules/plugin-marketplace/README.md) for what it does.
 
 ---
 
@@ -328,7 +328,7 @@ State is per session: the flag is keyed by the hook input's `session_id` (`CLAUD
 **Module**: advisor-mode
 **Can block**: No
 
-While this session's advisor-mode flag (`~/.claude/advisor-mode/<session_id>`) exists, injects a short per-turn posture reminder (`additionalContext`): the session is an orchestrator — spec, delegate to implementers, review via separate agents, triage, merge; trivial or conversational turns are answered directly; a guard denial means delegate, never shell-trick around it. The injection also names this session's id and flag path, which is what `/advisor` reads when `CLAUDE_CODE_SESSION_ID` is not in the environment. One `stat()` per prompt when the mode is off. The guard enforces; this injection is what keeps the model delegating instead of fighting denials.
+While this session's advisor-mode flag (`~/.claude/advisor-mode/<session_id>`) exists, injects a short per-turn posture reminder (`additionalContext`): the session is an orchestrator — spec, delegate to implementers, review via separate agents, triage, merge; trivial or conversational turns are answered directly; a guard denial means delegate, never shell-trick around it. The injection also names this session's id and flag path, which is what `/advisor` reads when `CLAUDE_CODE_SESSION_ID` is not in the environment. One JSON parse and one `stat()` per prompt when the mode is off. The guard enforces; this injection is what keeps the model delegating instead of fighting denials.
 
 ---
 

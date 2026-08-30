@@ -11,8 +11,8 @@ environment variable is missing.
 
 The guard (advisor-guard.py) enforces the posture mechanically; this injection
 explains it so the model delegates instead of fighting denials. Adapted from
-baton's orchestrator-mode injection pattern. One stat() per prompt when the
-mode is off.
+baton's orchestrator-mode injection pattern. One JSON parse and one stat()
+per prompt when the mode is off.
 """
 
 import json
