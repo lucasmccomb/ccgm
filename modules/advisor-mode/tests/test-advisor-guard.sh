@@ -307,6 +307,58 @@ else
     echo "  got: ${nest_err}"
 fi
 
+# Review round 2 — pins for rules the suite could not catch regressing.
+
+# R1-c: the round-1 redirect case passed cwd-dependently — with the path rule
+# reverted, the placeholder happened to resolve outside a write root from the
+# cwd CI runs in. Assert it from a cwd that IS inside an allowed write root,
+# where a reverted rule resolves the placeholder to an allowed path.
+mkdir -p "${HOME}/.claude/scratch"
+R2_PWD="$(pwd)"
+if cd "${HOME}/.claude/scratch"; then
+    assert_exit 2 "substitution redirect target denied from an allowed cwd" "$(bash_json 'echo hi > $(echo ~/code/repo/pwn)')"
+    assert_exit 2 "substitution scratch path denied from an allowed cwd" "$(bash_json 'rm $(echo ~/code/repo/f)')"
+    cd "${R2_PWD}" || exit 1
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: could not cd into the allowed-write-root scratch dir"
+fi
+
+# R1-d: no per-command exemption is safe. Exempting `git` from the
+# placeholder rule reopens both of these, so they pin the rule for `git`
+# specifically — `git $(echo push)` does not, since git_segment_allowed
+# denies that one on its own.
+assert_exit 2 "substitution as git branch flag denied" "$(bash_json 'git branch $(echo -D) x')"
+assert_exit 2 "substitution as git checkout pathspec denied" "$(bash_json 'git checkout $(echo --) f')"
+
+# R1-e: the denial for this class names the substitution and the remedy, and
+# never quotes the internal placeholder the user did not type.
+subst_err=$(printf '%s' "$(bash_json 'sed $(echo -i) s/a/b/ f')" | python3 "${GUARD}" 2>&1 >/dev/null)
+subst_rc=$?
+if [ "${subst_rc}" = "2" ] \
+    && printf '%s' "${subst_err}" | grep -q "inline the value" \
+    && ! printf '%s' "${subst_err}" | grep -q "__SUBST__"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: substitution-as-argument denial explains inlining without the placeholder"
+    echo "  exit: ${subst_rc}"
+    echo "  got:  ${subst_err}"
+fi
+
+redir_err=$(printf '%s' "$(bash_json 'echo hi > $(echo ~/code/repo/pwn)')" | python3 "${GUARD}" 2>&1 >/dev/null)
+redir_rc=$?
+if [ "${redir_rc}" = "2" ] \
+    && printf '%s' "${redir_err}" | grep -q "redirect target" \
+    && ! printf '%s' "${redir_err}" | grep -q "__SUBST__"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: substitution-as-redirect-target denial names the target class"
+    echo "  exit: ${redir_rc}"
+    echo "  got:  ${redir_err}"
+fi
+
 # ─── Posture hook ────────────────────────────────────────────────────────────
 
 posture_json="{\"session_id\":\"${SID}\"}"

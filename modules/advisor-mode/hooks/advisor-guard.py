@@ -64,10 +64,13 @@ denied outright. Shell grouping tokens (`{`, `(`) are structure, not
 commands. A known dev-tool binary is allowed when its only arguments are
 version/identity probes (`node -v`, `wrangler whoami`).
 
-One quote/escape rule serves the whole file: scan_states() is the single
-scanner, and a backslash escapes the next character everywhere except inside
-single quotes. Earlier versions carried that rule in three places, and both
-holes found in review were those copies disagreeing.
+One quote/escape rule serves mask_quotes, find_substitutions and
+match_paren: scan_states() is their shared scanner, and a backslash escapes
+the next character everywhere except inside single quotes. Earlier versions
+carried that rule in three places, and both holes found in review were those
+copies disagreeing. match_backtick keeps its own escape loop and tracks no
+quote state — the shell's rule for a backtick span, applied with the unescape
+step above.
 
 KNOWN GAPS (documented in rules/advisor-mode.md): awk/heredoc bodies can
 smuggle writes past the segment scan; wrapper commands are denied outright
@@ -138,6 +141,20 @@ SUBST_PREFIX = "inside a substitution"
 # The shell removes one level of backslash from a backtick body before
 # running it, so a checker must do the same before reading the body.
 BACKTICK_UNESCAPE_RE = re.compile(r"\\([\\`$])")
+
+SUBST_ARG_REASON = (
+    "a `$(...)` or backtick substitution is used as an argument to a command "
+    "that is not read-only, and the guard cannot check what it expands to — "
+    "an inner command that only reads says nothing about whether its output "
+    "is a flag like `-i` or a path. Run the substitution on its own and "
+    "inline the value it printed, or delegate the command."
+)
+
+SUBST_TARGET_REASON = (
+    "a `$(...)` or backtick substitution is used as a redirect target, so the "
+    "guard cannot check where the output would land. Run the substitution on "
+    "its own and inline the path it printed, or delegate the command."
+)
 
 BACKTICK_HINT = (
     "Backticks inside a double-quoted argument are real command substitution "
@@ -461,19 +478,34 @@ def probe_segment_allowed(words):
     return bool(args) and all(a in PROBE_ARGS for a in args)
 
 
+def placeholder_misuse(segment):
+    """True when a checked substitution stands in for an argument to a
+    command that is not read-only.
+
+    A verified substitution collapses to a placeholder, and the shell
+    word-splits its output into real argv: `sed $(echo -i) …` IS `sed -i …`.
+    Checking the inner command read-only says nothing about its output, so
+    only plain read-only consumers may take one — every branch in
+    bash_segment_allowed decides on literal argument text (`-i`, `-delete`,
+    `-o`, `-X`, a path) that a placeholder silently slips past.
+
+    The deny decision and its message both read this, so the message can name
+    what actually happened instead of quoting a token the user never typed.
+    """
+    words = strip_env_assignments(strip_grouping(segment).split())
+    if not words:
+        return False
+    first = words[0].rsplit("/", 1)[-1]
+    return first not in READ_ONLY and any(SUBST_PLACEHOLDER in w for w in words)
+
+
 def bash_segment_allowed(segment):
     words = strip_env_assignments(strip_grouping(segment).split())
     if not words:
         return True
     first = words[0]
     first = first.rsplit("/", 1)[-1]  # /usr/bin/git → git
-    if first not in READ_ONLY and any(SUBST_PLACEHOLDER in w for w in words):
-        # A verified substitution collapses to a placeholder, and the shell
-        # word-splits its output into real argv: `sed $(echo -i) …` IS
-        # `sed -i …`. Checking the inner command read-only says nothing about
-        # its output, so only plain read-only consumers may take one — every
-        # branch below decides on literal argument text (`-i`, `-delete`,
-        # `-o`, `-X`, a path) that a placeholder silently slips past.
+    if placeholder_misuse(segment):
         return False
     if first == "sed":
         # -i in any form: bare, with attached suffix (-i.bak), inside a
@@ -630,10 +662,14 @@ def check_command(command, depth=0):
         masked = mask_quotes(command)
     ok, target = redirects_allowed(command, masked)
     if not ok:
+        if SUBST_PLACEHOLDER in target:
+            return SUBST_TARGET_REASON
         return ("redirecting output into `%s` writes outside the "
                 "orchestrator's work-product paths." % target)
     for segment in split_segments(command, masked):
         if not bash_segment_allowed(segment):
+            if placeholder_misuse(segment):
+                return SUBST_ARG_REASON
             return ("`%s` is not on the orchestrator's read-only/"
                     "orchestration allowlist." % segment.strip())
     return None
