@@ -178,7 +178,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | Module | Category | Commands | Description | Dependencies |
 |--------|----------|----------|-------------|--------------|
 | **adversarial-review** | workflow | `/adrev` | Adversarial review of a plan or any entity (file, PR, issue, dir, concept). Separate reviewer agent attacks premises and failure modes; plan targets get findings incorporated automatically and four autonomous-execution tenets enforced (minimal human work, follow-up completion, decision context, comprehensive E2E coverage) unless told not to | subagent-patterns |
-| **advisor-mode** | workflow | `/advisor` | Delegation-only session posture for expensive orchestrator models: the main agent specs, delegates, reviews via separate agents, and merges, while a hard PreToolUse gate blocks its own edits and non-orchestration Bash (subagent calls pass; ADVISOR_DIRECT=1 hatch) | settings, subagent-patterns |
+| **advisor-mode** | workflow | `/advisor` | Delegation-only session posture for expensive orchestrator models: the main agent specs, delegates, reviews via separate agents, and merges, while a hard PreToolUse gate blocks its own edits and non-orchestration Bash (subagent calls pass; ADVISOR_DIRECT=1 hatch). Per-session state, on by default at session start (CCGM_ADVISOR_AUTO=false opts out) | settings, subagent-patterns |
 | **agent-manager** [DEPRECATED] | workflow | `/agents` | Go-based terminal UI (/agents) for monitoring Claude Code agent processes via tmux. Unmaintained; not offered for new installs, kept in-repo for existing users | multi-agent |
 | **agent-native** | patterns | `/agent-native-audit` | Principles, audit skill, and a self-eval / red-team rubric for building applications where an agent is a first-class client | subagent-patterns |
 | **argus** | workflow | `/argus` | Closed-loop visual-ATDD harness: deterministic gates plus a separate judge agent score UI renders against a design spec until convergence | subagent-patterns |
@@ -366,7 +366,7 @@ The `docs/` directory contains comprehensive documentation:
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
 | [Module Catalog](docs/modules.md) | Detailed reference for all 79 modules |
 | [Commands Reference](docs/commands.md) | All 90 slash commands with usage examples |
-| [Hooks Reference](docs/hooks.md) | All 34 hooks explained - what they do and when they fire |
+| [Hooks Reference](docs/hooks.md) | All 36 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |
 | [Configuration](docs/configuration.md) | Customization, template variables, settings overrides |

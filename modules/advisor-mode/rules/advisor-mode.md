@@ -2,9 +2,9 @@
 
 **Iron Law:** WHILE ADVISOR MODE IS ON, THE MAIN AGENT PRODUCES SPECS, REVIEWS, AND DECISIONS — NEVER DIFFS.
 
-Advisor mode puts an expensive orchestrator session (usually Fable or Opus) into a delegation posture: implementation goes to cheaper agents, review goes to separate reviewer agents, fixes are delegated until the work is complete — follow-ups included. The posture is mechanical, not aspirational: while the mode flag exists, a PreToolUse hook (`advisor-guard.py`, exit 2, bypass-surviving) blocks the main agent's file edits and non-orchestration Bash. Subagent tool calls pass untouched.
+Advisor mode puts an expensive orchestrator session (usually Fable or Opus) into a delegation posture: implementation goes to cheaper agents, review goes to separate reviewer agents, fixes are delegated until the work is complete — follow-ups included. The posture is mechanical, not aspirational: while this session's mode flag exists, a PreToolUse hook (`advisor-guard.py`, exit 2, bypass-surviving) blocks the main agent's file edits and non-orchestration Bash. Subagent tool calls pass untouched.
 
-This rule binds only while `~/.claude/advisor-mode` exists. Bare `/advisor` toggles the mode; explicit `on|off|status` are also accepted.
+The mode is **per session**, not per machine. Its state is the flag file `~/.claude/advisor-mode/<session_id>`, and this rule binds only while the running session's own flag exists — one session's mode never binds another's. A SessionStart hook creates the flag, so every fresh, resumed, or cleared session starts in advisor mode; opt out with `CCGM_ADVISOR_AUTO=false` in the environment or `~/.claude/.ccgm.env`. Compaction never re-creates a flag the session removed, so `/advisor off` survives it. A SessionEnd hook drops the flag, and SessionStart sweeps flags whose session is gone. Bare `/advisor` toggles this session; explicit `on|off|status` are also accepted, and all of them act on this session alone.
 
 ## Why the Gate Is Hard, Not Advisory
 
@@ -54,6 +54,8 @@ Be honest about the economics: delegation's wins are context protection (impleme
 ## Enforcement Mechanics and Known Gaps
 
 - The guard distinguishes main-agent from subagent calls by the hook input's `agent_id`/`agent_type` fields (subagent calls carry them; main-agent calls do not). Discriminator drift is asymmetric: if main-agent inputs ever start carrying the fields, the guard goes inert (fails open, visibly denies nothing); if subagent inputs ever stopped carrying them, subagents would be denied too — loud, immediate, and recoverable with `/advisor off`, never a silent misroute.
+- The session is identified by the hook input's `session_id`, with the `CLAUDE_CODE_SESSION_ID` environment variable as the fallback. A call carrying neither fails open (the guard allows it) — the same asymmetric-drift choice as the discriminator: if the field ever disappears, the mode goes inert and visibly denies nothing, rather than denying every session at once.
+- A session idle for more than three days loses its flag: SessionStart garbage-collects flags whose transcript has not been touched in that long, and a live-but-idle session has exactly that signature. Nothing re-arms it, so the gate is off when you come back to that pane — run `/advisor on` again. The direction of this lapse is the unsafe one for a gate, and it is the cost of sweeping flags left by sessions that crashed.
 - File writes are allowed to orchestrator work-product paths only: `~/.claude/`, temp/scratchpad roots, `~/code/plans/`, `~/code/docs/`, worktree checkouts, and plan-mode plan files.
 - Bash is default-deny: read-only inspection, read-only git plus branch/worktree/pull lifecycle, and gh PR/issue/run/label management (merge included) are allowed; redirection and scratch file-ops only into the allowed write roots. Command substitution, shells, interpreters, and wrapper commands (`env`, `xargs`) are denied outright rather than unwrapped.
 - Known gaps: `awk` bodies and heredoc content can smuggle writes past the segment scan; over-denial (quoted metacharacters, heredocs) is the accepted direction — the denial names the delegation recipe.

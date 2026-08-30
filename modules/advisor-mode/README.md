@@ -25,14 +25,30 @@ inputs gaining the fields makes the guard inert (fails open, visibly); subagent
 inputs losing them would deny subagents too — loud and recoverable with
 `/advisor off`, never a silent misroute.
 
+## State is per session
+
+The flag is `~/.claude/advisor-mode/<session_id>`, keyed by the `session_id`
+every hook input carries (`CLAUDE_CODE_SESSION_ID` is the fallback). One
+session's mode never binds another's — with many sessions running at once, a
+single machine-global file meant one session's `/advisor off` removed the gate
+from all of them.
+
+Every session starts in advisor mode. Opt out with `CCGM_ADVISOR_AUTO=false` in
+the environment or in `~/.claude/.ccgm.env`. Only compaction is exempt from the
+auto-on, so `/advisor off` survives a compaction but a resume or a `/clear`
+starts the mode again. The flag is removed when the session ends, and flags
+left by sessions that died are swept at the next session start.
+
 ## Files
 
 | File | Role |
 |------|------|
-| `commands/advisor.md` | `/advisor` toggles; explicit `on\|off\|status` accepted — flag file `~/.claude/advisor-mode` |
+| `commands/advisor.md` | `/advisor` toggles this session; explicit `on\|off\|status` accepted — `status` also lists every session in the mode |
 | `rules/advisor-mode.md` | The posture contract: loop, delegation ladder, floor, review contract |
 | `hooks/advisor-guard.py` | PreToolUse exit-2 gate: file writes confined to work-product paths; Bash default-deny with read-only + orchestration allowlist |
-| `hooks/advisor-posture.py` | UserPromptSubmit injection while the flag exists |
+| `hooks/advisor-posture.py` | UserPromptSubmit injection while this session's flag exists; also names the session id |
+| `hooks/advisor-session-start.py` | SessionStart: creates this session's flag, migrates the legacy global file, sweeps dead sessions' flags |
+| `hooks/advisor-session-end.py` | SessionEnd: removes this session's flag |
 | `settings.partial.json` | Hook registration (merged into settings.json) |
 
 ## What the main agent keeps
@@ -54,6 +70,7 @@ worktree checkouts, and plan-mode plan files.
 cp commands/advisor.md ~/.claude/commands/
 cp rules/advisor-mode.md ~/.claude/rules/
 cp hooks/advisor-guard.py hooks/advisor-posture.py ~/.claude/hooks/
+cp hooks/advisor-session-start.py hooks/advisor-session-end.py ~/.claude/hooks/
 # merge settings.partial.json into ~/.claude/settings.json
 ```
 
@@ -61,12 +78,19 @@ cp hooks/advisor-guard.py hooks/advisor-posture.py ~/.claude/hooks/
 
 ```bash
 bash modules/advisor-mode/tests/test-advisor-guard.sh
+bash modules/advisor-mode/tests/test-advisor-session.sh
 ```
 
-Covers: flag on/off, subagent passthrough, hatch, work-product path
-allowances, the Bash allowlist/denylist, redirection scoping, and regression
-probes for real bypasses found during development (newline-hidden commands,
-single-`&` chaining, `sed -i` variants, `git checkout -- pathspec`).
+`test-advisor-guard.sh` covers flag on/off, subagent passthrough, hatch,
+work-product path allowances, the Bash allowlist/denylist, redirection
+scoping, and regression probes for real bypasses found during development
+(newline-hidden commands, single-`&` chaining, `sed -i` variants,
+`git checkout -- pathspec`).
+
+`test-advisor-session.sh` covers the per-session state: two sessions with
+opposite modes, the session-id fallback and the fail-open when there is none,
+auto-on at startup/resume/clear but not compaction, the `CCGM_ADVISOR_AUTO`
+opt-out, legacy-file migration, SessionEnd removal, and garbage collection.
 
 ## Deferred by design (v1)
 
@@ -75,4 +99,4 @@ single-`&` chaining, `sed -i` variants, `git checkout -- pathspec`).
   proves out; skipped so the mode never fights ordinary conversation.
 - **Requirements-Ledger / Stop guards** — CCGM's plan/progress artifacts and
   etp's completion contract already cover run-to-completion.
-- **Auto-enable on Fable sessions** — possible follow-up.
+- **Model-conditional auto-enable** — every session now starts in the mode; keying the default off the session's model (Fable/Opus only) is a possible follow-up.

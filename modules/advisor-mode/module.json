@@ -1,7 +1,7 @@
 {
   "name": "advisor-mode",
   "displayName": "Advisor Mode",
-  "description": "Session posture for expensive orchestrator models (Fable/Opus): /advisor puts the main agent into a delegation-only mode - it writes specs, dispatches cheaper implementer agents, reviews through separate reviewer agents, triages findings, and merges, while a hard PreToolUse gate (exit 2, bypass-surviving) blocks its own file edits and non-orchestration Bash. Subagent calls pass untouched; a per-turn posture injection keeps the model delegating instead of fighting denials. ADVISOR_DIRECT=1 one-off hatch.",
+  "description": "Session posture for expensive orchestrator models (Fable/Opus): /advisor puts the main agent into a delegation-only mode - it writes specs, dispatches cheaper implementer agents, reviews through separate reviewer agents, triages findings, and merges, while a hard PreToolUse gate (exit 2, bypass-surviving) blocks its own file edits and non-orchestration Bash. Subagent calls pass untouched; a per-turn posture injection keeps the model delegating instead of fighting denials. ADVISOR_DIRECT=1 one-off hatch. State is per session: every session starts in the mode, and CCGM_ADVISOR_AUTO=false opts out.",
   "category": "workflow",
   "scope": [
     "global"
@@ -28,6 +28,16 @@
     },
     "hooks/advisor-posture.py": {
       "target": "hooks/advisor-posture.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/advisor-session-start.py": {
+      "target": "hooks/advisor-session-start.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/advisor-session-end.py": {
+      "target": "hooks/advisor-session-end.py",
       "type": "hook",
       "template": false
     },
