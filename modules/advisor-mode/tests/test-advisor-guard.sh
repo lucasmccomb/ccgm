@@ -247,6 +247,66 @@ assert_exit 2 "unbalanced substitution denied" "$(bash_json 'echo $(git status')
 assert_exit 2 "unpaired backtick denied" "$(bash_json 'gh issue create --body "a `b"')"
 assert_exit 2 "substitution nested past the cap denied" "$(bash_json 'echo $(echo $(echo $(echo $(echo $(date)))))')"
 
+# Review round 1 — holes the reviewer reproduced with real side effects.
+
+# P0-1: the shell strips one backslash level from a backtick body, so `\`` in
+# there opens a real nested substitution the guard must follow.
+assert_exit 2 "nested escaped backticks denied" "$(bash_json 'echo `echo \`git commit -m x\``')"
+assert_exit 2 "nested escaped backticks touch denied" "$(bash_json 'echo `echo \`touch ~/code/repo/pwn\``')"
+assert_exit 2 "nested escaped backticks sed -i denied" "$(bash_json 'echo `echo \`sed -i s/a/b/ ~/code/repo/f\``')"
+assert_exit 2 "three-deep escaped backticks denied" "$(bash_json 'echo `echo \`echo \\\`git commit -m x\\\`\``')"
+# $( ) does not strip backslashes, so the inner command never runs there.
+assert_exit 0 "escaped backtick inside \$( ) allowed" "$(bash_json 'echo $(echo \`git commit -m x\`)')"
+
+# P0-2: the shell word-splits a substitution's output into real argv, so a
+# collapsed span must not stand in for an argument any check reads literally.
+assert_exit 2 "substitution as sed flag denied" "$(bash_json 'sed $(echo -i) s/a/b/ ~/code/repo/f')"
+assert_exit 2 "substitution as sed long flag denied" "$(bash_json 'sed $(echo --in-place) s/a/b/ ~/code/repo/f')"
+assert_exit 2 "backtick as sed flag denied" "$(bash_json 'sed `echo -i` s/a/b/ ~/code/repo/f')"
+assert_exit 2 "substitution as find predicate denied" "$(bash_json 'find . $(echo -delete)')"
+assert_exit 2 "substitution as find -exec denied" "$(bash_json 'find . $(echo -exec) rm {} +')"
+assert_exit 2 "substitution as sort -o denied" "$(bash_json 'sort $(echo -o) ~/code/repo/f ~/code/repo/g')"
+assert_exit 2 "substitution as gh api flag denied" "$(bash_json 'gh api repos/o/r/issues/1 $(echo -X) DELETE')"
+assert_exit 2 "substitution as scratch-op path denied" "$(bash_json 'rm $(echo ~/code/repo/f)')"
+assert_exit 2 "substitution as redirect target denied" "$(bash_json 'echo hi > $(echo ~/code/repo/pwn)')"
+assert_exit 2 "substitution as git subcommand denied" "$(bash_json 'git $(echo push)')"
+# The guard against over-correcting back into #1009: read-only consumers keep
+# taking a checked substitution as an argument.
+assert_exit 0 "substitution as echo argument allowed" "$(bash_json 'echo $(git rev-parse HEAD)')"
+
+# P0-3 (issue #1012): a backslash escapes inside double quotes too, so an
+# escaped quote can no longer close the span early and hide what follows.
+assert_exit 2 "escaped quote then commit denied" "$(bash_json 'echo "\"" ; git commit -m x')"
+assert_exit 2 "escaped quote mid-word then commit denied" "$(bash_json 'echo "a\"b" ; git commit -m x')"
+assert_exit 2 "escaped quote then repo write denied" "$(bash_json 'echo "\"" ; touch ~/code/repo/pwn')"
+assert_exit 2 "escaped backslash then commit denied" "$(bash_json 'echo "\\" ; git commit -m x')"
+assert_exit 0 "escaped backslash then status allowed" "$(bash_json 'echo "\\"; git status')"
+assert_exit 2 "apostrophe in double quotes still splits" "$(bash_json "echo \"it's\" ; git commit -m x")"
+assert_exit 0 "backslash in single quotes is literal" "$(bash_json "echo 'a\\' ; git status")"
+
+# P2-2: arithmetic expansion is denied, with a message about arithmetic
+# rather than one claiming the arithmetic body is an unknown command.
+arith_err=$(printf '%s' "$(bash_json 'echo $((1+1))')" | python3 "${GUARD}" 2>&1 >/dev/null)
+arith_rc=$?
+if [ "${arith_rc}" = "2" ] && printf '%s' "${arith_err}" | grep -qi "arithmetic"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: arithmetic expansion denied with its own message"
+    echo "  exit: ${arith_rc}"
+    echo "  got:  ${arith_err}"
+fi
+
+# Nit: a nested denial names its depth once instead of repeating the phrase.
+nest_err=$(printf '%s' "$(bash_json 'echo $(echo $(git commit -m x))')" | python3 "${GUARD}" 2>&1 >/dev/null)
+if [ "$(printf '%s' "${nest_err}" | grep -c 'inside a substitution')" = "1" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: nested denial reason names its depth once"
+    echo "  got: ${nest_err}"
+fi
+
 # ─── Posture hook ────────────────────────────────────────────────────────────
 
 posture_json="{\"session_id\":\"${SID}\"}"

@@ -54,10 +54,20 @@ ALLOWS:
 
 Command substitution (`$(...)`, backticks) is checked recursively: the
 inner command runs through this same allowlist, so `echo "$(git rev-parse
-HEAD)"` passes while `echo $(git commit -m x)` is denied. Process
-substitution stays denied outright. Shell grouping tokens (`{`, `(`) are
-structure, not commands. A known dev-tool binary is allowed when its only
-arguments are version/identity probes (`node -v`, `wrangler whoami`).
+HEAD)"` passes while `echo $(git commit -m x)` is denied. A backtick body is
+unescaped first, the way the shell does before running it, so a nested
+`\\`...\\`` is checked rather than read as literal text. A verified span
+collapses to SUBST_PLACEHOLDER, which only a READ_ONLY command may take as an
+argument — knowing the inner command is read-only says nothing about whether
+its OUTPUT is a dangerous flag (`sed $(echo -i)`). Process substitution stays
+denied outright. Shell grouping tokens (`{`, `(`) are structure, not
+commands. A known dev-tool binary is allowed when its only arguments are
+version/identity probes (`node -v`, `wrangler whoami`).
+
+One quote/escape rule serves the whole file: scan_states() is the single
+scanner, and a backslash escapes the next character everywhere except inside
+single quotes. Earlier versions carried that rule in three places, and both
+holes found in review were those copies disagreeing.
 
 KNOWN GAPS (documented in rules/advisor-mode.md): awk/heredoc bodies can
 smuggle writes past the segment scan; wrapper commands are denied outright
@@ -123,6 +133,11 @@ REDIRECT_TOKEN_RE = re.compile(r"^(\d*[<>]{1,2}&?\d*|&>{1,2})\S*$")
 # is denied, and the word an already-checked substitution collapses to.
 MAX_SUBST_DEPTH = 4
 SUBST_PLACEHOLDER = "__SUBST__"
+SUBST_PREFIX = "inside a substitution"
+
+# The shell removes one level of backslash from a backtick body before
+# running it, so a checker must do the same before reading the body.
+BACKTICK_UNESCAPE_RE = re.compile(r"\\([\\`$])")
 
 BACKTICK_HINT = (
     "Backticks inside a double-quoted argument are real command substitution "
@@ -224,6 +239,10 @@ def path_allowed(raw_path):
     """True when the path is an orchestrator work-product location."""
     if not raw_path or not isinstance(raw_path, str):
         return True  # fail open: nothing to judge
+    if SUBST_PLACEHOLDER in raw_path:
+        # The path is a substitution's output, so it cannot be resolved and
+        # checked. Covers scratch-op arguments and redirect targets alike.
+        return False
     path = os.path.realpath(os.path.expanduser(
         os.path.expandvars(raw_path.strip().strip("'\""))))
     marked = path if path.endswith("/") else path + "/"
@@ -238,35 +257,65 @@ def path_allowed(raw_path):
     return any(path == t or path.startswith(t + os.sep) for t in tmp_roots)
 
 
+def scan_states(cmd):
+    """Per-character `(quote, escaped)` for `cmd` — the file's only scanner.
+
+    `quote` is the quoted span a character belongs to (None, `'` or `"`),
+    delimiters included, so every character of `"a"` reports `"`. `escaped`
+    is True for a backslash that escapes and for the character it escapes,
+    under one rule: a backslash escapes the next character everywhere except
+    inside single quotes, where nothing escapes.
+
+    mask_quotes, find_substitutions and match_paren all read these states.
+    Keeping the rule here is the point: when each of them carried its own
+    copy, `mask_quotes` disagreed with the span finder about `\\"` and a
+    trailing command went unchecked (issue #1012), and `match_backtick`
+    disagreed about `\\`` and a nested command ran unchecked.
+    """
+    states = []
+    quote = None
+    i, n = 0, len(cmd)
+    while i < n:
+        c = cmd[i]
+        if quote == "'":
+            states.append(("'", False))
+            if c == "'":
+                quote = None
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            states.append((quote, True))
+            states.append((quote, True))
+            i += 2
+            continue
+        if quote is None and c in ("'", '"'):
+            quote = c
+        elif c == quote:
+            states.append((quote, False))
+            quote = None
+            i += 1
+            continue
+        states.append((quote, False))
+        i += 1
+    return states
+
+
 def mask_quotes(cmd):
     """Replace quoted spans with spaces so metacharacter scans skip them.
 
     Single-quoted spans are fully masked (the shell treats them literally).
-    Double-quoted spans are masked except `$` and backtick, which still
-    expand inside double quotes and must stay visible to the scans.
+    Double-quoted spans are masked except an unescaped `$` or backtick, which
+    still expand there and must stay visible to the scans. An escape pair is
+    masked wherever it sits — an escaped `$` expands nothing.
     """
     out = []
-    i, n = 0, len(cmd)
-    while i < n:
-        c = cmd[i]
-        if c == "\\" and i + 1 < n:
-            out.append("  ")
-            i += 2
-            continue
-        if c in ("'", '"'):
-            quote = c
+    for c, (quote, escaped) in zip(cmd, scan_states(cmd)):
+        if escaped or quote == "'":
             out.append(" ")
-            i += 1
-            while i < n and cmd[i] != quote:
-                keep = quote == '"' and cmd[i] in ("$", "`")
-                out.append(cmd[i] if keep else " ")
-                i += 1
-            if i < n:
-                out.append(" ")
-                i += 1
-            continue
-        out.append(c)
-        i += 1
+        elif quote == '"':
+            out.append(c if c in ("$", "`") else " ")
+        else:
+            out.append(c)
     return "".join(out)
 
 
@@ -417,6 +466,14 @@ def bash_segment_allowed(segment):
         return True
     first = words[0]
     first = first.rsplit("/", 1)[-1]  # /usr/bin/git → git
+    if first not in READ_ONLY and any(SUBST_PLACEHOLDER in w for w in words):
+        # A verified substitution collapses to a placeholder, and the shell
+        # word-splits its output into real argv: `sed $(echo -i) …` IS
+        # `sed -i …`. Checking the inner command read-only says nothing about
+        # its output, so only plain read-only consumers may take one — every
+        # branch below decides on literal argument text (`-i`, `-delete`,
+        # `-o`, `-X`, a path) that a placeholder silently slips past.
+        return False
     if first == "sed":
         # -i in any form: bare, with attached suffix (-i.bak), inside a
         # single-dash flag cluster (-ni), or --in-place[=suffix].
@@ -445,33 +502,36 @@ def bash_segment_allowed(segment):
     return False
 
 
-def match_paren(cmd, i):
-    """Index of the `)` closing a `$(` whose body starts at i, or None."""
-    depth, quote, n = 1, None, len(cmd)
-    while i < n:
-        c = cmd[i]
-        if c == "\\" and quote != "'" and i + 1 < n:
-            i += 2
+def match_paren(cmd, start):
+    """Index of the `)` closing a `$(` whose body starts at `start`, or None.
+
+    The body is scanned on its own states: quoting restarts inside a
+    substitution, so `echo $(echo ")")` ends at the last paren, not the
+    quoted one.
+    """
+    body = cmd[start:]
+    depth = 1
+    for j, (c, (quote, escaped)) in enumerate(zip(body, scan_states(body))):
+        if escaped or quote is not None:
             continue
-        if quote:
-            if c == quote:
-                quote = None
-            i += 1
-            continue
-        if c in ("'", '"'):
-            quote = c
-        elif c == "(":
+        if c == "(":
             depth += 1  # a nested $( counts through its own paren
         elif c == ")":
             depth -= 1
             if depth == 0:
-                return i
-        i += 1
+                return start + j
     return None
 
 
 def match_backtick(cmd, i):
-    """Index of the backtick closing one opened before i, or None."""
+    """Index of the backtick closing one opened before i, or None.
+
+    Escaped backticks are skipped, because that is how the shell finds the
+    end of the span — which means the body this delimits still holds those
+    escapes. A caller must unescape the body (BACKTICK_UNESCAPE_RE) before
+    checking it, or a nested `\\`…\\`` reads as literal text while the shell
+    runs it.
+    """
     n = len(cmd)
     while i < n:
         if cmd[i] == "\\" and i + 1 < n:
@@ -494,29 +554,20 @@ def find_substitutions(cmd):
     `"$(git commit -m x)"` — which the shell does expand.
     """
     spans = []
-    i, n, quote = 0, len(cmd), None
+    states = scan_states(cmd)
+    i, n = 0, len(cmd)
     while i < n:
+        quote, escaped = states[i]
+        if escaped or quote == "'":
+            i += 1  # nothing expands in single quotes, or when escaped
+            continue
         c = cmd[i]
-        if c == "\\" and quote != "'" and i + 1 < n:
-            i += 2
-            continue
-        if quote:
-            if c == quote:
-                quote = None
-                i += 1
-                continue
-            if quote == "'":
-                i += 1  # nothing expands in single quotes
-                continue
-        elif c in ("'", '"'):
-            quote = c
-            i += 1
-            continue
         if c == "$" and i + 1 < n and cmd[i + 1] == "(":
             end = match_paren(cmd, i + 2)
             if end is None:
                 return spans, "dollar"
-            spans.append((i, end + 1, i + 2, end, "dollar"))
+            kind = "arith" if cmd[i + 2:i + 3] == "(" else "dollar"
+            spans.append((i, end + 1, i + 2, end, kind))
             i = end + 1
             continue
         if c == "`":
@@ -550,12 +601,25 @@ def check_command(command, depth=0):
                 "this gate checks. Split the command, or delegate it."
                 % MAX_SUBST_DEPTH)
     for start, end, inner_start, inner_end, kind in reversed(spans):
-        reason = check_command(command[inner_start:inner_end], depth + 1)
+        if kind == "arith":
+            return ("arithmetic expansion `$((...))` is not checked by this "
+                    "gate — its body can carry a command substitution. "
+                    "Compute the value another way, or delegate the command.")
+        inner = command[inner_start:inner_end]
+        if kind == "backtick":
+            # The shell strips one level of backslash before running a
+            # backtick body, so `\\`` in there opens a real nested
+            # substitution. Unescape first or the nested command is read as
+            # literal text and never checked.
+            inner = BACKTICK_UNESCAPE_RE.sub(r"\1", inner)
+        reason = check_command(inner, depth + 1)
         if reason is not None:
-            if kind == "backtick":
-                return "inside a backtick substitution, %s %s" % (
-                    reason, BACKTICK_HINT)
-            return "inside a `$(...)` substitution, %s" % reason
+            if not reason.startswith(SUBST_PREFIX):
+                reason = "%s %d level%s deep, %s" % (
+                    SUBST_PREFIX, depth + 1, "" if depth == 0 else "s", reason)
+            if kind == "backtick" and BACKTICK_HINT not in reason:
+                reason = "%s %s" % (reason, BACKTICK_HINT)
+            return reason
         # Checked and read-only: collapse it to a plain word so the outer
         # scan reads it as an ordinary argument.
         command = command[:start] + SUBST_PLACEHOLDER + command[end:]

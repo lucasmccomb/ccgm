@@ -62,7 +62,10 @@ worktree checkouts, and plan-mode plan files.
 Read-only recon passes too: dev-tool version and identity probes (`node -v`,
 `wrangler whoami`, not `pnpm install`), shell grouping tokens, and
 `$(...)`/backtick substitution whose inner commands are themselves
-allowlisted (checked recursively, depth-capped).
+allowlisted (checked recursively, depth-capped, backtick bodies
+unescaped first). What a checked substitution returns is an argument for
+read-only commands only: `echo $(git rev-parse HEAD)` passes,
+`sed $(echo -i) …` does not.
 
 ## Escape hatches
 
@@ -88,9 +91,11 @@ bash modules/advisor-mode/tests/test-advisor-session.sh
 
 `test-advisor-guard.sh` covers flag on/off, subagent passthrough, hatch,
 work-product path allowances, the Bash allowlist/denylist, redirection
-scoping, tool probes, grouping tokens, recursive substitution checking, and
-regression probes for real bypasses found during development (newline-hidden
-commands, single-`&` chaining, `sed -i` variants, `git checkout -- pathspec`).
+scoping, tool probes, grouping tokens, recursive substitution checking, quote
+and escape handling, and regression probes for real bypasses found during
+development (newline-hidden commands, single-`&` chaining, `sed -i` variants,
+`git checkout -- pathspec`, nested escaped backticks, a substitution standing
+in for a flag or path, and an escaped quote hiding a trailing command).
 
 `test-advisor-session.sh` covers the per-session state: two sessions with
 opposite modes, the session-id fallback and the fail-open when there is none,
