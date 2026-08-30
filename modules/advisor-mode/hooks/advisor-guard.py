@@ -8,15 +8,20 @@ implementation to cheaper agents and reviews their work. Advisory-only "you
 never implement" prompts demonstrably fail under pressure — the documented
 failure mode is the orchestrator drifting into hands-on patching exactly at
 friction moments (integration fixes, small "one-liners"). This gate makes the
-posture mechanical: while the flag file exists, the MAIN agent cannot mutate
-source; a denial is steering ("delegate this"), not an obstacle.
+posture mechanical: while this session's flag file exists, the MAIN agent
+cannot mutate source; a denial is steering ("delegate this"), not an obstacle.
 
 Classification: bypass-retained. Denials use exit 2 (hard_block semantics,
 inlined so the hook is dependency-free). A JSON `permissionDecision: deny`
 does not survive bypass mode (GitHub issue #39344); exit 2 does — same
 contract as branch-guard.py.
 
-BLOCKS while ~/.claude/advisor-mode exists, for the MAIN agent only:
+State is PER SESSION: the flag is ~/.claude/advisor-mode/<session_id>, keyed
+by the session_id every hook input carries (falling back to the
+CLAUDE_CODE_SESSION_ID environment variable). One session's mode never binds
+another's.
+
+BLOCKS while this session's flag file exists, for the MAIN agent only:
   - Edit / MultiEdit / Write / NotebookEdit and the filesystem-MCP write
     tools, unless the target is an orchestrator work-product path (below)
   - Bash outside a default-deny allowlist of read-only inspection commands
@@ -25,7 +30,7 @@ BLOCKS while ~/.claude/advisor-mode exists, for the MAIN agent only:
     scratch file-ops confined to the allowed write roots
 
 ALLOWS:
-  - Everything when the flag file is absent (mode off)
+  - Everything when this session's flag file is absent (mode off)
   - SUBAGENT tool calls — their hook input carries a non-empty `agent_id`
     (and usually `agent_type`); the main agent's carries neither. These are
     documented common hook-input fields. Discriminator drift is asymmetric:
@@ -42,6 +47,10 @@ ALLOWS:
     plan files (/.claude/plans/) which only the main agent may write
   - Unparseable input, unknown tools, missing paths (fail open — this is a
     workflow gate, not a data-loss guard)
+  - Input with no resolvable session id (fail open, the same asymmetric-drift
+    class as the subagent discriminator: if the field ever disappears the
+    guard goes inert and visibly denies nothing, instead of denying every
+    session at once)
 
 KNOWN GAPS (documented in rules/advisor-mode.md): awk/heredoc bodies can
 smuggle writes past the segment scan; wrapper commands are denied outright
@@ -55,7 +64,11 @@ import re
 import sys
 import tempfile
 
-FLAG_ENV = "CCGM_ADVISOR_FLAG"
+SESSION_ID_ENV = "CLAUDE_CODE_SESSION_ID"
+
+# Session ids are uuids; anything else cannot name a flag file. Rejecting
+# separators and dot-entries keeps the flag inside the state directory.
+SESSION_ID_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 FILE_TOOLS = {
     "Edit",
@@ -136,9 +149,21 @@ def hard_block(reason):
     sys.exit(2)
 
 
-def flag_path():
-    return os.environ.get(FLAG_ENV) or os.path.join(
-        os.path.expanduser("~"), ".claude", "advisor-mode")
+def session_id(data):
+    """This call's session id: hook input first, environment as fallback."""
+    for candidate in (data.get("session_id"), os.environ.get(SESSION_ID_ENV)):
+        if not isinstance(candidate, str):
+            continue
+        candidate = candidate.strip()
+        if candidate in (".", "..") or not SESSION_ID_RE.fullmatch(candidate):
+            continue
+        return candidate
+    return None
+
+
+def flag_path(sid):
+    return os.path.join(
+        os.path.expanduser("~"), ".claude", "advisor-mode", sid)
 
 
 def allowed_write_roots():
@@ -396,8 +421,6 @@ def check_file_tool(tool, tool_input):
 
 
 def main():
-    if not os.path.isfile(flag_path()):
-        sys.exit(0)
     if os.environ.get("ADVISOR_DIRECT") == "1":
         sys.exit(0)
     try:
@@ -408,6 +431,9 @@ def main():
         sys.exit(0)
     if data.get("agent_id") or data.get("agent_type"):
         sys.exit(0)  # subagent call — the guard only binds the main agent
+    sid = session_id(data)
+    if not sid or not os.path.isfile(flag_path(sid)):
+        sys.exit(0)  # mode off here (or no session id — fail open)
     tool = data.get("tool_name") or ""
     tool_input = data.get("tool_input") or {}
     if not isinstance(tool_input, dict):

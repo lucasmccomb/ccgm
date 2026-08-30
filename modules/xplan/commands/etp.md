@@ -260,7 +260,7 @@ Each stage returns a verdict and a specific, itemized findings list. Quality-rev
 ### 4.3 Apply reasonable and valid fixes
 
 Triage the findings yourself (orchestrator judgment - latent work, not delegable):
-- **Reasonable and valid** (real bug, real scope creep, real spec gap) → fix it. Dispatch an `implementer` against the PR branch (or fix inline for a one-liner — unless advisor mode is on (`~/.claude/advisor-mode` exists), where even one-liners are delegated: the inline "quick fix" is the documented drift pattern the mode's guard blocks), push, and **re-review the changed PR** (back to 4.2).
+- **Reasonable and valid** (real bug, real scope creep, real spec gap) → fix it. Dispatch an `implementer` against the PR branch (or fix inline for a one-liner — unless this session is in advisor mode (its flag `~/.claude/advisor-mode/<session_id>` exists), where even one-liners are delegated: the inline "quick fix" is the documented drift pattern the mode's guard blocks), push, and **re-review the changed PR** (back to 4.2).
 - **Invalid, speculative, or out-of-scope** (gold-plating, hypothetical edge cases, "you could also…") → reject with a one-line reason recorded in the run record. Completeness means finishing the unit, not expanding it. Do not implement review suggestions with no caller or that the work did not ask for.
 
 Loop review → fix → re-review until the PR passes. Bound it: after **3 fix rounds** on the same PR without convergence, freeze that PR, record the unresolved findings as a blocker, and move on - one stuck PR does not halt the wave.

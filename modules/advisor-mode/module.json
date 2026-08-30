@@ -31,6 +31,16 @@
       "type": "hook",
       "template": false
     },
+    "hooks/advisor-session-start.py": {
+      "target": "hooks/advisor-session-start.py",
+      "type": "hook",
+      "template": false
+    },
+    "hooks/advisor-session-end.py": {
+      "target": "hooks/advisor-session-end.py",
+      "type": "hook",
+      "template": false
+    },
     "settings.partial.json": {
       "target": "settings.json",
       "type": "config",

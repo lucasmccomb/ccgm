@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-UserPromptSubmit hook: while advisor mode is on, remind each turn that the
-session is an orchestrator.
+UserPromptSubmit hook: while advisor mode is on for THIS session, remind each
+turn that the session is an orchestrator.
+
+State is per session: the flag is ~/.claude/advisor-mode/<session_id>, read
+from the hook input's session_id (CLAUDE_CODE_SESSION_ID as the fallback), so
+another session's mode never injects here. The injection also names the
+session id, which is what /advisor uses to find its own flag when the
+environment variable is missing.
 
 The guard (advisor-guard.py) enforces the posture mechanically; this injection
 explains it so the model delegates instead of fighting denials. Adapted from
@@ -11,9 +17,14 @@ mode is off.
 
 import json
 import os
+import re
 import sys
 
-FLAG_ENV = "CCGM_ADVISOR_FLAG"
+SESSION_ID_ENV = "CLAUDE_CODE_SESSION_ID"
+
+# Session ids are uuids; anything else cannot name a flag file. Rejecting
+# separators and dot-entries keeps the flag inside the state directory.
+SESSION_ID_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 CONTEXT = (
     "advisor mode is ON — you are the orchestrator: a PreToolUse hook blocks "
@@ -31,16 +42,42 @@ CONTEXT = (
     "delegate it, never shell-trick around it. /advisor off ends the mode."
 )
 
+TRAILER = (
+    " The mode is per session: this session's id is {sid}, and its flag is "
+    "~/.claude/advisor-mode/{sid}. Other sessions are unaffected."
+)
+
+
+def session_id(data):
+    """This turn's session id: hook input first, environment as fallback."""
+    for candidate in (data.get("session_id"), os.environ.get(SESSION_ID_ENV)):
+        if not isinstance(candidate, str):
+            continue
+        candidate = candidate.strip()
+        if candidate in (".", "..") or not SESSION_ID_RE.fullmatch(candidate):
+            continue
+        return candidate
+    return None
+
 
 def main():
-    flag = os.environ.get(FLAG_ENV) or os.path.join(
-        os.path.expanduser("~"), ".claude", "advisor-mode")
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    sid = session_id(data)
+    if not sid:
+        sys.exit(0)
+    flag = os.path.join(
+        os.path.expanduser("~"), ".claude", "advisor-mode", sid)
     if not os.path.isfile(flag):
         sys.exit(0)
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
-            "additionalContext": CONTEXT,
+            "additionalContext": CONTEXT + TRAILER.format(sid=sid),
         },
         "suppressOutput": True,
     }))

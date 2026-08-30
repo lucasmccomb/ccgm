@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Tests for advisor-guard.py — the hard PreToolUse gate that keeps an
-# advisor-mode orchestrator from implementing directly. While the flag file
-# exists, the MAIN agent's file writes are confined to its own work-product
-# paths and its Bash is confined to read-only inspection plus orchestration
-# verbs; subagent tool calls (hook input carries agent_id/agent_type) pass.
+# advisor-mode orchestrator from implementing directly. While this session's
+# flag file exists, the MAIN agent's file writes are confined to its own
+# work-product paths and its Bash is confined to read-only inspection plus
+# orchestration verbs; subagent tool calls (hook input carries
+# agent_id/agent_type) pass. Per-session state itself (isolation between two
+# sessions, auto-on, GC, cleanup) is covered by test-advisor-session.sh.
 #
 # Exit-code contract under test: 2 = hard block, 0 = allowed.
 #
@@ -18,6 +20,9 @@ POSTURE="${MODULE_ROOT}/hooks/advisor-posture.py"
 
 PASS=0
 FAIL=0
+
+# Every hook input below carries this session id; the flag lives under it.
+SID=test-session-a
 
 # A leaked one-off hatch would silently flip every deny-case to allow.
 unset ADVISOR_DIRECT
@@ -43,21 +48,23 @@ file_json() {
     # $1 tool_name, $2 file_path, $3 optional extra top-level JSON fields
     local extra="${3:-}"
     if [ -n "${extra}" ]; then extra=",${extra}"; fi
-    printf '{"tool_name":"%s","tool_input":{"file_path":"%s"}%s}' "$1" "$2" "${extra}"
+    printf '{"tool_name":"%s","tool_input":{"file_path":"%s"},"session_id":"%s"%s}' \
+        "$1" "$2" "${SID}" "${extra}"
 }
 
 bash_json() {
     # $1 command (must not contain double quotes that break JSON; use jq-free escaping)
-    python3 - "$1" <<'PY'
+    python3 - "$1" "${SID}" <<'PY'
 import json, sys
-print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]},
+                  "session_id": sys.argv[2]}))
 PY
 }
 
 TMP=$(mktemp -d -t advisor-guard.XXXXXX)
 export HOME="${TMP}/home"
-mkdir -p "${HOME}/.claude" "${HOME}/code/plans" "${HOME}/code/docs" "${HOME}/code/repo/src"
-FLAG="${HOME}/.claude/advisor-mode"
+mkdir -p "${HOME}/.claude/advisor-mode" "${HOME}/code/plans" "${HOME}/code/docs" "${HOME}/code/repo/src"
+FLAG="${HOME}/.claude/advisor-mode/${SID}"
 REPO_FILE="${HOME}/code/repo/src/app.py"
 
 # ─── Mode off: everything passes ─────────────────────────────────────────────
@@ -86,10 +93,10 @@ assert_exit 0 "Write in legacy worktree path allowed" "$(file_json Write "${HOME
 assert_exit 0 "Write plan-mode file allowed" "$(file_json Write "${HOME}/code/repo/.claude/plans/plan.md")"
 assert_exit 2 "Write repo source denied" "$(file_json Write "${REPO_FILE}")"
 assert_exit 2 "MultiEdit repo source denied" "$(file_json MultiEdit "${REPO_FILE}")"
-assert_exit 2 "NotebookEdit repo denied" '{"tool_name":"NotebookEdit","tool_input":{"notebook_path":"'"${HOME}"'/code/repo/nb.ipynb"}}'
-assert_exit 2 "mcp write_file repo denied" '{"tool_name":"mcp__filesystem__write_file","tool_input":{"path":"'"${REPO_FILE}"'"}}'
-assert_exit 2 "mcp move_file dest repo denied" '{"tool_name":"mcp__filesystem__move_file","tool_input":{"source":"'"${HOME}"'/.claude/a.md","destination":"'"${REPO_FILE}"'"}}'
-assert_exit 0 "missing path fails open" '{"tool_name":"Write","tool_input":{}}'
+assert_exit 2 "NotebookEdit repo denied" '{"tool_name":"NotebookEdit","tool_input":{"notebook_path":"'"${HOME}"'/code/repo/nb.ipynb"},"session_id":"'"${SID}"'"}'
+assert_exit 2 "mcp write_file repo denied" '{"tool_name":"mcp__filesystem__write_file","tool_input":{"path":"'"${REPO_FILE}"'"},"session_id":"'"${SID}"'"}'
+assert_exit 2 "mcp move_file dest repo denied" '{"tool_name":"mcp__filesystem__move_file","tool_input":{"source":"'"${HOME}"'/.claude/a.md","destination":"'"${REPO_FILE}"'"},"session_id":"'"${SID}"'"}'
+assert_exit 0 "missing path fails open" '{"tool_name":"Write","tool_input":{},"session_id":"'"${SID}"'"}'
 assert_exit 0 "unparseable input fails open" 'not json'
 
 # Scratch space outside HOME (the session scratchpad lives under the temp root).
@@ -173,8 +180,8 @@ assert_exit 0 "plain sort in pipe allowed" "$(bash_json 'git diff --stat | sort 
 assert_exit 0 "git for-each-ref allowed" "$(bash_json 'git for-each-ref --contains HEAD')"
 assert_exit 0 "git cat-file allowed" "$(bash_json 'git cat-file -p HEAD')"
 assert_exit 0 "git merge-base allowed" "$(bash_json 'git merge-base HEAD origin/main')"
-assert_exit 0 "non-string command fails open" '{"tool_name":"Bash","tool_input":{"command":123}}'
-assert_exit 0 "non-string file_path fails open" '{"tool_name":"Write","tool_input":{"file_path":42}}'
+assert_exit 0 "non-string command fails open" '{"tool_name":"Bash","tool_input":{"command":123},"session_id":"'"${SID}"'"}'
+assert_exit 0 "non-string file_path fails open" '{"tool_name":"Write","tool_input":{"file_path":42},"session_id":"'"${SID}"'"}'
 
 # ─── Bash: redirection targets scoped to allowed roots ───────────────────────
 
@@ -193,7 +200,8 @@ assert_exit 0 "cp within plans allowed" "$(bash_json "cp ${HOME}/code/plans/a.md
 
 # ─── Posture hook ────────────────────────────────────────────────────────────
 
-posture_out_off=$(rm -f "${FLAG}"; printf '{}' | python3 "${POSTURE}" 2>/dev/null; echo "exit=$?")
+posture_json="{\"session_id\":\"${SID}\"}"
+posture_out_off=$(rm -f "${FLAG}"; printf '%s' "${posture_json}" | python3 "${POSTURE}" 2>/dev/null; echo "exit=$?")
 if printf '%s' "${posture_out_off}" | grep -q "advisor"; then
     FAIL=$((FAIL + 1)); echo "FAIL: posture silent when flag off"
 else
@@ -201,7 +209,7 @@ else
 fi
 
 touch "${FLAG}"
-posture_out_on=$(printf '{}' | python3 "${POSTURE}" 2>/dev/null)
+posture_out_on=$(printf '%s' "${posture_json}" | python3 "${POSTURE}" 2>/dev/null)
 if printf '%s' "${posture_out_on}" | grep -q "hookSpecificOutput" && printf '%s' "${posture_out_on}" | grep -qi "advisor mode"; then
     PASS=$((PASS + 1))
 else

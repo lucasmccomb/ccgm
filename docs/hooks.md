@@ -314,9 +314,11 @@ Hard gate against work on a repo's default branch (main/master, per `origin/HEAD
 **Module**: advisor-mode
 **Can block**: Yes (exit 2 — survives bypass mode)
 
-Hard gate for advisor mode: while `~/.claude/advisor-mode` exists, the MAIN agent cannot implement — file edits are confined to orchestrator work-product paths (`~/.claude/`, temp/scratchpad roots, `~/code/plans/`, `~/code/docs/`, worktree checkouts, plan-mode plan files) and Bash is default-deny outside read-only inspection plus orchestration verbs (read-only git; `checkout`/`switch`/`pull`/`fetch`/`worktree` lifecycle; `gh` PR/issue/run/label management including merge; redirection and scratch file-ops scoped to the allowed write roots). Subagent tool calls pass untouched — their hook input carries `agent_id`/`agent_type`, the main agent's does not. Discriminator drift is asymmetric: main-agent inputs gaining the fields makes the guard inert (fails open, visibly); subagent inputs losing them would deny subagents too — loud, and recoverable with `/advisor off`. Command/process substitution, shells, interpreters, and wrapper commands are denied outright. Every denial names the delegation recipe.
+Hard gate for advisor mode: while this session's flag `~/.claude/advisor-mode/<session_id>` exists, the MAIN agent cannot implement — file edits are confined to orchestrator work-product paths (`~/.claude/`, temp/scratchpad roots, `~/code/plans/`, `~/code/docs/`, worktree checkouts, plan-mode plan files) and Bash is default-deny outside read-only inspection plus orchestration verbs (read-only git; `checkout`/`switch`/`pull`/`fetch`/`worktree` lifecycle; `gh` PR/issue/run/label management including merge; redirection and scratch file-ops scoped to the allowed write roots). Subagent tool calls pass untouched — their hook input carries `agent_id`/`agent_type`, the main agent's does not. Discriminator drift is asymmetric: main-agent inputs gaining the fields makes the guard inert (fails open, visibly); subagent inputs losing them would deny subagents too — loud, and recoverable with `/advisor off`. Command/process substitution, shells, interpreters, and wrapper commands are denied outright. Every denial names the delegation recipe.
 
-**Exemptions**: flag file absent (mode off), subagent calls, `ADVISOR_DIRECT=1` (env or inline), unparseable input and missing paths (fail open).
+State is per session: the flag is keyed by the hook input's `session_id` (`CLAUDE_CODE_SESSION_ID` as the fallback), so one session's mode never binds another's.
+
+**Exemptions**: this session's flag absent (mode off), subagent calls, `ADVISOR_DIRECT=1` (env or inline), unparseable input, missing paths, and input with no resolvable session id (all fail open).
 
 ---
 
@@ -326,7 +328,29 @@ Hard gate for advisor mode: while `~/.claude/advisor-mode` exists, the MAIN agen
 **Module**: advisor-mode
 **Can block**: No
 
-While the advisor-mode flag exists, injects a short per-turn posture reminder (`additionalContext`): the session is an orchestrator — spec, delegate to implementers, review via separate agents, triage, merge; trivial or conversational turns are answered directly; a guard denial means delegate, never shell-trick around it. One `stat()` per prompt when the mode is off. The guard enforces; this injection is what keeps the model delegating instead of fighting denials.
+While this session's advisor-mode flag (`~/.claude/advisor-mode/<session_id>`) exists, injects a short per-turn posture reminder (`additionalContext`): the session is an orchestrator — spec, delegate to implementers, review via separate agents, triage, merge; trivial or conversational turns are answered directly; a guard denial means delegate, never shell-trick around it. The injection also names this session's id and flag path, which is what `/advisor` reads when `CLAUDE_CODE_SESSION_ID` is not in the environment. One `stat()` per prompt when the mode is off. The guard enforces; this injection is what keeps the model delegating instead of fighting denials.
+
+---
+
+### advisor-session-start.py
+
+**Type**: SessionStart (startup, resume, clear)
+**Module**: advisor-mode
+**Can block**: No (state only — writes no context)
+
+Creates this session's advisor-mode flag (`~/.claude/advisor-mode/<session_id>`, content `on <UTC timestamp>`), so every session starts in the delegation posture. An existing flag keeps its original timestamp. Also migrates the legacy machine-global state (a regular file at `~/.claude/advisor-mode`) away on first run, and garbage-collects flags whose session is gone: no transcript under `~/.claude/projects/*/<session_id>.jsonl` and the flag older than an hour (the grace period spares a session that has not written its transcript yet), or a transcript untouched for more than three days. The current session's flag is never swept.
+
+**Opt out of the auto-on**: `CCGM_ADVISOR_AUTO=false` in the environment or `~/.claude/.ccgm.env` (environment wins; unset means on). Garbage collection still runs. `source == "compact"` also skips the auto-on, so compaction never re-enables a mode the session turned off with `/advisor off`.
+
+---
+
+### advisor-session-end.py
+
+**Type**: SessionEnd
+**Module**: advisor-mode
+**Can block**: No
+
+Removes this session's advisor-mode flag when the session ends, so the state directory does not fill with dead sessions. A session that dies without firing SessionEnd is swept later by `advisor-session-start.py`.
 
 ---
 
