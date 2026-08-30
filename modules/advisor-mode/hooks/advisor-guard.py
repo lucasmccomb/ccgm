@@ -52,6 +52,13 @@ ALLOWS:
     guard goes inert and visibly denies nothing, instead of denying every
     session at once)
 
+Command substitution (`$(...)`, backticks) is checked recursively: the
+inner command runs through this same allowlist, so `echo "$(git rev-parse
+HEAD)"` passes while `echo $(git commit -m x)` is denied. Process
+substitution stays denied outright. Shell grouping tokens (`{`, `(`) are
+structure, not commands. A known dev-tool binary is allowed when its only
+arguments are version/identity probes (`node -v`, `wrangler whoami`).
+
 KNOWN GAPS (documented in rules/advisor-mode.md): awk/heredoc bodies can
 smuggle writes past the segment scan; wrapper commands are denied outright
 rather than unwrapped (env/xargs/shells). Over-denial is the accepted
@@ -89,9 +96,39 @@ READ_ONLY = {
     "basename", "dirname", "realpath", "readlink", "shasum", "sha256sum",
     "md5", "cksum", "strings", "nl", "od", "hexdump", "xxd", "uname",
     "hostname", "id", "whoami", "type", "man", "cd", "awk", "comm", "tac",
+    "exit", "return", ":",
 }
 # find and sort are allowed too, but through flag-checked branches in
 # bash_segment_allowed (write/exec predicates and -o denied), not this set.
+
+# Dev-tool binaries that run builds, installs, and deploys — allowed only as
+# version/identity probes (every argument in PROBE_ARGS). `node build.js`,
+# `pnpm install`, and `wrangler deploy` stay denied.
+TOOL_PROBES = {
+    "node", "npm", "npx", "pnpm", "yarn", "bun", "deno", "python", "python3",
+    "pip", "pip3", "ruby", "gem", "bundle", "go", "cargo", "rustc", "java",
+    "swift", "xcodebuild", "docker", "kubectl", "terraform", "wrangler",
+    "supabase", "vercel", "netlify", "flyctl", "aws", "gcloud", "brew",
+    "make", "claude", "code",
+}
+PROBE_ARGS = {"-v", "-V", "--version", "-version", "version", "--help", "-h",
+              "whoami"}
+
+# Redirection words inside a segment (`2>&1`, `2>/dev/null`, `>>out`). Their
+# targets are path-checked by the redirect scan; the probe check ignores them
+# so `wrangler --version 2>&1` still reads as a bare probe.
+REDIRECT_TOKEN_RE = re.compile(r"^(\d*[<>]{1,2}&?\d*|&>{1,2})\S*$")
+
+# Substitution recursion: how deep `$( $( ... ) )` may nest before the command
+# is denied, and the word an already-checked substitution collapses to.
+MAX_SUBST_DEPTH = 4
+SUBST_PLACEHOLDER = "__SUBST__"
+
+BACKTICK_HINT = (
+    "Backticks inside a double-quoted argument are real command substitution "
+    "to the shell, markdown or not — pass long bodies with `--body-file` "
+    "(gh issue create / gh pr create)."
+)
 
 # Scratch file-ops: allowed only when every path argument resolves inside an
 # allowed write root.
@@ -353,8 +390,29 @@ def scratch_op_allowed(words):
     return True
 
 
+def strip_grouping(segment):
+    """Drop shell grouping tokens: `{ echo hi` reads as `echo hi`.
+
+    `{` and `(` are structure, not commands. What the group contains is still
+    checked as an ordinary segment, so `(git push)` reads as `git push` and
+    stays denied; a segment that was pure structure (a lone `}`) empties out.
+    """
+    s = segment.strip()
+    while s and s[0] in "{(":
+        s = s[1:].lstrip()
+    while s and s[-1] in "})":
+        s = s[:-1].rstrip()
+    return s
+
+
+def probe_segment_allowed(words):
+    """A dev-tool binary is allowed only as a version/identity probe."""
+    args = [w for w in words[1:] if not REDIRECT_TOKEN_RE.match(w)]
+    return bool(args) and all(a in PROBE_ARGS for a in args)
+
+
 def bash_segment_allowed(segment):
-    words = strip_env_assignments(segment.split())
+    words = strip_env_assignments(strip_grouping(segment).split())
     if not words:
         return True
     first = words[0]
@@ -382,28 +440,144 @@ def bash_segment_allowed(segment):
         return git_segment_allowed(words)
     if first == "gh":
         return gh_segment_allowed(words)
+    if first in TOOL_PROBES:
+        return probe_segment_allowed(words)
     return False
+
+
+def match_paren(cmd, i):
+    """Index of the `)` closing a `$(` whose body starts at i, or None."""
+    depth, quote, n = 1, None, len(cmd)
+    while i < n:
+        c = cmd[i]
+        if c == "\\" and quote != "'" and i + 1 < n:
+            i += 2
+            continue
+        if quote:
+            if c == quote:
+                quote = None
+            i += 1
+            continue
+        if c in ("'", '"'):
+            quote = c
+        elif c == "(":
+            depth += 1  # a nested $( counts through its own paren
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None
+
+
+def match_backtick(cmd, i):
+    """Index of the backtick closing one opened before i, or None."""
+    n = len(cmd)
+    while i < n:
+        if cmd[i] == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if cmd[i] == "`":
+            return i
+        i += 1
+    return None
+
+
+def find_substitutions(cmd):
+    """Outermost `$(...)` and backtick spans in the RAW command.
+
+    Returns (spans, unterminated); each span is
+    (start, end, inner_start, inner_end, kind).
+
+    This scans the raw string rather than the quote-masked one on purpose:
+    masking drops the `(` inside double quotes, so a masked scan misses
+    `"$(git commit -m x)"` — which the shell does expand.
+    """
+    spans = []
+    i, n, quote = 0, len(cmd), None
+    while i < n:
+        c = cmd[i]
+        if c == "\\" and quote != "'" and i + 1 < n:
+            i += 2
+            continue
+        if quote:
+            if c == quote:
+                quote = None
+                i += 1
+                continue
+            if quote == "'":
+                i += 1  # nothing expands in single quotes
+                continue
+        elif c in ("'", '"'):
+            quote = c
+            i += 1
+            continue
+        if c == "$" and i + 1 < n and cmd[i + 1] == "(":
+            end = match_paren(cmd, i + 2)
+            if end is None:
+                return spans, "dollar"
+            spans.append((i, end + 1, i + 2, end, "dollar"))
+            i = end + 1
+            continue
+        if c == "`":
+            end = match_backtick(cmd, i + 1)
+            if end is None:
+                return spans, "backtick"
+            spans.append((i, end + 1, i + 1, end, "backtick"))
+            i = end + 1
+            continue
+        i += 1
+    return spans, None
+
+
+def check_command(command, depth=0):
+    """None when the command is allowed, else the denial reason."""
+    masked = mask_quotes(command)
+    if "<(" in masked or ">(" in masked:
+        return ("process substitution is blocked for the main agent (the "
+                "inner command cannot be verified read-only). Split the "
+                "command, or delegate it.")
+    spans, unterminated = find_substitutions(command)
+    if unterminated == "dollar":
+        return ("this command has an unterminated `$(` substitution, so its "
+                "inner command cannot be checked. Split the command, or "
+                "delegate it.")
+    if unterminated == "backtick":
+        return ("this command has an unpaired backtick, so the substitution "
+                "it opens cannot be checked. " + BACKTICK_HINT)
+    if spans and depth >= MAX_SUBST_DEPTH:
+        return ("command substitution nests deeper than %d levels, past what "
+                "this gate checks. Split the command, or delegate it."
+                % MAX_SUBST_DEPTH)
+    for start, end, inner_start, inner_end, kind in reversed(spans):
+        reason = check_command(command[inner_start:inner_end], depth + 1)
+        if reason is not None:
+            if kind == "backtick":
+                return "inside a backtick substitution, %s %s" % (
+                    reason, BACKTICK_HINT)
+            return "inside a `$(...)` substitution, %s" % reason
+        # Checked and read-only: collapse it to a plain word so the outer
+        # scan reads it as an ordinary argument.
+        command = command[:start] + SUBST_PLACEHOLDER + command[end:]
+    if spans:
+        masked = mask_quotes(command)
+    ok, target = redirects_allowed(command, masked)
+    if not ok:
+        return ("redirecting output into `%s` writes outside the "
+                "orchestrator's work-product paths." % target)
+    for segment in split_segments(command, masked):
+        if not bash_segment_allowed(segment):
+            return ("`%s` is not on the orchestrator's read-only/"
+                    "orchestration allowlist." % segment.strip())
+    return None
 
 
 def check_bash(command):
     if re.search(r"\bADVISOR_DIRECT=1\b", command):
         return
-    masked = mask_quotes(command)
-    if "$(" in masked or "`" in masked or "<(" in masked or ">(" in masked:
-        hard_block(
-            "advisor mode: command/process substitution is blocked for the "
-            "main agent (the inner command cannot be verified read-only). "
-            "Split the command, or delegate it. " + RECIPE)
-    ok, target = redirects_allowed(command, masked)
-    if not ok:
-        hard_block(
-            "advisor mode: redirecting output into `%s` writes outside the "
-            "orchestrator's work-product paths. %s" % (target, RECIPE))
-    for segment in split_segments(command, masked):
-        if not bash_segment_allowed(segment):
-            hard_block(
-                "advisor mode: `%s` is not on the orchestrator's read-only/"
-                "orchestration allowlist. %s" % (segment.strip(), RECIPE))
+    reason = check_command(command)
+    if reason is not None:
+        hard_block("advisor mode: %s %s" % (reason, RECIPE))
 
 
 def check_file_tool(tool, tool_input):

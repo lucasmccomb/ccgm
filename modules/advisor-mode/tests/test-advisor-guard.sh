@@ -151,7 +151,8 @@ assert_exit 2 "gh repo delete denied" "$(bash_json 'gh repo delete o/r --yes')"
 assert_exit 2 "compound with commit denied" "$(bash_json 'git status && git commit -m x')"
 assert_exit 2 "pipe into tee denied" "$(bash_json 'echo x | tee src/app.py')"
 assert_exit 2 "command substitution denied" "$(bash_json 'echo $(git commit -m x)')"
-assert_exit 2 "backtick substitution denied" "$(bash_json 'echo `whoami`')"
+assert_exit 0 "backtick with read-only inner allowed" "$(bash_json 'echo `whoami`')"
+assert_exit 2 "backtick with mutating inner denied" "$(bash_json 'echo `git commit -m x`')"
 assert_exit 2 "xargs denied" "$(bash_json 'find . -name "*.tmp" | xargs rm')"
 assert_exit 2 "env wrapper denied" "$(bash_json 'env git commit -m x')"
 assert_exit 2 "unknown command denied" "$(bash_json 'terraform apply')"
@@ -197,6 +198,54 @@ assert_exit 0 "rm in tmp allowed" "$(bash_json 'rm -rf /tmp/advisor-scratch')"
 assert_exit 2 "rm in repo denied" "$(bash_json "rm ${HOME}/code/repo/src/app.py")"
 assert_exit 2 "mv into repo denied" "$(bash_json "mv /tmp/x.py ${HOME}/code/repo/src/x.py")"
 assert_exit 0 "cp within plans allowed" "$(bash_json "cp ${HOME}/code/plans/a.md ${HOME}/code/plans/b.md")"
+
+# ─── Bash: read-only recon (issue #1009) ─────────────────────────────────────
+
+# The two commands an /etp pre-flight was denied on. Every segment is a probe,
+# a grouping token, or a read-only git call.
+RECON_PROBES='node -v; pnpm -v 2>&1; wrangler --version 2>&1 | head -1; gh auth status 2>&1 | grep -E "Logged in|account" | head -2'
+RECON_WHOAMI='wrangler whoami 2>&1 | grep -E "Account|You are" | head -3'
+RECON_CD='cd ~/code/repo 2>&1 || { echo "NO SOURCE CLONE"; exit 0; }
+echo "origin/main = $(git rev-parse origin/main)"'
+assert_exit 0 "recon: tool-probe compound allowed" "$(bash_json "${RECON_PROBES}")"
+assert_exit 0 "recon: wrangler whoami pipeline allowed" "$(bash_json "${RECON_WHOAMI}")"
+assert_exit 0 "recon: brace-group fallback + rev-parse allowed" "$(bash_json "${RECON_CD}")"
+
+# Tool version/identity probes.
+assert_exit 0 "node -v allowed" "$(bash_json 'node -v')"
+assert_exit 0 "pnpm -v allowed" "$(bash_json 'pnpm -v')"
+assert_exit 0 "wrangler --version allowed" "$(bash_json 'wrangler --version')"
+assert_exit 0 "wrangler whoami allowed" "$(bash_json 'wrangler whoami')"
+assert_exit 0 "python3 --version allowed" "$(bash_json 'python3 --version')"
+assert_exit 0 "xcodebuild -version allowed" "$(bash_json 'xcodebuild -version')"
+assert_exit 2 "node script denied" "$(bash_json 'node build.js')"
+assert_exit 2 "pnpm install denied" "$(bash_json 'pnpm install')"
+assert_exit 2 "wrangler deploy denied" "$(bash_json 'wrangler deploy')"
+assert_exit 2 "python3 -c denied" "$(bash_json 'python3 -c "print(1)"')"
+assert_exit 2 "docker run denied" "$(bash_json 'docker run x')"
+assert_exit 2 "bare node denied" "$(bash_json 'node')"
+
+# Grouping tokens are structure, not commands.
+assert_exit 0 "brace group with exit allowed" "$(bash_json '{ echo hi; exit 0; }')"
+assert_exit 2 "brace group with commit denied" "$(bash_json '{ git commit -m x; }')"
+assert_exit 0 "subshell git status allowed" "$(bash_json '(git status)')"
+assert_exit 2 "subshell git push denied" "$(bash_json '(git push)')"
+assert_exit 0 "lone closing brace allowed" "$(bash_json '}')"
+assert_exit 0 "no-op colon allowed" "$(bash_json ':')"
+
+# Substitution: allowed when every inner command is itself allowlisted.
+assert_exit 0 "substitution with read-only inner allowed" "$(bash_json 'echo "x = $(git rev-parse HEAD)"')"
+assert_exit 0 "nested substitution allowed" "$(bash_json 'echo $(dirname $(realpath x))')"
+assert_exit 0 "backtick date allowed" "$(bash_json 'echo `date`')"
+assert_exit 0 "single-quoted substitution is literal" "$(bash_json "echo '\$(git commit -m x)'")"
+assert_exit 2 "substitution as the command word denied" "$(bash_json 'echo x && $(dirname $(realpath x))')"
+assert_exit 2 "double-quoted mutating substitution denied" "$(bash_json 'echo "$(git commit -m x)"')"
+assert_exit 2 "outer redirect after substitution denied" "$(bash_json "\$(cat f) > ${HOME}/code/repo/out.txt")"
+assert_exit 2 "redirect inside substitution denied" "$(bash_json "echo \$(echo x > ${HOME}/code/repo/f)")"
+assert_exit 2 "process substitution denied" "$(bash_json 'diff <(git status) f')"
+assert_exit 2 "unbalanced substitution denied" "$(bash_json 'echo $(git status')"
+assert_exit 2 "unpaired backtick denied" "$(bash_json 'gh issue create --body "a `b"')"
+assert_exit 2 "substitution nested past the cap denied" "$(bash_json 'echo $(echo $(echo $(echo $(echo $(date)))))')"
 
 # ─── Posture hook ────────────────────────────────────────────────────────────
 
