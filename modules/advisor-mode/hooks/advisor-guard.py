@@ -52,6 +52,26 @@ ALLOWS:
     guard goes inert and visibly denies nothing, instead of denying every
     session at once)
 
+Command substitution (`$(...)`, backticks) is checked recursively: the
+inner command runs through this same allowlist, so `echo "$(git rev-parse
+HEAD)"` passes while `echo $(git commit -m x)` is denied. A backtick body is
+unescaped first, the way the shell does before running it, so a nested
+`\\`...\\`` is checked rather than read as literal text. A verified span
+collapses to SUBST_PLACEHOLDER, which only a READ_ONLY command may take as an
+argument — knowing the inner command is read-only says nothing about whether
+its OUTPUT is a dangerous flag (`sed $(echo -i)`). Process substitution stays
+denied outright. Shell grouping tokens (`{`, `(`) are structure, not
+commands. A known dev-tool binary is allowed when its only arguments are
+version/identity probes (`node -v`, `wrangler whoami`).
+
+One quote/escape rule serves mask_quotes, find_substitutions and
+match_paren: scan_states() is their shared scanner, and a backslash escapes
+the next character everywhere except inside single quotes. Earlier versions
+carried that rule in three places, and both holes found in review were those
+copies disagreeing. match_backtick keeps its own escape loop and tracks no
+quote state — the shell's rule for a backtick span, applied with the unescape
+step above.
+
 KNOWN GAPS (documented in rules/advisor-mode.md): awk/heredoc bodies can
 smuggle writes past the segment scan; wrapper commands are denied outright
 rather than unwrapped (env/xargs/shells). Over-denial is the accepted
@@ -89,9 +109,58 @@ READ_ONLY = {
     "basename", "dirname", "realpath", "readlink", "shasum", "sha256sum",
     "md5", "cksum", "strings", "nl", "od", "hexdump", "xxd", "uname",
     "hostname", "id", "whoami", "type", "man", "cd", "awk", "comm", "tac",
+    "exit", "return", ":",
 }
 # find and sort are allowed too, but through flag-checked branches in
 # bash_segment_allowed (write/exec predicates and -o denied), not this set.
+
+# Dev-tool binaries that run builds, installs, and deploys — allowed only as
+# version/identity probes (every argument in PROBE_ARGS). `node build.js`,
+# `pnpm install`, and `wrangler deploy` stay denied.
+TOOL_PROBES = {
+    "node", "npm", "npx", "pnpm", "yarn", "bun", "deno", "python", "python3",
+    "pip", "pip3", "ruby", "gem", "bundle", "go", "cargo", "rustc", "java",
+    "swift", "xcodebuild", "docker", "kubectl", "terraform", "wrangler",
+    "supabase", "vercel", "netlify", "flyctl", "aws", "gcloud", "brew",
+    "make", "claude", "code",
+}
+PROBE_ARGS = {"-v", "-V", "--version", "-version", "version", "--help", "-h",
+              "whoami"}
+
+# Redirection words inside a segment (`2>&1`, `2>/dev/null`, `>>out`). Their
+# targets are path-checked by the redirect scan; the probe check ignores them
+# so `wrangler --version 2>&1` still reads as a bare probe.
+REDIRECT_TOKEN_RE = re.compile(r"^(\d*[<>]{1,2}&?\d*|&>{1,2})\S*$")
+
+# Substitution recursion: how deep `$( $( ... ) )` may nest before the command
+# is denied, and the word an already-checked substitution collapses to.
+MAX_SUBST_DEPTH = 4
+SUBST_PLACEHOLDER = "__SUBST__"
+SUBST_PREFIX = "inside a substitution"
+
+# The shell removes one level of backslash from a backtick body before
+# running it, so a checker must do the same before reading the body.
+BACKTICK_UNESCAPE_RE = re.compile(r"\\([\\`$])")
+
+SUBST_ARG_REASON = (
+    "a `$(...)` or backtick substitution is used as an argument to a command "
+    "that is not read-only, and the guard cannot check what it expands to — "
+    "an inner command that only reads says nothing about whether its output "
+    "is a flag like `-i` or a path. Run the substitution on its own and "
+    "inline the value it printed, or delegate the command."
+)
+
+SUBST_TARGET_REASON = (
+    "a `$(...)` or backtick substitution is used as a redirect target, so the "
+    "guard cannot check where the output would land. Run the substitution on "
+    "its own and inline the path it printed, or delegate the command."
+)
+
+BACKTICK_HINT = (
+    "Backticks inside a double-quoted argument are real command substitution "
+    "to the shell, markdown or not — pass long bodies with `--body-file` "
+    "(gh issue create / gh pr create)."
+)
 
 # Scratch file-ops: allowed only when every path argument resolves inside an
 # allowed write root.
@@ -187,6 +256,10 @@ def path_allowed(raw_path):
     """True when the path is an orchestrator work-product location."""
     if not raw_path or not isinstance(raw_path, str):
         return True  # fail open: nothing to judge
+    if SUBST_PLACEHOLDER in raw_path:
+        # The path is a substitution's output, so it cannot be resolved and
+        # checked. Covers scratch-op arguments and redirect targets alike.
+        return False
     path = os.path.realpath(os.path.expanduser(
         os.path.expandvars(raw_path.strip().strip("'\""))))
     marked = path if path.endswith("/") else path + "/"
@@ -201,35 +274,66 @@ def path_allowed(raw_path):
     return any(path == t or path.startswith(t + os.sep) for t in tmp_roots)
 
 
+def scan_states(cmd):
+    """Per-character `(quote, escaped)` for `cmd` — the file's only scanner.
+
+    `quote` is the quoted span a character belongs to (None, `'` or `"`),
+    delimiters included, so every character of `"a"` reports `"`. `escaped`
+    is True for a backslash that escapes and for the character it escapes,
+    under one rule: a backslash escapes the next character everywhere except
+    inside single quotes, where nothing escapes.
+
+    Yielded lazily so a caller that stops early pays only for what it read;
+    find_substitutions, which needs to jump over spans, materializes a list.
+
+    mask_quotes, find_substitutions and match_paren all read these states.
+    Keeping the rule here is the point: when each of them carried its own
+    copy, `mask_quotes` disagreed with the span finder about `\\"` and a
+    trailing command went unchecked (issue #1012), and `match_backtick`
+    disagreed about `\\`` and a nested command ran unchecked.
+    """
+    quote = None
+    i, n = 0, len(cmd)
+    while i < n:
+        c = cmd[i]
+        if quote == "'":
+            yield ("'", False)
+            if c == "'":
+                quote = None
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            yield (quote, True)
+            yield (quote, True)
+            i += 2
+            continue
+        if quote is None and c in ("'", '"'):
+            quote = c
+        elif c == quote:
+            yield (quote, False)
+            quote = None
+            i += 1
+            continue
+        yield (quote, False)
+        i += 1
+
+
 def mask_quotes(cmd):
     """Replace quoted spans with spaces so metacharacter scans skip them.
 
     Single-quoted spans are fully masked (the shell treats them literally).
-    Double-quoted spans are masked except `$` and backtick, which still
-    expand inside double quotes and must stay visible to the scans.
+    Double-quoted spans are masked except an unescaped `$` or backtick, which
+    still expand there and must stay visible to the scans. An escape pair is
+    masked wherever it sits — an escaped `$` expands nothing.
     """
     out = []
-    i, n = 0, len(cmd)
-    while i < n:
-        c = cmd[i]
-        if c == "\\" and i + 1 < n:
-            out.append("  ")
-            i += 2
-            continue
-        if c in ("'", '"'):
-            quote = c
+    for c, (quote, escaped) in zip(cmd, scan_states(cmd)):
+        if escaped or quote == "'":
             out.append(" ")
-            i += 1
-            while i < n and cmd[i] != quote:
-                keep = quote == '"' and cmd[i] in ("$", "`")
-                out.append(cmd[i] if keep else " ")
-                i += 1
-            if i < n:
-                out.append(" ")
-                i += 1
-            continue
-        out.append(c)
-        i += 1
+        elif quote == '"':
+            out.append(c if c in ("$", "`") else " ")
+        else:
+            out.append(c)
     return "".join(out)
 
 
@@ -353,12 +457,56 @@ def scratch_op_allowed(words):
     return True
 
 
+def strip_grouping(segment):
+    """Drop shell grouping tokens: `{ echo hi` reads as `echo hi`.
+
+    `{` and `(` are structure, not commands. What the group contains is still
+    checked as an ordinary segment, so `(git push)` reads as `git push` and
+    stays denied; a segment that was pure structure (a lone `}`) empties out.
+    """
+    s = segment.strip()
+    while s and s[0] in "{(":
+        s = s[1:].lstrip()
+    while s and s[-1] in "})":
+        s = s[:-1].rstrip()
+    return s
+
+
+def probe_segment_allowed(words):
+    """A dev-tool binary is allowed only as a version/identity probe."""
+    args = [w for w in words[1:] if not REDIRECT_TOKEN_RE.match(w)]
+    return bool(args) and all(a in PROBE_ARGS for a in args)
+
+
+def placeholder_misuse(segment):
+    """True when a checked substitution stands in for an argument to a
+    command that is not read-only.
+
+    A verified substitution collapses to a placeholder, and the shell
+    word-splits its output into real argv: `sed $(echo -i) …` IS `sed -i …`.
+    Checking the inner command read-only says nothing about its output, so
+    only plain read-only consumers may take one — every branch in
+    bash_segment_allowed decides on literal argument text (`-i`, `-delete`,
+    `-o`, `-X`, a path) that a placeholder silently slips past.
+
+    The deny decision and its message both read this, so the message can name
+    what actually happened instead of quoting a token the user never typed.
+    """
+    words = strip_env_assignments(strip_grouping(segment).split())
+    if not words:
+        return False
+    first = words[0].rsplit("/", 1)[-1]
+    return first not in READ_ONLY and any(SUBST_PLACEHOLDER in w for w in words)
+
+
 def bash_segment_allowed(segment):
-    words = strip_env_assignments(segment.split())
+    words = strip_env_assignments(strip_grouping(segment).split())
     if not words:
         return True
     first = words[0]
     first = first.rsplit("/", 1)[-1]  # /usr/bin/git → git
+    if placeholder_misuse(segment):
+        return False
     if first == "sed":
         # -i in any form: bare, with attached suffix (-i.bak), inside a
         # single-dash flag cluster (-ni), or --in-place[=suffix].
@@ -382,28 +530,157 @@ def bash_segment_allowed(segment):
         return git_segment_allowed(words)
     if first == "gh":
         return gh_segment_allowed(words)
+    if first in TOOL_PROBES:
+        return probe_segment_allowed(words)
     return False
+
+
+def match_paren(cmd, start):
+    """Index of the `)` closing a `$(` whose body starts at `start`, or None.
+
+    The body is scanned on its own states: quoting restarts inside a
+    substitution, so `echo $(echo ")")` ends at the last paren, not the
+    quoted one.
+    """
+    body = cmd[start:]
+    depth = 1
+    for j, (c, (quote, escaped)) in enumerate(zip(body, scan_states(body))):
+        # scan_states is lazy, so this stops at the closing paren rather than
+        # scanning the rest of the command for every span.
+        if escaped or quote is not None:
+            continue
+        if c == "(":
+            depth += 1  # a nested $( counts through its own paren
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return start + j
+    return None
+
+
+def match_backtick(cmd, i):
+    """Index of the backtick closing one opened before i, or None.
+
+    Escaped backticks are skipped, because that is how the shell finds the
+    end of the span — which means the body this delimits still holds those
+    escapes. A caller must unescape the body (BACKTICK_UNESCAPE_RE) before
+    checking it, or a nested `\\`…\\`` reads as literal text while the shell
+    runs it.
+    """
+    n = len(cmd)
+    while i < n:
+        if cmd[i] == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if cmd[i] == "`":
+            return i
+        i += 1
+    return None
+
+
+def find_substitutions(cmd):
+    """Outermost `$(...)` and backtick spans in the RAW command.
+
+    Returns (spans, unterminated); each span is
+    (start, end, inner_start, inner_end, kind).
+
+    This scans the raw string rather than the quote-masked one on purpose:
+    masking drops the `(` inside double quotes, so a masked scan misses
+    `"$(git commit -m x)"` — which the shell does expand.
+    """
+    spans = []
+    states = list(scan_states(cmd))  # indexed: this loop jumps over spans
+    i, n = 0, len(cmd)
+    while i < n:
+        quote, escaped = states[i]
+        if escaped or quote == "'":
+            i += 1  # nothing expands in single quotes, or when escaped
+            continue
+        c = cmd[i]
+        if c == "$" and i + 1 < n and cmd[i + 1] == "(":
+            end = match_paren(cmd, i + 2)
+            if end is None:
+                return spans, "dollar"
+            kind = "arith" if cmd[i + 2:i + 3] == "(" else "dollar"
+            spans.append((i, end + 1, i + 2, end, kind))
+            i = end + 1
+            continue
+        if c == "`":
+            end = match_backtick(cmd, i + 1)
+            if end is None:
+                return spans, "backtick"
+            spans.append((i, end + 1, i + 1, end, "backtick"))
+            i = end + 1
+            continue
+        i += 1
+    return spans, None
+
+
+def check_command(command, depth=0):
+    """None when the command is allowed, else the denial reason."""
+    masked = mask_quotes(command)
+    if "<(" in masked or ">(" in masked:
+        return ("process substitution is blocked for the main agent (the "
+                "inner command cannot be verified read-only). Split the "
+                "command, or delegate it.")
+    spans, unterminated = find_substitutions(command)
+    if unterminated == "dollar":
+        return ("this command has an unterminated `$(` substitution, so its "
+                "inner command cannot be checked. Split the command, or "
+                "delegate it.")
+    if unterminated == "backtick":
+        return ("this command has an unpaired backtick, so the substitution "
+                "it opens cannot be checked. " + BACKTICK_HINT)
+    if spans and depth >= MAX_SUBST_DEPTH:
+        return ("command substitution nests deeper than %d levels, past what "
+                "this gate checks. Split the command, or delegate it."
+                % MAX_SUBST_DEPTH)
+    for start, end, inner_start, inner_end, kind in reversed(spans):
+        if kind == "arith":
+            return ("arithmetic expansion `$((...))` is not checked by this "
+                    "gate — its body can carry a command substitution. "
+                    "Compute the value another way, or delegate the command.")
+        inner = command[inner_start:inner_end]
+        if kind == "backtick":
+            # The shell strips one level of backslash before running a
+            # backtick body, so `\\`` in there opens a real nested
+            # substitution. Unescape first or the nested command is read as
+            # literal text and never checked.
+            inner = BACKTICK_UNESCAPE_RE.sub(r"\1", inner)
+        reason = check_command(inner, depth + 1)
+        if reason is not None:
+            if not reason.startswith(SUBST_PREFIX):
+                reason = "%s %d level%s deep, %s" % (
+                    SUBST_PREFIX, depth + 1, "" if depth == 0 else "s", reason)
+            if kind == "backtick" and BACKTICK_HINT not in reason:
+                reason = "%s %s" % (reason, BACKTICK_HINT)
+            return reason
+        # Checked and read-only: collapse it to a plain word so the outer
+        # scan reads it as an ordinary argument.
+        command = command[:start] + SUBST_PLACEHOLDER + command[end:]
+    if spans:
+        masked = mask_quotes(command)
+    ok, target = redirects_allowed(command, masked)
+    if not ok:
+        if SUBST_PLACEHOLDER in target:
+            return SUBST_TARGET_REASON
+        return ("redirecting output into `%s` writes outside the "
+                "orchestrator's work-product paths." % target)
+    for segment in split_segments(command, masked):
+        if not bash_segment_allowed(segment):
+            if placeholder_misuse(segment):
+                return SUBST_ARG_REASON
+            return ("`%s` is not on the orchestrator's read-only/"
+                    "orchestration allowlist." % segment.strip())
+    return None
 
 
 def check_bash(command):
     if re.search(r"\bADVISOR_DIRECT=1\b", command):
         return
-    masked = mask_quotes(command)
-    if "$(" in masked or "`" in masked or "<(" in masked or ">(" in masked:
-        hard_block(
-            "advisor mode: command/process substitution is blocked for the "
-            "main agent (the inner command cannot be verified read-only). "
-            "Split the command, or delegate it. " + RECIPE)
-    ok, target = redirects_allowed(command, masked)
-    if not ok:
-        hard_block(
-            "advisor mode: redirecting output into `%s` writes outside the "
-            "orchestrator's work-product paths. %s" % (target, RECIPE))
-    for segment in split_segments(command, masked):
-        if not bash_segment_allowed(segment):
-            hard_block(
-                "advisor mode: `%s` is not on the orchestrator's read-only/"
-                "orchestration allowlist. %s" % (segment.strip(), RECIPE))
+    reason = check_command(command)
+    if reason is not None:
+        hard_block("advisor mode: %s %s" % (reason, RECIPE))
 
 
 def check_file_tool(tool, tool_input):

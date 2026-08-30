@@ -151,7 +151,8 @@ assert_exit 2 "gh repo delete denied" "$(bash_json 'gh repo delete o/r --yes')"
 assert_exit 2 "compound with commit denied" "$(bash_json 'git status && git commit -m x')"
 assert_exit 2 "pipe into tee denied" "$(bash_json 'echo x | tee src/app.py')"
 assert_exit 2 "command substitution denied" "$(bash_json 'echo $(git commit -m x)')"
-assert_exit 2 "backtick substitution denied" "$(bash_json 'echo `whoami`')"
+assert_exit 0 "backtick with read-only inner allowed" "$(bash_json 'echo `whoami`')"
+assert_exit 2 "backtick with mutating inner denied" "$(bash_json 'echo `git commit -m x`')"
 assert_exit 2 "xargs denied" "$(bash_json 'find . -name "*.tmp" | xargs rm')"
 assert_exit 2 "env wrapper denied" "$(bash_json 'env git commit -m x')"
 assert_exit 2 "unknown command denied" "$(bash_json 'terraform apply')"
@@ -197,6 +198,166 @@ assert_exit 0 "rm in tmp allowed" "$(bash_json 'rm -rf /tmp/advisor-scratch')"
 assert_exit 2 "rm in repo denied" "$(bash_json "rm ${HOME}/code/repo/src/app.py")"
 assert_exit 2 "mv into repo denied" "$(bash_json "mv /tmp/x.py ${HOME}/code/repo/src/x.py")"
 assert_exit 0 "cp within plans allowed" "$(bash_json "cp ${HOME}/code/plans/a.md ${HOME}/code/plans/b.md")"
+
+# ─── Bash: read-only recon (issue #1009) ─────────────────────────────────────
+
+# The two commands an /etp pre-flight was denied on. Every segment is a probe,
+# a grouping token, or a read-only git call.
+RECON_PROBES='node -v; pnpm -v 2>&1; wrangler --version 2>&1 | head -1; gh auth status 2>&1 | grep -E "Logged in|account" | head -2'
+RECON_WHOAMI='wrangler whoami 2>&1 | grep -E "Account|You are" | head -3'
+RECON_CD='cd ~/code/repo 2>&1 || { echo "NO SOURCE CLONE"; exit 0; }
+echo "origin/main = $(git rev-parse origin/main)"'
+assert_exit 0 "recon: tool-probe compound allowed" "$(bash_json "${RECON_PROBES}")"
+assert_exit 0 "recon: wrangler whoami pipeline allowed" "$(bash_json "${RECON_WHOAMI}")"
+assert_exit 0 "recon: brace-group fallback + rev-parse allowed" "$(bash_json "${RECON_CD}")"
+
+# Tool version/identity probes.
+assert_exit 0 "node -v allowed" "$(bash_json 'node -v')"
+assert_exit 0 "pnpm -v allowed" "$(bash_json 'pnpm -v')"
+assert_exit 0 "wrangler --version allowed" "$(bash_json 'wrangler --version')"
+assert_exit 0 "wrangler whoami allowed" "$(bash_json 'wrangler whoami')"
+assert_exit 0 "python3 --version allowed" "$(bash_json 'python3 --version')"
+assert_exit 0 "xcodebuild -version allowed" "$(bash_json 'xcodebuild -version')"
+assert_exit 2 "node script denied" "$(bash_json 'node build.js')"
+assert_exit 2 "pnpm install denied" "$(bash_json 'pnpm install')"
+assert_exit 2 "wrangler deploy denied" "$(bash_json 'wrangler deploy')"
+assert_exit 2 "python3 -c denied" "$(bash_json 'python3 -c "print(1)"')"
+assert_exit 2 "docker run denied" "$(bash_json 'docker run x')"
+assert_exit 2 "bare node denied" "$(bash_json 'node')"
+
+# Grouping tokens are structure, not commands.
+assert_exit 0 "brace group with exit allowed" "$(bash_json '{ echo hi; exit 0; }')"
+assert_exit 2 "brace group with commit denied" "$(bash_json '{ git commit -m x; }')"
+assert_exit 0 "subshell git status allowed" "$(bash_json '(git status)')"
+assert_exit 2 "subshell git push denied" "$(bash_json '(git push)')"
+assert_exit 0 "lone closing brace allowed" "$(bash_json '}')"
+assert_exit 0 "no-op colon allowed" "$(bash_json ':')"
+
+# Substitution: allowed when every inner command is itself allowlisted.
+assert_exit 0 "substitution with read-only inner allowed" "$(bash_json 'echo "x = $(git rev-parse HEAD)"')"
+assert_exit 0 "nested substitution allowed" "$(bash_json 'echo $(dirname $(realpath x))')"
+assert_exit 0 "backtick date allowed" "$(bash_json 'echo `date`')"
+assert_exit 0 "single-quoted substitution is literal" "$(bash_json "echo '\$(git commit -m x)'")"
+assert_exit 2 "substitution as the command word denied" "$(bash_json 'echo x && $(dirname $(realpath x))')"
+assert_exit 2 "double-quoted mutating substitution denied" "$(bash_json 'echo "$(git commit -m x)"')"
+assert_exit 2 "outer redirect after substitution denied" "$(bash_json "\$(cat f) > ${HOME}/code/repo/out.txt")"
+assert_exit 2 "redirect inside substitution denied" "$(bash_json "echo \$(echo x > ${HOME}/code/repo/f)")"
+assert_exit 2 "process substitution denied" "$(bash_json 'diff <(git status) f')"
+assert_exit 2 "unbalanced substitution denied" "$(bash_json 'echo $(git status')"
+assert_exit 2 "unpaired backtick denied" "$(bash_json 'gh issue create --body "a `b"')"
+assert_exit 2 "substitution nested past the cap denied" "$(bash_json 'echo $(echo $(echo $(echo $(echo $(date)))))')"
+
+# Review round 1 — holes the reviewer reproduced with real side effects.
+
+# P0-1: the shell strips one backslash level from a backtick body, so `\`` in
+# there opens a real nested substitution the guard must follow.
+assert_exit 2 "nested escaped backticks denied" "$(bash_json 'echo `echo \`git commit -m x\``')"
+assert_exit 2 "nested escaped backticks touch denied" "$(bash_json 'echo `echo \`touch ~/code/repo/pwn\``')"
+assert_exit 2 "nested escaped backticks sed -i denied" "$(bash_json 'echo `echo \`sed -i s/a/b/ ~/code/repo/f\``')"
+assert_exit 2 "three-deep escaped backticks denied" "$(bash_json 'echo `echo \`echo \\\`git commit -m x\\\`\``')"
+# $( ) does not strip backslashes, so the inner command never runs there.
+assert_exit 0 "escaped backtick inside \$( ) allowed" "$(bash_json 'echo $(echo \`git commit -m x\`)')"
+
+# P0-2: the shell word-splits a substitution's output into real argv, so a
+# collapsed span must not stand in for an argument any check reads literally.
+assert_exit 2 "substitution as sed flag denied" "$(bash_json 'sed $(echo -i) s/a/b/ ~/code/repo/f')"
+assert_exit 2 "substitution as sed long flag denied" "$(bash_json 'sed $(echo --in-place) s/a/b/ ~/code/repo/f')"
+assert_exit 2 "backtick as sed flag denied" "$(bash_json 'sed `echo -i` s/a/b/ ~/code/repo/f')"
+assert_exit 2 "substitution as find predicate denied" "$(bash_json 'find . $(echo -delete)')"
+assert_exit 2 "substitution as find -exec denied" "$(bash_json 'find . $(echo -exec) rm {} +')"
+assert_exit 2 "substitution as sort -o denied" "$(bash_json 'sort $(echo -o) ~/code/repo/f ~/code/repo/g')"
+assert_exit 2 "substitution as gh api flag denied" "$(bash_json 'gh api repos/o/r/issues/1 $(echo -X) DELETE')"
+assert_exit 2 "substitution as scratch-op path denied" "$(bash_json 'rm $(echo ~/code/repo/f)')"
+assert_exit 2 "substitution as redirect target denied" "$(bash_json 'echo hi > $(echo ~/code/repo/pwn)')"
+assert_exit 2 "substitution as git subcommand denied" "$(bash_json 'git $(echo push)')"
+# The guard against over-correcting back into #1009: read-only consumers keep
+# taking a checked substitution as an argument.
+assert_exit 0 "substitution as echo argument allowed" "$(bash_json 'echo $(git rev-parse HEAD)')"
+
+# P0-3 (issue #1012): a backslash escapes inside double quotes too, so an
+# escaped quote can no longer close the span early and hide what follows.
+assert_exit 2 "escaped quote then commit denied" "$(bash_json 'echo "\"" ; git commit -m x')"
+assert_exit 2 "escaped quote mid-word then commit denied" "$(bash_json 'echo "a\"b" ; git commit -m x')"
+assert_exit 2 "escaped quote then repo write denied" "$(bash_json 'echo "\"" ; touch ~/code/repo/pwn')"
+assert_exit 2 "escaped backslash then commit denied" "$(bash_json 'echo "\\" ; git commit -m x')"
+assert_exit 0 "escaped backslash then status allowed" "$(bash_json 'echo "\\"; git status')"
+assert_exit 2 "apostrophe in double quotes still splits" "$(bash_json "echo \"it's\" ; git commit -m x")"
+assert_exit 0 "backslash in single quotes is literal" "$(bash_json "echo 'a\\' ; git status")"
+
+# P2-2: arithmetic expansion is denied, with a message about arithmetic
+# rather than one claiming the arithmetic body is an unknown command.
+arith_err=$(printf '%s' "$(bash_json 'echo $((1+1))')" | python3 "${GUARD}" 2>&1 >/dev/null)
+arith_rc=$?
+if [ "${arith_rc}" = "2" ] && printf '%s' "${arith_err}" | grep -qi "arithmetic"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: arithmetic expansion denied with its own message"
+    echo "  exit: ${arith_rc}"
+    echo "  got:  ${arith_err}"
+fi
+
+# Nit: a nested denial names its depth once instead of repeating the phrase.
+nest_err=$(printf '%s' "$(bash_json 'echo $(echo $(git commit -m x))')" | python3 "${GUARD}" 2>&1 >/dev/null)
+if [ "$(printf '%s' "${nest_err}" | grep -c 'inside a substitution')" = "1" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: nested denial reason names its depth once"
+    echo "  got: ${nest_err}"
+fi
+
+# Review round 2 — pins for rules the suite could not catch regressing.
+
+# R1-c: the round-1 redirect case passed cwd-dependently — with the path rule
+# reverted, the placeholder happened to resolve outside a write root from the
+# cwd CI runs in. Assert it from a cwd that IS inside an allowed write root,
+# where a reverted rule resolves the placeholder to an allowed path.
+mkdir -p "${HOME}/.claude/scratch"
+R2_PWD="$(pwd)"
+if cd "${HOME}/.claude/scratch"; then
+    assert_exit 2 "substitution redirect target denied from an allowed cwd" "$(bash_json 'echo hi > $(echo ~/code/repo/pwn)')"
+    assert_exit 2 "substitution scratch path denied from an allowed cwd" "$(bash_json 'rm $(echo ~/code/repo/f)')"
+    cd "${R2_PWD}" || exit 1
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: could not cd into the allowed-write-root scratch dir"
+fi
+
+# R1-d: no per-command exemption is safe. Exempting `git` from the
+# placeholder rule reopens both of these, so they pin the rule for `git`
+# specifically — `git $(echo push)` does not, since git_segment_allowed
+# denies that one on its own.
+assert_exit 2 "substitution as git branch flag denied" "$(bash_json 'git branch $(echo -D) x')"
+assert_exit 2 "substitution as git checkout pathspec denied" "$(bash_json 'git checkout $(echo --) f')"
+
+# R1-e: the denial for this class names the substitution and the remedy, and
+# never quotes the internal placeholder the user did not type.
+subst_err=$(printf '%s' "$(bash_json 'sed $(echo -i) s/a/b/ f')" | python3 "${GUARD}" 2>&1 >/dev/null)
+subst_rc=$?
+if [ "${subst_rc}" = "2" ] \
+    && printf '%s' "${subst_err}" | grep -q "inline the value" \
+    && ! printf '%s' "${subst_err}" | grep -q "__SUBST__"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: substitution-as-argument denial explains inlining without the placeholder"
+    echo "  exit: ${subst_rc}"
+    echo "  got:  ${subst_err}"
+fi
+
+redir_err=$(printf '%s' "$(bash_json 'echo hi > $(echo ~/code/repo/pwn)')" | python3 "${GUARD}" 2>&1 >/dev/null)
+redir_rc=$?
+if [ "${redir_rc}" = "2" ] \
+    && printf '%s' "${redir_err}" | grep -q "redirect target" \
+    && ! printf '%s' "${redir_err}" | grep -q "__SUBST__"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: substitution-as-redirect-target denial names the target class"
+    echo "  exit: ${redir_rc}"
+    echo "  got:  ${redir_err}"
+fi
 
 # ─── Posture hook ────────────────────────────────────────────────────────────
 
