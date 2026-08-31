@@ -65,7 +65,10 @@ Read-only recon passes too: dev-tool version and identity probes (`node -v`,
 allowlisted (checked recursively, depth-capped, backtick bodies
 unescaped first). What a checked substitution returns is an argument for
 read-only commands only: `echo $(git rev-parse HEAD)` passes,
-`sed $(echo -i) …` does not.
+`sed $(echo -i) …` does not. An argument that begins with a variable the
+guard cannot resolve is denied the same way (`A=-i; sed $A f`), so pass the
+value written out; `echo $A`, `grep $PAT f` and `rm -rf $TMPDIR/x` still
+pass.
 
 ## Escape hatches
 
@@ -95,8 +98,8 @@ scoping, tool probes, grouping tokens, recursive substitution checking, quote
 and escape handling, and regression probes for real bypasses found during
 development (newline-hidden commands, single-`&` chaining, `sed -i` variants,
 `git checkout -- pathspec`, nested escaped backticks, a substitution standing
-in for a flag or path, and an escaped quote hiding a trailing command inside
-a double-quoted or `$'…'` span).
+in for a flag or path, an escaped quote hiding a trailing command inside a
+double-quoted or `$'…'` span, and a variable standing in for a flag or path).
 
 `test-advisor-session.sh` covers the per-session state: two sessions with
 opposite modes, the session-id fallback and the fail-open when there is none,

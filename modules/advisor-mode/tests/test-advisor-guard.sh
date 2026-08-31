@@ -371,6 +371,64 @@ assert_exit 0 "ansi-c escaped apostrophe then status allowed" "$(bash_json "echo
 assert_exit 2 "dollar-quote inside double quotes still splits" "$(bash_json "grep \"\$'literal\" f ; git commit -m x")"
 assert_exit 0 "unterminated ansi-c quote handled" "$(bash_json "echo \$'unterminated")"
 
+# Issue #1014: the assignment is dropped as an env prefix and the later `$A`
+# is a token the guard cannot resolve, so every argument-level check reads
+# past it. An argument that begins with an unresolvable expansion is denied
+# for any command that is not read-only. $TMPDIR is pinned here because one
+# case below turns on it resolving to an allowed write root.
+export TMPDIR="${TMP}/tmpdir"
+mkdir -p "${TMPDIR}"
+
+assert_exit 2 "assignment then sed \$A denied" "$(bash_json 'A=-i
+sed $A s/a/b/ ~/code/repo/f')"
+assert_exit 2 "substituted assignment then sed \$A denied" "$(bash_json 'A=$(echo -i)
+sed $A s/a/b/ ~/code/repo/f')"
+assert_exit 2 "find with \$A predicate denied" "$(bash_json 'find . $A')"
+assert_exit 2 "git checkout \$A denied" "$(bash_json 'git checkout $A')"
+assert_exit 2 "sort with \$A flag denied" "$(bash_json 'sort $A f g')"
+assert_exit 2 "redirect into \$A denied" "$(bash_json 'echo hi > $A')"
+assert_exit 2 "rm \$A denied" "$(bash_json 'rm $A')"
+assert_exit 2 "node \$A denied" "$(bash_json 'node $A')"
+# The edge: the expansion is not the first argument, and still cannot be read.
+assert_exit 2 "sed with a trailing \$A denied" "$(bash_json "sed 's/a/b/' \$A")"
+# `$_` is the shell's last argument, not this process's environment — so an
+# environment lookup for it resolves to the wrong value. `: -i` then
+# `sed $_ …` rewrites a file in place exactly like `A=-i`.
+assert_exit 2 "shell-only \$_ as sed flag denied" "$(bash_json ': -i
+sed $_ s/a/b/ ~/code/repo/f')"
+assert_exit 2 "shell-only \$_ as redirect target denied" "$(bash_json 'echo hi > $_')"
+# Read-only first words keep taking one — none of them can write it.
+assert_exit 0 "echo of an unset var allowed" "$(bash_json 'echo $UNSET_ANYTHING')"
+assert_exit 0 "grep with a \$PAT allowed" "$(bash_json 'grep $PAT f')"
+assert_exit 0 "rm under a resolved \$TMPDIR allowed" "$(bash_json 'rm -rf $TMPDIR/advisor-scratch')"
+assert_exit 0 "single-quoted \$A is literal" "$(bash_json "echo 'literal \$A' ; git status")"
+
+var_err=$(printf '%s' "$(bash_json 'A=-i
+sed $A s/a/b/ f')" | python3 "${GUARD}" 2>&1 >/dev/null)
+var_rc=$?
+if [ "${var_rc}" = "2" ] \
+    && printf '%s' "${var_err}" | grep -q 'value written out' \
+    && printf '%s' "${var_err}" | grep -q 'VAR'; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: variable-as-argument denial names the expansion and the remedy"
+    echo "  exit: ${var_rc}"
+    echo "  got:  ${var_err}"
+fi
+
+var_redir_err=$(printf '%s' "$(bash_json 'echo hi > $A')" | python3 "${GUARD}" 2>&1 >/dev/null)
+var_redir_rc=$?
+if [ "${var_redir_rc}" = "2" ] \
+    && printf '%s' "${var_redir_err}" | grep -q "redirect target"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: variable-as-redirect-target denial names the target class"
+    echo "  exit: ${var_redir_rc}"
+    echo "  got:  ${var_redir_err}"
+fi
+
 # ─── Posture hook ────────────────────────────────────────────────────────────
 
 posture_json="{\"session_id\":\"${SID}\"}"

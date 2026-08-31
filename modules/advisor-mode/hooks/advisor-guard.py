@@ -64,6 +64,15 @@ denied outright. Shell grouping tokens (`{`, `(`) are structure, not
 commands. A known dev-tool binary is allowed when its only arguments are
 version/identity probes (`node -v`, `wrangler whoami`).
 
+Variable expansion is not modeled; it is bounded. An argument that BEGINS
+with a `$VAR` this process cannot resolve is denied for any command that is
+not READ_ONLY, for the same reason a collapsed substitution is: the shell
+expands it into real argv, and the assignment that set it was dropped as an
+env prefix (`A=-i; sed $A f` really edits in place). One that resolves here
+is checked as its expansion, so `rm -rf $TMPDIR/x` still reaches the path
+check as a path. A `$VAR` left in a redirect target or a scratch-op path is
+denied by path_allowed for the same reason.
+
 One quote/escape rule serves mask_quotes, find_substitutions and
 match_paren: scan_states() is their shared scanner, and a backslash escapes
 the next character everywhere except inside single quotes — with `$'...'`
@@ -156,6 +165,32 @@ SUBST_TARGET_REASON = (
     "a `$(...)` or backtick substitution is used as a redirect target, so the "
     "guard cannot check where the output would land. Run the substitution on "
     "its own and inline the path it printed, or delegate the command."
+)
+
+# A word that BEGINS with a `$NAME` / `${NAME}` expansion, and the same shape
+# anywhere in a path. Leading `"` are stripped first: double quotes do not
+# stop expansion, single quotes do (a `'`-opened word is literal, and never
+# matches because the `'` is still there).
+LEADING_VAR_RE = re.compile(r"^\$\{?[A-Za-z_]")
+UNRESOLVED_VAR_RE = re.compile(r"\$\{?[A-Za-z_]")
+# `$_` is the shell's own last-argument parameter, not an environment
+# variable: what this process reads from the environment is not what bash
+# will substitute, so it is never resolved here. `: -i` then `sed $_ …` is
+# the same bypass as `A=-i` — verified to rewrite a file in place.
+SHELL_ONLY_VAR_RE = re.compile(r"\$\{?_\b")
+
+VAR_ARG_REASON = (
+    "an argument begins with a `$VAR` expansion that this gate cannot "
+    "resolve, and a command that is not read-only may not take one — the "
+    "shell splits an expansion into real argv, so an `A=-i` earlier on the "
+    "line turns `sed $A …` into an in-place edit. Run the command with the "
+    "value written out, or delegate it."
+)
+
+VAR_TARGET_REASON = (
+    "a `$VAR` expansion this gate cannot resolve is used as a redirect "
+    "target, so the guard cannot check where the output would land. Write "
+    "the path out, or delegate the command."
 )
 
 BACKTICK_HINT = (
@@ -254,6 +289,22 @@ def allowed_write_roots():
 ALLOWED_SEGMENTS = ("/.claude/worktrees/", "/.worktrees/", "/.claude/plans/")
 
 
+def unresolved_leading_var(word):
+    """True when `word` BEGINS with a `$VAR` this process cannot resolve."""
+    if not LEADING_VAR_RE.match(word):
+        return False
+    if SHELL_ONLY_VAR_RE.match(word):
+        return True
+    return bool(LEADING_VAR_RE.match(os.path.expandvars(word)))
+
+
+def unresolved_var_in(text):
+    """True when `text` still carries a `$VAR` anywhere after expansion."""
+    if SHELL_ONLY_VAR_RE.search(text):
+        return True
+    return bool(UNRESOLVED_VAR_RE.search(os.path.expandvars(text)))
+
+
 def path_allowed(raw_path):
     """True when the path is an orchestrator work-product location."""
     if not raw_path or not isinstance(raw_path, str):
@@ -262,8 +313,14 @@ def path_allowed(raw_path):
         # The path is a substitution's output, so it cannot be resolved and
         # checked. Covers scratch-op arguments and redirect targets alike.
         return False
-    path = os.path.realpath(os.path.expanduser(
-        os.path.expandvars(raw_path.strip().strip("'\""))))
+    raw = raw_path.strip().strip("'\"")
+    if unresolved_var_in(raw):
+        # A variable this process cannot resolve, so where the write lands is
+        # unknowable — the same reason a substitution's output cannot be a
+        # path. `A=~/code/repo/pwn` then `echo hi > $A` is the redirect twin
+        # of `rm $A` (issue #1014).
+        return False
+    path = os.path.realpath(os.path.expanduser(os.path.expandvars(raw)))
     marked = path if path.endswith("/") else path + "/"
     if any(seg in marked for seg in ALLOWED_SEGMENTS):
         return True
@@ -429,6 +486,36 @@ def strip_env_assignments(words):
     return words
 
 
+def expand_leading_vars(words):
+    """Resolve words that BEGIN with a `$VAR`; report the ones that will not.
+
+    Returns `(words, unresolved)`. A word whose expansion this process's own
+    environment can resolve is replaced by it, so the checks that follow read
+    the real text (`rm -rf $TMPDIR/x` still reaches the path check as a path).
+    One that stays `$…` is left alone and reported: the shell splits an
+    expansion into real argv, so `$A` can be `-i`, `-delete`, `--`, or a repo
+    path, and no literal scan in this file would see any of them — the
+    assignment that set it was already dropped by strip_env_assignments
+    (issue #1014).
+
+    A word that only CONTAINS an expansion (`--flag=$A`, `s/a/b/$A`) is left
+    alone: it cannot become a leading-dash flag or a fresh path argument, and
+    every literal scan still sees its literal prefix.
+    """
+    out = []
+    unresolved = False
+    for w in words:
+        bare = w.lstrip('"')
+        if not LEADING_VAR_RE.match(bare):
+            out.append(w)
+        elif unresolved_leading_var(bare):
+            unresolved = True
+            out.append(w)
+        else:
+            out.append(os.path.expandvars(w))
+    return out, unresolved
+
+
 def git_segment_allowed(words):
     args = words[1:]
     # Skip global flags; -C and -c consume a value.
@@ -523,13 +610,34 @@ def placeholder_misuse(segment):
     return first not in READ_ONLY and any(SUBST_PLACEHOLDER in w for w in words)
 
 
+def var_misuse(segment):
+    """True when an argument to a command that is not read-only begins with a
+    `$VAR` this gate cannot resolve.
+
+    Same shape, and the same reason, as placeholder_misuse: every branch below
+    decides on literal argument text, and an expansion the guard cannot read
+    slips past all of them. Read-only first words keep taking one — `echo $A`,
+    `grep $PAT f` and `cd $DIR` cannot write whatever the variable holds.
+
+    The deny decision and its message both read this predicate.
+    """
+    words, unresolved = expand_leading_vars(
+        strip_env_assignments(strip_grouping(segment).split()))
+    if not words or not unresolved:
+        return False
+    return words[0].rsplit("/", 1)[-1] not in READ_ONLY
+
+
 def bash_segment_allowed(segment):
-    words = strip_env_assignments(strip_grouping(segment).split())
+    words, _ = expand_leading_vars(
+        strip_env_assignments(strip_grouping(segment).split()))
     if not words:
         return True
     first = words[0]
     first = first.rsplit("/", 1)[-1]  # /usr/bin/git → git
     if placeholder_misuse(segment):
+        return False
+    if var_misuse(segment):
         return False
     if first == "sed":
         # -i in any form: bare, with attached suffix (-i.bak), inside a
@@ -688,12 +796,16 @@ def check_command(command, depth=0):
     if not ok:
         if SUBST_PLACEHOLDER in target:
             return SUBST_TARGET_REASON
+        if unresolved_var_in(target):
+            return VAR_TARGET_REASON
         return ("redirecting output into `%s` writes outside the "
                 "orchestrator's work-product paths." % target)
     for segment in split_segments(command, masked):
         if not bash_segment_allowed(segment):
             if placeholder_misuse(segment):
                 return SUBST_ARG_REASON
+            if var_misuse(segment):
+                return VAR_ARG_REASON
             return ("`%s` is not on the orchestrator's read-only/"
                     "orchestration allowlist." % segment.strip())
     return None
