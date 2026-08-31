@@ -359,6 +359,126 @@ else
     echo "  got:  ${redir_err}"
 fi
 
+# Issue #1015: `$'…'` (ANSI-C quoting) is a span where a backslash escapes,
+# so `\'` does not close it. Read as a POSIX single-quoted span it closed one
+# character early, a phantom span swallowed the separator, and the command
+# after it ran unchecked.
+assert_exit 2 "ansi-c quoting then commit denied" "$(bash_json "echo \$'a\\'' ; git commit -m x")"
+assert_exit 2 "ansi-c quoting then repo write denied" "$(bash_json "echo \$'a\\'' ; touch ~/code/repo/pwn")"
+assert_exit 0 "ansi-c escape argument allowed" "$(bash_json "echo \$'\\t' x")"
+assert_exit 0 "ansi-c escaped apostrophe then status allowed" "$(bash_json "echo \$'it\\'s fine' ; git status")"
+# Inside double quotes `$'` is not an ANSI-C opener — the `;` still splits.
+assert_exit 2 "dollar-quote inside double quotes still splits" "$(bash_json "grep \"\$'literal\" f ; git commit -m x")"
+assert_exit 0 "unterminated ansi-c quote handled" "$(bash_json "echo \$'unterminated")"
+
+# Issue #1014: the assignment is dropped as an env prefix and the later `$A`
+# is a token the guard cannot resolve, so every argument-level check reads
+# past it. An argument that begins with an unresolvable expansion is denied
+# for any command that is not read-only. $TMPDIR is pinned here because one
+# case below turns on it resolving to an allowed write root.
+export TMPDIR="${TMP}/tmpdir"
+mkdir -p "${TMPDIR}"
+
+assert_exit 2 "assignment then sed \$A denied" "$(bash_json 'A=-i
+sed $A s/a/b/ ~/code/repo/f')"
+assert_exit 2 "substituted assignment then sed \$A denied" "$(bash_json 'A=$(echo -i)
+sed $A s/a/b/ ~/code/repo/f')"
+assert_exit 2 "find with \$A predicate denied" "$(bash_json 'find . $A')"
+assert_exit 2 "git checkout \$A denied" "$(bash_json 'git checkout $A')"
+assert_exit 2 "sort with \$A flag denied" "$(bash_json 'sort $A f g')"
+assert_exit 2 "redirect into \$A denied" "$(bash_json 'echo hi > $A')"
+assert_exit 2 "rm \$A denied" "$(bash_json 'rm $A')"
+assert_exit 2 "node \$A denied" "$(bash_json 'node $A')"
+# The edge: the expansion is not the first argument, and still cannot be read.
+assert_exit 2 "sed with a trailing \$A denied" "$(bash_json "sed 's/a/b/' \$A")"
+# `$_` is the shell's last argument, not this process's environment — so an
+# environment lookup for it resolves to the wrong value. `: -i` then
+# `sed $_ …` rewrites a file in place exactly like `A=-i`.
+assert_exit 2 "shell-only \$_ as sed flag denied" "$(bash_json ': -i
+sed $_ s/a/b/ ~/code/repo/f')"
+assert_exit 2 "shell-only \$_ as redirect target denied" "$(bash_json 'echo hi > $_')"
+# Read-only first words keep taking one — none of them can write it.
+assert_exit 0 "echo of an unset var allowed" "$(bash_json 'echo $UNSET_ANYTHING')"
+assert_exit 0 "grep with a \$PAT allowed" "$(bash_json 'grep $PAT f')"
+assert_exit 0 "rm under a resolved \$TMPDIR allowed" "$(bash_json 'rm -rf $TMPDIR/advisor-scratch')"
+assert_exit 0 "single-quoted \$A is literal" "$(bash_json "echo 'literal \$A' ; git status")"
+
+var_err=$(printf '%s' "$(bash_json 'A=-i
+sed $A s/a/b/ f')" | python3 "${GUARD}" 2>&1 >/dev/null)
+var_rc=$?
+if [ "${var_rc}" = "2" ] \
+    && printf '%s' "${var_err}" | grep -q 'value written out' \
+    && printf '%s' "${var_err}" | grep -q 'VAR'; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: variable-as-argument denial names the expansion and the remedy"
+    echo "  exit: ${var_rc}"
+    echo "  got:  ${var_err}"
+fi
+
+var_redir_err=$(printf '%s' "$(bash_json 'echo hi > $A')" | python3 "${GUARD}" 2>&1 >/dev/null)
+var_redir_rc=$?
+if [ "${var_redir_rc}" = "2" ] \
+    && printf '%s' "${var_redir_err}" | grep -q "redirect target"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: variable-as-redirect-target denial names the target class"
+    echo "  exit: ${var_redir_rc}"
+    echo "  got:  ${var_redir_err}"
+fi
+
+# Rule (b) must not deny the merged /advisor on/off recipes, which put
+# $CLAUDE_CODE_SESSION_ID in the flag path. The hook subprocess may not carry
+# that variable, so the guard seeds it from the stdin session_id it already
+# trusts (SESSION_ID_RE-validated). CLAUDE_CODE_SESSION_ID is forced unset for
+# these runs so the test proves the stdin seeding, not the ambient CI env —
+# without seeding the var stays unresolved and rule (b) would deny the recipe.
+# A helper that runs the guard with the variable stripped from its environment.
+guard_no_sid_env() {
+    printf '%s' "$1" | env -u CLAUDE_CODE_SESSION_ID python3 "${GUARD}" \
+        >/dev/null 2>&1
+    return $?
+}
+
+guard_no_sid_env "$(bash_json 'rm -f ~/.claude/advisor-mode/$CLAUDE_CODE_SESSION_ID')"
+off_rc=$?
+if [ "${off_rc}" = "0" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: /advisor off recipe allowed with CLAUDE_CODE_SESSION_ID unset"
+    echo "  actual exit: ${off_rc}"
+fi
+
+guard_no_sid_env "$(bash_json "date -u +'on %Y-%m-%dT%H:%M:%SZ' > ~/.claude/advisor-mode/\$CLAUDE_CODE_SESSION_ID")"
+on_rc=$?
+if [ "${on_rc}" = "0" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: /advisor on recipe body allowed with CLAUDE_CODE_SESSION_ID unset"
+    echo "  actual exit: ${on_rc}"
+fi
+
+# Seeding is scoped to CLAUDE_CODE_SESSION_ID and to a path under an allowed
+# root. A shell-local attacker var is never seeded, so it stays denied even
+# with CLAUDE_CODE_SESSION_ID unset in the environment.
+guard_no_sid_env "$(bash_json 'echo hi > $A')"
+[ "$?" = "2" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: attacker \$A redirect still denied with sid unset"; }
+guard_no_sid_env "$(bash_json 'rm $A')"
+[ "$?" = "2" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: attacker rm \$A still denied with sid unset"; }
+guard_no_sid_env "$(bash_json 'A=~/code/repo/pwn
+echo hi > $A')"
+[ "$?" = "2" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: inline-assigned attacker \$A redirect still denied"; }
+
+# The seeded variable resolves, but a resulting path OUTSIDE an allowed write
+# root is still denied by the normal prefix check — seeding never widens where
+# a write may land.
+guard_no_sid_env "$(bash_json "echo hi > ${HOME}/code/repo/\$CLAUDE_CODE_SESSION_ID")"
+[ "$?" = "2" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: seeded sid into a repo path still denied"; }
+
 # ─── Posture hook ────────────────────────────────────────────────────────────
 
 posture_json="{\"session_id\":\"${SID}\"}"
