@@ -429,6 +429,56 @@ else
     echo "  got:  ${var_redir_err}"
 fi
 
+# Rule (b) must not deny the merged /advisor on/off recipes, which put
+# $CLAUDE_CODE_SESSION_ID in the flag path. The hook subprocess may not carry
+# that variable, so the guard seeds it from the stdin session_id it already
+# trusts (SESSION_ID_RE-validated). CLAUDE_CODE_SESSION_ID is forced unset for
+# these runs so the test proves the stdin seeding, not the ambient CI env —
+# without seeding the var stays unresolved and rule (b) would deny the recipe.
+# A helper that runs the guard with the variable stripped from its environment.
+guard_no_sid_env() {
+    printf '%s' "$1" | env -u CLAUDE_CODE_SESSION_ID python3 "${GUARD}" \
+        >/dev/null 2>&1
+    return $?
+}
+
+guard_no_sid_env "$(bash_json 'rm -f ~/.claude/advisor-mode/$CLAUDE_CODE_SESSION_ID')"
+off_rc=$?
+if [ "${off_rc}" = "0" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: /advisor off recipe allowed with CLAUDE_CODE_SESSION_ID unset"
+    echo "  actual exit: ${off_rc}"
+fi
+
+guard_no_sid_env "$(bash_json "date -u +'on %Y-%m-%dT%H:%M:%SZ' > ~/.claude/advisor-mode/\$CLAUDE_CODE_SESSION_ID")"
+on_rc=$?
+if [ "${on_rc}" = "0" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: /advisor on recipe body allowed with CLAUDE_CODE_SESSION_ID unset"
+    echo "  actual exit: ${on_rc}"
+fi
+
+# Seeding is scoped to CLAUDE_CODE_SESSION_ID and to a path under an allowed
+# root. A shell-local attacker var is never seeded, so it stays denied even
+# with CLAUDE_CODE_SESSION_ID unset in the environment.
+guard_no_sid_env "$(bash_json 'echo hi > $A')"
+[ "$?" = "2" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: attacker \$A redirect still denied with sid unset"; }
+guard_no_sid_env "$(bash_json 'rm $A')"
+[ "$?" = "2" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: attacker rm \$A still denied with sid unset"; }
+guard_no_sid_env "$(bash_json 'A=~/code/repo/pwn
+echo hi > $A')"
+[ "$?" = "2" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: inline-assigned attacker \$A redirect still denied"; }
+
+# The seeded variable resolves, but a resulting path OUTSIDE an allowed write
+# root is still denied by the normal prefix check — seeding never widens where
+# a write may land.
+guard_no_sid_env "$(bash_json "echo hi > ${HOME}/code/repo/\$CLAUDE_CODE_SESSION_ID")"
+[ "$?" = "2" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: seeded sid into a repo path still denied"; }
+
 # ─── Posture hook ────────────────────────────────────────────────────────────
 
 posture_json="{\"session_id\":\"${SID}\"}"

@@ -68,7 +68,9 @@ read-only commands only: `echo $(git rev-parse HEAD)` passes,
 `sed $(echo -i) …` does not. An argument that begins with a variable the
 guard cannot resolve is denied the same way (`A=-i; sed $A f`), so pass the
 value written out; `echo $A`, `grep $PAT f` and `rm -rf $TMPDIR/x` still
-pass.
+pass. The guard resolves `$CLAUDE_CODE_SESSION_ID` from its own validated
+session context, so the per-session `/advisor on`/`off` flag commands keep
+working even when the hook subprocess does not carry the variable.
 
 ## Escape hatches
 

@@ -847,6 +847,20 @@ def main():
     sid = session_id(data)
     if not sid or not os.path.isfile(flag_path(sid)):
         sys.exit(0)  # mode off here (or no session id — fail open)
+    # The /advisor on/off recipes carry a `$CLAUDE_CODE_SESSION_ID` in the
+    # flag path (`… > ~/.claude/advisor-mode/$CLAUDE_CODE_SESSION_ID`, and the
+    # `rm -f` twin). If the hook subprocess does not carry that variable, rule
+    # (b) cannot resolve it and would deny the recipe — stranding a user in
+    # advisor mode with no documented way out. The guard already knows the id
+    # authoritatively: it just matched the flag file with `sid`, which
+    # session_id() validated against SESSION_ID_RE. Seed it so the path
+    # resolves — only when absent, never overwriting the environment's own
+    # value, and only for an id that re-passes that same validation, so a
+    # hostile stdin string is never written into the environment. A
+    # shell-local attacker var (`A=…`) is still never seeded, so it stays
+    # unresolvable and denied.
+    if not os.environ.get(SESSION_ID_ENV) and SESSION_ID_RE.fullmatch(sid):
+        os.environ[SESSION_ID_ENV] = sid
     tool = data.get("tool_name") or ""
     tool_input = data.get("tool_input") or {}
     if not isinstance(tool_input, dict):
