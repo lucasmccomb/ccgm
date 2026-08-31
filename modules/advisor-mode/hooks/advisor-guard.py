@@ -66,7 +66,9 @@ version/identity probes (`node -v`, `wrangler whoami`).
 
 One quote/escape rule serves mask_quotes, find_substitutions and
 match_paren: scan_states() is their shared scanner, and a backslash escapes
-the next character everywhere except inside single quotes. Earlier versions
+the next character everywhere except inside single quotes — with `$'...'`
+(ANSI-C quoting) the one span that looks single-quoted but escapes, which is
+what decides where it really ends. Earlier versions
 carried that rule in three places, and both holes found in review were those
 copies disagreeing. match_backtick keeps its own escape loop and tracks no
 quote state — the shell's rule for a backtick span, applied with the unescape
@@ -281,7 +283,16 @@ def scan_states(cmd):
     delimiters included, so every character of `"a"` reports `"`. `escaped`
     is True for a backslash that escapes and for the character it escapes,
     under one rule: a backslash escapes the next character everywhere except
-    inside single quotes, where nothing escapes.
+    inside a POSIX single-quoted span, where nothing escapes.
+
+    `$'...'` (ANSI-C quoting) is the exception to that exception, and issue
+    #1015: the shell DOES process backslash escapes there, so `\\'` does not
+    close the span. Read as a POSIX span it closed one character early, the
+    next `'` opened a phantom span that swallowed the following separator,
+    and the command after it was never checked — `echo $'a\\'' ; touch <repo>`
+    ran the touch. The span is reported as `'` (nothing expands inside one
+    either way); only where it ENDS changes. `$'` is an opener only outside
+    every quote — inside double quotes the shell reads it as `$` then `'`.
 
     Yielded lazily so a caller that stops early pays only for what it read;
     find_substitutions, which needs to jump over spans, materializes a list.
@@ -293,18 +304,31 @@ def scan_states(cmd):
     disagreed about `\\`` and a nested command ran unchecked.
     """
     quote = None
+    ansi_c = False  # this `'` span was opened by `$'` — backslashes escape
     i, n = 0, len(cmd)
     while i < n:
         c = cmd[i]
         if quote == "'":
+            if ansi_c and c == "\\" and i + 1 < n:
+                yield ("'", True)
+                yield ("'", True)
+                i += 2
+                continue
             yield ("'", False)
             if c == "'":
                 quote = None
+                ansi_c = False
             i += 1
             continue
         if c == "\\" and i + 1 < n:
             yield (quote, True)
             yield (quote, True)
+            i += 2
+            continue
+        if quote is None and c == "$" and cmd[i + 1:i + 2] == "'":
+            quote, ansi_c = "'", True
+            yield ("'", False)  # the `$`
+            yield ("'", False)  # the `'` it opens with
             i += 2
             continue
         if quote is None and c in ("'", '"'):

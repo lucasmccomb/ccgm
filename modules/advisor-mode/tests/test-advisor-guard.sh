@@ -359,6 +359,18 @@ else
     echo "  got:  ${redir_err}"
 fi
 
+# Issue #1015: `$'…'` (ANSI-C quoting) is a span where a backslash escapes,
+# so `\'` does not close it. Read as a POSIX single-quoted span it closed one
+# character early, a phantom span swallowed the separator, and the command
+# after it ran unchecked.
+assert_exit 2 "ansi-c quoting then commit denied" "$(bash_json "echo \$'a\\'' ; git commit -m x")"
+assert_exit 2 "ansi-c quoting then repo write denied" "$(bash_json "echo \$'a\\'' ; touch ~/code/repo/pwn")"
+assert_exit 0 "ansi-c escape argument allowed" "$(bash_json "echo \$'\\t' x")"
+assert_exit 0 "ansi-c escaped apostrophe then status allowed" "$(bash_json "echo \$'it\\'s fine' ; git status")"
+# Inside double quotes `$'` is not an ANSI-C opener — the `;` still splits.
+assert_exit 2 "dollar-quote inside double quotes still splits" "$(bash_json "grep \"\$'literal\" f ; git commit -m x")"
+assert_exit 0 "unterminated ansi-c quote handled" "$(bash_json "echo \$'unterminated")"
+
 # ─── Posture hook ────────────────────────────────────────────────────────────
 
 posture_json="{\"session_id\":\"${SID}\"}"

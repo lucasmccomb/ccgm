@@ -95,7 +95,8 @@ scoping, tool probes, grouping tokens, recursive substitution checking, quote
 and escape handling, and regression probes for real bypasses found during
 development (newline-hidden commands, single-`&` chaining, `sed -i` variants,
 `git checkout -- pathspec`, nested escaped backticks, a substitution standing
-in for a flag or path, and an escaped quote hiding a trailing command).
+in for a flag or path, and an escaped quote hiding a trailing command inside
+a double-quoted or `$'…'` span).
 
 `test-advisor-session.sh` covers the per-session state: two sessions with
 opposite modes, the session-id fallback and the fail-open when there is none,
