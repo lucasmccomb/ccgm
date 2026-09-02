@@ -99,6 +99,7 @@ analyzer below:
 - `bin/dream-eval.sh` -- extended with poisoning negative-control fixtures
   so the regression gate optimistic integration must pass every night
   actually exercises the attack shapes the engine is designed against.
+  It also fails loud now (see "The eval harness fails loud" below).
 - `commands/dream-review.md` (`/dream-review`) -- post-hoc review of
   auto-integrated and still-dwelling rows.
 - `bin/ccgm-learnings-sync` (in `self-improving`) -- `revert <sha>`: a
@@ -182,6 +183,38 @@ Epics 4-8 and are built today (`/dream-apply`, `bin/dream-daily.sh`,
 `bin/dream-eval.sh`, `lib/reconcile_automemory.py`); the opt-in optimistic
 auto-integration engine on top of all of it is covered in its own section
 above.
+
+## The eval harness fails loud
+
+`bin/dream-eval.sh` runs `eval/memory_eval.py`, whose `--gate` mode is the
+regression gate the optimistic engine must pass nightly. Between 2026-07-15
+and 2026-09-02 every nightly run scored `format_error_rate: 1.0` on all 54
+rows and the gate read that as a memory failure. Neither memory nor the API
+was at fault: the LaunchAgent exports a fixed PATH
+(`/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`), Claude Code's native
+installer puts the CLI in `~/.local/bin`, and every arm subprocess died with
+`FileNotFoundError` before it ran. Runs an operator started from a login
+shell worked, which is why the breakage looked intermittent.
+
+Two rules keep that shut:
+
+- **The `claude` binary is resolved to an absolute path before any task
+  runs.** `resolve_claude_bin()` tries the ambient PATH, then the known
+  install directories (`~/.local/bin`, `~/.claude/local`,
+  `/opt/homebrew/bin`, `/usr/local/bin`), and raises -- naming everything it
+  searched and pointing at `--claude-bin` / `CCGM_EVAL_CLAUDE_BIN` -- rather
+  than starting a run that cannot work.
+- **A whole-run format-error rate of 1.0 aborts.** One failed arm run stays
+  non-fatal; a run where every arm failed is not a measurement, so the
+  harness prints the first failure's raw output to stderr, exits non-zero,
+  and writes no results file. `--gate` then reports `no results` instead of
+  a regression nobody measured.
+
+The judge call is one Messages API request per run: no sampling parameters
+(every judge model from Opus 4.7 / Sonnet 5 on returns 400 for one),
+`thinking: {"type": "disabled"}` so a model bump cannot spend the output cap
+on thinking, and `output_config.format` pinning the `{pass, score}` schema so
+the verdict is valid by construction.
 
 ## Slug identity (read this before touching project-identity code)
 

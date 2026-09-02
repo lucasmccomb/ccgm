@@ -180,6 +180,15 @@ bash modules/self-improving/bin/memory-setup.sh       # activation prompts: read
 
 Rollback for a bad auto-integrated batch is `ccgm-learnings-sync revert <sha>` (in `self-improving`) — not a raw `git revert`, which is unsound against this store's `merge=union` shard files.
 
+### Eval harness (`bin/dream-eval.sh`)
+
+`dream-eval.sh --gate` is the regression gate the optimistic engine must pass nightly. Two rules keep a red gate meaningful, after seven weeks (2026-07-15 to 2026-09-02) in which every nightly run scored 100% format errors because the LaunchAgent's PATH did not include `~/.local/bin`, where Claude Code's native installer puts the CLI:
+
+- The `claude` binary is resolved to an absolute path before any task runs; an unresolvable binary fails the run immediately, naming what it searched, instead of spending anything.
+- A run where **every** agent run failed to execute aborts with the first failure's raw output on stderr and exit 1, writing no results file. A single failed run stays non-fatal.
+
+The judge is one Messages API call per run: no sampling parameters (current judge models 400 on them), `thinking: {"type": "disabled"}`, and `output_config.format` pinning the `{pass, score}` schema. When reading a red gate, check the run wrote rows at all before treating it as a memory result.
+
 ### Dreaming posture
 
 Human-gated apply (`/dream-apply`) is always on and requires no opt-in. Optimistic auto-integration is opt-in and off by default; every gate (eval regression, blast-radius caps, anomaly check, circuit breaker) is designed to hold even if the daily report is never read — only *undoing* an already-integrated row needs a read. See `modules/dreaming/rules/dreaming.md` for the full contract.
