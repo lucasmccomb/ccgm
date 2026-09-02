@@ -41,14 +41,36 @@ import sys
 analyzer_src = open(sys.argv[1], encoding="utf-8").read()
 installer_src = open(sys.argv[2], encoding="utf-8").read()
 
-# Published per-MTok list prices (input, output), checked 2026-09-02.
-# Opus 4.7 and 4.8 share a rate; the $15/$75 that used to sit under the
-# 4.7 key was the retired Opus 4.1 rate.
+# Published per-MTok list prices (input, output).
+#
+# Source: the Anthropic Current Models table and its per-model
+# descriptions, checked 2026-09-02. Mythos 5 and 5.1 are priced at the
+# Fable rate on the published statement that they are the same tier at
+# the same per-token price. Opus 4.7 and 4.8 share a rate; the $15/$75
+# that used to sit under the 4.7 key was the retired Opus 4.1 rate.
+#
+# Update this table in the same change that swaps or adds a model.
 PUBLISHED = {
+    "claude-fable-5-1": (10.0, 50.0),
+    "claude-fable-5": (10.0, 50.0),
+    "claude-mythos-5-1": (10.0, 50.0),
+    "claude-mythos-5": (10.0, 50.0),
+    "claude-opus-5": (5.0, 25.0),
+    "claude-opus-4-8": (5.0, 25.0),
     "claude-sonnet-5": (2.0, 10.0),
+    "claude-haiku-4-5": (1.0, 5.0),
+    # Priced but not gated: a config may still hold this pin (the
+    # installer migrates it) and older cost.log rows name it.
     "claude-sonnet-4-6": (3.0, 15.0),
-    "claude-haiku-4-5": (0.80, 4.0),
     "claude-opus-4-7": (5.0, 25.0),
+}
+
+# The two structured-outputs-capable models deliberately left out of the
+# gate, with the reason. Recorded here so dropping one silently, or
+# adding it back without a rate, fails rather than drifts.
+UNPRICED_SO_UNGATED = {
+    "claude-opus-4-1": "deprecated, retired 2026-08-05, no published rate",
+    "claude-opus-4-5": "active and schema-capable, but no published rate",
 }
 
 problems = []
@@ -83,6 +105,27 @@ if default_model != "claude-sonnet-5":
 analyzer_rates = parse_rates(analyzer_src, block_after(analyzer_src, "FALLBACK_PRICING = {"))
 installer_rates = parse_rates(installer_src, block_after(installer_src, "DEFAULT_PRICING = {"))
 
+# The config a FRESH install is handed. This is a third copy of the same
+# table -- the one an operator actually runs against -- so it is checked
+# like the other two rather than trusted to have been updated alongside.
+try:
+    seed_start = installer_src.index('{\n  "email_enabled"')
+    seed_end = installer_src.index("\n}\nEOF", seed_start) + 2
+    seed_cfg = json.loads(installer_src[seed_start:seed_end].replace("${WEBHOOK_TOKEN}", "x"))
+    seeded_rates = {
+        model: (float(entry["input_per_million"]), float(entry["output_per_million"]))
+        for model, entry in (seed_cfg.get("cost_pricing") or {}).items()
+    }
+except (ValueError, KeyError, TypeError) as exc:
+    seeded_rates = {}
+    problems.append(f"the config autoheal-install.sh seeds is not readable JSON: {exc}")
+
+if seeded_rates and seeded_rates != installer_rates:
+    problems.append(
+        "the seeded config cost_pricing and DEFAULT_PRICING disagree: "
+        + str(sorted(set(seeded_rates) ^ set(installer_rates)) or "same models, different rates")
+    )
+
 for label, rates in (("analyzer FALLBACK_PRICING", analyzer_rates), ("installer DEFAULT_PRICING", installer_rates)):
     if default_model not in rates:
         problems.append(f"{label} has no entry for the model the analyzer calls ({default_model})")
@@ -103,6 +146,35 @@ for label, rates in (("analyzer", analyzer_rates), ("installer", installer_rates
     unknown = sorted(set(rates) - set(PUBLISHED))
     if unknown:
         problems.append(f"{label}: no published rate recorded in this test for {unknown}")
+
+# The gate and the pricing tables are one contract: a model the gate
+# accepts must be priced in BOTH tables, or the run it allows would log
+# every call at the fallback rate behind a warning -- the cost-log
+# accuracy problem #1025 was filed about. And the gate's remediation
+# message prints this same list, so a gate entry with no price would be
+# the module recommending a config it cannot account for.
+gate_match = re.search(r'^STRUCTURED_OUTPUT_MODELS="([^"]+)"', analyzer_src, re.MULTILINE)
+gate = gate_match.group(1).split() if gate_match else []
+if not gate:
+    problems.append("STRUCTURED_OUTPUT_MODELS not found or empty")
+
+for model in gate:
+    if model not in PUBLISHED:
+        problems.append(f"gate model {model} has no published rate in this test")
+    for label, rates in (("analyzer FALLBACK_PRICING", analyzer_rates),
+                         ("installer DEFAULT_PRICING", installer_rates),
+                         ("the seeded config", seeded_rates)):
+        if rates and model not in rates:
+            problems.append(f"gate model {model} has no price entry in {label}")
+
+# A model with no published rate must not be gated, whatever else
+# changes. This is the half that keeps a retired or unpriced model from
+# being quietly re-admitted.
+for model, reason in UNPRICED_SO_UNGATED.items():
+    if model in gate:
+        problems.append(f"{model} is gated but {reason}")
+    if model in PUBLISHED:
+        problems.append(f"{model} has a rate in PUBLISHED but is recorded as unpriced")
 
 # The last-resort rate must track the model the analyzer calls.
 match = re.search(r'^SONNET_FALLBACK_MODEL = "([^"]+)"', analyzer_src, re.MULTILINE)

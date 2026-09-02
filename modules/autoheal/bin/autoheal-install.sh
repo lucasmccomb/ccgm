@@ -98,10 +98,16 @@ if [ ! -f "${AUTOHEAL_DIR}/config.json" ]; then
   "model": "claude-sonnet-5",
   "default_model": "claude-sonnet-5",
   "cost_pricing": {
+    "claude-fable-5-1":   {"input_per_million": 10,   "output_per_million": 50},
+    "claude-fable-5":     {"input_per_million": 10,   "output_per_million": 50},
+    "claude-mythos-5-1":  {"input_per_million": 10,   "output_per_million": 50},
+    "claude-mythos-5":    {"input_per_million": 10,   "output_per_million": 50},
+    "claude-opus-5":      {"input_per_million": 5,    "output_per_million": 25},
+    "claude-opus-4-8":    {"input_per_million": 5,    "output_per_million": 25},
     "claude-sonnet-5":    {"input_per_million": 2,    "output_per_million": 10},
+    "claude-haiku-4-5":   {"input_per_million": 1,    "output_per_million": 5},
     "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
-    "claude-opus-4-7":    {"input_per_million": 5,    "output_per_million": 25},
-    "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4}
+    "claude-opus-4-7":    {"input_per_million": 5,    "output_per_million": 25}
   },
   "max_input_tokens": 200000,
   "daily_cost_cap_usd": 10.00,
@@ -119,11 +125,23 @@ import sys
 
 path = sys.argv[1]
 
+# The models the analyzer can call under structured outputs, each with
+# its published per-MTok rate (Current Models table, checked 2026-09-02),
+# plus two priced-but-not-gated entries: claude-sonnet-4-6 (the pin this
+# script migrates below) and claude-opus-4-7 (older cost.log rows name
+# it). Mythos is priced at the Fable rate on the published statement that
+# they are the same tier at the same per-token price.
 DEFAULT_PRICING = {
+    "claude-fable-5-1":   {"input_per_million": 10,   "output_per_million": 50},
+    "claude-fable-5":     {"input_per_million": 10,   "output_per_million": 50},
+    "claude-mythos-5-1":  {"input_per_million": 10,   "output_per_million": 50},
+    "claude-mythos-5":    {"input_per_million": 10,   "output_per_million": 50},
+    "claude-opus-5":      {"input_per_million": 5,    "output_per_million": 25},
+    "claude-opus-4-8":    {"input_per_million": 5,    "output_per_million": 25},
     "claude-sonnet-5":    {"input_per_million": 2,    "output_per_million": 10},
+    "claude-haiku-4-5":   {"input_per_million": 1,    "output_per_million": 5},
     "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
     "claude-opus-4-7":    {"input_per_million": 5,    "output_per_million": 25},
-    "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4},
 }
 
 try:

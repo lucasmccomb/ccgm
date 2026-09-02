@@ -461,7 +461,7 @@ write_config() {
   "cost_pricing": {
     "claude-sonnet-5":    {"input_per_million": 2,    "output_per_million": 10},
     "claude-opus-4-8":    {"input_per_million": 5,    "output_per_million": 25},
-    "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4}
+    "claude-haiku-4-5":   {"input_per_million": 1,    "output_per_million": 5}
   }
 }
 EOF
@@ -624,35 +624,88 @@ rm -rf "${T7E_HOME}"
 
 # Test 7f — a model that cannot honor structured outputs stops the run
 # before anything is spent, and leaves last-analyzed alone (#1028).
-T7F_HOME=$(mktemp -d -t autoheal_t7f.XXXXXX)
-T7F_DIR="${T7F_HOME}/autoheal"
-mk_state "${T7F_DIR}"
-write_events "${T7F_DIR}/events/${YESTERDAY}.jsonl" 3
-cat > "${T7F_DIR}/config.json" <<'EOF'
-{
-  "default_model": "claude-sonnet-4-6"
-}
-EOF
+#
+# Runs for both ungated shapes: the migration pin the installer rewrites,
+# and a model that is priced but not gated (Opus 4.7 is active and has a
+# rate, and is still not on the structured-outputs list). Being priced
+# must not be mistaken for being callable.
+assert_model_refused() {
+    # assert_model_refused <label> <model id>
+    local label="$1"
+    local model="$2"
+    local home
+    home=$(mktemp -d -t autoheal_gate.XXXXXX)
+    local dir="${home}/autoheal"
+    mk_state "${dir}"
+    write_events "${dir}/events/${YESTERDAY}.jsonl" 3
+    printf '{\n  "default_model": "%s"\n}\n' "${model}" > "${dir}/config.json"
 
-env \
-    HOME="${T7F_HOME}" \
-    CCGM_AUTOHEAL_DIR="${T7F_DIR}" \
-    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="x" \
-    bash "${ANALYZER}" >"${T7F_HOME}/run.out" 2>"${T7F_HOME}/run.err"
-RC=$?
-assert_eq "${RC}" "2" "unsupported model: analyzer stops before calling"
-T7F_ERR=$(cat "${T7F_HOME}/run.err")
-assert_contains "${T7F_ERR}" "claude-sonnet-4-6" "unsupported model: stderr names the offending model"
-assert_contains "${T7F_ERR}" "structured outputs" "unsupported model: stderr says why"
-if [ -f "${T7F_DIR}/last-analyzed" ]; then
-    FAIL=$((FAIL + 1))
-    echo "FAIL: unsupported model: last-analyzed must not be written"
-else
-    PASS=$((PASS + 1))
-fi
-rm -rf "${T7F_HOME}"
+    env \
+        HOME="${home}" \
+        CCGM_AUTOHEAL_DIR="${dir}" \
+        CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
+        CCGM_AUTOHEAL_TODAY="${TODAY}" \
+        ANTHROPIC_API_KEY="x" \
+        bash "${ANALYZER}" >"${home}/run.out" 2>"${home}/run.err"
+    local rc=$?
+    local err
+    err=$(cat "${home}/run.err")
+
+    assert_eq "${rc}" "2" "${label}: analyzer stops before calling"
+    assert_contains "${err}" "${model}" "${label}: stderr names the offending model"
+    assert_contains "${err}" "structured outputs" "${label}: stderr says why"
+    if [ -f "${dir}/last-analyzed" ]; then
+        FAIL=$((FAIL + 1))
+        echo "FAIL: ${label}: last-analyzed must not be written"
+    else
+        PASS=$((PASS + 1))
+    fi
+
+    # The remediation message may only recommend models that are both
+    # gated and priced -- following it must not produce a config that
+    # logs every call at the fallback rate.
+    local unpriced
+    unpriced=$(ANALYZER_PATH="${ANALYZER}" ERR_TEXT="${err}" python3 <<'PY'
+import os
+import re
+
+analyzer = open(os.environ["ANALYZER_PATH"], encoding="utf-8").read()
+err = os.environ["ERR_TEXT"]
+
+gate = re.search(r'^STRUCTURED_OUTPUT_MODELS="([^"]+)"', analyzer, re.M)
+gate = gate.group(1).split() if gate else []
+
+start = analyzer.index("FALLBACK_PRICING = {")
+block = analyzer[start:analyzer.index("}\n", start)]
+priced = set(re.findall(r'"(claude-[a-z0-9-]+)":\s*\{', block))
+
+recommended = [m for m in re.findall(r"claude-[a-z0-9-]+", err) if m in gate]
+print(" ".join(sorted(set(recommended) - priced)))
+PY
+)
+    if [ -z "${unpriced}" ]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        echo "FAIL: ${label}: the fix message recommends unpriced models: ${unpriced}"
+    fi
+
+    # A retired model must never be recommended.
+    case "${err}" in
+        *claude-opus-4-1*)
+            FAIL=$((FAIL + 1))
+            echo "FAIL: ${label}: the fix message names the retired claude-opus-4-1"
+            ;;
+        *)
+            PASS=$((PASS + 1))
+            ;;
+    esac
+
+    rm -rf "${home}"
+}
+
+assert_model_refused "ungated migration pin" "claude-sonnet-4-6"
+assert_model_refused "priced but ungated" "claude-opus-4-7"
 
 # Test 7d — back-compat: a cost.log written by older code (no model
 # field) parses cleanly when summing today's spend (cap check).

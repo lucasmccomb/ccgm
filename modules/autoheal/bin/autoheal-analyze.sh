@@ -303,11 +303,29 @@ PY
 #
 # The request sends output_config.format, which only some models accept.
 # A model outside this list gets a 400 for every day analyzed, so the run
-# stops before spending anything and names the model and the fix. The
-# list is the published set of models supporting JSON output schemas.
+# stops before spending anything and names the model and the fix.
+#
+# One rule decides membership: the model must BOTH support structured
+# outputs AND have a published per-MTok rate, because a model this
+# analyzer can call but cannot price would corrupt the cost log the way
+# #1025 did. So the list is the published structured-outputs set, minus
+# the two entries with no published rate:
+#   - claude-opus-4-1: deprecated, retired 2026-08-05, unpriced.
+#   - claude-opus-4-5: still active and schema-capable, but no published
+#     rate, so spend against it could not be accounted for.
+# Every model here has an entry in FALLBACK_PRICING below and in
+# autoheal-install.sh's DEFAULT_PRICING, and the pin test fails if that
+# stops being true. The remediation message prints this same list, so it
+# can only ever recommend a model that is both callable and priced.
+#
+# Two models are priced but deliberately NOT here: claude-sonnet-4-6
+# (the migration case the installer rewrites) and claude-opus-4-7 (active
+# but not on the structured-outputs list). Both keep prices so existing
+# cost.log rows and configs still resolve; configuring either one refuses
+# the run rather than sending a request the API would reject.
 # ---------------------------------------------------------------------
 
-STRUCTURED_OUTPUT_MODELS="claude-fable-5 claude-fable-5-1 claude-mythos-5 claude-mythos-5-1 claude-opus-5 claude-opus-4-8 claude-sonnet-5 claude-haiku-4-5 claude-opus-4-5 claude-opus-4-1"
+STRUCTURED_OUTPUT_MODELS="claude-fable-5-1 claude-fable-5 claude-mythos-5-1 claude-mythos-5 claude-opus-5 claude-opus-4-8 claude-sonnet-5 claude-haiku-4-5"
 
 supports_structured_outputs() {
     local candidate="$1"
@@ -1390,19 +1408,30 @@ def append_cost(path, today, input_tokens, output_tokens, cost_usd, model):
     append_locked(path, line)
 
 
-# Per-model pricing fallback (USD per million tokens, as published on the
-# Anthropic pricing page, checked 2026-09-02). Matches autoheal-install.sh
-# defaults; the install step is the source of truth, this dict only fires
-# when the config file is unreadable or its cost_pricing block is missing
-# entirely. claude-sonnet-4-6 stays for installs that have not moved off
-# it; claude-sonnet-5 is the model this analyzer now calls (#1028).
-# claude-opus-4-7 carried the retired Opus 4.1 rate ($15/$75) until the
-# #1033 review; Opus 4.7 and 4.8 are both $5/$25.
+# Per-model pricing (USD per million tokens), from the Anthropic Current
+# Models table, checked 2026-09-02. Matches autoheal-install.sh defaults;
+# the install step is the source of truth, this dict only fires when the
+# config file is unreadable or its cost_pricing block is missing entirely.
+#
+# Every model in STRUCTURED_OUTPUT_MODELS appears here, so a config the
+# gate accepts can always be priced. Mythos 5/5.1 are priced at the Fable
+# rate on the published statement that they are the same tier at the same
+# per-token price. The last two entries are priced but NOT gated: an
+# install may still hold a claude-sonnet-4-6 pin (the installer migrates
+# it) and older cost.log rows may name claude-opus-4-7, which carried the
+# retired Opus 4.1 rate ($15/$75) until the #1033 review -- Opus 4.7 and
+# 4.8 are both $5/$25.
 FALLBACK_PRICING = {
+    "claude-fable-5-1": {"input_per_million": 10.0, "output_per_million": 50.0},
+    "claude-fable-5": {"input_per_million": 10.0, "output_per_million": 50.0},
+    "claude-mythos-5-1": {"input_per_million": 10.0, "output_per_million": 50.0},
+    "claude-mythos-5": {"input_per_million": 10.0, "output_per_million": 50.0},
+    "claude-opus-5": {"input_per_million": 5.0, "output_per_million": 25.0},
+    "claude-opus-4-8": {"input_per_million": 5.0, "output_per_million": 25.0},
     "claude-sonnet-5": {"input_per_million": 2.0, "output_per_million": 10.0},
+    "claude-haiku-4-5": {"input_per_million": 1.0, "output_per_million": 5.0},
     "claude-sonnet-4-6": {"input_per_million": 3.0, "output_per_million": 15.0},
     "claude-opus-4-7": {"input_per_million": 5.0, "output_per_million": 25.0},
-    "claude-haiku-4-5": {"input_per_million": 0.80, "output_per_million": 4.0},
 }
 # The last-resort rate for a model nothing prices. It tracks the model
 # this script actually calls, so the guess is at least the right order of
