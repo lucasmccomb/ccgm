@@ -53,7 +53,7 @@ The skill expects a one-page spec in the format documented by `code-quality/rule
 3. Skill performs Phase 0 pre-flight (auth checks for `gh` and `wrangler`, spec parseability).
 4. Skill parses the spec and confirms project name, framework default (Vite + React TS), required secrets.
 5. Skill creates the GitHub repo, scaffolds the project, implements the spec, commits incrementally, pushes to `main`.
-6. Skill creates the Pages project via the Cloudflare API (`source.type: "github"`) and verifies it with a read-back. If the one-time GitHub App precondition is unmet, it stops and tells the user to install it once, then retries.
+6. Skill verifies the GitHub App precondition against a throwaway-named project first, then creates the real Pages project via the Cloudflare API (`source.type: "github"`) with a read-back check, then explicitly triggers and polls the first deployment (Cloudflare does not start a build on project-create alone). If the one-time GitHub App precondition is unmet, it stops and tells the user to install it once, then retries.
 7. Skill provisions secrets via `wrangler pages secret put`, optionally attaches a custom domain, verifies the deployed URL, and reports.
 
 ## Constraints (Non-Negotiable)
@@ -62,7 +62,7 @@ The skill expects a one-page spec in the format documented by `code-quality/rule
 
 The single most expensive Cloudflare mistake is creating a direct-upload Pages project (via `wrangler pages deploy <new-name>`) instead of a Git-connected one. Cloudflare does not support retrofitting Git integration onto an existing direct-upload project. The only fix is to delete and recreate, which means migrating custom domains, env vars, and bindings — multi-session production work.
 
-**The `/launch` skill MUST NEVER run `wrangler pages deploy` to create a new project.** It creates the project via the Cloudflare Pages API (`source.type: "github"`) and verifies with a read-back; the dashboard's Connect-to-Git flow is the fallback when the GitHub App precondition is unmet or the API is unreachable. This is enforced in the skill prompt's Phase 6, with explicit anti-pattern callouts. See `modules/cloudflare/rules/cloudflare.md` for the full rule.
+**The `/launch` skill MUST NEVER run `wrangler pages deploy` to create a new project.** It verifies the precondition against a throwaway project first, creates the real project via the Cloudflare Pages API (`source.type: "github"`) with a read-back check, then explicitly triggers and polls the first deployment (it does not start on its own); the dashboard's Connect-to-Git flow is the fallback when the GitHub App precondition is unmet or the API is unreachable. This is enforced in the skill prompt's Phase 6, with explicit anti-pattern callouts. See `modules/cloudflare/rules/cloudflare.md` for the full rule.
 
 ### No AI attribution
 

@@ -218,7 +218,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **hooks** | core | - | Python hooks: issue-first workflow, commit format, branch protection, auto-approval for safe ops | settings |
 | **ideate** | commands | `/ideate` | Structured ideation framework: Socratic interview to refine ideas to 95% clarity, then hand off to /deepresearch or /xplan | - |
 | **identity** | core | - | Two foundational context files: soul.md (AI personality and philosophy) and human-context.md (who you are, your goals, how you work) | - |
-| **launch** | workflow | `/launch` | Takes a one-page spec to a deployed Cloudflare Pages site via the Pages API, stopping only if the one-time GitHub App install is missing | cloudflare, git-workflow, docs-for-agents |
+| **launch** | workflow | `/launch` | Takes a one-page spec to a deployed Cloudflare Pages site via the Pages API (throwaway-verified, then explicitly deploy-triggered and polled), stopping only if the one-time GitHub App install is missing | cloudflare, git-workflow, docs-for-agents |
 | **live-testing-guard** | core | - | Live/UI/app testing runs only on the dedicated runner machine, never the dev machine, and only under a permission grant recorded in the plan | - |
 | **make-interfaces-feel-better** | patterns | `/make-interfaces-feel-better` | Design-engineering details that compound into polished interfaces. Model-invoked skill covering design direction, typography, surfaces, animations, performance | - |
 | **mcp-development** | tech-specific | - | Building MCP servers: project structure, tool design, error handling, testing, evaluation patterns | - |

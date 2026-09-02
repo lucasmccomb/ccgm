@@ -334,16 +334,18 @@ In `dry-run`, print the command.
 
 **The skill creates the Pages project via the Cloudflare Pages API by default.** It stops for the user only when the one-time GitHub App precondition is unmet.
 
+**Redaction rule (applies to every step below):** every Pages API call in this phase carries an `Authorization: Bearer <token>` header. Read the token into a shell variable without echoing it, send it via `curl -H "Authorization: Bearer $TOKEN"` (or a header file, `curl -H @tokenfile`) — never as a literal on a command line, since shell history and `set -x` both capture literals. Never use `curl -v`/`--verbose` or `set -x` around these calls. **Any `BLOCKED` report in this phase that attaches a request or response must redact the `Authorization` header first** (e.g. `Authorization: Bearer [redacted]`) before it reaches a transcript, a final report, or any committed file.
+
 ### 6.1 Resolve the account id and auth
 
 Primary path — the same one the verified live probe this phase is built on used:
 
-- **Bearer token:** read the `oauth_token` field out of `~/.wrangler/config/default.toml` (the mode-0600 TOML file `wrangler login` already writes) and send it as `Authorization: Bearer <token>`. **Never print or log this value.**
-- **`<account_id>`:** read the "Account ID" column out of `wrangler whoami`'s output table — the same read-only command Phase 0.1 already runs to confirm auth. No separate account-id call is needed.
+- **Bearer token:** read the `oauth_token` field out of `~/.wrangler/config/default.toml` (the mode-0600 TOML file `wrangler login` already writes). Verified locally against wrangler 4.98.0 on 2026-09-02: that file's top-level keys are `oauth_token`, `expiration_time`, `refresh_token`, `scopes` (key names only — no value read into any committed output). Handle it per the redaction rule above.
+- **`<account_id>`:** verified locally against wrangler 4.98.0 on 2026-09-02: `wrangler whoami`'s output table has two columns, "Account Name" and "Account ID" — the same read-only command Phase 0.1 already runs to confirm auth. Resolve it in this order: (1) if `CLOUDFLARE_ACCOUNT_ID` is set, use it; (2) else if the table lists exactly one account (one data row — the common case), use that row's Account ID; (3) else — more than one account, or the table can't be parsed — ask the user which account to use and tell them to persist `CLOUDFLARE_ACCOUNT_ID` so future runs don't ask again.
 
-Because both values come from the same `wrangler login` session Phase 0.1 already requires, this path asks the user for nothing beyond what Phase 0 already asked for.
+Because both values come from the same `wrangler login` session Phase 0.1 already requires, this path asks the user for nothing beyond what Phase 0 already asked for, in the common single-account case.
 
-Fallback (if the wrangler config file is missing, unreadable, or lives somewhere else on this machine): use a `CLOUDFLARE_API_TOKEN` the user has already set, or a connected Cloudflare MCP server. If neither is available, ask the user once for a token and account id — and tell them to persist the token (e.g. `export CLOUDFLARE_API_TOKEN=...` in their shell profile) so future `/launch` runs do not ask again.
+Fallback (the wrangler config file is missing, unreadable, lives somewhere else on this machine, or the `oauth_token` key is absent/empty — treat any of these as the normal trigger for this branch, not an error): use a `CLOUDFLARE_API_TOKEN` the user has already set, or a connected Cloudflare MCP server. If neither is available, ask the user once for a token and account id — and tell them to persist both (e.g. `export CLOUDFLARE_API_TOKEN=...` and `export CLOUDFLARE_ACCOUNT_ID=...` in their shell profile) so future `/launch` runs do not ask again.
 
 ### 6.2 Preflight the GitHub App precondition (the safe pattern, on a throwaway name)
 
@@ -375,7 +377,7 @@ This step doubles as `cloudflare.md`'s documented safe pattern: verify the preco
    ---
    ```
 
-   Wait for "done", then retry the **throwaway** create (step 1) once. If it fails again with the same class of error: report `BLOCKED` — the real project name was never created or touched — and name the dashboard fallback: **Workers & Pages > Create > Pages > Connect to Git**, authorize `<owner>/<project_name>`, branch `main`, and the build settings from 6.3's table.
+   Wait for "done", then retry the **throwaway** create (step 1) once. If it fails again with the same class of error: report `BLOCKED` (redacted per the rule above) — the real project name was never created or touched — and name the dashboard fallback: **Workers & Pages > Create > Pages > Connect to Git**, authorize `<owner>/<project_name>`, branch `main`, and the build settings from 6.3's table.
 
 ### 6.3 Create the real project
 
@@ -407,6 +409,8 @@ POST /accounts/<account_id>/pages/projects
 
 `root_dir: ""` is the value the verified request actually used, not `"/"`. `production_deployments_enabled: true` is the field that governs production auto-deploy; `preview_deployment_setting: "all"` governs only preview-branch deployments (its own schema description says nothing about production); `deployments_enabled: true` is kept alongside both as the still-accepted deprecated umbrella.
 
+If this create fails for a reason unrelated to the precondition already handled in 6.2 (network error, malformed request, rate limit): report `BLOCKED` with the status code and the redacted response body attached (per the redaction rule above), and stop — do not fall through to `wrangler pages deploy`.
+
 Build settings by framework (unchanged from before this change):
 
 | Framework      | Build command   | Output directory |
@@ -424,7 +428,7 @@ Build settings by framework (unchanged from before this change):
 GET /accounts/<account_id>/pages/projects/<project_name>
 ```
 
-Assert `result.source.type == "github"`. On a mismatch (missing `source`, or any other value) — unexpected at this point, since 6.2 already verified the precondition against a throwaway — `DELETE /accounts/<account_id>/pages/projects/<project_name>` the bad project, report `BLOCKED` with the read-back body attached, and stop. **Never** fall through to `wrangler pages deploy` to "get something live" — that is exactly the mistake this phase exists to prevent.
+Assert `result.source.type == "github"`. On a mismatch (missing `source`, or any other value) — unexpected at this point, since 6.2 already verified the precondition against a throwaway — `DELETE /accounts/<account_id>/pages/projects/<project_name>` the bad project, report `BLOCKED` with the redacted read-back body attached (per the redaction rule above), and stop. **Never** fall through to `wrangler pages deploy` to "get something live" — that is exactly the mistake this phase exists to prevent.
 
 ### 6.5 First deployment
 
@@ -434,13 +438,15 @@ Assert `result.source.type == "github"`. On a mismatch (missing `source`, or any
 POST /accounts/<account_id>/pages/projects/<project_name>/deployments
 ```
 
-Capture the returned deployment id, then poll:
+If this trigger call itself fails (non-2xx): report `BLOCKED` with the status code and the redacted response body attached (per the redaction rule above) — do not start polling.
+
+On success, capture the returned deployment id, then poll:
 
 ```
 GET /accounts/<account_id>/pages/projects/<project_name>/deployments/<deployment_id>
 ```
 
-until `stage: deploy, status: success` (or a failure stage/status). The verified run took ~76 seconds end to end across five stages (`queued`, `initialize`, `clone_repo`, `build`, `deploy`); size the bound with margin — 10 attempts, 15s apart (150s) — and report `BLOCKED` with the last observed `stage`/`status` on timeout. Do not rely on Phase 9's `.pages.dev` HTTP check to wait for the build; its own bounded retry (5 attempts, 10s apart = 50s) is sized as a final sanity check after this poll has already confirmed success, not as the wait mechanism.
+until `stage: deploy, status: success`. The verified run took ~76 seconds end to end across five stages (`queued`, `initialize`, `clone_repo`, `build`, `deploy`); size the bound with margin — 10 attempts, 15s apart (150s). The one live run behind this never failed — no failure stage occurred — so the evidence does not record the exact terminal-failure value of `status`; treat any `status` other than one indicating still-in-progress as terminal, stop polling immediately, and report `BLOCKED` with the redacted last poll response attached rather than waiting out the full bound. On a genuine timeout (150s elapsed with no terminal state), report `BLOCKED` with the last observed `stage`/`status`. Do not rely on Phase 9's `.pages.dev` HTTP check to wait for the build; its own bounded retry (5 attempts, 10s apart = 50s) is sized as a final sanity check after this poll has already confirmed success, not as the wait mechanism.
 
 Capture the assigned URL:
 
@@ -450,7 +456,7 @@ PAGES_URL="https://<project_name>.pages.dev"  # default; override with the URL f
 
 ### 6.6 Dry-run behavior
 
-In `dry-run`, print the throwaway create/read-back/delete sequence from 6.2, the real `POST` body from 6.3 (values substituted), the `GET` from 6.4, and the deployment trigger + poll requests from 6.5 — do not send any of them. End with: "No requests sent. Downstream phases assume the project exists at https://<project_name>.pages.dev."
+In `dry-run`, print the throwaway create/read-back/delete sequence from 6.2, the real `POST` body from 6.3 (values substituted), the `GET` from 6.4, and the deployment trigger + poll requests from 6.5 — do not send any of them, and print `Authorization: Bearer [redacted]` in place of any header value. End with: "No requests sent. Downstream phases assume the project exists at https://<project_name>.pages.dev."
 
 ---
 

@@ -921,7 +921,7 @@ One-prompt spec to deployed Cloudflare Pages site.
 
 **Installs**: `skills/launch/`, `examples/sample-spec.md`
 
-**What it does**: `/launch` takes a one-page spec and reaches a deployed Cloudflare Pages site without further human input — except a one-time Cloudflare GitHub App install, which the skill stops to ask for only if it's missing. Inspired by Karpathy's Sequoia talk on shrinking the prompt-to-production loop. Doubles as a forcing function for surfacing every place the infra is still human-shaped.
+**What it does**: `/launch` takes a one-page spec and reaches a deployed Cloudflare Pages site without further human input — except a one-time Cloudflare GitHub App install, which the skill stops to ask for only if it's missing (Pages project creation is throwaway-verified, then explicitly deploy-triggered and polled, since Cloudflare does not start a build on project-create alone). Inspired by Karpathy's Sequoia talk on shrinking the prompt-to-production loop. Doubles as a forcing function for surfacing every place the infra is still human-shaped.
 
 **Dependencies**: cloudflare, git-workflow, docs-for-agents
 
