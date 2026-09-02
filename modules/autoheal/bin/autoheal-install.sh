@@ -100,7 +100,7 @@ if [ ! -f "${AUTOHEAL_DIR}/config.json" ]; then
   "cost_pricing": {
     "claude-sonnet-5":    {"input_per_million": 2,    "output_per_million": 10},
     "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
-    "claude-opus-4-7":    {"input_per_million": 15,   "output_per_million": 75},
+    "claude-opus-4-7":    {"input_per_million": 5,    "output_per_million": 25},
     "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4}
   },
   "max_input_tokens": 200000,
@@ -122,7 +122,7 @@ path = sys.argv[1]
 DEFAULT_PRICING = {
     "claude-sonnet-5":    {"input_per_million": 2,    "output_per_million": 10},
     "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
-    "claude-opus-4-7":    {"input_per_million": 15,   "output_per_million": 75},
+    "claude-opus-4-7":    {"input_per_million": 5,    "output_per_million": 25},
     "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4},
 }
 
@@ -149,6 +149,15 @@ else:
         if model_id not in cfg["cost_pricing"]:
             cfg["cost_pricing"][model_id] = rates
             dirty = True
+
+# #1034: migrate an install still pinned to claude-sonnet-4-6, which
+# cannot honor the structured outputs the analyzer now sends. Only that
+# exact value is rewritten -- any other pin is the operator's choice and
+# is left alone.
+for _model_key in ("model", "default_model"):
+    if cfg.get(_model_key) == "claude-sonnet-4-6":
+        cfg[_model_key] = "claude-sonnet-5"
+        dirty = True
 if "default_model" not in cfg:
     cfg["default_model"] = cfg.get("model", "claude-sonnet-5")
     dirty = True

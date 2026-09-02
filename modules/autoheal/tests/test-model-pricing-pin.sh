@@ -42,10 +42,13 @@ analyzer_src = open(sys.argv[1], encoding="utf-8").read()
 installer_src = open(sys.argv[2], encoding="utf-8").read()
 
 # Published per-MTok list prices (input, output), checked 2026-09-02.
+# Opus 4.7 and 4.8 share a rate; the $15/$75 that used to sit under the
+# 4.7 key was the retired Opus 4.1 rate.
 PUBLISHED = {
     "claude-sonnet-5": (2.0, 10.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-haiku-4-5": (0.80, 4.0),
+    "claude-opus-4-7": (5.0, 25.0),
 }
 
 problems = []
@@ -93,9 +96,11 @@ for label, rates in (("analyzer FALLBACK_PRICING", analyzer_rates), ("installer 
             )
 
 # Every model in either table needs a published rate in this test, or a
-# swap could carry a stale price forward unnoticed.
+# swap could carry a stale price forward unnoticed. No exemptions: the
+# one entry this used to skip (claude-opus-4-7) turned out to be carrying
+# the retired Opus 4.1 rate.
 for label, rates in (("analyzer", analyzer_rates), ("installer", installer_rates)):
-    unknown = sorted(set(rates) - set(PUBLISHED) - {"claude-opus-4-7"})
+    unknown = sorted(set(rates) - set(PUBLISHED))
     if unknown:
         problems.append(f"{label}: no published rate recorded in this test for {unknown}")
 
@@ -117,6 +122,74 @@ assert_eq "${RESULT}" "OK" "every default model has its published price in both 
 SEEDED_MODEL=$(grep -o '"default_model": "[^"]*"' "${INSTALLER}" | head -n 1 | sed 's/.*: "//; s/"//')
 ANALYZER_MODEL=$(grep -o '^DEFAULT_MODEL="[^"]*"' "${ANALYZER}" | sed 's/.*="//; s/"//')
 assert_eq "${SEEDED_MODEL}" "${ANALYZER_MODEL}" "autoheal-install.sh seeds the model the analyzer calls"
+
+# ---------------------------------------------------------------------
+# Upgrade path: an install still pinned to claude-sonnet-4-6 cannot honor
+# structured outputs, so the idempotent merge must migrate it (#1034).
+# Fresh-install seeding was already covered above; this is the path that
+# actually exists on every machine that ran an earlier version.
+# ---------------------------------------------------------------------
+
+UPGRADE_TMP=$(mktemp -d -t autoheal_pricing_upgrade.XXXXXX)
+cat > "${UPGRADE_TMP}/config.json" <<'JSON'
+{
+  "model": "claude-sonnet-4-6",
+  "default_model": "claude-sonnet-4-6",
+  "daily_cost_cap_usd": 10.00,
+  "cost_pricing": {
+    "claude-sonnet-4-6": {"input_per_million": 3, "output_per_million": 15}
+  }
+}
+JSON
+
+# Run only the installer's idempotent-merge python block against the
+# fixture config, so the test does not install a LaunchAgent.
+sed -n '/^DEFAULT_PRICING = {/,/^PY$/p' "${INSTALLER}" | sed '$d' > "${UPGRADE_TMP}/merge.py"
+{
+    echo "import json, sys"
+    echo "path = sys.argv[1]"
+    cat "${UPGRADE_TMP}/merge.py"
+} > "${UPGRADE_TMP}/merge_runnable.py"
+
+python3 "${UPGRADE_TMP}/merge_runnable.py" "${UPGRADE_TMP}/config.json" >/dev/null 2>&1
+
+UPGRADED_MODEL=$(python3 -c "
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+print(cfg.get('default_model', ''))
+" "${UPGRADE_TMP}/config.json")
+assert_eq "${UPGRADED_MODEL}" "${ANALYZER_MODEL}" "an existing claude-sonnet-4-6 install is migrated to the analyzer's model"
+
+UPGRADED_PLAIN_MODEL=$(python3 -c "
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+print(cfg.get('model', ''))
+" "${UPGRADE_TMP}/config.json")
+assert_eq "${UPGRADED_PLAIN_MODEL}" "${ANALYZER_MODEL}" "the legacy 'model' key is migrated too"
+
+UPGRADED_PRICE=$(python3 -c "
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+entry = cfg.get('cost_pricing', {}).get(sys.argv[2], {})
+print(f\"{entry.get('input_per_million')}/{entry.get('output_per_million')}\")
+" "${UPGRADE_TMP}/config.json" "${ANALYZER_MODEL}")
+assert_eq "${UPGRADED_PRICE}" "2/10" "the migrated model gets its price entry"
+
+# A pin the operator chose deliberately is left alone.
+cat > "${UPGRADE_TMP}/custom.json" <<'JSON'
+{
+  "default_model": "claude-opus-4-8",
+  "cost_pricing": {"claude-opus-4-8": {"input_per_million": 5, "output_per_million": 25}}
+}
+JSON
+python3 "${UPGRADE_TMP}/merge_runnable.py" "${UPGRADE_TMP}/custom.json" >/dev/null 2>&1
+CUSTOM_MODEL=$(python3 -c "
+import json, sys
+print(json.load(open(sys.argv[1])).get('default_model', ''))
+" "${UPGRADE_TMP}/custom.json")
+assert_eq "${CUSTOM_MODEL}" "claude-opus-4-8" "a non-4-6 pin is never rewritten"
+
+rm -rf "${UPGRADE_TMP}"
 
 echo ""
 echo "test-model-pricing-pin.sh: ${PASS} passed, ${FAIL} failed"

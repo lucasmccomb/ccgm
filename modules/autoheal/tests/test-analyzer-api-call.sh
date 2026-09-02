@@ -73,6 +73,59 @@ mk_state() {
     mkdir -p "${root}/events" "${root}/proposals"
 }
 
+make_curl_shim() {
+    # make_curl_shim <shim path> <request capture path> <body file> <http code> [curl exit]
+    #
+    # Stands in for curl on PATH: keeps the request body the analyzer
+    # built, writes the given body to curl's -o target, and prints the
+    # given status code the way `-w '%{http_code}'` does. With a non-zero
+    # curl exit it simulates a transport failure (28 == --max-time).
+    local shim="$1"
+    local capture="$2"
+    local body_file="$3"
+    local http_code="$4"
+    local curl_exit="${5:-0}"
+    mkdir -p "$(dirname "${shim}")"
+    cat > "${shim}" <<EOF
+#!/usr/bin/env bash
+set -u
+out_target=""
+prev=""
+for arg in "\$@"; do
+    case "\${prev}" in
+        databinary)
+            case "\${arg}" in
+                @*) cp "\${arg#@}" "${capture}" 2>/dev/null || true ;;
+            esac
+            prev=""
+            continue
+            ;;
+        outfile)
+            out_target="\${arg}"
+            prev=""
+            continue
+            ;;
+    esac
+    case "\${arg}" in
+        --data-binary) prev="databinary" ;;
+        -o) prev="outfile" ;;
+        *) prev="" ;;
+    esac
+done
+
+if [ "${curl_exit}" -ne 0 ]; then
+    echo "curl: (${curl_exit}) simulated transport failure" >&2
+    exit ${curl_exit}
+fi
+
+if [ -n "\${out_target}" ]; then
+    cp "${body_file}" "\${out_target}"
+fi
+printf '%s' "${http_code}"
+EOF
+    chmod +x "${shim}"
+}
+
 write_events() {
     local file="$1"
     local count="$2"
@@ -381,12 +434,17 @@ assert_contains "${ANALYZER_SRC}" "append_locked(path" "locked-append: log_rejec
 
 # ---------------------------------------------------------------------
 # Test 7 — per-model cost pricing (issue #497).
-# Fixture usage block is {input: 1200, output: 240}. Verify:
-#   - sonnet default config -> $3/M in + $15/M out
-#       cost = (1200*3 + 240*15) / 1e6 = (3600 + 3600) / 1e6 = 0.007200
-#   - opus default_model -> $15/M in + $75/M out
-#       cost = (1200*15 + 240*75) / 1e6 = (18000 + 18000) / 1e6 = 0.036000
-#   - unknown model -> stderr warning + sonnet fallback (0.007200)
+#
+# Since #1034 the configured model is the model the REQUEST uses, so
+# every model named here must be one the analyzer can actually call
+# (structured-outputs capable). Fixture usage block is
+# {input: 1200, output: 240}. Verify:
+#   - sonnet-5 default config -> $2/M in + $10/M out
+#       cost = (1200*2 + 240*10) / 1e6 = (2400 + 2400) / 1e6 = 0.004800
+#   - opus-4-8 default_model -> $5/M in + $25/M out
+#       cost = (1200*5 + 240*25) / 1e6 = (6000 + 6000) / 1e6 = 0.012000
+#   - a supported model with no price entry -> stderr warning + the
+#     analyzer's own model's rate as the fallback (0.004800)
 #   - cost.log lines include the model id as the 5th tab-separated field
 # ---------------------------------------------------------------------
 
@@ -401,8 +459,8 @@ write_config() {
 {
   "default_model": "${default_model}",
   "cost_pricing": {
-    "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
-    "claude-opus-4-7":    {"input_per_million": 15,   "output_per_million": 75},
+    "claude-sonnet-5":    {"input_per_million": 2,    "output_per_million": 10},
+    "claude-opus-4-8":    {"input_per_million": 5,    "output_per_million": 25},
     "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4}
   }
 }
@@ -438,7 +496,7 @@ T7A_HOME=$(mktemp -d -t autoheal_t7a.XXXXXX)
 T7A_DIR="${T7A_HOME}/autoheal"
 mk_state "${T7A_DIR}"
 write_events "${T7A_DIR}/events/${YESTERDAY}.jsonl" 1
-write_config "${T7A_DIR}/config.json" "claude-sonnet-4-6"
+write_config "${T7A_DIR}/config.json" "claude-sonnet-5"
 
 env \
     HOME="${T7A_HOME}" \
@@ -451,9 +509,9 @@ RC=$?
 assert_eq "${RC}" "0" "pricing sonnet: analyzer exits 0"
 
 T7A_COST_VAL=$(read_cost_field "${T7A_DIR}/cost.log" "${TODAY}" 3)
-assert_eq "${T7A_COST_VAL}" "0.007200" "pricing sonnet: cost matches \$3/M + \$15/M"
+assert_eq "${T7A_COST_VAL}" "0.004800" "pricing sonnet: cost matches \$2/M + \$10/M"
 T7A_MODEL_VAL=$(read_cost_field "${T7A_DIR}/cost.log" "${TODAY}" 4)
-assert_eq "${T7A_MODEL_VAL}" "claude-sonnet-4-6" "pricing sonnet: model id recorded in cost.log"
+assert_eq "${T7A_MODEL_VAL}" "claude-sonnet-5" "pricing sonnet: model id recorded in cost.log"
 
 T7A_ERR=$(cat "${T7A_HOME}/run.err")
 case "${T7A_ERR}" in
@@ -471,7 +529,7 @@ T7B_HOME=$(mktemp -d -t autoheal_t7b.XXXXXX)
 T7B_DIR="${T7B_HOME}/autoheal"
 mk_state "${T7B_DIR}"
 write_events "${T7B_DIR}/events/${YESTERDAY}.jsonl" 1
-write_config "${T7B_DIR}/config.json" "claude-opus-4-7"
+write_config "${T7B_DIR}/config.json" "claude-opus-4-8"
 
 env \
     HOME="${T7B_HOME}" \
@@ -484,16 +542,25 @@ RC=$?
 assert_eq "${RC}" "0" "pricing opus: analyzer exits 0"
 
 T7B_COST_VAL=$(read_cost_field "${T7B_DIR}/cost.log" "${TODAY}" 3)
-assert_eq "${T7B_COST_VAL}" "0.036000" "pricing opus: cost matches \$15/M + \$75/M"
+assert_eq "${T7B_COST_VAL}" "0.012000" "pricing opus: cost matches \$5/M + \$25/M"
 T7B_MODEL_VAL=$(read_cost_field "${T7B_DIR}/cost.log" "${TODAY}" 4)
-assert_eq "${T7B_MODEL_VAL}" "claude-opus-4-7" "pricing opus: model id recorded in cost.log"
+assert_eq "${T7B_MODEL_VAL}" "claude-opus-4-8" "pricing opus: model id recorded in cost.log"
 
-# Test 7c — unknown model falls back to sonnet pricing AND warns.
+# Test 7c — a callable model with no price entry falls back AND warns.
+# (Before #1034 this used a made-up model id; the configured model is now
+# the model the request uses, so it has to be one the analyzer can call.)
 T7C_HOME=$(mktemp -d -t autoheal_t7c.XXXXXX)
 T7C_DIR="${T7C_HOME}/autoheal"
 mk_state "${T7C_DIR}"
 write_events "${T7C_DIR}/events/${YESTERDAY}.jsonl" 1
-write_config "${T7C_DIR}/config.json" "claude-mystery-9-9"
+cat > "${T7C_DIR}/config.json" <<'EOF'
+{
+  "default_model": "claude-haiku-4-5",
+  "cost_pricing": {
+    "claude-sonnet-5": {"input_per_million": 2, "output_per_million": 10}
+  }
+}
+EOF
 
 env \
     HOME="${T7C_HOME}" \
@@ -503,19 +570,89 @@ env \
     ANTHROPIC_API_KEY="x" \
     bash "${ANALYZER}" >"${T7C_HOME}/run.out" 2>"${T7C_HOME}/run.err"
 RC=$?
-assert_eq "${RC}" "0" "pricing unknown: analyzer exits 0"
+assert_eq "${RC}" "0" "pricing unpriced: analyzer exits 0"
 
 T7C_COST_VAL=$(read_cost_field "${T7C_DIR}/cost.log" "${TODAY}" 3)
-# The last-resort rate tracks the model the analyzer actually calls
-# (claude-sonnet-5, $2/M in + $10/M out since #1028), not the retired pin:
+# The last-resort rate tracks the model the analyzer defaults to
+# (claude-sonnet-5, $2/M in + $10/M out since #1028):
 #   (1200*2 + 240*10) / 1e6 = (2400 + 2400) / 1e6 = 0.004800
-assert_eq "${T7C_COST_VAL}" "0.004800" "pricing unknown: cost falls back to the analyzer's own model (\$2/M + \$10/M)"
+assert_eq "${T7C_COST_VAL}" "0.004800" "pricing unpriced: cost falls back to the analyzer's own model (\$2/M + \$10/M)"
 T7C_MODEL_VAL=$(read_cost_field "${T7C_DIR}/cost.log" "${TODAY}" 4)
-assert_eq "${T7C_MODEL_VAL}" "claude-mystery-9-9" "pricing unknown: configured model id still recorded for traceability"
+assert_eq "${T7C_MODEL_VAL}" "claude-haiku-4-5" "pricing unpriced: the model that was actually called is recorded"
 
 T7C_ERR=$(cat "${T7C_HOME}/run.err")
-assert_contains "${T7C_ERR}" "no cost_pricing for model claude-mystery-9-9" "pricing unknown: stderr warning emitted"
-assert_contains "${T7C_ERR}" "falling back to claude-sonnet-5" "pricing unknown: stderr names the model it fell back to"
+assert_contains "${T7C_ERR}" "no cost_pricing for model claude-haiku-4-5" "pricing unpriced: stderr warning emitted"
+assert_contains "${T7C_ERR}" "falling back to claude-sonnet-5" "pricing unpriced: stderr names the model it fell back to"
+
+# Test 7e — the configured model is the model the REQUEST uses (#1034).
+# Before this, the request always used the shell constant while the cost
+# log named the configured model: a call that never happened, at the
+# wrong rate.
+T7E_HOME=$(mktemp -d -t autoheal_t7e.XXXXXX)
+T7E_DIR="${T7E_HOME}/autoheal"
+mk_state "${T7E_DIR}"
+write_events "${T7E_DIR}/events/${YESTERDAY}.jsonl" 3
+write_config "${T7E_DIR}/config.json" "claude-opus-4-8"
+
+T7E_BIN="${T7E_HOME}/bin"
+mkdir -p "${T7E_BIN}"
+make_curl_shim "${T7E_BIN}/curl" "${T7E_HOME}/request.json" "${FIXTURE}" "200"
+
+env \
+    HOME="${T7E_HOME}" \
+    PATH="${T7E_BIN}:${PATH}" \
+    CCGM_AUTOHEAL_DIR="${T7E_DIR}" \
+    CCGM_AUTOHEAL_TODAY="${TODAY}" \
+    ANTHROPIC_API_KEY="sk-test-not-a-real-key" \
+    bash "${ANALYZER}" >"${T7E_HOME}/run.out" 2>"${T7E_HOME}/run.err"
+RC=$?
+assert_eq "${RC}" "0" "configured model: analyzer exits 0"
+
+if [ -f "${T7E_HOME}/request.json" ]; then
+    T7E_REQ_MODEL=$(python3 -c "
+import json, sys
+print(json.load(open(sys.argv[1]))['model'])
+" "${T7E_HOME}/request.json")
+    assert_eq "${T7E_REQ_MODEL}" "claude-opus-4-8" "configured model: the request carries the configured model, not the shell constant"
+    T7E_LOGGED_MODEL=$(read_cost_field "${T7E_DIR}/cost.log" "${TODAY}" 4)
+    assert_eq "${T7E_LOGGED_MODEL}" "${T7E_REQ_MODEL}" "configured model: the cost log names the model that was called"
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: configured model: no request body captured"
+fi
+rm -rf "${T7E_HOME}"
+
+# Test 7f — a model that cannot honor structured outputs stops the run
+# before anything is spent, and leaves last-analyzed alone (#1028).
+T7F_HOME=$(mktemp -d -t autoheal_t7f.XXXXXX)
+T7F_DIR="${T7F_HOME}/autoheal"
+mk_state "${T7F_DIR}"
+write_events "${T7F_DIR}/events/${YESTERDAY}.jsonl" 3
+cat > "${T7F_DIR}/config.json" <<'EOF'
+{
+  "default_model": "claude-sonnet-4-6"
+}
+EOF
+
+env \
+    HOME="${T7F_HOME}" \
+    CCGM_AUTOHEAL_DIR="${T7F_DIR}" \
+    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
+    CCGM_AUTOHEAL_TODAY="${TODAY}" \
+    ANTHROPIC_API_KEY="x" \
+    bash "${ANALYZER}" >"${T7F_HOME}/run.out" 2>"${T7F_HOME}/run.err"
+RC=$?
+assert_eq "${RC}" "2" "unsupported model: analyzer stops before calling"
+T7F_ERR=$(cat "${T7F_HOME}/run.err")
+assert_contains "${T7F_ERR}" "claude-sonnet-4-6" "unsupported model: stderr names the offending model"
+assert_contains "${T7F_ERR}" "structured outputs" "unsupported model: stderr says why"
+if [ -f "${T7F_DIR}/last-analyzed" ]; then
+    FAIL=$((FAIL + 1))
+    echo "FAIL: unsupported model: last-analyzed must not be written"
+else
+    PASS=$((PASS + 1))
+fi
+rm -rf "${T7F_HOME}"
 
 # Test 7d — back-compat: a cost.log written by older code (no model
 # field) parses cleanly when summing today's spend (cap check).
@@ -567,30 +704,7 @@ mk_state "${T8_DIR}"
 write_events "${T8_DIR}/events/${YESTERDAY}.jsonl" 3
 
 T8_BIN="${T8_HOME}/bin"
-mkdir -p "${T8_BIN}"
-cat > "${T8_BIN}/curl" <<EOF
-#!/usr/bin/env bash
-# Capture the request body, then answer with the fixture.
-prev=""
-for arg in "\$@"; do
-    case "\${arg}" in
-        --data-binary)
-            prev="databinary"
-            ;;
-        @*)
-            if [ "\${prev}" = "databinary" ]; then
-                cp "\${arg#@}" "${T8_HOME}/request.json"
-            fi
-            prev=""
-            ;;
-        *)
-            prev=""
-            ;;
-    esac
-done
-cat "${FIXTURE}"
-EOF
-chmod +x "${T8_BIN}/curl"
+make_curl_shim "${T8_BIN}/curl" "${T8_HOME}/request.json" "${FIXTURE}" "200"
 
 env \
     HOME="${T8_HOME}" \
@@ -675,37 +789,185 @@ PY
     done
 fi
 
-# Test 8b — a response that stopped at the output cap is reported as a
-# failed extraction, not a quiet zero-proposal day (#1026).
-T8B_HOME=$(mktemp -d -t autoheal_t8b.XXXXXX)
-T8B_DIR="${T8B_HOME}/autoheal"
-mk_state "${T8B_DIR}"
-write_events "${T8B_DIR}/events/${YESTERDAY}.jsonl" 3
-
-TRUNCATED_FIXTURE="${T8B_HOME}/truncated-response.json"
-python3 - "${FIXTURE}" "${TRUNCATED_FIXTURE}" <<'PY'
+# Test 8b — a call that did not end cleanly is a failed call: the day is
+# held (last-analyzed does not move past it), the reason is on stderr,
+# and the run summary the digest reads carries the count (#1026, and the
+# #1033 review's findings 6 and 9).
+#
+# Runs the same assertions for each way a call can fail to produce a
+# usable answer.
+mutate_fixture() {
+    # mutate_fixture <out path> <python expression applied to `resp`>
+    python3 - "${FIXTURE}" "$1" "$2" <<'PY'
 import json
 import sys
 
 resp = json.load(open(sys.argv[1], encoding="utf-8"))
-resp["stop_reason"] = "max_tokens"
+exec(sys.argv[3])  # noqa: S102 - test-local mutation of a local fixture
 with open(sys.argv[2], "w", encoding="utf-8") as fh:
     json.dump(resp, fh)
 PY
+}
+
+assert_call_failure() {
+    # assert_call_failure <label> <mutation> <expected stderr substring> <expect truncated count>
+    local label="$1"
+    local mutation="$2"
+    local needle="$3"
+    local want_truncated="$4"
+
+    local home
+    home=$(mktemp -d -t autoheal_callfail.XXXXXX)
+    local dir="${home}/autoheal"
+    mk_state "${dir}"
+    write_events "${dir}/events/${YESTERDAY}.jsonl" 3
+    printf '%s\n' "2000-01-01" > "${dir}/last-analyzed"
+
+    local fixture="${home}/response.json"
+    mutate_fixture "${fixture}" "${mutation}"
+
+    env \
+        HOME="${home}" \
+        CCGM_AUTOHEAL_DIR="${dir}" \
+        CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${fixture}" \
+        CCGM_AUTOHEAL_TODAY="${TODAY}" \
+        ANTHROPIC_API_KEY="x" \
+        bash "${ANALYZER}" >"${home}/run.out" 2>"${home}/run.err"
+    local rc=$?
+
+    assert_eq "${rc}" "1" "${label}: analyzer reports the failure"
+    assert_contains "$(cat "${home}/run.err")" "${needle}" "${label}: stderr says what went wrong"
+    assert_contains "$(cat "${home}/run.err")" "day held" "${label}: stderr says the day is held"
+
+    local last_val=""
+    if [ -f "${dir}/last-analyzed" ]; then
+        last_val=$(tr -d '\n' < "${dir}/last-analyzed")
+    fi
+    if [ "${last_val}" \< "${YESTERDAY}" ]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        echo "FAIL: ${label}: last-analyzed must stay before the failed day (got '${last_val}')"
+    fi
+
+    local summary="${dir}/runs/${TODAY}.json"
+    assert_file_exists "${summary}" "${label}: run summary written for the digest"
+    if [ -f "${summary}" ]; then
+        local counts
+        counts=$(python3 -c "
+import json, sys
+s = json.load(open(sys.argv[1]))
+print(f\"{s.get('truncated_calls', 0)} {s.get('failed_calls', 0)}\")
+" "${summary}")
+        assert_eq "${counts}" "${want_truncated} 1" "${label}: run summary counts the failure"
+    fi
+
+    rm -rf "${home}"
+}
+
+assert_call_failure "truncation" \
+    'resp["stop_reason"] = "max_tokens"' \
+    "stop_reason=max_tokens" "1"
+
+assert_call_failure "refusal" \
+    'resp["stop_reason"] = "refusal"' \
+    "stop_reason=refusal" "0"
+
+assert_call_failure "empty content" \
+    'resp["content"] = []' \
+    "carried no assistant text" "0"
+
+# Test 8d — a non-200 response is not parsed as if it succeeded, and the
+# day is held rather than skipped past (#1033 review finding 3).
+T8D_HOME=$(mktemp -d -t autoheal_t8d.XXXXXX)
+T8D_DIR="${T8D_HOME}/autoheal"
+mk_state "${T8D_DIR}"
+write_events "${T8D_DIR}/events/${YESTERDAY}.jsonl" 3
+printf '%s\n' "2000-01-01" > "${T8D_DIR}/last-analyzed"
+
+cat > "${T8D_HOME}/error-body.json" <<'EOF'
+{"type":"error","error":{"type":"invalid_request_error","message":"output_config.format: unsupported for this model"}}
+EOF
+
+T8D_BIN="${T8D_HOME}/bin"
+make_curl_shim "${T8D_BIN}/curl" "${T8D_HOME}/request.json" "${T8D_HOME}/error-body.json" "400"
 
 env \
-    HOME="${T8B_HOME}" \
-    CCGM_AUTOHEAL_DIR="${T8B_DIR}" \
-    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${TRUNCATED_FIXTURE}" \
+    HOME="${T8D_HOME}" \
+    PATH="${T8D_BIN}:${PATH}" \
+    CCGM_AUTOHEAL_DIR="${T8D_DIR}" \
     CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="x" \
-    bash "${ANALYZER}" >"${T8B_HOME}/run.out" 2>"${T8B_HOME}/run.err"
+    ANTHROPIC_API_KEY="sk-test-not-a-real-key" \
+    bash "${ANALYZER}" >"${T8D_HOME}/run.out" 2>"${T8D_HOME}/run.err"
 RC=$?
-assert_eq "${RC}" "0" "truncation: analyzer still exits 0 (the day is reported, not fatal)"
-T8B_ERR=$(cat "${T8B_HOME}/run.err")
-assert_contains "${T8B_ERR}" "stop_reason=max_tokens" "truncation: stderr names the cap stop and the day"
-T8B_OUT=$(cat "${T8B_HOME}/run.out")
-assert_contains "${T8B_OUT}" '"truncated": 1' "truncation: the per-day summary carries the count"
+assert_eq "${RC}" "1" "http 400: analyzer reports the failure"
+T8D_ERR=$(cat "${T8D_HOME}/run.err")
+assert_contains "${T8D_ERR}" "HTTP 400" "http 400: stderr names the status"
+assert_contains "${T8D_ERR}" "invalid_request_error" "http 400: stderr carries a body excerpt"
+assert_contains "${T8D_ERR}" "day held" "http 400: stderr says the day is held"
+T8D_LAST=""
+if [ -f "${T8D_DIR}/last-analyzed" ]; then
+    T8D_LAST=$(tr -d '\n' < "${T8D_DIR}/last-analyzed")
+fi
+if [ "${T8D_LAST}" \< "${YESTERDAY}" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: http 400: last-analyzed must not advance past the failed day (got '${T8D_LAST}')"
+fi
+if [ -f "${T8D_DIR}/proposals/${TODAY}.jsonl" ]; then
+    T8D_SIZE=$(wc -c < "${T8D_DIR}/proposals/${TODAY}.jsonl" | tr -d ' ')
+    assert_eq "${T8D_SIZE}" "0" "http 400: an error body never becomes proposals"
+fi
+rm -rf "${T8D_HOME}"
+
+# Test 8e — a curl transport failure (exit 28 is what --max-time gives)
+# holds the day too. This is the branch that used to advance the
+# watermark past a day that was never analyzed.
+T8E_HOME=$(mktemp -d -t autoheal_t8e.XXXXXX)
+T8E_DIR="${T8E_HOME}/autoheal"
+mk_state "${T8E_DIR}"
+write_events "${T8E_DIR}/events/${YESTERDAY}.jsonl" 3
+printf '%s\n' "2000-01-01" > "${T8E_DIR}/last-analyzed"
+
+T8E_BIN="${T8E_HOME}/bin"
+make_curl_shim "${T8E_BIN}/curl" "${T8E_HOME}/request.json" "${FIXTURE}" "000" "28"
+
+env \
+    HOME="${T8E_HOME}" \
+    PATH="${T8E_BIN}:${PATH}" \
+    CCGM_AUTOHEAL_DIR="${T8E_DIR}" \
+    CCGM_AUTOHEAL_TODAY="${TODAY}" \
+    ANTHROPIC_API_KEY="sk-test-not-a-real-key" \
+    bash "${ANALYZER}" >"${T8E_HOME}/run.out" 2>"${T8E_HOME}/run.err"
+RC=$?
+assert_eq "${RC}" "1" "curl timeout: analyzer reports the failure"
+T8E_ERR=$(cat "${T8E_HOME}/run.err")
+assert_contains "${T8E_ERR}" "curl failed" "curl timeout: stderr names the transport failure"
+assert_contains "${T8E_ERR}" "exit 28" "curl timeout: stderr carries the curl exit code"
+T8E_LAST=""
+if [ -f "${T8E_DIR}/last-analyzed" ]; then
+    T8E_LAST=$(tr -d '\n' < "${T8E_DIR}/last-analyzed")
+fi
+if [ "${T8E_LAST}" \< "${YESTERDAY}" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: curl timeout: last-analyzed must not advance past the failed day (got '${T8E_LAST}')"
+fi
+rm -rf "${T8E_HOME}"
+
+# Test 8f — the timeout and the output cap are chosen together (#1026):
+# a 90s timeout against a 16000-token cap makes the cap unreachable.
+T8F_MAXTIME=$(grep -o '^CURL_MAX_TIME_SECONDS=[0-9]*' "${ANALYZER}" | head -n 1 | cut -d= -f2)
+T8F_CAP=$(grep -o '^DEFAULT_MAX_OUTPUT_TOKENS=[0-9]*' "${ANALYZER}" | head -n 1 | cut -d= -f2)
+assert_eq "${T8F_CAP}" "16000" "timeout pairing: the output cap is the non-streaming ceiling"
+if [ "${T8F_MAXTIME}" -ge 300 ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: timeout pairing: --max-time ${T8F_MAXTIME}s is too short to ever reach a ${T8F_CAP}-token answer"
+fi
 
 # Test 8c — the fence stripper is gone; a fenced body is a failure now.
 assert_contains "${ANALYZER_SRC}" "structured outputs" "no fence stripper: parse_proposals documents why it does not strip"
@@ -719,9 +981,7 @@ case "${ANALYZER_SRC}" in
         ;;
 esac
 
-for d in "${T8_HOME}" "${T8B_HOME}"; do
-    rm -rf "${d}"
-done
+rm -rf "${T8_HOME}"
 
 # ---------------------------------------------------------------------
 # Summary.

@@ -123,6 +123,10 @@ DEFAULT_MAX_OUTPUT_TOKENS = 16000
 # keeps the figure the cap used to be -- comfortably above the observed
 # per-call output and unchanged in effect from before #1026.
 PLANNING_OUTPUT_TOKENS = 4096
+# Paired with DEFAULT_MAX_OUTPUT_TOKENS above: a 16000-token answer needs
+# roughly this long to generate, so the two numbers are chosen together.
+# Raising the cap without raising this makes the cap unreachable.
+CURL_MAX_TIME_SECONDS = 300
 DEFAULT_DAILY_COST_CAP_USD = 10.0
 DEFAULT_LOOKBACK_DAYS = 7
 DEFAULT_PROMOTION_MIN_SESSIONS = 3
@@ -695,7 +699,7 @@ def _write_json_atomic(path: Path, obj: Any) -> None:
 
 
 def _default_canary_state() -> dict[str, Any]:
-    return {"active_incidents": {}, "reduce_failures": {}}
+    return {"active_incidents": {}, "reduce_failures": {}, "truncated_calls": {}}
 
 
 def record_canary_incident(slug: str, date: str, detail: str) -> None:
@@ -723,6 +727,20 @@ def record_reduce_failure_incident(slug: str, date: str, detail: str) -> None:
     state = _read_json(canary_state_path(), _default_canary_state())
     state.setdefault("reduce_failures", {})
     state["reduce_failures"][slug] = {"date": date, "detail": detail}
+    state["last_updated"] = _utc_now_iso()
+    _write_json_atomic(canary_state_path(), state)
+
+
+def record_truncated_call_incident(slug: str, date: str, detail: str) -> None:
+    """Durable marker for a map call that stopped at the output cap
+    (#1026). The slug's mined evidence was paid for but never extracted,
+    so main() holds that slug's watermark and it is re-mined next run --
+    the same "not consumed, not advanced" contract the reduce path has.
+    Recorded in the SAME durable-incident file dream-digest.sh renders as
+    a loud banner, keyed per slug (latest incident wins)."""
+    state = _read_json(canary_state_path(), _default_canary_state())
+    state.setdefault("truncated_calls", {})
+    state["truncated_calls"][slug] = {"date": date, "detail": detail}
     state["last_updated"] = _utc_now_iso()
     _write_json_atomic(canary_state_path(), state)
 
@@ -1019,7 +1037,12 @@ def _call_curl_with_retry(
                 "-H", f"x-api-key: {api_key}",
                 "-H", f"anthropic-version: {ANTHROPIC_VERSION}",
                 "-H", "content-type: application/json",
-                "--max-time", "90",
+                # Chosen as a pair with DEFAULT_MAX_OUTPUT_TOKENS (16000):
+                # emitting a full 16000-token body needs roughly 300s at
+                # observed generation rates, so a shorter timeout would
+                # make the cap unreachable and turn every long answer into
+                # a transport failure instead. Move both together.
+                "--max-time", str(CURL_MAX_TIME_SECONDS),
                 "-w", "\n%{http_code}",
                 api_url,
                 "--data-binary", "@-",
@@ -1151,8 +1174,11 @@ def run_map(
     day: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int], bool]:
     """Returns (candidates, usage, truncated). `truncated` is True when the
-    response stopped at the output cap (#1026) -- a failed extraction for
-    this slug, reported rather than quietly accepted as a short answer."""
+    response stopped at the output cap (#1026): a failed extraction for
+    this slug, not a short answer. main() acts on it -- the slug's
+    watermark does NOT advance and a durable incident is recorded, so the
+    evidence this call was paid for is re-mined next run instead of being
+    consumed unread."""
     max_output_tokens = int(cfg.get("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS))
     parsed, usage, stop_reason = get_model_response(
         model=cfg.get("map_model", DEFAULT_MAP_MODEL),
@@ -1171,8 +1197,8 @@ def run_map(
     if truncated:
         print(
             f"dream_analyze: map call for slug {slug!r} on {day or '?'} stopped at the "
-            f"{max_output_tokens}-token output cap (stop_reason=max_tokens); treating it as a "
-            "failed extraction, not a short answer",
+            f"{max_output_tokens}-token output cap (stop_reason=max_tokens); this slug's "
+            "watermark will NOT advance and its evidence will be re-mined next run",
             file=sys.stderr,
         )
     if parsed is None:
@@ -1817,6 +1843,11 @@ def main(argv: list[str] | None = None) -> int:
     total_output_tokens = 0
     map_calls = 0
     truncated_calls = 0
+    # Slugs whose map call stopped at the output cap. Their evidence was
+    # paid for but never extracted, so the watermark loop below skips
+    # them and they are re-mined next run (#1026) -- the same contract
+    # the reduce-failure path already has for a whole run.
+    truncated_slugs: set[str] = set()
     for slug in planned_slugs:
         candidates, usage, truncated = run_map(
             slug, bundles[slug], cfg=cfg, map_system_prompt=map_system_prompt,
@@ -1826,6 +1857,11 @@ def main(argv: list[str] | None = None) -> int:
         map_calls += 1
         if truncated:
             truncated_calls += 1
+            truncated_slugs.add(slug)
+            record_truncated_call_incident(
+                slug, today,
+                "map call stopped at the output cap; evidence NOT consumed, watermark NOT advanced",
+            )
         total_input_tokens += usage["input_tokens"]
         total_output_tokens += usage["output_tokens"]
         if offline_dir is None:
@@ -1954,6 +1990,15 @@ def main(argv: list[str] | None = None) -> int:
     write_proposals(written_rows, target_path, overwrite=bool(args.force_day))
 
     for slug in planned_slugs:
+        if slug in truncated_slugs:
+            # Its map call never produced a usable extraction, so advancing
+            # here would consume mined sessions that were never read.
+            print(
+                f"dream_analyze: holding watermark for slug {slug!r} -- its map call stopped "
+                "at the output cap, so its evidence is re-mined next run",
+                file=sys.stderr,
+            )
+            continue
         sessions = bundles[slug].get("sessions", [])
         timestamps = [s.get("ended_at") or s.get("started_at") for s in sessions]
         timestamps = [t for t in timestamps if t]

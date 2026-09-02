@@ -133,7 +133,35 @@ run_digest() {
     CCGM_AUTOHEAL_CONFIG="${config_file}" \
     CCGM_AUTOHEAL_TODAY="${today}" \
     CCGM_AUTOHEAL_LIB_DIR="${LIB_DIR}" \
+    CCGM_AUTOHEAL_RUNS_DIR="${RUNS_DIR_OVERRIDE:-${proposals_dir}/../runs}" \
         bash "${DIGEST_SCRIPT}" "$@"
+}
+
+write_run_summary() {
+    # write_run_summary <runs_dir> <date> <truncated> <failed> [day] [reason]
+    local runs_dir="$1"
+    local date="$2"
+    local truncated="$3"
+    local failed="$4"
+    local day="${5:-}"
+    local reason="${6:-}"
+    mkdir -p "${runs_dir}"
+    python3 - "${runs_dir}/${date}.json" "${date}" "${truncated}" "${failed}" "${day}" "${reason}" <<'PY'
+import json
+import sys
+
+path, date, truncated, failed, day, reason = sys.argv[1:7]
+summary = {
+    "date": date,
+    "generated_at": f"{date}T00:00:00+00:00",
+    "model": "claude-sonnet-5",
+    "truncated_calls": int(truncated),
+    "failed_calls": int(failed),
+    "failures": [{"day": day, "reason": reason}] if day else [],
+}
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(summary, fh, indent=2)
+PY
 }
 
 # ---------------------------------------------------------------------------
@@ -328,6 +356,53 @@ run_digest "${CASE6}/proposals" "${CASE6}/digests" "${CASE6}/sent" \
 if [ -f "${CASE6}/digests/${TODAY6}.md" ]; then
     FAIL=$((FAIL + 1))
     echo "FAIL: case6: digest_enabled:false should suppress digest write"
+else
+    PASS=$((PASS + 1))
+fi
+
+# ---------------------------------------------------------------------------
+# Assertion 7: analyzer call failures reach the digest (#1026, #1028).
+#
+# A day whose calls stopped at the output cap or failed outright produces
+# no proposals. Before this the digest skipped that day entirely and the
+# only trace was a stderr line in a launchd log.
+# ---------------------------------------------------------------------------
+
+CASE7="${TMPROOT}/case7"
+mkdir -p "${CASE7}/proposals" "${CASE7}/digests" "${CASE7}/sent" "${CASE7}/runs"
+TODAY7="2026-05-24"
+write_run_summary "${CASE7}/runs" "${TODAY7}" 1 2 "2026-05-23" "stop_reason_max_tokens"
+
+RUNS_DIR_OVERRIDE="${CASE7}/runs" run_digest "${CASE7}/proposals" "${CASE7}/digests" "${CASE7}/sent" \
+    "${CASE7}/config-missing.json" "${TODAY7}" >/dev/null 2>&1
+ASSERT7_EXIT=$?
+assert_eq "${ASSERT7_EXIT}" "0" "case7: digest exits 0"
+
+DIGEST7="${CASE7}/digests/${TODAY7}.md"
+if [ -f "${DIGEST7}" ]; then
+    PASS=$((PASS + 1))
+    BODY7="$(cat "${DIGEST7}")"
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: case7: a zero-proposal day with failed calls must still render a digest"
+    BODY7=""
+fi
+assert_contains "${BODY7}" "stopped at the output cap: 1" "case7: truncation count rendered"
+assert_contains "${BODY7}" "failed calls: 2" "case7: failed-call count rendered"
+assert_contains "${BODY7}" "2026-05-23" "case7: the failing day is named"
+assert_contains "${BODY7}" "stop_reason_max_tokens" "case7: the failure reason is named"
+
+# A clean day still short-circuits: no proposals, no failures, no digest.
+CASE7B="${TMPROOT}/case7b"
+mkdir -p "${CASE7B}/proposals" "${CASE7B}/digests" "${CASE7B}/sent" "${CASE7B}/runs"
+TODAY7B="2026-05-25"
+write_run_summary "${CASE7B}/runs" "${TODAY7B}" 0 0
+
+RUNS_DIR_OVERRIDE="${CASE7B}/runs" run_digest "${CASE7B}/proposals" "${CASE7B}/digests" "${CASE7B}/sent" \
+    "${CASE7B}/config-missing.json" "${TODAY7B}" >/dev/null 2>&1
+if [ -f "${CASE7B}/digests/${TODAY7B}.md" ]; then
+    FAIL=$((FAIL + 1))
+    echo "FAIL: case7b: a genuinely quiet day should still skip the digest"
 else
     PASS=$((PASS + 1))
 fi

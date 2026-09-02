@@ -152,9 +152,20 @@ DAILY_COST_CAP_CENTS="${DAILY_COST_CAP_CENTS_DEFAULT}"
 # tune: without it the output cap silently becomes a shared ceiling over
 # thinking plus the JSON answer.
 DEFAULT_MODEL="claude-sonnet-5"
+# What the request actually uses: config.json's `default_model`/`model`
+# when set, else DEFAULT_MODEL. load_runtime_tunables() resolves it, and
+# the same value drives pricing, so the request and the cost log can no
+# longer name different models (#1034).
+MODEL="${DEFAULT_MODEL}"
 # A backstop, not a tuning knob. 16000 is the ceiling for a non-streaming
-# request, which is what this script issues.
+# request, which is what this script issues. Chosen as a pair with
+# CURL_MAX_TIME_SECONDS below -- raising one without the other either
+# makes the cap unreachable or cuts real answers short.
 DEFAULT_MAX_OUTPUT_TOKENS=16000
+# Generating a full 16000-token body takes roughly this long at observed
+# rates. The old 90s left the cap unreachable, so every long answer
+# surfaced as a transport failure instead of a truncation.
+CURL_MAX_TIME_SECONDS=300
 LOOKBACK_DAYS=7                     # Walk back at most this many days.
 CALIBRATION_WINDOW_DAYS=7
 REJECT_GIVEUP_THRESHOLD=7           # After N rejections of the same day,
@@ -213,11 +224,18 @@ rejected_days_path() {
 }
 
 # ---------------------------------------------------------------------
-# Config-driven tunables (max_input_tokens, daily_cost_cap_usd).
+# Config-driven tunables (max_input_tokens, daily_cost_cap_usd, model).
 #
 # Reads ~/.claude/autoheal/config.json (or CCGM_AUTOHEAL_CONFIG). Missing
-# file, malformed JSON, or missing keys fall back to defaults. Both
-# values must be positive numbers; anything else is treated as missing.
+# file, malformed JSON, or missing keys fall back to defaults. The two
+# numbers must be positive; anything else is treated as missing.
+#
+# `model` resolves the same way pricing already resolved it
+# (`default_model` then `model`, then the DEFAULT_MODEL constant), and
+# the resolved value is what the REQUEST uses (#1034). Before this the
+# request always used the constant while the cost log named the
+# configured model, so a config left on an older pin logged a call that
+# never happened, at the wrong rate.
 # ---------------------------------------------------------------------
 
 load_runtime_tunables() {
@@ -231,6 +249,7 @@ load_runtime_tunables() {
         CONFIG_PATH="${cfg}" \
         DEFAULT_MAX="${MAX_INPUT_TOKENS_DEFAULT}" \
         DEFAULT_CAP_CENTS="${DAILY_COST_CAP_CENTS_DEFAULT}" \
+        DEFAULT_MODEL_ID="${DEFAULT_MODEL}" \
         python3 - <<'PY'
 import json
 import os
@@ -238,6 +257,7 @@ import os
 path = os.environ["CONFIG_PATH"]
 default_max = int(os.environ["DEFAULT_MAX"])
 default_cap_cents = int(os.environ["DEFAULT_CAP_CENTS"])
+default_model = os.environ["DEFAULT_MODEL_ID"]
 
 try:
     with open(path, "r", encoding="utf-8") as fh:
@@ -260,13 +280,44 @@ if isinstance(cap_usd, (int, float)) and cap_usd > 0:
 else:
     cap_cents = default_cap_cents
 
-print(f"{mit_out}\t{cap_cents}")
+model = cfg.get("default_model") or cfg.get("model")
+if not isinstance(model, str) or not model.strip():
+    model = default_model
+
+print(f"{mit_out}\t{cap_cents}\t{model.strip()}")
 PY
     )
     if [ -n "${parsed}" ]; then
         MAX_INPUT_TOKENS="$(printf '%s' "${parsed}" | cut -f1)"
         DAILY_COST_CAP_CENTS="$(printf '%s' "${parsed}" | cut -f2)"
+        local cfg_model
+        cfg_model="$(printf '%s' "${parsed}" | cut -f3)"
+        if [ -n "${cfg_model}" ]; then
+            MODEL="${cfg_model}"
+        fi
     fi
+}
+
+# ---------------------------------------------------------------------
+# Structured outputs support gate (#1028).
+#
+# The request sends output_config.format, which only some models accept.
+# A model outside this list gets a 400 for every day analyzed, so the run
+# stops before spending anything and names the model and the fix. The
+# list is the published set of models supporting JSON output schemas.
+# ---------------------------------------------------------------------
+
+STRUCTURED_OUTPUT_MODELS="claude-fable-5 claude-fable-5-1 claude-mythos-5 claude-mythos-5-1 claude-opus-5 claude-opus-4-8 claude-sonnet-5 claude-haiku-4-5 claude-opus-4-5 claude-opus-4-1"
+
+supports_structured_outputs() {
+    local candidate="$1"
+    local known
+    for known in ${STRUCTURED_OUTPUT_MODELS}; do
+        if [ "${candidate}" = "${known}" ]; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 # ---------------------------------------------------------------------
@@ -287,6 +338,17 @@ fi
 
 # Apply config-driven tunables now that paths are resolved.
 load_runtime_tunables
+
+# The request carries output_config.format, so a model that cannot honor
+# it would 400 on every day. Stop before spending anything, name the
+# model, and leave last-analyzed untouched so no day is skipped.
+if ! supports_structured_outputs "${MODEL}"; then
+    echo "autoheal-analyze: configured model '${MODEL}' does not support structured outputs" >&2
+    echo "autoheal-analyze: the analyzer sends output_config.format, which this model would reject." >&2
+    echo "autoheal-analyze: set default_model in $(config_path) to one of: ${STRUCTURED_OUTPUT_MODELS}" >&2
+    echo "autoheal-analyze: no day was analyzed and last-analyzed was left unchanged." >&2
+    exit 2
+fi
 
 # ---------------------------------------------------------------------
 # API-key + fixture handling.
@@ -512,6 +574,11 @@ record_rejection() {
     local est_tokens="$2"
     local cap="$3"
     local version="$4"
+    # Why the day was held. "token_cap" is the original size rejection;
+    # API and transport failures reuse this ledger (#1033 review finding
+    # 3) so a permanently failing day still hits REJECT_GIVEUP_THRESHOLD
+    # instead of blocking the watermark forever.
+    local reason="${5:-token_cap}"
     local path
     path="$(rejected_days_path)"
     mkdir -p "$(dirname "${path}")"
@@ -519,6 +586,7 @@ record_rejection() {
     REJ_EST="${est_tokens}" \
     REJ_CAP="${cap}" \
     REJ_VERSION="${version}" \
+    REJ_REASON="${reason}" \
     REJ_PATH="${path}" \
     python3 - <<'PY'
 import datetime as dt
@@ -533,6 +601,7 @@ rec = {
     "est_tokens": int(os.environ.get("REJ_EST") or 0),
     "max_input_tokens": int(os.environ.get("REJ_CAP") or 0),
     "analyzer_version": os.environ.get("REJ_VERSION") or "1",
+    "reason": os.environ.get("REJ_REASON") or "token_cap",
 }
 parent = os.path.dirname(path)
 if parent:
@@ -571,6 +640,72 @@ analyzer_version() {
 # the "no rejections" path so last-analyzed bumps past them.
 REJECTED_DAYS=""
 
+# Per-run call health, written to runs/{today}.json at the end so
+# autoheal-digest.sh can render it (#1033 review finding 6). A stderr
+# line in a launchd log is not a surface anyone reads.
+RUN_TRUNCATED_CALLS=0
+RUN_FAILED_CALLS=0
+RUN_FAILURES=""
+
+hold_day_for_failure() {
+    # A day whose API call never produced a usable response was NOT
+    # analyzed, so last-analyzed must not move past it (#1033 review
+    # finding 3 — both the non-200 and the transport-failure branch used
+    # to bump the watermark and lose the day for good). Routed through
+    # the same rejection ledger as a size rejection, so a day that fails
+    # this way REJECT_GIVEUP_THRESHOLD times still advances rather than
+    # blocking the pipeline forever.
+    local day="$1"
+    local reason="$2"
+    local version
+    version="$(analyzer_version)"
+    record_rejection "${day}" "0" "${MAX_INPUT_TOKENS}" "${version}" "${reason}"
+    RUN_FAILED_CALLS=$((RUN_FAILED_CALLS + 1))
+    RUN_FAILURES="${RUN_FAILURES}${day} ${reason}
+"
+    local prior
+    prior="$(rejected_count_for_day "${day}" "${version}")"
+    if [ "${prior}" -ge "${REJECT_GIVEUP_THRESHOLD}" ]; then
+        echo "autoheal-analyze: GIVE_UP day=${day} failed ${prior} times (${reason}); bumping past it." >&2
+        return 0
+    fi
+    REJECTED_DAYS="${REJECTED_DAYS}${day}
+"
+}
+
+redacted_body_excerpt() {
+    # Print a short, secret-scrubbed excerpt of an error body. Reuses
+    # hook_utils.redact_secrets when it is importable, and falls back to
+    # a conservative key-shape scrub so a body is never echoed raw.
+    local body_file="$1"
+    BODY_FILE="${body_file}" HOOK_LIB="${MODULE_ROOT}/../hooks/lib" python3 - <<'PY'
+import os
+import re
+import sys
+
+path = os.environ["BODY_FILE"]
+try:
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        body = fh.read(4000)
+except OSError:
+    print("  (no response body captured)")
+    sys.exit(0)
+
+try:
+    sys.path.insert(0, os.environ["HOOK_LIB"])
+    from hook_utils import redact_secrets  # noqa: E402
+    body = redact_secrets(body)
+except Exception:
+    body = re.sub(r"sk-[A-Za-z0-9_\-]{16,}", "[redacted]", body)
+    body = re.sub(r"(?i)(api[_-]?key\"?\s*[:=]\s*\"?)[^\"\s,}]+", r"\1[redacted]", body)
+
+body = " ".join(body.split())
+if len(body) > 400:
+    body = body[:400] + " ..."
+print(f"  body: {body}" if body else "  (empty response body)")
+PY
+}
+
 # ---------------------------------------------------------------------
 # Per-day processing.
 # ---------------------------------------------------------------------
@@ -601,7 +736,7 @@ analyze_one_day() {
             "$(analyzer_prompt_path)" \
             "${CLONE_ID}" \
             "${CALIBRATION_MODE}" \
-            "${DEFAULT_MODEL}" \
+            "${MODEL}" \
             "${DEFAULT_MAX_OUTPUT_TOKENS}" \
             "$(proposal_schema_path)" \
             <<'PY'
@@ -1028,16 +1163,32 @@ PY
         local api_url="${CCGM_AUTOHEAL_API_URL:-https://api.anthropic.com/v1/messages}"
         local sb
         sb="$(sandbox_prefix)"
+        local http_code=""
+        local curl_rc=0
+        # -w prints the status to stdout while -o keeps the body in the
+        # file: without it a 4xx error body was parsed as if it were a
+        # successful response, and the day looked proposal-free.
         # shellcheck disable=SC2086
-        if ! ${sb}curl -s -S \
+        http_code="$(${sb}curl -s -S \
                 -H "x-api-key: ${ANTHROPIC_API_KEY}" \
                 -H "anthropic-version: 2023-06-01" \
                 -H "content-type: application/json" \
-                --max-time 90 \
+                --max-time "${CURL_MAX_TIME_SECONDS}" \
+                -o "${response_file}" \
+                -w '%{http_code}' \
                 "${api_url}" \
-                --data-binary @"${request_file}" \
-                > "${response_file}"; then
-            echo "autoheal-analyze: curl failed for ${day_iso}" >&2
+                --data-binary @"${request_file}")" || curl_rc=$?
+
+        if [ "${curl_rc}" -ne 0 ]; then
+            echo "autoheal-analyze: curl failed for ${day_iso} (exit ${curl_rc}); day held, last-analyzed will not advance past it" >&2
+            hold_day_for_failure "${day_iso}" "transport_exit_${curl_rc}"
+            rm -rf "${tmp_dir}"
+            return 1
+        fi
+        if [ "${http_code}" != "200" ]; then
+            echo "autoheal-analyze: Messages API returned HTTP ${http_code} for ${day_iso}; day held, last-analyzed will not advance past it" >&2
+            redacted_body_excerpt "${response_file}" >&2
+            hold_day_for_failure "${day_iso}" "http_${http_code}"
             rm -rf "${tmp_dir}"
             return 1
         fi
@@ -1065,7 +1216,8 @@ PY
             "$(cost_log_path)" \
             "${TODAY_ISO}" \
             "$(config_path)" \
-            "${DEFAULT_MODEL}" \
+            "${MODEL}" \
+            "${tmp_dir}" \
         <<'PY'
 import datetime as dt
 import json
@@ -1082,7 +1234,15 @@ day_iso = sys.argv[7]
 cost_log_path = sys.argv[8]
 today_iso = sys.argv[9]
 config_path = sys.argv[10]
-fallback_model = sys.argv[11]
+# The model the REQUEST used, resolved once by load_runtime_tunables()
+# from config.json. Pricing keys off this same value, so the cost log
+# can no longer name a model that was never called (#1034).
+request_model = sys.argv[11]
+tmp_dir = sys.argv[12]
+
+# Exit code for "the call happened but produced nothing usable" -- the
+# caller holds the day rather than advancing past it.
+EXIT_UNUSABLE_RESPONSE = 4
 
 
 def load_schema(path):
@@ -1115,11 +1275,10 @@ def parse_proposals(text):
     """Read the proposal array out of the assistant text.
 
     Structured outputs (#1028) make the body schema-valid on any 200, so
-    there is no code fence to strip and no prose to skip past. A body
-    that still fails to parse means the response never finished -- see
-    the stop_reason check below, which reports that as a failed
-    extraction rather than letting it look like a quiet zero-proposal
-    day."""
+    there is no code fence to strip and no prose to skip past. The
+    stop_reason and empty-text checks run before this and hold the day on
+    the failures that actually happen, so reaching a JSON error here
+    means something stranger; say so rather than returning silently."""
     text = text.strip()
     if not text:
         return []
@@ -1237,10 +1396,12 @@ def append_cost(path, today, input_tokens, output_tokens, cost_usd, model):
 # when the config file is unreadable or its cost_pricing block is missing
 # entirely. claude-sonnet-4-6 stays for installs that have not moved off
 # it; claude-sonnet-5 is the model this analyzer now calls (#1028).
+# claude-opus-4-7 carried the retired Opus 4.1 rate ($15/$75) until the
+# #1033 review; Opus 4.7 and 4.8 are both $5/$25.
 FALLBACK_PRICING = {
     "claude-sonnet-5": {"input_per_million": 2.0, "output_per_million": 10.0},
     "claude-sonnet-4-6": {"input_per_million": 3.0, "output_per_million": 15.0},
-    "claude-opus-4-7": {"input_per_million": 15.0, "output_per_million": 75.0},
+    "claude-opus-4-7": {"input_per_million": 5.0, "output_per_million": 25.0},
     "claude-haiku-4-5": {"input_per_million": 0.80, "output_per_million": 4.0},
 }
 # The last-resort rate for a model nothing prices. It tracks the model
@@ -1261,10 +1422,12 @@ def load_cfg(path):
     return cfg
 
 
-def resolve_pricing(cfg, fallback_model):
-    """Return (model_id, pricing_dict). Emits a stderr warning when the
-    configured model has no cost_pricing entry."""
-    model = cfg.get("default_model") or cfg.get("model") or fallback_model
+def resolve_pricing(cfg, model):
+    """Return (model_id, pricing_dict) for the model the request used.
+
+    `model` is passed in rather than re-derived from config here: the
+    request and the price must key off one value, or the cost log ends up
+    naming a model that was never called (#1034)."""
     pricing_map = cfg.get("cost_pricing")
     if not isinstance(pricing_map, dict):
         pricing_map = FALLBACK_PRICING
@@ -1295,16 +1458,29 @@ else:
     out_tok = 0
 
 cfg = load_cfg(config_path)
-model_id, pricing = resolve_pricing(cfg, fallback_model)
+model_id, pricing = resolve_pricing(cfg, request_model)
 cost = (
     in_tok * float(pricing["input_per_million"])
     + out_tok * float(pricing["output_per_million"])
 ) / 1_000_000.0
 append_cost(cost_log_path, today_iso, in_tok, out_tok, cost, model_id)
 
-# #1026: a response that stopped at the output cap is a failed
-# extraction, not a short answer. Say so, and carry the count out in the
-# per-day summary so an unattended run does not hide it.
+
+def mark(name, contents=""):
+    """Leave a marker the shell reads before deleting tmp_dir. Same idiom
+    as REJECT_TOKEN_CAP in the pre-extract phase."""
+    try:
+        with open(os.path.join(tmp_dir, name), "w", encoding="utf-8") as fh:
+            fh.write(contents)
+    except OSError:
+        pass
+
+
+# A call that did not end cleanly produced no usable extraction, whatever
+# it cost. `max_tokens` means the answer was cut off; `refusal` means the
+# model declined -- plausible here, since every input this analyzer sends
+# is security-shaped event data. Either way the day is held rather than
+# recorded as a clean zero-proposal day (#1033 review finding 9).
 stop_reason = response.get("stop_reason") if isinstance(response, dict) else None
 truncated = stop_reason == "max_tokens"
 if truncated:
@@ -1313,8 +1489,32 @@ if truncated:
         "(stop_reason=max_tokens); treating it as a failed extraction, not a short answer",
         file=sys.stderr,
     )
+    mark("TRUNCATED")
+    mark("CALL_FAILED", "stop_reason_max_tokens")
+    sys.exit(EXIT_UNUSABLE_RESPONSE)
+
+if stop_reason is not None and stop_reason != "end_turn":
+    print(
+        f"WARN: analyzer response for day {day_iso} ended with stop_reason={stop_reason}; "
+        "treating it as a failed call, not a proposal-free day",
+        file=sys.stderr,
+    )
+    mark("CALL_FAILED", f"stop_reason_{stop_reason}")
+    sys.exit(EXIT_UNUSABLE_RESPONSE)
 
 text = extract_assistant_text(response)
+if not text.strip():
+    # The branch every realistic failure lands on: an error body, an
+    # empty content array, or blocks that are not type "text". It used to
+    # return silently and read as a clean zero-proposal day.
+    print(
+        f"WARN: analyzer response for day {day_iso} carried no assistant text; "
+        "treating it as a failed call, not a proposal-free day",
+        file=sys.stderr,
+    )
+    mark("CALL_FAILED", "empty_response_text")
+    sys.exit(EXIT_UNUSABLE_RESPONSE)
+
 proposals = parse_proposals(text)
 
 accepted = 0
@@ -1345,14 +1545,32 @@ for prop in proposals:
 print(json.dumps({
     "accepted": accepted,
     "rejected": rejected,
-    "truncated": 1 if truncated else 0,
     "day": day_iso,
 }))
 PY
     local pa_rc=$?
+
+    # Read the parse phase's markers before the temp dir goes away.
+    if [ -f "${tmp_dir}/TRUNCATED" ]; then
+        RUN_TRUNCATED_CALLS=$((RUN_TRUNCATED_CALLS + 1))
+    fi
+    local call_failure=""
+    if [ -f "${tmp_dir}/CALL_FAILED" ]; then
+        call_failure="$(tr -d '\n' < "${tmp_dir}/CALL_FAILED" || true)"
+    fi
     rm -rf "${tmp_dir}"
+
+    # 4 is EXIT_UNUSABLE_RESPONSE in the parse phase above.
+    if [ "${pa_rc}" -eq 4 ]; then
+        # The call happened and was billed, but produced nothing usable.
+        # Hold the day so it is retried rather than skipped past.
+        echo "autoheal-analyze: unusable response for ${day_iso} (${call_failure:-unknown}); day held, last-analyzed will not advance past it" >&2
+        hold_day_for_failure "${day_iso}" "${call_failure:-unusable_response}"
+        return 1
+    fi
     if [ "${pa_rc}" -ne 0 ]; then
-        echo "autoheal-analyze: post-API parse failed for ${day_iso} (rc=${pa_rc})" >&2
+        echo "autoheal-analyze: post-API parse failed for ${day_iso} (rc=${pa_rc}); day held" >&2
+        hold_day_for_failure "${day_iso}" "parse_rc_${pa_rc}"
         return 1
     fi
 
@@ -1370,6 +1588,55 @@ while IFS= read -r day; do
         OVERALL_RC=1
     fi
 done <<< "${DAYS_TO_ANALYZE}"
+
+# ---------------------------------------------------------------------
+# Per-run call health, for the digest.
+#
+# Mirrors dreaming's runs/{date}.json (#1033 review finding 6): a call
+# that stopped at the cap, was refused, or came back empty is otherwise
+# only a stderr line in a launchd log nobody reads. autoheal-digest.sh
+# renders this file, and its presence with a non-zero count also keeps
+# the digest from skipping a day that produced no proposals BECAUSE the
+# calls failed.
+# ---------------------------------------------------------------------
+
+RUNS_DIR="$(autoheal_dir)/runs"
+mkdir -p "${RUNS_DIR}"
+RUN_TRUNCATED_CALLS="${RUN_TRUNCATED_CALLS}" \
+RUN_FAILED_CALLS="${RUN_FAILED_CALLS}" \
+RUN_FAILURES="${RUN_FAILURES}" \
+RUN_MODEL="${MODEL}" \
+RUN_TODAY="${TODAY_ISO}" \
+RUN_PATH="${RUNS_DIR}/${TODAY_ISO}.json" \
+python3 - <<'PY'
+import datetime as dt
+import json
+import os
+
+failures = []
+for line in (os.environ.get("RUN_FAILURES") or "").splitlines():
+    line = line.strip()
+    if not line:
+        continue
+    day, _, reason = line.partition(" ")
+    failures.append({"day": day, "reason": reason or "unknown"})
+
+summary = {
+    "date": os.environ["RUN_TODAY"],
+    "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+    "model": os.environ.get("RUN_MODEL", ""),
+    "truncated_calls": int(os.environ.get("RUN_TRUNCATED_CALLS") or 0),
+    "failed_calls": int(os.environ.get("RUN_FAILED_CALLS") or 0),
+    "failures": failures,
+}
+
+path = os.environ["RUN_PATH"]
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(summary, fh, indent=2)
+    fh.write("\n")
+os.replace(tmp, path)
+PY
 
 # Bump last-analyzed (issue #517):
 #  - --force-day mode never bumps (explicit user override).

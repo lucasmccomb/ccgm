@@ -40,6 +40,7 @@ import dream_analyze as da  # noqa: E402
 
 OFFLINE_FIXTURES = HERE / "fixtures" / "offline-responses"
 BROKEN_REDUCE_FIXTURES = HERE / "fixtures" / "offline-responses-broken-reduce"
+TRUNCATED_MAP_FIXTURES = HERE / "fixtures" / "offline-responses-truncated-map"
 FRICTION_FIXTURE = HERE / "fixtures" / "friction.jsonl"
 DRIFT_FIXTURE = HERE / "fixtures" / "drift.jsonl"
 
@@ -1240,6 +1241,34 @@ class OutputSchemaTests(unittest.TestCase):
         proposal = da.PROPOSALS_ENVELOPE_SCHEMA["properties"]["proposals"]["items"]
         self.assertEqual(set(proposal["properties"]["kind"]["enum"]), set(da.VALID_PROPOSAL_KINDS))
 
+    # Fields the runtime assigns after the reduce call, so the model is
+    # never asked for them. Everything else in proposal-schema.json's
+    # `required` set must be in the envelope, or the model stops being
+    # asked for a field the validator still demands.
+    RUNTIME_ASSIGNED_FIELDS = {"id", "fingerprint", "generated_at", "status"}
+
+    def test_envelope_offers_exactly_what_the_proposal_schema_requires(self):
+        # Stage-2 finding 7: autoheal derives its envelope from its schema
+        # file, so drift there is impossible. dreaming hand-writes its
+        # envelope beside the same kind of file -- this is the assertion
+        # that keeps the two in step.
+        file_schema = json.loads(
+            (Path(da.__file__).resolve().parent / "proposal-schema.json").read_text(encoding="utf-8")
+        )
+        expected = set(file_schema["required"]) - self.RUNTIME_ASSIGNED_FIELDS
+        item = da.PROPOSALS_ENVELOPE_SCHEMA["properties"]["proposals"]["items"]
+        self.assertEqual(
+            set(item["required"]), expected,
+            "envelope `required` must equal proposal-schema.json `required` minus the "
+            "runtime-assigned fields; add the field to the envelope, or to "
+            "RUNTIME_ASSIGNED_FIELDS if the runtime now supplies it",
+        )
+        self.assertEqual(set(item["properties"]), expected)
+        self.assertTrue(
+            self.RUNTIME_ASSIGNED_FIELDS.isdisjoint(item["properties"]),
+            "the model must not be asked for fields the runtime assigns",
+        )
+
     def test_both_envelopes_are_json_serializable(self):
         # They are embedded in the request body verbatim.
         for schema in self._schemas().values():
@@ -1486,6 +1515,42 @@ class MainIntegrationTests(unittest.TestCase):
         self.assertIn("widget-app", canary.get("reduce_failures", {}),
                       "a durable, digest-visible marker must record the failure (mirrors record_canary_incident)")
 
+    def test_truncated_map_call_holds_the_slug_watermark_and_records_an_incident(self):
+        # #1026 / Stage-2 finding 2: a map call that stopped at the output
+        # cap produced no extraction, so consuming its mined sessions
+        # would lose them for good -- the watermark must stay put and the
+        # failure must be durable, the way a reduce failure already is.
+        dreaming_dir = _isolate_env(self)
+        projects_root = _make_projects_root("truncmap")
+        self.addCleanup(lambda: __import__("shutil").rmtree(projects_root, ignore_errors=True))
+
+        rc = da.main([
+            "--offline", str(TRUNCATED_MAP_FIXTURES),
+            "--force-day", "2026-01-01",
+            "--slugs", "widget-app",
+            "--projects-root", str(projects_root),
+        ])
+        self.assertEqual(rc, 0, "the run itself completes -- only this slug is held back")
+
+        self.assertFalse(
+            (dreaming_dir / "state" / "last-dreamed.json").exists(),
+            "a truncated map call must not advance the slug's watermark",
+        )
+
+        canary = json.loads((dreaming_dir / "state" / "canary.json").read_text(encoding="utf-8"))
+        self.assertIn(
+            "widget-app", canary.get("truncated_calls", {}),
+            "the truncation must be recorded durably, not only on stderr",
+        )
+        detail = canary["truncated_calls"]["widget-app"]["detail"]
+        self.assertIn("NOT consumed", detail)
+        self.assertIn("NOT advanced", detail)
+
+        run_summary = json.loads(
+            (dreaming_dir / "state" / "runs" / "2026-01-01.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(run_summary["truncated_calls"], 1)
+
     def test_reduce_parse_failure_under_force_day_does_not_wipe_prior_valid_proposals(self):
         # #769 Stage-2 P1 #1, the destructive half: --force-day must not
         # overwrite an existing, valid proposals file with an empty result
@@ -1563,9 +1628,13 @@ class MainIntegrationTests(unittest.TestCase):
 class CanaryStateTests(unittest.TestCase):
     def test_default_canary_state_has_no_untested_versions_key(self):
         # Epic 2: the version-allowlist toil signal (untested_versions_
-        # observed) is gone from the durable canary state -- only the two
-        # incident families remain.
-        self.assertEqual(da._default_canary_state(), {"active_incidents": {}, "reduce_failures": {}})
+        # observed) is gone from the durable canary state -- only the
+        # incident families remain (#1026 added truncated_calls).
+        state = da._default_canary_state()  # noqa: SLF001
+        self.assertEqual(
+            state, {"active_incidents": {}, "reduce_failures": {}, "truncated_calls": {}}
+        )
+        self.assertNotIn("untested_versions_observed", state)
 
     def test_schema_drift_error_records_active_incident_with_named_detail(self):
         # drift.jsonl (Epic 1) renames every friction field while keeping

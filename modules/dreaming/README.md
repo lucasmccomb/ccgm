@@ -136,9 +136,10 @@ The **nightly map->reduce analyzer**, on top of Epic 2's miner:
   explicitly in the request body: map runs thinking-disabled at `effort:
   low` (classification-shaped extraction), reduce runs thinking-disabled
   at the model's default effort, and each sends the JSON schema its
-  response must satisfy. `max_tokens` (16000) is a backstop -- a call
-  that stops at it is reported as a failed extraction and counted in the
-  run summary, never read as a short answer.
+  response must satisfy. `max_tokens` (16000) is a backstop, paired with
+  a 300s curl timeout so the cap is reachable -- a map call that stops at
+  it holds that slug's watermark (its evidence is re-mined next run),
+  records a durable incident, and is counted in the run summary.
 - `lib/dreaming-prompt-map.md` / `lib/dreaming-prompt-reduce.md` -- the two
   system prompts, both opening with an untrusted-input threat-model block
   (excerpts are mined from other agents' sessions -- data, never

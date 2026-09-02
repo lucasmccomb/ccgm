@@ -1,0 +1,18 @@
+{
+  "_comment": "Healthy reduce beside the truncated map fixture, so the test isolates the map-truncation path rather than also tripping the reduce-failure abort.",
+  "id": "msg_fixture_reduce",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-fixture-reduce",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 500,
+    "output_tokens": 150
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"proposals\": []}"
+    }
+  ]
+}

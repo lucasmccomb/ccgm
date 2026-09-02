@@ -186,7 +186,11 @@ active_incidents = canary.get("active_incidents") or {}
 # durable file so it gets the same loud, persists-until-acknowledged
 # banner as a schema_canary incident.
 reduce_failures = canary.get("reduce_failures") or {}
-if active_incidents or reduce_failures:
+# Map calls that stopped at the output cap (#1026). Same contract as a
+# reduce failure, scoped to one slug: its evidence was paid for but never
+# extracted, so its watermark was held and it is re-mined next run.
+truncated_call_incidents = canary.get("truncated_calls") or {}
+if active_incidents or reduce_failures or truncated_call_incidents:
     out.append("## ⚠️ Canary banner (durable — shown until acknowledged)")
     out.append("")
     if active_incidents:
@@ -199,6 +203,12 @@ if active_incidents or reduce_failures:
         out.append("**Reduce-phase failures (mined evidence NOT consumed, watermark NOT advanced):**")
         out.append("")
         for slug, info in sorted(reduce_failures.items()):
+            out.append(f"- `{slug}` (last failed {info.get('date', '?')}): {info.get('detail', '')}")
+        out.append("")
+    if truncated_call_incidents:
+        out.append("**Map calls that stopped at the output cap (mined evidence NOT consumed, watermark NOT advanced):**")
+        out.append("")
+        for slug, info in sorted(truncated_call_incidents.items()):
             out.append(f"- `{slug}` (last failed {info.get('date', '?')}): {info.get('detail', '')}")
         out.append("")
 

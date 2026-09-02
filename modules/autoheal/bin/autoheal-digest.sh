@@ -81,6 +81,12 @@ fi
 
 PROPOSALS_FILE="${PROPOSALS_DIR}/${TODAY}.jsonl"
 DIGEST_FILE="${DIGESTS_DIR}/${TODAY}.md"
+# Per-run call health written by autoheal-analyze.sh (#1026, #1028): how
+# many calls stopped at the output cap or failed outright. A day whose
+# calls failed is exactly a day the operator should see, so its presence
+# also overrides the "no proposals, skip the digest" shortcut below.
+RUNS_DIR="${CCGM_AUTOHEAL_RUNS_DIR:-${CCGM_AUTOHEAL_DIR:-${HOME}/.claude/autoheal}/runs}"
+RUN_SUMMARY_FILE="${RUNS_DIR}/${TODAY}.json"
 
 # ---------------------------------------------------------------------------
 # Preflight
@@ -124,7 +130,17 @@ if [ -f "${PROPOSALS_FILE}" ]; then
     proposal_count="$(grep -c . "${PROPOSALS_FILE}" 2>/dev/null || echo 0)"
 fi
 
-if [ "${proposal_count}" -eq 0 ] && [ "${INCLUDE_EMPTY}" -eq 0 ]; then
+# Did any call fail today? A zero-proposal day caused by failed calls is
+# not a quiet day, and skipping the digest would hide it.
+FAILED_CALL_COUNT=0
+if [ -f "${RUN_SUMMARY_FILE}" ]; then
+    FAILED_CALL_COUNT="$(jq -r '((.failed_calls // 0) + (.truncated_calls // 0))' "${RUN_SUMMARY_FILE}" 2>/dev/null || echo 0)"
+    case "${FAILED_CALL_COUNT}" in
+        ''|*[!0-9]*) FAILED_CALL_COUNT=0 ;;
+    esac
+fi
+
+if [ "${proposal_count}" -eq 0 ] && [ "${INCLUDE_EMPTY}" -eq 0 ] && [ "${FAILED_CALL_COUNT}" -eq 0 ]; then
     echo "no proposals for ${TODAY}; skipping digest" >&2
     exit 0
 fi
@@ -184,6 +200,7 @@ OUTPUT="$(
     CCGM_BACKFILL_DAYS="${backfill_days}" \
     CCGM_LIB_DIR="${LIB_DIR}" \
     CCGM_INCLUDE_EMPTY="${INCLUDE_EMPTY}" \
+    CCGM_RUN_SUMMARY_FILE="${RUN_SUMMARY_FILE}" \
     python3 - <<'PYEOF'
 import json
 import os
@@ -200,6 +217,17 @@ proposals_file = os.environ["CCGM_PROPOSALS_FILE"]
 today = os.environ["CCGM_DIGEST_TODAY"]
 backfill_days = [d for d in os.environ.get("CCGM_BACKFILL_DAYS", "").split() if d]
 include_empty = os.environ.get("CCGM_INCLUDE_EMPTY", "0") == "1"
+
+run_summary = {}
+run_summary_file = os.environ.get("CCGM_RUN_SUMMARY_FILE", "")
+if run_summary_file and os.path.isfile(run_summary_file):
+    try:
+        with open(run_summary_file, "r", encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        if isinstance(loaded, dict):
+            run_summary = loaded
+    except (OSError, json.JSONDecodeError):
+        run_summary = {}
 
 proposals = []
 if os.path.isfile(proposals_file):
@@ -269,13 +297,34 @@ CAP = 5
 shown = proposals[:CAP]
 hidden = proposals[CAP:]
 
+truncated_calls = int(run_summary.get("truncated_calls") or 0)
+failed_calls = int(run_summary.get("failed_calls") or 0)
+
 out = []
 out.append(f"# Autoheal digest — {today}")
 out.append("")
+
+# Call health first: a day with no proposals because its calls failed is
+# not a quiet day, and this is the only surface that says so.
+if truncated_calls or failed_calls:
+    out.append("## ⚠️ Analyzer calls that did not produce proposals")
+    out.append("")
+    if truncated_calls:
+        out.append(
+            f"- **stopped at the output cap: {truncated_calls}** "
+            "(raise `max_output_tokens` if this repeats)"
+        )
+    if failed_calls:
+        out.append(f"- **failed calls: {failed_calls}** — each day is held and retried, not skipped")
+    for failure in run_summary.get("failures") or []:
+        if isinstance(failure, dict):
+            out.append(f"  - `{failure.get('day', '?')}`: {failure.get('reason', 'unknown')}")
+    out.append("")
+
 if not proposals:
-    if not include_empty:
+    if not include_empty and not (truncated_calls or failed_calls):
         # Should not reach here; the bash caller short-circuits on empty
-        # without --include-empty.
+        # without --include-empty and without failed calls.
         sys.exit(0)
     out.append("_No proposals for today._")
     out.append("")
