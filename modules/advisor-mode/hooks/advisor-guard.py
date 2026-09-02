@@ -234,6 +234,12 @@ GLOB_CHARS = "*?["
 IFS_WHITESPACE = " \t\n"
 # Commands that move bash's working directory out from under the guard's.
 CD_COMMANDS = {"cd", "pushd", "popd"}
+# Tilde forms that name a directory rather than a user: `~+` is bash's
+# $PWD, `~-` its $OLDPWD, and `~0`/`~+2`/`~-2` index the dirstack. Each is
+# as working-directory-dependent as `./x`, and os.path.expanduser leaves
+# every one of them literal — so realpath would read them against THIS
+# process's directory rather than the one bash will be in.
+TILDE_CWD_RE = re.compile(r"^~[-+0-9]")
 
 VAR_ARG_REASON = (
     "an argument begins with — or is a flag carrying — a `$VAR`-style "
@@ -273,10 +279,11 @@ GLOB_ARG_REASON = (
 )
 
 CD_PATH_REASON = (
-    "this command changes directory and then uses a relative path. The "
-    "guard resolves that path against its own working directory, not "
-    "the one bash will be in, so where the write lands is unknowable. "
-    "Write the absolute path out, or delegate the command."
+    "a path here is read against the working directory, and the guard's is "
+    "not the one bash will use: `~+` IS bash's `$PWD` and `~-` its "
+    "`$OLDPWD`, and a plain relative path moves with any `cd` earlier in the "
+    "command. Where the write lands is unknowable either way. Write the "
+    "absolute path out, or delegate the command."
 )
 
 ANSI_ARG_REASON = (
@@ -420,6 +427,12 @@ def path_allowed(raw_path):
         # checked. Covers scratch-op arguments and redirect targets alike.
         return False
     raw = raw_path.strip()
+    if TILDE_CWD_RE.match(raw):
+        # `~+/x` IS bash's `$PWD/x`. expanduser does not implement it, so it
+        # stayed literal and realpath read it as a relative path from the
+        # guard's own directory — which is how `cd <repo> && rm -f
+        # ~+/victim.txt` resolved back into an allowed root and passed.
+        return False
     if unresolved_var_in(raw):
         # A variable this process cannot resolve, so where the write lands is
         # unknowable — the same reason a substitution's output cannot be a
@@ -580,6 +593,11 @@ def decode_ansi_c(body):
     An escape this decoder does not recognize ends the decode and reports
     False: the word bash would pass is then unknowable, and guessing at it is
     how a `-i` sneaks through.
+
+    An escape that produces a NUL (`\\c@`, `\\x00`, `\\000`) ENDS the word and
+    reports True: bash carries its words as C strings and does the same, so
+    `$'a\\c@b'` is the one-character word `a`. Truncating matches bash exactly
+    and can only shorten the word, never hide a flag inside it.
     """
     out = []
     i, n = 0, len(body)
@@ -606,14 +624,20 @@ def decode_ansi_c(body):
             # is wrong for everything else: `$'\c-' is CR (0x0d), not
             # `m`. Verified against printf for - m M ? [ a A @.
             ch = body[i]
-            out.append(chr(0x7F if ch == "?" else ord(ch) & 0x1F))
+            code = 0x7F if ch == "?" else ord(ch) & 0x1F
+            if code == 0:
+                return "".join(out), True  # a NUL ends the word (below)
+            out.append(chr(code))
             i += 1
             continue
         if e in "01234567":  # \nnn — up to three octal digits
             j = i
             while j < n and j - i < 3 and body[j] in "01234567":
                 j += 1
-            out.append(chr(int(body[i:j], 8) & 0xFF))
+            code = int(body[i:j], 8) & 0xFF
+            if code == 0:
+                return "".join(out), True  # a NUL ends the word (below)
+            out.append(chr(code))
             i = j
             continue
         if e in ("x", "u", "U"):  # \xHH, \uHHHH, \UHHHHHHHH
@@ -629,6 +653,8 @@ def decode_ansi_c(body):
                 # Checked rather than caught: chr() raises ValueError on some
                 # Python versions and OverflowError on others.
                 return "".join(out), False  # past the Unicode range
+            if code == 0:
+                return "".join(out), True  # a NUL ends the word (below)
             out.append(chr(code))
             i = j
             continue
@@ -673,24 +699,43 @@ def scan_expansion(s, i):
     return i + 1, None, False  # `$` before anything else is literal
 
 
+def unsafe_value(value):
+    """Why splicing a resolved value would misread the command, or None.
+
+    Bash expands a parameter and THEN splits the result on $IFS and globs it,
+    so a value carrying either class becomes several argv words, or a
+    different word entirely. Splicing it into `text` would have every check
+    read a word bash never builds: `GLOBVAR='-dele*'` then `find <dir>
+    $GLOBVAR` reaches find as `-delete`. The key names the blocker, so the
+    denial says which of the two it was.
+
+    Brace expansion is deliberately absent: bash runs it BEFORE parameter
+    expansion, so a value carrying `{a,b}` is not re-expanded — verified.
+    """
+    if any(w in value for w in IFS_WHITESPACE):
+        return "split"
+    if any(c in value for c in GLOB_CHARS):
+        return "glob"
+    return None
+
+
 def expand_run(s, states, quoted):
     """Quote-removed text of an unquoted (`quoted` False) or double-quoted run.
 
-    Returns (text, marks, splits): `marks` are offsets into `text` where an
-    expansion this process cannot resolve begins, and `splits` is True when
-    bash would word-split this run into more than one argv word.
+    Returns (text, marks, blockers): `marks` are offsets into `text` where an
+    expansion this process cannot resolve begins, and `blockers` names the
+    bash steps that would take this run apart after the guard has read it.
 
     A resolvable `$NAME` is replaced by its value, so the checks downstream
-    read the real argument — unless the run is unquoted and the value carries
-    $IFS whitespace, in which case splicing it would build one word where bash
-    builds two (`EVIL=" -delete"; find <dir>$EVIL`), so it is reported instead.
-    An UNQUOTED expansion this process cannot resolve is reported the same
-    way, wherever it sits: `find <dir>$IFS-delete` is a plain, non-flag-shaped
-    word that becomes a write predicate (issue #1017).
+    read the real argument — unless the run is unquoted and the value is one
+    bash would re-expand (see unsafe_value), in which case it is reported
+    instead. An UNQUOTED expansion this process cannot resolve is reported
+    the same way, wherever it sits: `find <dir>$IFS-delete` is a plain,
+    non-flag-shaped word that becomes a write predicate (issue #1017).
     """
     parts = []
     marks = []
-    splits = False
+    blockers = []
     length = 0
     i, n = 0, len(s)
     while i < n:
@@ -707,16 +752,19 @@ def expand_run(s, states, quoted):
         if c == "$" and not states[i][1]:
             end, name, is_expansion = scan_expansion(s, i)
             value = os.environ.get(name) if name is not None else None
+            unsafe = unsafe_value(value) if value is not None and not quoted \
+                else None
             if not is_expansion:
                 parts.append(s[i:end])
                 length += end - i
-            elif value is not None and not (
-                    not quoted and any(w in value for w in IFS_WHITESPACE)):
+            elif value is not None and unsafe is None:
                 parts.append(value)
                 length += len(value)
             else:
                 if not quoted:
-                    splits = True
+                    key = unsafe or "split"
+                    if key not in blockers:
+                        blockers.append(key)
                 marks.append(length)
                 parts.append(s[i:end])
                 length += end - i
@@ -725,7 +773,7 @@ def expand_run(s, states, quoted):
         parts.append(c)
         length += 1
         i += 1
-    return "".join(parts), marks, splits
+    return "".join(parts), marks, blockers
 
 
 def unquoted_specials(raw, states):
@@ -784,10 +832,10 @@ def normalize_word(raw):
             j = i
             while j < n and states[j][0] is None:
                 j += 1
-            text, run_marks, splits = expand_run(raw[i:j], states[i:j], False)
+            text, run_marks, run_blockers = expand_run(
+                raw[i:j], states[i:j], False)
             marks.extend(length + m for m in run_marks)
-            if splits and "split" not in blockers:
-                blockers.append("split")
+            blockers.extend(k for k in run_blockers if k not in blockers)
             parts.append(text)
             length += len(text)
             i = j
@@ -912,7 +960,14 @@ REDIRECT_RE = re.compile(r"(\d*>{1,2}&?\d*|&>{1,2})[ \t]*([^\s;|&<>]*)")
 
 
 def relative_path(text):
-    """True when a path's meaning depends on the working directory."""
+    """True when a path's meaning depends on the working directory.
+
+    A leading `~/` is anchored to HOME and is not, but `~+`, `~-` and the
+    `~N` dirstack forms are exactly as cwd-dependent as `./x` — they are the
+    shell's own names for `$PWD` and `$OLDPWD`.
+    """
+    if TILDE_CWD_RE.match(text):
+        return True
     return not (text.startswith("/") or text.startswith("~"))
 
 
@@ -1287,7 +1342,8 @@ def check_command(command, depth=0):
             return SUBST_TARGET_REASON
         if target.unresolved:
             return VAR_TARGET_REASON
-        if cd_anywhere and relative_path(target.text):
+        if TILDE_CWD_RE.match(target.text) or (
+                cd_anywhere and relative_path(target.text)):
             return CD_PATH_REASON
         return ("redirecting output into `%s` writes outside the "
                 "orchestrator's work-product paths." % target.text)
@@ -1297,9 +1353,10 @@ def check_command(command, depth=0):
             reason = argument_blocker(segment)
             if reason is not None:
                 return reason
-            if after_cd and any(relative_path(w.text)
-                                for w in segment_words(segment)[1:]
-                                if not w.text.startswith("-")):
+            paths = [w.text for w in segment_words(segment)[1:]
+                     if not w.text.startswith("-")]
+            if any(TILDE_CWD_RE.match(p) for p in paths) or (
+                    after_cd and any(relative_path(p) for p in paths)):
                 return CD_PATH_REASON
             return ("`%s` is not on the orchestrator's read-only/"
                     "orchestration allowlist." % segment.strip())

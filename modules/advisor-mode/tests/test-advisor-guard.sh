@@ -795,6 +795,87 @@ else
     echo "FAIL: could not cd into the allowed-write-root scratch dir"
 fi
 
+# `~+` is bash's `$PWD` and `~-` its `$OLDPWD`; `~0`/`~+2`/`~-2` index the
+# dirstack. Python's expanduser implements none of them, so they stayed
+# literal and realpath read them against the GUARD's directory — which let
+# `cd <repo> && rm -f ~+/victim.txt` resolve back into an allowed root and
+# pass while bash deleted a repo file. They are as cwd-dependent as `./x`.
+assert_exit 2 "cwd-tilde rm after a cd denied" "$(bash_json "cd ${HOME}/code/repo && rm -f ~+/victim.txt")"
+assert_exit 2 "cwd-tilde touch after a cd denied" "$(bash_json "cd ${HOME}/code/repo && touch ~+/pwn.txt")"
+assert_exit 2 "cwd-tilde redirect after a cd denied" "$(bash_json "cd ${HOME}/code/repo && echo hi > ~+/pwn.txt")"
+assert_exit 2 "oldpwd-tilde rm after two cds denied" "$(bash_json "cd ${HOME}/code/repo && cd /tmp && rm -f ~-/victim.txt")"
+assert_exit 2 "dirstack-tilde rm denied" "$(bash_json 'rm -f ~0/victim.txt')"
+assert_exit 2 "cwd-tilde rm with no cd denied" "$(bash_json 'rm -f ~+/victim.txt')"
+assert_exit 2 "cwd-tilde redirect with no cd denied" "$(bash_json 'echo hi > ~+/pwn.txt')"
+tilde_err=$(printf '%s' "$(bash_json 'rm -f ~+/victim.txt')" | python3 "${GUARD}" 2>&1 >/dev/null)
+tilde_rc=$?
+if [ "${tilde_rc}" = "2" ] && printf '%s' "${tilde_err}" | grep -q 'absolute path'; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: cwd-tilde denial names the absolute-path remedy"
+    echo "  exit: ${tilde_rc}"
+    echo "  got:  ${tilde_err}"
+fi
+# A plain `~/` is anchored to HOME, not to the working directory.
+assert_exit 0 "home tilde rm still allowed" "$(bash_json 'rm -f ~/.claude/x')"
+assert_exit 0 "home tilde mkdir still allowed" "$(bash_json 'mkdir -p ~/code/plans/x')"
+assert_exit 0 "home tilde redirect still allowed" "$(bash_json 'echo hi > ~/.claude/x')"
+
+# Bash expands a parameter and THEN globs the result, so a glob character
+# inside a value the guard CAN resolve becomes a different word entirely —
+# `GLOBVAR='-dele*'` with a `-delete` file in the working directory reaches
+# find as a write predicate. The raw word shows no glob, so only the value
+# check catches it.
+export EVIL_GLOB_VALUE='-dele*'
+export EVIL_GLOB_PATH='/tmp/x/*'
+export PLAIN_VALUE='-delete-nomatch'
+assert_exit 2 "glob-valued variable as a find predicate denied" "$(bash_json "find ${HOME}/code/repo \$EVIL_GLOB_VALUE")"
+assert_exit 2 "glob-valued variable as a sed flag denied" "$(bash_json 'sed $EVIL_GLOB_VALUE s/a/b/ f')"
+assert_exit 2 "glob-valued variable as a scratch path denied" "$(bash_json 'rm -rf $EVIL_GLOB_PATH')"
+assert_exit 2 "glob-valued variable as a redirect target denied" "$(bash_json 'echo hi > $EVIL_GLOB_PATH')"
+glob_val_err=$(printf '%s' "$(bash_json 'sed $EVIL_GLOB_VALUE s/a/b/ f')" | python3 "${GUARD}" 2>&1 >/dev/null)
+glob_val_rc=$?
+if [ "${glob_val_rc}" = "2" ] \
+    && printf '%s' "${glob_val_err}" | grep -q 'glob character'; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: glob-valued variable denial names globbing, not \$IFS"
+    echo "  exit: ${glob_val_rc}"
+    echo "  got:  ${glob_val_err}"
+fi
+# A resolvable value with neither glob nor $IFS characters is still spliced
+# and checked as its value, and a quoted one is never re-expanded at all.
+assert_exit 0 "plain-valued variable as a find predicate allowed" "$(bash_json "find ${HOME}/code/repo \$PLAIN_VALUE")"
+assert_exit 0 "quoted glob-valued variable allowed" "$(bash_json 'echo "$EVIL_GLOB_VALUE"')"
+assert_exit 0 "resolved variable in a scratch path still allowed" "$(bash_json 'rm -rf $TMPDIR/advisor-scratch')"
+
+# bash carries its words as C strings, so a NUL-producing escape ends the
+# word: `$'a\c@b'` is the one-character word `a`. The decoder truncates the
+# same way, which can only shorten a word — never hide a flag inside one.
+nul_bad=0
+for nul in 'c@' 'x00' '000'; do
+    want=$(eval "printf '%s' \$'a\\${nul}b'" | od -An -c | tr -d ' \n')
+    got=$(python3 - "${GUARD}" "${nul}" <<'PY'
+import importlib.util, subprocess, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1])
+g = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(g)
+text, ok = g.decode_ansi_c("a\\" + sys.argv[2] + "b")
+sys.stdout.write(text if ok else "UNDECODED")
+PY
+)
+    got=$(printf '%s' "${got}" | od -An -c | tr -d ' \n')
+    [ "${want}" = "${got}" ] || { nul_bad=1; echo "  \\${nul}: bash=${want} guard=${got}"; }
+done
+if [ "${nul_bad}" = "0" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: a NUL escape ends the word the way bash ends it"
+fi
+
 # ─── Malformed input: no traceback, no hang ──────────────────────────────────
 
 assert_no_crash() {

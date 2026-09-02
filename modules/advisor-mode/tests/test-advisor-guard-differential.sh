@@ -174,7 +174,7 @@ fi
 # character-level — quoting and escapes that hide a flag from a literal scan.
 # The second is word-level: bash steps that turn ONE typed word into SEVERAL
 # argv words, which is the class a per-word model cannot express.
-CARRIERS="bare squote dquote split backslash ansi ansihex ansioct ansiuni var dqvar indirect default flagvar dqdollar brace ifs contin glob"
+CARRIERS="bare squote dquote split backslash ansi ansihex ansioct ansiuni var dqvar indirect default flagvar dqdollar brace ifs contin glob resolvedglob tildepwd"
 
 enc_ansi() {  # per-character \xHH / \NNN / \uHHHH bodies
     local fmt="$1" s="$2" i c out=""
@@ -223,6 +223,20 @@ ${tok:1}" ;;
         # Pathname expansion against the run directory, which holds a file
         # named after each flag token (see GLOB_BAIT below).
         glob)      CARRY_TOKEN="${tok:0:$(( ${#tok} - 1 ))}*" ;;
+        # The same glob, but arriving inside a variable the guard CAN
+        # resolve. Bash expands the parameter and THEN globs the result, so
+        # the raw word shows nothing; only the value check catches it.
+        resolvedglob)
+            export DIFF_GLOB_VALUE="${tok:0:$(( ${#tok} - 1 ))}*"
+            CARRY_TOKEN='$DIFF_GLOB_VALUE' ;;
+        # `~+` is bash's $PWD. Only a path token can carry it, so a flag
+        # token falls back to `bare` — the row still has to be denied.
+        tildepwd)
+            case "${tok}" in
+                /*) CARRY_PREFIX="cd $(dirname "${tok}")"
+                    CARRY_TOKEN="~+/$(basename "${tok}")" ;;
+                *)  CARRY_TOKEN="${tok}" ;;
+            esac ;;
         *) echo "unknown carrier ${kind}" >&2; exit 1 ;;
     esac
 }

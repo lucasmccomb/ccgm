@@ -74,14 +74,16 @@ hides it. What bash does that the guard cannot reproduce is refused instead
 of guessed at, because brace expansion, `$IFS` word splitting and globbing
 each turn one typed word into several: a brace group (`-delet{e,e}`), an
 unquoted glob (`-dele*`, `[-]delete`), an unquoted expansion the guard cannot
-resolve anywhere in a word (`find <dir>$IFS-delete`), and an undecodable
-`$'…'` escape are all denied for a command that is not read-only. A
+resolve anywhere in a word (`find <dir>$IFS-delete`), a resolvable one whose
+value carries whitespace or a glob character (bash globs a value after it
+substitutes it), and an undecodable `$'…'` escape are all denied for a
+command that is not read-only. A
 double-quoted expansion cannot be word-split, so it keeps the narrower rule —
 denied leading or inside a flag before its first `=`, allowed after it, which
 is what keeps `gh pr edit 1 --title="$T"` usable. `echo $A`, `grep $PAT f`
-and `rm -rf $TMPDIR/x` still pass. A relative path after a `cd` is denied:
-the guard resolves it against its own working directory, not the one bash
-will be in. The guard resolves `$CLAUDE_CODE_SESSION_ID` from its own
+and `rm -rf $TMPDIR/x` still pass. A relative path after a `cd` is denied, and so are
+`~+`, `~-` and `~N` anywhere: the guard resolves them against its own
+working directory, not the one bash will be in. The guard resolves `$CLAUDE_CODE_SESSION_ID` from its own
 validated session context, so the per-session `/advisor on`/`off` flag
 commands keep working even when the hook subprocess does not carry the
 variable.
