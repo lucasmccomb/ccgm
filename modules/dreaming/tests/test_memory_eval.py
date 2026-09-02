@@ -47,6 +47,10 @@ import learnings_store  # noqa: E402
 TASKS_DIR = HERE.parent / "eval" / "tasks"
 OFFLINE_FIXTURES = HERE / "fixtures" / "offline-responses"
 OFFLINE_DREAMED_FIXTURES = HERE / "fixtures" / "offline-responses-dreamed"
+# Real `claude -p --output-format json` stdout, captured from CLI 2.1.258 and
+# redacted (session_id/uuid replaced with fixed placeholders). Pins the shape
+# run_claude_p() parses (#1027).
+CLAUDE_P_RESULT_FIXTURE = HERE / "fixtures" / "claude-p-result-2.1.258.json"
 
 
 def _isolate_env(test: unittest.TestCase) -> Path:
@@ -486,6 +490,203 @@ class RunClaudePEnvIsolationTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# run_claude_p(): the parse step, pinned against REAL captured CLI output
+# (#1027). The eval recorded 100% format errors for seven weeks; this class
+# separates "the CLI's output shape changed" from "the CLI never launched",
+# which is what the regression actually was.
+# ---------------------------------------------------------------------------
+
+class RunClaudePParseTests(unittest.TestCase):
+    def test_real_cli_json_output_parses_into_the_fields_the_harness_reads(self):
+        raw = CLAUDE_P_RESULT_FIXTURE.read_text(encoding="utf-8")
+
+        def fake_run(cmd, *, cwd, env, capture_output, text, timeout):
+            return types.SimpleNamespace(returncode=0, stdout=raw, stderr="")
+
+        tmp = Path(tempfile.mkdtemp(prefix="ccgm-eval-test-parse-"))
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
+            result = me.run_claude_p(
+                prompt="p", workdir=tmp / "work", config_dir=tmp / "cfg", home_dir=tmp / "home",
+                model="claude-sonnet-5", inject=False, api_key="sk-test-fixture",
+                learnings_dir=tmp / "learnings", claude_bin="/usr/bin/true", max_budget_usd=0.5, timeout_s=5,
+            )
+
+        # Every field _run_one() reads off the result must survive the parse.
+        self.assertFalse(result["is_error"])
+        self.assertEqual(result["result"], "ok")
+        self.assertEqual(result["num_turns"], 1)
+        self.assertGreater(result["total_cost_usd"], 0.0)
+        usage = result["usage"]
+        self.assertEqual(usage["input_tokens"], 2)
+        self.assertEqual(usage["output_tokens"], 4)
+        # #789's total-input accounting depends on both cache fields being
+        # present in the CLI's own usage block.
+        self.assertIn("cache_read_input_tokens", usage)
+        self.assertIn("cache_creation_input_tokens", usage)
+
+    def test_unparseable_stdout_degrades_to_a_non_fatal_format_error(self):
+        def fake_run(cmd, *, cwd, env, capture_output, text, timeout):
+            return types.SimpleNamespace(returncode=1, stdout="", stderr="boom: not json")
+
+        tmp = Path(tempfile.mkdtemp(prefix="ccgm-eval-test-parse-bad-"))
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
+            result = me.run_claude_p(
+                prompt="p", workdir=tmp / "work", config_dir=tmp / "cfg", home_dir=tmp / "home",
+                model="m", inject=False, api_key="k", learnings_dir=tmp / "learnings",
+                claude_bin="/usr/bin/true", max_budget_usd=0.5, timeout_s=5,
+            )
+
+        self.assertTrue(result["is_error"])
+        self.assertIn("boom: not json", result["result"])
+
+
+# ---------------------------------------------------------------------------
+# resolve_claude_bin(): the root cause of #1027. The dreaming LaunchAgent
+# exports a fixed PATH that does not include ~/.local/bin, where Claude
+# Code's native installer puts the CLI -- so every arm subprocess died with
+# FileNotFoundError and scored a silent format error.
+# ---------------------------------------------------------------------------
+
+class ResolveClaudeBinTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="ccgm-eval-test-bin-"))
+        self._prev_path = os.environ.get("PATH")
+        self.addCleanup(self._restore_path)
+
+    def _restore_path(self):
+        if self._prev_path is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = self._prev_path
+
+    def _make_executable(self, directory: Path, name: str = "claude") -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / name
+        target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        target.chmod(0o755)
+        return target
+
+    def test_resolves_from_path_to_an_absolute_path(self):
+        bin_dir = self.tmp / "onpath"
+        self._make_executable(bin_dir)
+        os.environ["PATH"] = str(bin_dir)
+        resolved = me.resolve_claude_bin("claude")
+        self.assertTrue(Path(resolved).is_absolute())
+        self.assertEqual(Path(resolved).name, "claude")
+
+    def test_a_symlinked_entry_point_is_not_followed(self):
+        """~/.local/bin/claude is a symlink into a versioned binary. A CLI
+        update mid-run swings that link and can delete the version behind
+        it, so the harness keeps the stable entry point."""
+        real_dir = self.tmp / "versions"
+        real = self._make_executable(real_dir, name="2.1.258")
+        link_dir = self.tmp / "linked"
+        link_dir.mkdir(parents=True, exist_ok=True)
+        link = link_dir / "claude"
+        link.symlink_to(real)
+        os.environ["PATH"] = str(link_dir)
+        self.assertEqual(Path(me.resolve_claude_bin("claude")), link)
+
+    def test_falls_back_to_a_known_install_dir_when_path_misses_it(self):
+        """The launchd case: PATH resolves nothing, but the native
+        installer's directory has the binary."""
+        install_dir = self.tmp / "home" / ".local" / "bin"
+        self._make_executable(install_dir)
+        os.environ["PATH"] = "/nonexistent-dir-for-test"
+        with mock.patch.object(me, "CLAUDE_BIN_FALLBACK_DIRS", (str(install_dir),)):
+            resolved = me.resolve_claude_bin("claude")
+        self.assertEqual(Path(resolved), install_dir / "claude")
+
+    def test_raises_naming_what_it_searched_when_nowhere(self):
+        os.environ["PATH"] = "/nonexistent-dir-for-test"
+        with mock.patch.object(me, "CLAUDE_BIN_FALLBACK_DIRS", (str(self.tmp / "absent"),)):
+            with self.assertRaises(me.ClaudeBinaryNotFoundError) as ctx:
+                me.resolve_claude_bin("claude")
+        message = str(ctx.exception)
+        self.assertIn("PATH=", message)
+        self.assertIn(str(self.tmp / "absent"), message)
+        self.assertIn("CCGM_EVAL_CLAUDE_BIN", message)
+
+    def test_an_explicit_path_is_taken_at_its_word(self):
+        explicit = self._make_executable(self.tmp / "explicit")
+        os.environ["PATH"] = "/nonexistent-dir-for-test"
+        self.assertEqual(Path(me.resolve_claude_bin(str(explicit))), explicit)
+
+    def test_a_dot_slash_name_resolves_against_the_cwd_not_the_path(self):
+        """`Path("./claude").parts` is `('claude',)` -- the leading dot is
+        normalized away -- so a parts-based test misroutes `./claude` into
+        the PATH branch. This asserts the outcome the operator asked for;
+        the discriminating case is the sibling test below, where the named
+        file does not exist and the PATH branch silently substitutes an
+        install-dir binary instead of failing."""
+        cwd_dir = self.tmp / "cwd"
+        self._make_executable(cwd_dir)
+        decoy_dir = self.tmp / "decoy"
+        self._make_executable(decoy_dir)
+        os.environ["PATH"] = str(decoy_dir)
+
+        prev_cwd = os.getcwd()
+        os.chdir(cwd_dir)
+        try:
+            resolved = Path(me.resolve_claude_bin("./claude"))
+        finally:
+            os.chdir(prev_cwd)
+
+        self.assertEqual(resolved.parent.name, "cwd", f"resolved to the decoy on PATH instead: {resolved}")
+
+    def test_a_dot_slash_name_that_does_not_exist_raises_rather_than_falling_back(self):
+        """The real hazard behind finding 4: a misrouted `./claude` does not
+        fail when the named file is missing -- it falls through to
+        CLAUDE_BIN_FALLBACK_DIRS and launches whatever is installed there,
+        with no diagnostic that the operator's choice was ignored."""
+        os.environ["PATH"] = str(self._make_executable(self.tmp / "decoy").parent)
+        prev_cwd = os.getcwd()
+        os.chdir(self.tmp)
+        try:
+            with self.assertRaises(me.ClaudeBinaryNotFoundError):
+                me.resolve_claude_bin("./claude")
+        finally:
+            os.chdir(prev_cwd)
+
+    def test_an_explicit_path_that_is_not_executable_raises(self):
+        not_exec = self.tmp / "explicit" / "claude"
+        not_exec.parent.mkdir(parents=True, exist_ok=True)
+        not_exec.write_text("", encoding="utf-8")
+        not_exec.chmod(0o644)
+        with self.assertRaises(me.ClaudeBinaryNotFoundError):
+            me.resolve_claude_bin(str(not_exec))
+
+
+# ---------------------------------------------------------------------------
+# whole_run_format_error_rate(): the pure half of the fail-loud contract
+# (#1027).
+# ---------------------------------------------------------------------------
+
+class WholeRunFormatErrorRateTests(unittest.TestCase):
+    @staticmethod
+    def _row(rates: tuple[float, float, float], *, runs: int = 5) -> dict:
+        return {arm: {"runs": runs, "format_error_rate": rate} for arm, rate in zip(me.ARMS, rates)}
+
+    def test_all_arms_failing_is_one(self):
+        self.assertEqual(me.whole_run_format_error_rate([self._row((1.0, 1.0, 1.0))]), 1.0)
+
+    def test_one_healthy_row_keeps_it_below_one(self):
+        rows = [self._row((0.0, 0.0, 0.0)), self._row((1.0, 1.0, 1.0))]
+        self.assertLess(me.whole_run_format_error_rate(rows), 1.0)
+
+    def test_a_single_failed_arm_is_not_a_broken_harness(self):
+        self.assertLess(me.whole_run_format_error_rate([self._row((0.0, 1.0, 0.0))]), 1.0)
+
+    def test_rows_with_no_runs_return_none_rather_than_a_fabricated_rate(self):
+        """An all-`error`-row run means nothing ran; "nothing ran" must not
+        be reported as "everything failed"."""
+        self.assertIsNone(me.whole_run_format_error_rate([self._row((0.0, 0.0, 0.0), runs=0)]))
+
+    def test_no_rows_at_all_return_none(self):
+        self.assertIsNone(me.whole_run_format_error_rate([]))
+
+
+# ---------------------------------------------------------------------------
 # Judge-prompt blindness: no condition strings anywhere in the payload sent
 # to the judge (adrev-003a test contract).
 # ---------------------------------------------------------------------------
@@ -532,82 +733,45 @@ class CallJudgeApiTransportTests(unittest.TestCase):
             "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
         })
 
-    def tearDown(self):
-        # The module-global temperature-support cache must not leak between
-        # tests (#779).
-        me._MODELS_WITHOUT_TEMPERATURE.clear()  # noqa: SLF001
-
-    def test_temperature_deprecated_400_retries_without_it_and_caches(self):
-        calls = []
-
-        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002
-            calls.append(json.loads(input))
-            if len(calls) == 1:
-                return self._fake_proc(
-                    body='{"type":"error","error":{"type":"invalid_request_error",'
-                         '"message":"`temperature` is deprecated for this model."}}',
-                    http_code="400",
-                )
-            return self._fake_proc(body=self._messages_api_body({"pass": True, "score": 9.0}))
-
-        model = "claude-temp-deprecated-fixture"
-        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
-            parsed, usage = me._call_judge_api(  # noqa: SLF001
-                model=model, system_prompt="sys", user_obj={"a": 1},
-                max_output_tokens=100, api_key="sk-test-fixture",
-                api_url="https://api.anthropic.com/v1/messages",
-            )
-
-        # First attempt carries temperature; the 400 triggers a retry WITHOUT
-        # it; the model is remembered as temperature-unsupported.
-        self.assertEqual(len(calls), 2)
-        self.assertIn("temperature", calls[0])
-        self.assertNotIn("temperature", calls[1])
-        self.assertEqual(parsed, {"pass": True, "score": 9.0})
-        self.assertEqual(usage, {"input_tokens": 42, "output_tokens": 7})
-        self.assertIn(model, me._MODELS_WITHOUT_TEMPERATURE)  # noqa: SLF001
-
-    def test_known_temperature_unsupported_model_omits_it_from_the_first_call(self):
-        me._MODELS_WITHOUT_TEMPERATURE.add("claude-known-bad-fixture")  # noqa: SLF001
-        captured = {}
-
-        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002
-            captured["body"] = json.loads(input)
-            return self._fake_proc(body=self._messages_api_body({"pass": True, "score": 7.0}))
-
-        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
-            parsed, _ = me._call_judge_api(  # noqa: SLF001
-                model="claude-known-bad-fixture", system_prompt="sys", user_obj={"a": 1},
-                max_output_tokens=100, api_key="sk-test-fixture",
-                api_url="https://api.anthropic.com/v1/messages",
-            )
-
-        self.assertNotIn("temperature", captured["body"])
-        self.assertEqual(parsed, {"pass": True, "score": 7.0})
-
-    def test_request_carries_temperature_zero_model_system_and_messages(self):
-        captured = {}
+    def test_request_never_carries_temperature_and_pins_thinking_and_schema(self):
+        """#1029: the judge request carries NO sampling parameter (every
+        judge model from Opus 4.7 / Sonnet 5 on returns 400 for one, and the
+        default judge is claude-opus-4-8), pins `thinking: disabled` so a
+        model bump cannot spend the output cap on thinking (#1026), and
+        pins the verdict schema via output_config.format (#1028). Exactly
+        one request is made -- the old probe-and-retry made two."""
+        captured = []
 
         def fake_run(cmd, *, input, capture_output, text):  # noqa: A002 - matches subprocess.run's own kwarg name
-            captured["cmd"] = cmd
-            captured["input"] = input
+            captured.append({"cmd": cmd, "input": input})
             return self._fake_proc(body=self._messages_api_body({"pass": True, "score": 8.5}))
 
         with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
             parsed, usage = me._call_judge_api(  # noqa: SLF001
                 model="claude-judge-fixture", system_prompt="You are a blind judge.",
                 user_obj={"task_prompt": "Do X.", "criteria": ["done"], "final_files": {}, "agent_summary": "done"},
-                max_output_tokens=200, api_key="sk-test-fixture", api_url="https://api.anthropic.com/v1/messages",
+                max_output_tokens=1024, api_key="sk-test-fixture", api_url="https://api.anthropic.com/v1/messages",
             )
 
+        self.assertEqual(len(captured), 1)
         self.assertEqual(parsed, {"pass": True, "score": 8.5})
         self.assertEqual(usage, {"input_tokens": 42, "output_tokens": 7})
 
-        request_body = json.loads(captured["input"])
-        self.assertEqual(request_body["temperature"], 0)
+        request_body = json.loads(captured[0]["input"])
+        self.assertNotIn("temperature", request_body)
+        self.assertNotIn("top_p", request_body)
+        self.assertNotIn("top_k", request_body)
+        self.assertEqual(request_body["thinking"], {"type": "disabled"})
+        self.assertEqual(
+            request_body["output_config"],
+            {"format": {"type": "json_schema", "schema": me.JUDGE_VERDICT_SCHEMA}},
+        )
+        # Effort is left at the model default: disabling thinking is
+        # rejected only at `xhigh`/`max`, which nothing here sets.
+        self.assertNotIn("effort", request_body["output_config"])
         self.assertEqual(request_body["model"], "claude-judge-fixture")
         self.assertEqual(request_body["system"], "You are a blind judge.")
-        self.assertEqual(request_body["max_tokens"], 200)
+        self.assertEqual(request_body["max_tokens"], 1024)
         self.assertEqual(len(request_body["messages"]), 1)
         self.assertEqual(request_body["messages"][0]["role"], "user")
         # The user_obj is JSON-encoded into the message content, not
@@ -615,7 +779,24 @@ class CallJudgeApiTransportTests(unittest.TestCase):
         self.assertEqual(json.loads(request_body["messages"][0]["content"]), {
             "task_prompt": "Do X.", "criteria": ["done"], "final_files": {}, "agent_summary": "done",
         })
-        self.assertIn("sk-test-fixture", " ".join(captured["cmd"]))
+        self.assertIn("sk-test-fixture", " ".join(captured[0]["cmd"]))
+
+    def test_verdict_schema_avoids_keywords_structured_outputs_rejects(self):
+        """The structured-outputs schema subset 400s on numeric range
+        keywords ("For 'number' type, properties maximum, minimum are not
+        supported"), which a first cut of this schema hit against
+        claude-opus-4-8. The 0-10 range lives in judge-prompt.md and is
+        clamped in judge_output(); the schema pins the field set and types."""
+        score_schema = me.JUDGE_VERDICT_SCHEMA["properties"]["score"]
+        self.assertEqual(score_schema, {"type": "number"})
+        self.assertFalse(me.JUDGE_VERDICT_SCHEMA["additionalProperties"])
+        self.assertEqual(sorted(me.JUDGE_VERDICT_SCHEMA["required"]), ["pass", "score"])
+
+    def test_default_judge_output_cap_is_a_backstop_not_a_tuning_knob(self):
+        """#1026: a two-field verdict never needs 1024 tokens; the point is
+        that a truncated verdict cannot happen, including on a model that
+        thinks by default before the `thinking: disabled` pin takes effect."""
+        self.assertEqual(me.DEFAULT_JUDGE_MAX_OUTPUT_TOKENS, 1024)
 
     def test_429_retries_then_succeeds_on_the_next_attempt(self):
         calls = []
@@ -681,6 +862,47 @@ class CallJudgeApiTransportTests(unittest.TestCase):
 
         self.assertIsNone(parsed)
         self.assertEqual(usage, {"input_tokens": 0, "output_tokens": 0})
+
+
+# ---------------------------------------------------------------------------
+# _parse_judge_verdict(): the judge's OWN parse (#1029). The response is
+# schema-valid by construction, so this is json.loads plus the shape check
+# the harness has always applied -- deliberately NOT dream_analyze.py's
+# lenient `_parse_json_object`, whose fence-stripping and first-`{` scan
+# exist for the unconstrained map/reduce prompts.
+# ---------------------------------------------------------------------------
+
+class ParseJudgeVerdictTests(unittest.TestCase):
+    def test_plain_schema_valid_verdict_round_trips(self):
+        self.assertEqual(me._parse_judge_verdict('{"pass": true, "score": 8}'), {"pass": True, "score": 8})  # noqa: SLF001
+
+    def test_float_score_is_accepted(self):
+        self.assertEqual(me._parse_judge_verdict('{"pass": false, "score": 3.5}'), {"pass": False, "score": 3.5})  # noqa: SLF001
+
+    def test_non_json_returns_none(self):
+        self.assertIsNone(me._parse_judge_verdict("not json at all"))  # noqa: SLF001
+
+    def test_non_object_json_returns_none(self):
+        self.assertIsNone(me._parse_judge_verdict("[1, 2, 3]"))  # noqa: SLF001
+
+    def test_missing_score_returns_none(self):
+        self.assertIsNone(me._parse_judge_verdict('{"pass": true}'))  # noqa: SLF001
+
+    def test_non_numeric_score_returns_none(self):
+        self.assertIsNone(me._parse_judge_verdict('{"pass": true, "score": "eight"}'))  # noqa: SLF001
+
+    def test_boolean_score_is_not_a_number(self):
+        self.assertIsNone(me._parse_judge_verdict('{"pass": true, "score": true}'))  # noqa: SLF001
+
+    def test_non_boolean_pass_returns_none(self):
+        self.assertIsNone(me._parse_judge_verdict('{"pass": "yes", "score": 8}'))  # noqa: SLF001
+
+    def test_fenced_output_is_rejected_rather_than_stripped(self):
+        """The lenient fence-stripper is gone on purpose: with
+        output_config.format in place, a fenced response means the schema
+        was not honoured, and that should surface as a judge error rather
+        than be quietly repaired."""
+        self.assertIsNone(me._parse_judge_verdict('```json\n{"pass": true, "score": 8}\n```'))  # noqa: SLF001
 
 
 # ---------------------------------------------------------------------------
@@ -1568,6 +1790,560 @@ class TaskLevelIsolationTests(unittest.TestCase):
         # write_results() call) -- only the within-loop incremental write
         # can explain this.
         self.assertEqual({r["task_id"] for r in results}, {"iso-ok-2"})
+
+
+# ---------------------------------------------------------------------------
+# #1027: a run where EVERY agent run failed to execute is the harness, not a
+# memory result. It must abort loudly (raw first failure on stderr, non-zero
+# exit) rather than write a red results file that gate_check() then reads as
+# a regression -- while a run with SOME failures stays non-fatal.
+# ---------------------------------------------------------------------------
+
+class WholeRunAbortTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+        me.reset_agent_error_samples()
+        self.addCleanup(me.reset_agent_error_samples)
+        self.tasks_dir = self.tmp / "tasks"
+        self.tasks_dir.mkdir()
+
+    def _write_task(self, filename: str, task_id: str) -> None:
+        task = {
+            "id": task_id, "kind": "canary", "prompt": f"prompt for {task_id}",
+            "fixture": {"files": {"a.txt": "x\n"}}, "criteria": ["c"],
+        }
+        (self.tasks_dir / filename).write_text(json.dumps(task), encoding="utf-8")
+
+    @staticmethod
+    def _launch_failure() -> dict:
+        return {
+            "is_error": True,
+            "result": "claude -p failed to launch: [Errno 2] No such file or directory: 'claude'",
+            "usage": {}, "num_turns": 0, "total_cost_usd": 0.0,
+        }
+
+    @staticmethod
+    def _healthy_result() -> dict:
+        return {
+            "is_error": False, "result": "done", "num_turns": 2, "total_cost_usd": 0.01,
+            "usage": {"input_tokens": 100, "output_tokens": 20},
+        }
+
+    @staticmethod
+    def _seed_prior_green_results(date: str = "2026-08-30") -> Path:
+        """The state production is always in: evals/ holds weeks of prior
+        runs, at least one of them gate-opening. An abort that writes
+        nothing leaves THIS file as the newest results, so without the
+        harness-broken marker the gate opens on it."""
+        arm = {"runs": 5, "format_error_rate": 0.0, "judge_error_rate": 0.0, "mean_score": 9.0}
+        green = {
+            "date": date, "task_id": "dreamed-01", "kind": "dreamed", "offline": False,
+            "backbone": "m", "runs": 5, "baseline": arm, "treatment": arm, "full_context": arm,
+            "delta": 2.0, "delta_sat": 1.0, "bucket": "high_value", "cost_usd": 0.5,
+            "mining": {"noise_high_value": False},
+        }
+        me.evals_dir().mkdir(parents=True, exist_ok=True)
+        path = me.evals_dir() / f"{date}.jsonl"
+        path.write_text(json.dumps(green) + "\n", encoding="utf-8")
+        return path
+
+    def _run_main(self, run_claude_p_side_effect, *, date: str = "2026-09-02"):
+        """Returns (exit_code, stderr, judge_calls)."""
+        stderr = io.StringIO()
+        judge_calls = []
+
+        def counting_judge(**kwargs):
+            judge_calls.append(kwargs)
+            return {"pass": True, "score": 7.0}, {"input_tokens": 10, "output_tokens": 5}
+
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test-fixture"}), \
+                mock.patch("memory_eval.run_claude_p", side_effect=run_claude_p_side_effect), \
+                mock.patch("memory_eval._call_judge_api", side_effect=counting_judge), \
+                contextlib.redirect_stderr(stderr):
+            exit_code = me.main([
+                "--tasks", str(self.tasks_dir / "*.json"),
+                "--runs", "1",
+                "--backbone", "fixture-model",
+                "--claude-bin", "/usr/bin/true",
+                "--date", date,
+            ])
+        return exit_code, stderr.getvalue(), judge_calls
+
+    def test_abort_keeps_the_gate_closed_even_with_a_prior_green_results_file(self):
+        """The fail-open hazard: gate_check() takes the NEWEST evals/*.jsonl,
+        so an abort that writes nothing hands it last week's green file and
+        the gate opens while the harness is provably broken. The marker is
+        what closes it."""
+        prior_green = self._seed_prior_green_results()
+        self.assertEqual(me.gate_check(), (True, "ok"), "fixture must start from an OPEN gate")
+
+        self._write_task("01-a.json", "abort-a")
+        self._write_task("02-b.json", "abort-b")
+
+        exit_code, stderr, _judge_calls = self._run_main(lambda **kwargs: self._launch_failure())
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("every agent run failed to execute", stderr)
+        # The RAW subprocess detail is attached, not just a rate.
+        self.assertIn("No such file or directory", stderr)
+        # No results file for tonight -- the prior green one is untouched and
+        # is still what _find_latest_results_file() returns.
+        self.assertFalse(me.results_path_for_date("2026-09-02").exists())
+        self.assertEqual(me._find_latest_results_file(), prior_green)  # noqa: SLF001
+        # ...and the gate is closed anyway, naming the harness.
+        is_open, reason = me.gate_check()
+        self.assertFalse(is_open, "a broken harness must never leave the gate open")
+        self.assertEqual(reason, "harness broken: every agent run failed to execute on 2026-09-02")
+
+    def test_the_marker_is_not_mistaken_for_a_results_file(self):
+        self._write_task("01-a.json", "abort-a")
+        self._run_main(lambda **kwargs: self._launch_failure())
+
+        marker = me.harness_broken_marker_path("2026-09-02")
+        self.assertTrue(marker.is_file())
+        self.assertFalse(marker.name.endswith(".jsonl"))
+        self.assertIsNone(me._find_latest_results_file(), "the results glob must ignore the marker")  # noqa: SLF001
+        recorded = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertIn("No such file or directory", recorded["first_failure"])
+
+    def test_a_later_successful_run_clears_the_marker_and_reopens_the_gate(self):
+        self._write_task("01-a.json", "recover-a")
+        self._run_main(lambda **kwargs: self._launch_failure())
+        self.assertFalse(me.gate_check()[0])
+
+        exit_code, _stderr, _judge = self._run_main(lambda **kwargs: self._healthy_result())
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(me.harness_broken_marker_path("2026-09-02").exists())
+        # The gate now judges the fresh results on their merits (this
+        # fixture has no high_value row), never on the stale marker.
+        is_open, reason = me.gate_check()
+        self.assertFalse(is_open)
+        self.assertNotIn("harness broken", reason)
+
+    def test_a_partial_results_file_from_an_earlier_error_row_is_removed(self):
+        """A task whose own orchestration raises writes a zero-run `error`
+        row, and zero-run arms do not count toward the rate -- so a results
+        file can already be on disk when a later task trips the abort."""
+        malformed = {
+            "id": "malformed", "kind": "canary", "prompt": "p",
+            "fixture": {"files": {"a.txt": 5}}, "criteria": ["c"],
+        }
+        (self.tasks_dir / "01-malformed.json").write_text(json.dumps(malformed), encoding="utf-8")
+        self._write_task("02-broken.json", "broken")
+
+        exit_code, stderr, _judge = self._run_main(lambda **kwargs: self._launch_failure())
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("every agent run failed to execute", stderr)
+        self.assertFalse(me.results_path_for_date("2026-09-02").exists(), "the partial file must not survive the abort")
+        self.assertIsNone(me._find_latest_results_file())  # noqa: SLF001
+        is_open, reason = me.gate_check()
+        self.assertFalse(is_open)
+        self.assertEqual(reason, "harness broken: every agent run failed to execute on 2026-09-02")
+
+    def test_an_all_failing_run_spends_no_judge_calls(self):
+        self._write_task("01-a.json", "no-judge-a")
+        self._write_task("02-b.json", "no-judge-b")
+
+        _exit_code, _stderr, judge_calls = self._run_main(lambda **kwargs: self._launch_failure())
+
+        self.assertEqual(judge_calls, [], "a run that never executed has nothing to grade")
+
+    def test_a_partially_failing_run_stays_non_fatal_and_writes_results(self):
+        self._write_task("01-ok.json", "partial-ok")
+        self._write_task("02-bad.json", "partial-bad")
+
+        def side_effect(**kwargs):
+            return self._launch_failure() if "partial-bad" in kwargs["prompt"] else self._healthy_result()
+
+        exit_code, stderr, judge_calls = self._run_main(side_effect)
+
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("every agent run failed to execute", stderr)
+        results_path = me._find_latest_results_file()  # noqa: SLF001
+        self.assertIsNotNone(results_path)
+        rows = {r["task_id"]: r for r in me._read_results_file(results_path)}  # noqa: SLF001
+        self.assertEqual(rows["partial-ok"]["baseline"]["format_error_rate"], 0.0)
+        self.assertEqual(rows["partial-bad"]["baseline"]["format_error_rate"], 1.0)
+        # Only the arm that actually ran was graded (3 arms x 1 run).
+        self.assertEqual(len(judge_calls), 3)
+        # The failed task's arms still carry a 0.0 score, not a judge error.
+        self.assertEqual(rows["partial-bad"]["baseline"]["mean_score"], 0.0)
+        self.assertEqual(rows["partial-bad"]["baseline"]["judge_error_rate"], 0.0)
+
+    def test_an_unresolvable_claude_binary_fails_before_any_task_runs(self):
+        self._write_task("01-a.json", "unresolvable")
+        ran = []
+
+        def side_effect(**kwargs):
+            ran.append(kwargs["prompt"])
+            return self._healthy_result()
+
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test-fixture"}), \
+                mock.patch("memory_eval.run_claude_p", side_effect=side_effect), \
+                mock.patch(
+                    "memory_eval.resolve_claude_bin",
+                    side_effect=me.ClaudeBinaryNotFoundError("'claude' not found. Searched: PATH=''"),
+                ), \
+                contextlib.redirect_stderr(stderr):
+            exit_code = me.main([
+                "--tasks", str(self.tasks_dir / "*.json"),
+                "--runs", "1", "--backbone", "fixture-model",
+            ])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("not found", stderr.getvalue())
+        self.assertEqual(ran, [], "no task may run once the binary cannot be resolved")
+        self.assertIsNone(me._find_latest_results_file())  # noqa: SLF001
+        # An unresolvable binary is not an aborted RUN -- nothing executed,
+        # so there is no first-failure detail and no marker to write.
+        self.assertFalse(me.harness_broken_marker_path(me.today_iso()).exists())
+
+    def test_a_successful_run_clears_every_marker_not_only_its_own_date(self):
+        """A marker whose mtime sorts newest holds the gate closed against a
+        results file that is newer by date (an NTP correction, a restore, an
+        `rsync -a` of ~/.claude), and nothing sweeps evals/. A run that
+        produced results has proved the harness works, whatever date it
+        wrote, so it clears all of them."""
+        self._write_task("01-a.json", "sweep-a")
+        self._run_main(lambda **kwargs: self._launch_failure(), date="2026-09-01")
+        self._run_main(lambda **kwargs: self._launch_failure(), date="2026-09-02")
+        markers = sorted(pth.name for pth in me.evals_dir().glob("*.harness-broken"))
+        self.assertEqual(markers, ["2026-09-01.harness-broken", "2026-09-02.harness-broken"])
+
+        exit_code, _stderr, _judge = self._run_main(lambda **kwargs: self._healthy_result(), date="2026-09-03")
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(list(me.evals_dir().glob("*.harness-broken")), [])
+        self.assertNotIn("harness broken", me.gate_check()[1])
+
+    def test_the_abort_leaves_a_concurrent_runs_results_file_alone(self):
+        """The unlink must remove the file THIS process wrote, not whatever
+        is at that path -- a second eval finishing for the same date has
+        already paid for its rows."""
+        malformed = {
+            "id": "malformed", "kind": "canary", "prompt": "p",
+            "fixture": {"files": {"a.txt": 5}}, "criteria": ["c"],
+        }
+        (self.tasks_dir / "01-malformed.json").write_text(json.dumps(malformed), encoding="utf-8")
+        self._write_task("02-broken.json", "broken")
+        other_run = json.dumps({"task_id": "from-another-process", "bucket": "redundant"})
+
+        def side_effect(**kwargs):
+            # A concurrent, healthy run finishes for the same date while
+            # this process is still in its task loop.
+            me.results_path_for_date("2026-09-02").write_text(other_run + "\n", encoding="utf-8")
+            return self._launch_failure()
+
+        exit_code, stderr, _judge = self._run_main(side_effect)
+
+        self.assertEqual(exit_code, 1)
+        self.assertTrue(me.results_path_for_date("2026-09-02").exists())
+        self.assertIn("from-another-process", me.results_path_for_date("2026-09-02").read_text(encoding="utf-8"))
+        self.assertIn("changed since this run wrote it", stderr)
+        # The marker still closes the gate -- the harness broke later today.
+        self.assertIn("harness broken", me.gate_check()[1])
+
+    def test_offline_mode_skips_binary_resolution_entirely(self):
+        """--offline never spawns `claude`, so a machine with no CLI at all
+        must still be able to run the plumbing check."""
+        stderr = io.StringIO()
+        with mock.patch(
+            "memory_eval.resolve_claude_bin",
+            side_effect=AssertionError("resolve_claude_bin must not run in --offline mode"),
+        ), contextlib.redirect_stderr(stderr):
+            exit_code = me.main([
+                "--tasks", str(TASKS_DIR / "06-canary-unrelated-rename.json"),
+                "--offline", str(OFFLINE_FIXTURES),
+                "--runs", "1", "--backbone", "fixture-model",
+            ])
+        self.assertEqual(exit_code, 0)
+
+
+# ---------------------------------------------------------------------------
+# #1027: a run that never executed must move no score in EITHER direction,
+# and a row containing one is a harness observation rather than a memory
+# measurement. Flooring such a run to 0.0 and averaging it in was itself a
+# fail-open: two failed launches in a five-run baseline arm pulled the mean
+# down far enough to classify the row high_value and open the gate.
+# ---------------------------------------------------------------------------
+
+class PartialLaunchFailureTests(unittest.TestCase):
+    """The arm order run_arms() uses is ARMS == (baseline, treatment,
+    full_context), `runs` sequential calls each, so with --runs 5 the first
+    two run_claude_p calls are baseline runs 0 and 1."""
+
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+        me.reset_agent_error_samples()
+        self.addCleanup(me.reset_agent_error_samples)
+        self.tasks_dir = self.tmp / "tasks"
+        self.tasks_dir.mkdir()
+        task = {
+            "id": "flake", "kind": "canary", "prompt": "do the thing",
+            "fixture": {"files": {"a.txt": "x\n"}}, "criteria": ["c"],
+            "seed_learnings": [{"type": "pattern", "content": "a seeded fact", "confidence": 8}],
+        }
+        (self.tasks_dir / "01.json").write_text(json.dumps(task), encoding="utf-8")
+
+    # Scores chosen so a HEALTHY row is genuinely high_value: baseline 4.0,
+    # treatment 7.0 (delta +3.0, over the 1.5 threshold), full_context 6.0
+    # (delta_sat +1.0, so the Δ_sat precondition holds too).
+    ARM_SCORES = {"baseline": 4.0, "treatment": 7.0, "full_context": 6.0}
+
+    @staticmethod
+    def _arm_of(*, inject: bool, prompt: str) -> str:
+        if inject:
+            return "treatment"
+        return "full_context" if "Relevant project context" in prompt else "baseline"
+
+    @staticmethod
+    def _healthy(arm: str):
+        return {
+            "is_error": False, "result": f"arm={arm}", "num_turns": 2, "total_cost_usd": 0.01,
+            "usage": {"input_tokens": 100, "output_tokens": 20},
+        }
+
+    @staticmethod
+    def _failed():
+        return {
+            "is_error": True, "result": "claude -p failed to launch: [Errno 2] ... 'claude'",
+            "usage": {}, "num_turns": 0, "total_cost_usd": 0.0,
+        }
+
+    def _run(self, *, failing_call_indexes: set):
+        """The judge reads the arm back off `agent_summary`, so each arm gets
+        a fixed score and the only thing a failed launch can change is
+        whether the run counts at all."""
+        calls = {"n": 0}
+
+        def run_claude_p(**kwargs):
+            calls["n"] += 1
+            if calls["n"] in failing_call_indexes:
+                return self._failed()
+            return self._healthy(self._arm_of(inject=kwargs["inject"], prompt=kwargs["prompt"]))
+
+        def judge(**kwargs):
+            arm = kwargs["user_obj"]["agent_summary"].split("=", 1)[1]
+            return ({"pass": True, "score": self.ARM_SCORES[arm]},
+                    {"input_tokens": 10, "output_tokens": 5})
+
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test-fixture"}), \
+                mock.patch("memory_eval.run_claude_p", side_effect=run_claude_p), \
+                mock.patch("memory_eval._call_judge_api", side_effect=judge), \
+                contextlib.redirect_stderr(io.StringIO()):
+            exit_code = me.main([
+                "--tasks", str(self.tasks_dir / "*.json"), "--runs", "5",
+                "--backbone", "fixture-model", "--claude-bin", "/usr/bin/true",
+                "--date", "2026-09-02",
+            ])
+        self.assertEqual(exit_code, 0)
+        rows = me._read_results_file(me.results_path_for_date("2026-09-02"))  # noqa: SLF001
+        self.assertEqual(len(rows), 1)
+        return rows[0]
+
+    def test_all_launches_succeeding_is_unaffected(self):
+        """The control: every run executes, so the row classifies on its
+        merits -- high_value with these scores."""
+        row = self._run(failing_call_indexes=set())
+        self.assertEqual(row["bucket"], "high_value")
+        self.assertEqual(row["baseline"]["mean_score"], 4.0)
+        self.assertEqual(row["treatment"]["mean_score"], 7.0)
+        self.assertEqual(row["delta"], 3.0)
+        self.assertEqual(row["baseline"]["format_error_rate"], 0.0)
+        self.assertNotIn("task_error", row)
+
+    def test_two_of_five_baseline_launches_failing_buckets_the_row_error(self):
+        """Same scores as the control, two baseline runs never launched."""
+        row = self._run(failing_call_indexes={1, 2})
+
+        # The two runs that never executed contribute no score in either
+        # direction: the arm's mean is still 4.0, not (3*4 + 2*0)/5 == 2.4.
+        self.assertEqual(row["baseline"]["mean_score"], 4.0)
+        self.assertEqual(row["baseline"]["format_error_rate"], 0.4)
+        # The launched runs alone would still read as high_value (delta 3.0),
+        # so the row-level rule is what stops a partial harness failure
+        # from opening the gate.
+        self.assertEqual(row["delta"], 3.0)
+        self.assertEqual(row["bucket"], "error")
+        self.assertIn("baseline 2/5", row["task_error"])
+
+    def test_a_partially_failed_row_cannot_open_the_gate(self):
+        self._run(failing_call_indexes={1, 2})
+        is_open, reason = me.gate_check()
+        self.assertFalse(is_open)
+        self.assertNotEqual(reason, "ok")
+
+    def test_launch_failures_are_excluded_from_every_mean_not_only_the_score(self):
+        """Token, turn and cost figures of a run that never executed are all
+        zero -- averaging them in understates the arm on exactly the metrics
+        classify_bucket()'s efficiency path compares."""
+        def executed(score):
+            return {
+                "score": score, "pass": True, "input_tokens": 100, "total_input_tokens": 1000,
+                "output_tokens": 20, "turns": 2, "run_cost_usd": 0.01,
+                "is_error": False, "judge_error": None, "launch_error": None,
+            }
+
+        def never_launched():
+            return {
+                "score": 0.0, "pass": False, "input_tokens": 0, "total_input_tokens": 0,
+                "output_tokens": 0, "turns": 0, "run_cost_usd": 0.0,
+                "is_error": True, "judge_error": None, "launch_error": "failed to launch",
+            }
+
+        stats = me._aggregate_arm_runs([executed(8.0), executed(8.0), never_launched()])  # noqa: SLF001
+        self.assertEqual(stats["mean_score"], 8.0)
+        self.assertEqual(stats["pass_rate"], 1.0)
+        self.assertEqual(stats["mean_input_tokens"], 100.0)
+        self.assertEqual(stats["mean_total_input_tokens"], 1000.0)
+        self.assertEqual(stats["mean_output_tokens"], 20.0)
+        self.assertEqual(stats["mean_turns"], 2.0)
+        # Cost is the exception: it is spend, not a quality metric. A run
+        # stopped against --max-budget-usd is flagged is_error but already
+        # spent, and _build_result_row() multiplies this by the full `runs`
+        # count -- averaging over survivors while multiplying by everything
+        # under-reports into the shared cost ledger.
+        self.assertAlmostEqual(stats["mean_cost_usd"], 0.02 / 3)
+        # The rates keep every attempted run in the denominator -- that is
+        # what makes format_error_rate a failure RATE.
+        self.assertAlmostEqual(stats["format_error_rate"], 1 / 3)
+        self.assertEqual(stats["runs"], 3)
+
+    def test_launch_failure_summary_names_each_failing_arm(self):
+        arms = {
+            "baseline": {"runs": 5, "format_error_rate": 0.4},
+            "treatment": {"runs": 5, "format_error_rate": 0.0},
+            "full_context": {"runs": 5, "format_error_rate": 0.2},
+        }
+        summary = me.launch_failure_summary(arms)
+        self.assertIn("baseline 2/5", summary)
+        self.assertIn("full_context 1/5", summary)
+        self.assertNotIn("treatment", summary)
+        self.assertIsNone(me.launch_failure_summary({a: {"runs": 5, "format_error_rate": 0.0} for a in me.ARMS}))
+
+
+# ---------------------------------------------------------------------------
+# #1027 THE INVARIANT: a launch failure may only move a row TOWARD a closed
+# gate, never toward an open one. The first cut of the downgrade violated it
+# in the one place it mattered -- it overwrote `regression`, which
+# gate_check() selects by name, so a real regression plus one flake opened
+# the gate. These tests assert the invariant through gate_check(), not by
+# reading bucket names, because the gate is what the invariant is about.
+# ---------------------------------------------------------------------------
+
+class LaunchFailureMonotonicityTests(unittest.TestCase):
+    ALL_BUCKETS = ("high_value", "regression", "redundant", "inconclusive", "gap")
+
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+        me.evals_dir().mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _arm(mean_score: float, *, failed: int = 0, runs: int = 5) -> dict:
+        return {
+            "mean_score": mean_score, "pass_rate": 1.0, "mean_input_tokens": 100.0,
+            "mean_total_input_tokens": 1000.0, "mean_output_tokens": 20.0, "mean_turns": 2.0,
+            "mean_cost_usd": 0.01, "format_error_rate": failed / runs,
+            "judge_error_rate": 0.0, "runs": runs,
+        }
+
+    def _arms(self, *, failed_arm=None, failed: int = 1) -> dict:
+        return {arm: self._arm(7.0, failed=failed if arm == failed_arm else 0) for arm in me.ARMS}
+
+    def _row(self, bucket: str, *, kind: str = "uplift", task_id: str = "row-under-test",
+             failed_arm=None, failed: int = 1, delta: float = 0.0) -> dict:
+        return me._build_result_row(  # noqa: SLF001
+            task_id=task_id, kind=kind, backbone="m", runs=5, offline=False,
+            arms=self._arms(failed_arm=failed_arm, failed=failed),
+            bucket=bucket, delta=delta, delta_sat=1.0,
+            extra={"mining": {"noise_high_value": False}} if kind == "dreamed" else {},
+        )
+
+    def _gate_on(self, rows: list) -> tuple:
+        for stale in me.evals_dir().glob("*"):
+            stale.unlink()
+        me.write_results(rows, date="2026-09-02")
+        return me.gate_check()
+
+    def _clean_dreamed_high_value(self) -> dict:
+        return self._row("high_value", kind="dreamed", task_id="dreamed-01", delta=3.0)
+
+    # -- (1) the reviewer's repro ------------------------------------------
+    def test_a_regressing_row_with_a_failed_launch_stays_a_regression(self):
+        """One failed baseline launch in a genuinely regressing row must not
+        delete the regression from the gate's view. The row's scores come
+        from the runs that DID execute, so the regression is real; the flake
+        only changes the label."""
+        regressing = self._row("regression", failed_arm="baseline", delta=-5.0)
+        self.assertEqual(regressing["bucket"], "regression")
+        # The flake is still recorded, just not allowed to relabel the row.
+        self.assertIn("baseline 1/5", regressing["task_error"])
+
+        is_open, reason = self._gate_on([regressing, self._clean_dreamed_high_value()])
+        self.assertFalse(is_open, "a launch failure must never hide a regression")
+        self.assertEqual(reason, "1 regression bucket row(s) present")
+
+    def test_the_same_regression_without_a_flake_is_identical_to_the_gate(self):
+        """The control for the test above: the flake changes nothing the
+        gate can see."""
+        clean_regression = self._row("regression", delta=-5.0)
+        self.assertNotIn("task_error", clean_regression)
+        is_open, reason = self._gate_on([clean_regression, self._clean_dreamed_high_value()])
+        self.assertFalse(is_open)
+        self.assertEqual(reason, "1 regression bucket row(s) present")
+
+    # -- (2) the round-2 repro still holds ---------------------------------
+    def test_a_high_value_row_with_failed_launches_is_downgraded_to_error(self):
+        flaked = self._row("high_value", task_id="uplift-01", failed_arm="baseline", failed=2, delta=3.0)
+        self.assertEqual(flaked["bucket"], "error")
+        self.assertIn("baseline 2/5", flaked["task_error"])
+        is_open, reason = self._gate_on([flaked])
+        self.assertFalse(is_open)
+        self.assertEqual(reason, "no high_value rows")
+
+    def test_a_flaked_dreamed_row_cannot_satisfy_the_live_dreamed_clause(self):
+        """The full_context-arm case the review called out: with every run
+        of an arm excluded the classifier can read high_value off nothing at
+        all, and the whole-run abort does not fire because the other arms
+        ran."""
+        flaked = self._row("high_value", kind="dreamed", task_id="dreamed-01",
+                           failed_arm="full_context", delta=3.0)
+        self.assertEqual(flaked["bucket"], "error")
+        is_open, _reason = self._gate_on([flaked])
+        self.assertFalse(is_open)
+
+    # -- (3) the property, over every bucket and every arm -----------------
+    def test_a_launch_failure_never_moves_the_gate_toward_open(self):
+        """For every bucket classify_bucket() can return and every arm:
+        adding a launch failure yields a gate verdict that is closed-or-equal
+        (`open_after` implies `open_before`). Asserted through gate_check()
+        on a real results file, never by inspecting bucket names."""
+        for bucket in self.ALL_BUCKETS:
+            for arm in me.ARMS:
+                with self.subTest(bucket=bucket, arm=arm):
+                    delta = -5.0 if bucket == "regression" else 3.0
+                    before = self._gate_on([
+                        self._row(bucket, delta=delta), self._clean_dreamed_high_value(),
+                    ])
+                    after = self._gate_on([
+                        self._row(bucket, failed_arm=arm, delta=delta), self._clean_dreamed_high_value(),
+                    ])
+                    self.assertFalse(
+                        after[0] and not before[0],
+                        f"a launch failure in {arm} opened the gate on a {bucket} row: "
+                        f"before={before}, after={after}",
+                    )
+
+    def test_the_downgrade_function_states_the_rule_directly(self):
+        arms_clean = self._arms()
+        arms_flaked = self._arms(failed_arm="treatment")
+        for bucket in self.ALL_BUCKETS:
+            with self.subTest(bucket=bucket):
+                self.assertEqual(me.downgrade_bucket_for_launch_failures(bucket, arms_clean), (bucket, None))
+                downgraded, summary = me.downgrade_bucket_for_launch_failures(bucket, arms_flaked)
+                self.assertIn("treatment 1/5", summary, "the flake stays visible either way")
+                self.assertEqual(downgraded, "regression" if bucket == "regression" else "error")
 
 
 # ---------------------------------------------------------------------------

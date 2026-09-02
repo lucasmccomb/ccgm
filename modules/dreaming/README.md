@@ -99,6 +99,7 @@ analyzer below:
 - `bin/dream-eval.sh` -- extended with poisoning negative-control fixtures
   so the regression gate optimistic integration must pass every night
   actually exercises the attack shapes the engine is designed against.
+  It also fails loud now (see "The eval harness fails loud" below).
 - `commands/dream-review.md` (`/dream-review`) -- post-hoc review of
   auto-integrated and still-dwelling rows.
 - `bin/ccgm-learnings-sync` (in `self-improving`) -- `revert <sha>`: a
@@ -182,6 +183,57 @@ Epics 4-8 and are built today (`/dream-apply`, `bin/dream-daily.sh`,
 `bin/dream-eval.sh`, `lib/reconcile_automemory.py`); the opt-in optimistic
 auto-integration engine on top of all of it is covered in its own section
 above.
+
+## The eval harness fails loud
+
+`bin/dream-eval.sh` runs `eval/memory_eval.py`, whose `--gate` mode is the
+regression gate the optimistic engine must pass nightly. Between 2026-07-15
+and 2026-09-02 every nightly run scored `format_error_rate: 1.0` on all 54
+rows and the gate read that as a memory failure. Neither memory nor the API
+was at fault: the LaunchAgent exports a fixed PATH
+(`/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`), Claude Code's native
+installer puts the CLI in `~/.local/bin`, and every arm subprocess died with
+`FileNotFoundError` before it ran. Runs an operator started from a login
+shell worked, which is why the breakage looked intermittent.
+
+Two rules keep that shut:
+
+- **The `claude` binary is resolved to an absolute path before any task
+  runs.** `resolve_claude_bin()` tries the ambient PATH, then the known
+  install directories (`~/.local/bin`, `~/.claude/local`,
+  `/opt/homebrew/bin`, `/usr/local/bin`), and raises -- naming everything it
+  searched and pointing at `--claude-bin` / `CCGM_EVAL_CLAUDE_BIN` -- rather
+  than starting a run that cannot work.
+- **A whole-run format-error rate of 1.0 aborts.** One failed arm run stays
+  non-fatal; a run where every arm failed is not a measurement, so the
+  harness prints the first failure's raw output to stderr, exits non-zero,
+  writes no results file (dropping any partial file it wrote this run), and
+  records `evals/<date>.harness-broken`. The marker is load-bearing: `evals/`
+  always holds prior runs, so an abort that wrote nothing would otherwise
+  leave `--gate` reading the previous file and reporting `open` on a broken
+  harness. While a marker is newer than the newest results file, `--gate`
+  reports `harness broken: every agent run failed to execute on <date>`;
+  the next run that produces results clears it.
+
+**A launch failure may only move a row toward a closed gate, never toward
+an open one.** A run that never executed is not sent to the judge (nothing
+to grade, and on a broken harness that would be a whole task's judge calls
+spent before the abort fires) and is excluded from every mean the classifier
+reads -- flooring it to zero instead pulls the arm's mean down, and two
+failed launches in a five-run baseline arm are enough to classify a row
+`high_value`. Cost is the exception: a run stopped against
+`--max-budget-usd` spent real money, and spend is not a quality metric. A
+row is only as good as its worst arm, so any arm holding a failed run
+downgrades the row to `error` -- except a `regression`, which is preserved,
+because the gate selects regressions by bucket name and relabelling one
+would delete it from the gate's view. `downgrade_bucket_for_launch_failures()`
+is the single place that decides this.
+
+The judge call is one Messages API request per run: no sampling parameters
+(every judge model from Opus 4.7 / Sonnet 5 on returns 400 for one),
+`thinking: {"type": "disabled"}` so a model bump cannot spend the output cap
+on thinking, and `output_config.format` pinning the `{pass, score}` schema so
+the verdict is valid by construction.
 
 ## Slug identity (read this before touching project-identity code)
 
