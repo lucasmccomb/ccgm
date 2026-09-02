@@ -13,7 +13,7 @@ When the user asks to:
 - Trace an error or stack trace
 - Figure out why something behaves unexpectedly
 
-**Invoke the `/debug` skill** using the Skill tool before starting any analysis or making code changes. The skill runs the debugging agent on Opus 4.6 for deep root-cause analysis.
+**Invoke the `/debug` skill** using the Skill tool before starting any analysis or making code changes. The skill runs the debugging agent on the Opus-tier model for deep root-cause analysis.
 
 ## Why This Matters
 

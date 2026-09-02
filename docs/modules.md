@@ -621,7 +621,7 @@ Deep research, planning, and execution framework for complex projects.
 - **Phase 3** - Plan creation with parallelized epics and dependency waves. Every plan builds a **comprehensive autonomous E2E test suite** (Phase 3.3.5): new projects get a Wave-1 test-harness epic and per-epic E2E coverage; existing repos get a coverage-gap audit and optimistic gap-fill for touched areas. The suite is wired into CI as a blocking merge gate so it, not the user, is the ready-to-merge oracle.
 - **Phase 4** - Constructive peer review by security, architecture, and business logic agents (review stage 1 of 2)
 - **Phase 5 (+5.6)** - Write plan.md, then a self-review loop for placeholders, identifier drift, and autonomous-execution readiness
-- **Phase 5.7** - Adversarial review sequence (stage 2 of 2): 3 sequential `adrev-reviewer` passes on Opus 4.8 (max effort), each attacking the plan after the prior pass's fixes are incorporated, and enforcing the four plan-execution tenets (minimal/edge-bucketed human work, follow-up completion, autonomous decision context, comprehensive autonomous E2E coverage)
+- **Phase 5.7** - Adversarial review sequence (stage 2 of 2): 3 sequential `adrev-reviewer` passes on the current Opus-tier model (max effort), each attacking the plan after the prior pass's fixes are incorporated, and enforcing the four plan-execution tenets (minimal/edge-bucketed human work, follow-up completion, autonomous decision context, comprehensive autonomous E2E coverage)
 - **Phase 6** - Web review + final confirmation gate
 - **Phase 7** - Execute via parallel agents in separate clones; waves and completion gate on a green E2E suite and completion of all in-scope follow-up work
 - **Phase 8** - Verification, audit, and retrospective

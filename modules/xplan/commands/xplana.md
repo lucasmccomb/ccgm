@@ -51,7 +51,7 @@ Autonomous mode affects these xplan phases:
 | 2.7 (Multi-Agent Setup) | Inferred from scope (9+ epics = workspace, 4-8 = flat, 1-3 = single). |
 | 4.0 (Review Configuration) | Locked to Full - security + architecture + business logic. |
 | 5.6 (Plan Quality Self-Review) | Unchanged - still loops until clean. |
-| 5.7 (Adversarial Review Sequence) | **Locked ON.** Runs 3 sequential `adrev-reviewer` passes (Opus 4.8, max effort) against the finished plan — each pass attacks after the previous pass's fixes are incorporated; the third is the final review. No mid-flow prompt - any P0/P1 the final pass leaves unresolved are recorded and surfaced at the 6.A walkthrough + 6.5 gate instead of asking. |
+| 5.7 (Adversarial Review Sequence) | **Locked ON.** Runs 3 sequential `adrev-reviewer` passes (the current Opus-tier model, max effort) against the finished plan — each pass attacks after the previous pass's fixes are incorporated; the third is the final review. No mid-flow prompt - any P0/P1 the final pass leaves unresolved are recorded and surfaced at the 6.A walkthrough + 6.5 gate instead of asking. |
 | 6 (Walkthrough) | Runs the new **Phase 6.A Autonomous Plan Walkthrough** - structured plan-as-artifact presentation with explicit assumption callouts. |
 | 6.5 (Final Execution Gate) | **Always fires**, same as any xplan run. Autonomous mode does NOT bypass this gate. |
 

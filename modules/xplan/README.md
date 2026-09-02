@@ -18,7 +18,7 @@ xplan is a human-in-the-loop planning framework with mandatory confirmation gate
 - **Phase 3** - Create parallelized plan with epics and dependency waves
 - **Phase 4** - Constructive peer review by security, architecture, and business logic agents (stage 1 of 2)
 - **Phase 5** - Write comprehensive plan.md (+ 5.6 self-review loop)
-- **Phase 5.7** - Adversarial review sequence (stage 2 of 2): **3 sequential `adrev-reviewer` passes** on Opus 4.8 (max effort). Each pass attacks the plan *after* the previous pass's fixes are incorporated (it uses the agent's native apply mode), so only one reviewer edits `plan.md` at a time and the third pass judges the fully-hardened plan. A finished plan has had **6 independent reviews in the full configuration** (3 standard + 3 adversarial).
+- **Phase 5.7** - Adversarial review sequence (stage 2 of 2): **3 sequential `adrev-reviewer` passes** on the current Opus-tier model (max effort). Each pass attacks the plan *after* the previous pass's fixes are incorporated (it uses the agent's native apply mode), so only one reviewer edits `plan.md` at a time and the third pass judges the fully-hardened plan. A finished plan has had **6 independent reviews in the full configuration** (3 standard + 3 adversarial).
 - **Phase 6** - Web review (default surface) + final confirmation gate before execution
 - **Phase 7** - Create repo, issues, and spawn parallel agents per wave
 - **Phase 8** - Verification, audit, retrospective, optional template generation
@@ -50,7 +50,7 @@ Planning asks where it runs and whether the user approves it (Phase 0.5.2 Q8, de
 
 **`--light`**: fast path. Reduced depth, minimal interaction. Skips Phases 0.5, 1.5, 2.5, 2.6, and 2.7 (Q8 is deferred to 3.3.5, not dropped). Traditional section-by-section walkthrough at the end.
 
-**`--autonomous`**: deep path. Maximum depth, zero interruption until the final gate. Runs the full research pipeline (all 7 agents), full standard review (security + architecture + business logic), the self-review loop, and the Phase 5.7 adversarial review sequence (3 sequential `adrev-reviewer` passes on Opus 4.8 at max effort, each incorporating its fixes before the next; the third judges the fully-hardened plan). Tech stack, scope, naming, and multi-agent setup are inferred and documented in `decisions.md`. At Phase 6 the completed plan is presented as a single structured artifact with every inferred default called out, then the (non-bypassable) Phase 6.5 final execution gate fires. Pick this when you know exactly what you want to plan and prefer reviewing a finished artifact over answering questions during creation. Correct any wrong inferences with `/xplan --deepen ~/code/plans/{concept-name}` rather than re-running from scratch.
+**`--autonomous`**: deep path. Maximum depth, zero interruption until the final gate. Runs the full research pipeline (all 7 agents), full standard review (security + architecture + business logic), the self-review loop, and the Phase 5.7 adversarial review sequence (3 sequential `adrev-reviewer` passes on the current Opus-tier model at max effort, each incorporating its fixes before the next; the third judges the fully-hardened plan). Tech stack, scope, naming, and multi-agent setup are inferred and documented in `decisions.md`. At Phase 6 the completed plan is presented as a single structured artifact with every inferred default called out, then the (non-bypassable) Phase 6.5 final execution gate fires. Pick this when you know exactly what you want to plan and prefer reviewing a finished artifact over answering questions during creation. Correct any wrong inferences with `/xplan --deepen ~/code/plans/{concept-name}` rather than re-running from scratch.
 
 `--light` and `--autonomous` are mutually exclusive.
 
@@ -96,7 +96,7 @@ Both execute work, but they are not interchangeable. `/xplan-resume` resumes an 
 ## Dependencies
 
 - **multi-agent**: Required for parallel agent execution during research, review, and implementation phases
-- **adversarial-review**: Provides the `adrev-reviewer` agent that Phase 5.7's adversarial review sequence dispatches (3 sequential passes on Opus 4.8). Installed automatically as a module dependency.
+- **adversarial-review**: Provides the `adrev-reviewer` agent that Phase 5.7's adversarial review sequence dispatches (3 sequential passes on the current Opus-tier model). Installed automatically as a module dependency.
 - **[lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch)** (companion install): xplan's Phase 1 delegates research to the `/deepresearch` command, which is not part of CCGM - it lives in a standalone repo with its own installer
 
 ### /deepresearch - required for research phase

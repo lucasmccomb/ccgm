@@ -4,7 +4,7 @@ Provides `/debug` for structured root-cause debugging with Opus delegation.
 
 ## `/debug <problem description>`
 
-Delegates to an Opus 4.6 agent for deep root-cause analysis. Follows a strict 7-phase workflow: gather context, reproduce, hypothesize, instrument, diagnose, fix, verify.
+Delegates to an Opus-tier agent for deep root-cause analysis. Follows a strict 7-phase workflow: gather context, reproduce, hypothesize, instrument, diagnose, fix, verify.
 
 **Iron Laws:**
 - Reproduce before fixing
