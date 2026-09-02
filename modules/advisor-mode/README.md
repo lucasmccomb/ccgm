@@ -65,12 +65,28 @@ Read-only recon passes too: dev-tool version and identity probes (`node -v`,
 allowlisted (checked recursively, depth-capped, backtick bodies
 unescaped first). What a checked substitution returns is an argument for
 read-only commands only: `echo $(git rev-parse HEAD)` passes,
-`sed $(echo -i) …` does not. An argument that begins with a variable the
-guard cannot resolve is denied the same way (`A=-i; sed $A f`), so pass the
-value written out; `echo $A`, `grep $PAT f` and `rm -rf $TMPDIR/x` still
-pass. The guard resolves `$CLAUDE_CODE_SESSION_ID` from its own validated
-session context, so the per-session `/advisor on`/`off` flag commands keep
-working even when the hook subprocess does not carry the variable.
+`sed $(echo -i) …` does not.
+
+Every argument is read the way bash will pass it — quotes removed
+(`'-i'`, `-''i`, `$'-i'`, `$"-i"`), adjacent spans joined, backslash escapes
+and line continuations dropped — so spelling a flag differently no longer
+hides it. What bash does that the guard cannot reproduce is refused instead
+of guessed at, because brace expansion, `$IFS` word splitting and globbing
+each turn one typed word into several: a brace group (`-delet{e,e}`), an
+unquoted glob (`-dele*`, `[-]delete`), an unquoted expansion the guard cannot
+resolve anywhere in a word (`find <dir>$IFS-delete`), a resolvable one whose
+value carries whitespace or a glob character (bash globs a value after it
+substitutes it), and an undecodable `$'…'` escape are all denied for a
+command that is not read-only. A
+double-quoted expansion cannot be word-split, so it keeps the narrower rule —
+denied leading or inside a flag before its first `=`, allowed after it, which
+is what keeps `gh pr edit 1 --title="$T"` usable. `echo $A`, `grep $PAT f`
+and `rm -rf $TMPDIR/x` still pass. A relative path after a `cd` is denied, and so are
+`~+`, `~-` and `~N` anywhere: the guard resolves them against its own
+working directory, not the one bash will be in. The guard resolves `$CLAUDE_CODE_SESSION_ID` from its own
+validated session context, so the per-session `/advisor on`/`off` flag
+commands keep working even when the hook subprocess does not carry the
+variable.
 
 ## Escape hatches
 
@@ -91,17 +107,27 @@ cp hooks/advisor-session-start.py hooks/advisor-session-end.py ~/.claude/hooks/
 
 ```bash
 bash modules/advisor-mode/tests/test-advisor-guard.sh
+bash modules/advisor-mode/tests/test-advisor-guard-differential.sh
 bash modules/advisor-mode/tests/test-advisor-session.sh
 ```
 
 `test-advisor-guard.sh` covers flag on/off, subagent passthrough, hatch,
 work-product path allowances, the Bash allowlist/denylist, redirection
 scoping, tool probes, grouping tokens, recursive substitution checking, quote
-and escape handling, and regression probes for real bypasses found during
-development (newline-hidden commands, single-`&` chaining, `sed -i` variants,
-`git checkout -- pathspec`, nested escaped backticks, a substitution standing
-in for a flag or path, an escaped quote hiding a trailing command inside a
-double-quoted or `$'…'` span, and a variable standing in for a flag or path).
+and escape handling, malformed input, and regression probes for real bypasses
+found during development (newline-hidden commands, single-`&` chaining,
+`sed -i` variants, `git checkout -- pathspec`, nested escaped backticks, a
+substitution standing in for a flag or path, an escaped quote hiding a
+trailing command inside a double-quoted or `$'…'` span, a variable standing
+in for a flag or path, and a flag spelled out of reach of the literal scans
+by quoting, ANSI-C quoting, or an expansion).
+
+`test-advisor-guard-differential.sh` compares the guard against real bash. It
+builds a throwaway sandbox and runs a generated carrier x command matrix —
+every way of spelling a mutating flag against every command that acts on one
+— through both the guard and `bash -c`, then asserts the one invariant that
+matters: if bash mutated the sandbox, the guard exited 2. This is the method
+that found issue #1017.
 
 `test-advisor-session.sh` covers the per-session state: two sessions with
 opposite modes, the session-id fallback and the fail-open when there is none,

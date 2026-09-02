@@ -12,6 +12,13 @@
 # Run: bash modules/advisor-mode/tests/test-advisor-guard.sh
 
 set -u
+# bash 3.2 (macOS /bin/bash) brace-expands the RESULT of a command
+# substitution inside double quotes; bash >= 4 does not. Every assertion
+# below is `"$(bash_json ...)"`, so on 3.2 a command carrying a brace
+# group was rewritten by this shell before it ever reached the guard
+# and a different command got checked. Brace expansion is never wanted
+# here.
+set +B
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -478,6 +485,454 @@ echo hi > $A')"
 # a write may land.
 guard_no_sid_env "$(bash_json "echo hi > ${HOME}/code/repo/\$CLAUDE_CODE_SESSION_ID")"
 [ "$?" = "2" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: seeded sid into a repo path still denied"; }
+
+# Issue #1017: every argument check reads the word bash will actually pass,
+# so a flag or a path assembled by quoting, ANSI-C quoting, or an expansion
+# the guard cannot resolve no longer walks past the literal scans. Each line
+# below was proven on origin/main to exit 0 while real bash performed the
+# write.
+
+# The symptom table from the issue.
+assert_exit 2 "ansi-c find predicate denied" "$(bash_json "find . -name victim.txt \$'-delete'")"
+assert_exit 2 "single-quoted sed -i denied" "$(bash_json "sed '-i' s/a/b/ f")"
+assert_exit 2 "double-quoted sed -i denied" "$(bash_json 'sed "-i" s/a/b/ f')"
+assert_exit 2 "split-quoted sed -i denied" "$(bash_json "sed -''i s/a/b/ f")"
+assert_exit 2 "single-quoted find -delete denied" "$(bash_json "find . '-delete'")"
+assert_exit 2 "single-quoted attached sort -o denied" "$(bash_json "sort '-o/tmp/x' f")"
+assert_exit 2 "ansi-c sed -i denied" "$(bash_json "sed \$'-i' s/a/b/ f")"
+assert_exit 2 "ansi-c bare find -delete denied" "$(bash_json "find . \$'-delete'")"
+assert_exit 2 "indirect expansion as sed flag denied" "$(bash_json 'A=B
+B=-i
+sed ${!A} s/a/b/ f')"
+
+# The same carriers on the other checks, plus the escape spellings.
+assert_exit 2 "backslash-escaped sed -i denied" "$(bash_json 'sed \-i s/a/b/ f')"
+assert_exit 2 "ansi-c hex sed -i denied" "$(bash_json "sed \$'\\x2di' s/a/b/ f")"
+assert_exit 2 "ansi-c octal sed -i denied" "$(bash_json "sed \$'\\055i' s/a/b/ f")"
+assert_exit 2 "ansi-c unicode sed -i denied" "$(bash_json "sed \$'\\u002di' s/a/b/ f")"
+assert_exit 2 "double-quoted flag letter denied" "$(bash_json 'sed -"i" s/a/b/ f')"
+assert_exit 2 "flag-shaped \$A denied" "$(bash_json 'A=i
+sed -$A s/a/b/ f')"
+assert_exit 2 "flag-shaped long \$A denied" "$(bash_json 'A=lace
+sed --in-p$A s/a/b/ f')"
+assert_exit 2 "split-quoted find predicate denied" "$(bash_json "find . -dele''te")"
+assert_exit 2 "ansi-c repo path as rm target denied" "$(bash_json "rm -rf \$'${HOME}/code/repo/src'")"
+assert_exit 2 "ansi-c repo path as redirect target denied" "$(bash_json "echo hi > \$'${HOME}/code/repo/pwn'")"
+assert_exit 2 "single-quoted checkout pathspec denied" "$(bash_json "git checkout '--' f")"
+assert_exit 2 "single-quoted git branch -D denied" "$(bash_json "git branch '-D' x")"
+assert_exit 2 "single-quoted gh api -X denied" "$(bash_json "gh api '-X' POST /x")"
+
+# The unresolvable-expansion family beyond `$NAME`: indirect, length,
+# default-value, positional and special parameters.
+assert_exit 2 "indirect expansion as find predicate denied" "$(bash_json 'find . ${!A}')"
+assert_exit 2 "length expansion as sed flag denied" "$(bash_json 'sed ${#A} s/a/b/ f')"
+assert_exit 2 "default-value expansion as sed flag denied" "$(bash_json 'sed ${A:--i} s/a/b/ f')"
+assert_exit 2 "positional parameter as sed flag denied" "$(bash_json 'sed $1 s/a/b/ f')"
+assert_exit 2 "positional parameter as find predicate denied" "$(bash_json 'find . $1')"
+assert_exit 2 "all-args parameter as rm path denied" "$(bash_json 'rm $@')"
+# Mid-word in a path is the one place an expansion still decides where a write
+# lands: a prefix inside an allowed root says nothing about what the rest
+# resolves to (`/tmp/x/${!A}` with B=../../code/repo/f leaves /tmp entirely).
+assert_exit 2 "mid-word indirect expansion in a scratch path denied" "$(bash_json 'rm -rf /tmp/x/${!A}')"
+assert_exit 2 "mid-word positional parameter in a scratch path denied" "$(bash_json "cp ${HOME}/code/plans/a.md ${HOME}/code/plans/b\$1.md")"
+assert_exit 2 "pid parameter as redirect target denied" "$(bash_json 'echo hi > /tmp/f.$$')"
+assert_exit 2 "unterminated brace expansion denied" "$(bash_json 'sed ${ f')"
+
+# An ANSI-C body the decoder cannot finish is denied rather than guessed at.
+assert_exit 2 "undecodable ansi-c escape as sed arg denied" "$(bash_json "sed \$'\\q' s/a/b/ f")"
+assert_exit 2 "undecodable ansi-c escape as rm path denied" "$(bash_json "rm \$'\\q'")"
+ansi_err=$(printf '%s' "$(bash_json "sed \$'\\q' s/a/b/ f")" | python3 "${GUARD}" 2>&1 >/dev/null)
+ansi_rc=$?
+if [ "${ansi_rc}" = "2" ] && printf '%s' "${ansi_err}" | grep -q "cannot decode"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: undecodable ansi-c denial names the decode failure"
+    echo "  exit: ${ansi_rc}"
+    echo "  got:  ${ansi_err}"
+fi
+
+# Sibling literal-check gaps of the same class, both verified against the real
+# binary: gh accepts the attached flag forms, and git clusters short flags
+# (`git branch -dr <name>` attempted the delete).
+assert_exit 2 "gh api attached --method= denied" "$(bash_json 'gh api --method=POST /repos/o/r/labels')"
+assert_exit 2 "gh api attached -XPOST denied" "$(bash_json 'gh api -XPOST /repos/o/r/labels')"
+assert_exit 2 "gh api attached --field= denied" "$(bash_json 'gh api --field=name=x /repos/o/r/labels')"
+assert_exit 2 "gh api attached -fk=v denied" "$(bash_json 'gh api -fname=x /repos/o/r/labels')"
+assert_exit 2 "gh api attached -Fk=v denied" "$(bash_json 'gh api -Fname=x /repos/o/r/labels')"
+assert_exit 2 "gh api attached --raw-field= denied" "$(bash_json 'gh api --raw-field=name=x /repos/o/r/labels')"
+assert_exit 2 "gh api attached --input= denied" "$(bash_json 'gh api --input=/tmp/x /repos/o/r/labels')"
+assert_exit 2 "git branch clustered -Df denied" "$(bash_json 'git branch -Df feat')"
+assert_exit 2 "git branch clustered -fD denied" "$(bash_json 'git branch -fD feat')"
+assert_exit 2 "git branch clustered -dr denied" "$(bash_json 'git branch -dr feat')"
+
+# The allow side: quoting a legitimate argument must not start denying it,
+# and an expansion after a flag's `=` is a value, not the flag.
+assert_exit 0 "gh pr edit attached --title= allowed" "$(bash_json 'gh pr edit 1 --title="x y"')"
+assert_exit 0 "gh issue comment ansi-c body allowed" "$(bash_json "gh issue comment 7 --body=\$'multi\\nline'")"
+assert_exit 0 "gh api paginate allowed" "$(bash_json 'gh api --paginate /repos/o/r/issues')"
+assert_exit 0 "gh pr edit --body with a quoted \$T value allowed" "$(bash_json 'gh pr edit 1 --body="$T"')"
+assert_exit 0 "mkdir under a quoted \$HOME path allowed" "$(bash_json 'mkdir -p "$HOME/.claude/x"')"
+assert_exit 0 "mkdir into a quoted tmp path with a space allowed" "$(bash_json "mkdir -p '/tmp/a b'")"
+assert_exit 0 "quoted sed -n script allowed" "$(bash_json "sed -n '1,10p' f")"
+assert_exit 0 "quoted find -name allowed" "$(bash_json "find . -name '*.py'")"
+assert_exit 0 "ansi-c escape as an echo argument allowed" "$(bash_json "echo \$'\\e[0m'")"
+assert_exit 0 "printf with a quoted expansion allowed" "$(bash_json 'printf "%s\\n" "$A"')"
+assert_exit 0 "git log quoted --format allowed" "$(bash_json "git log --format='%h %s'")"
+assert_exit 0 "git -C with a quoted path allowed" "$(bash_json 'git -C "$HOME/code/repo" status')"
+assert_exit 0 "git branch read-only clusters allowed" "$(bash_json 'git branch -vv')"
+assert_exit 0 "git branch --list allowed" "$(bash_json "git branch --list 'feat/*'")"
+assert_exit 0 "sed script ending in a dollar allowed" "$(bash_json "sed -n '\$p' f")"
+# The first word is read after quote removal too, because that is the command
+# bash runs. It reaches the branch its name selects — which is the same
+# allowlist decision as before, so a quoted mutating command stays denied.
+assert_exit 0 "quoted first word still reads as its command" "$(bash_json "'git' status")"
+assert_exit 0 "quoted rm inside tmp still allowed" "$(bash_json "'rm' -rf /tmp/advisor-scratch")"
+assert_exit 2 "quoted sed -i denied through its own branch" "$(bash_json "'sed' -i s/a/b/ f")"
+assert_exit 2 "quoted find -delete denied through its own branch" "$(bash_json "'find' . -delete")"
+assert_exit 2 "quoted rm of a repo path denied" "$(bash_json "'rm' ${HOME}/code/repo/src/app.py")"
+assert_exit 2 "quoted git push denied" "$(bash_json "'git' push origin main")"
+assert_exit 2 "ansi-c git commit denied" "$(bash_json "\$'git' commit -m x")"
+
+# ─── Word-level carriers (fix round for issue #1017) ─────────────────────────
+
+# normalize_word models the steps bash takes between the typed word and argv.
+# The ones it cannot carry out are recorded and denied instead of guessed at:
+# three of them turn ONE typed word into SEVERAL argv words, which no
+# per-word check can express. Every line below was proven to exit 0 while
+# real bash performed the write.
+
+# `$"…"` is locale-translation quoting. With no message catalogue bash
+# returns the text unchanged, so it is a double-quoted span whose leading `$`
+# belongs to it — read as a literal `$` plus a plain `"` span it left a stray
+# dollar on the front of the word and matched no flag check.
+assert_exit 2 "locale-quoted find predicate denied" "$(bash_json "find ${HOME}/code/repo \$\"-delete\"")"
+assert_exit 2 "locale-quoted sed -i denied" "$(bash_json "sed \$\"-i\" s/a/b/ f")"
+assert_exit 2 "locale-quoted sort -o denied" "$(bash_json "sort \$\"-o\" f g")"
+assert_exit 2 "locale-quoted git branch -D denied" "$(bash_json "git branch \$\"-D\" x")"
+assert_exit 2 "locale-quoted checkout pathspec denied" "$(bash_json "git checkout \$\"--\" f")"
+assert_exit 2 "locale-quoted gh api -X denied" "$(bash_json "gh api \$\"-X\" POST /x")"
+assert_exit 0 "locale-quoted echo argument allowed" "$(bash_json 'echo $"hi"')"
+
+# Brace expansion assembles the flag after the guard has read the word.
+assert_exit 2 "brace-split find predicate denied" "$(bash_json "find ${HOME}/code/repo -delet{e,e}")"
+assert_exit 2 "brace-whole find predicate denied" "$(bash_json "find ${HOME}/code/repo -{delete,delete}")"
+assert_exit 2 "brace sed -i denied" "$(bash_json 'sed -{i,i} s/a/b/ f')"
+assert_exit 2 "brace attached sort -o denied" "$(bash_json "sort -{o,o}${HOME}/code/repo/pwn.txt f")"
+assert_exit 2 "brace sort --output denied" "$(bash_json "sort --outp{ut,ut}=${HOME}/code/repo/pwn.txt f")"
+assert_exit 2 "brace git branch -D denied" "$(bash_json 'git branch -{D,D} x')"
+assert_exit 2 "brace checkout pathspec denied" "$(bash_json 'git checkout {--,tracked.txt}')"
+assert_exit 2 "brace gh api --method denied" "$(bash_json 'gh api --met{hod,hod}=POST /x')"
+assert_exit 0 "brace group as an echo argument allowed" "$(bash_json 'echo {a,b}')"
+
+# A brace group in a scratch-op path resolves under an allowed root as one
+# word and escapes it as two: `..` glued to `{a,` is not a path component.
+assert_exit 2 "brace rm escaping the write root denied" "$(bash_json "rm -rf \$TMPDIR/{a,../../home/code/repo/victim.txt}")"
+assert_exit 2 "brace touch escaping the write root denied" "$(bash_json "touch \$TMPDIR/{a,../../home/code/repo/pwn.txt}")"
+assert_exit 2 "brace cp escaping the write root denied" "$(bash_json "cp \$TMPDIR/{src,../../home/code/repo/pwn.txt}")"
+
+# $IFS word splitting. An UNQUOTED expansion the guard cannot resolve is
+# denied wherever it sits — the old position carve-out assumed a mid-word
+# expansion could become neither a flag nor a fresh path, and splitting is
+# exactly how it becomes both.
+assert_exit 2 "IFS-split find predicate denied" "$(bash_json "find ${HOME}/code/repo\$IFS-delete")"
+assert_exit 2 "IFS-split mid-argument find predicate denied" "$(bash_json "find ${HOME}/code/repo -name v\$IFS-delete")"
+assert_exit 2 "IFS-split sort -o denied" "$(bash_json "sort f\$IFS-o\$IFS${HOME}/code/repo/x")"
+assert_exit 2 "IFS-split rm path denied" "$(bash_json "rm -rf \$TMPDIR/a\$IFS${HOME}/code/repo/victim.txt")"
+# The same hop with a variable the guard CAN resolve: splicing a value that
+# carries whitespace would build one word where bash builds two.
+export EVIL_WHITESPACE_VALUE=' -delete'
+assert_exit 2 "whitespace-valued variable mid-word denied" "$(bash_json "find ${HOME}/code/repo\$EVIL_WHITESPACE_VALUE")"
+assert_exit 2 "whitespace-valued variable as a rm path denied" "$(bash_json 'rm -rf $TMPDIR/x$EVIL_WHITESPACE_VALUE')"
+assert_exit 0 "whitespace-valued variable for a read-only word allowed" "$(bash_json 'echo $EVIL_WHITESPACE_VALUE')"
+# Read-only first words keep taking any of it.
+assert_exit 0 "IFS in an echo argument allowed" "$(bash_json 'echo a$IFS-b')"
+assert_exit 0 "IFS in a grep pattern allowed" "$(bash_json 'grep pat$IFS f')"
+# A DOUBLE-QUOTED expansion cannot be word-split, so the narrower positional
+# rules still apply to it — which is what keeps these two usable.
+assert_exit 0 "quoted \$T after a flag's = allowed" "$(bash_json 'gh pr edit 1 --title="$T"')"
+assert_exit 0 "quoted \$B after a flag's = allowed" "$(bash_json 'gh issue comment 7 --body="$B"')"
+assert_exit 2 "unquoted \$T after a flag's = denied" "$(bash_json 'gh pr edit 1 --body=$T')"
+assert_exit 2 "unquoted expansion in a plain word denied" "$(bash_json 'sed s/a/b/$A f')"
+# The positional rules are what a double-quoted expansion is judged by, and
+# they are the ONLY thing that catches these two: quoting stops bash from
+# word-splitting, so the unquoted-expansion rule above never sees them.
+assert_exit 2 "quoted expansion inside a flag denied" "$(bash_json 'sed -"$A" s/a/b/ f')"
+assert_exit 2 "quoted expansion mid-path in a scratch op denied" "$(bash_json 'rm -rf "/tmp/x/${!A}"')"
+assert_exit 2 "quoted expansion mid-path in a redirect denied" "$(bash_json 'echo hi > "/tmp/x/${!A}"')"
+
+# The double-quoted leading/flag case keeps its own message.
+dq_err=$(printf '%s' "$(bash_json 'sed "$A" s/a/b/ f')" | python3 "${GUARD}" 2>&1 >/dev/null)
+dq_rc=$?
+if [ "${dq_rc}" = "2" ] && printf '%s' "${dq_err}" | grep -q 'begins with'; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: double-quoted leading expansion keeps the positional message"
+    echo "  exit: ${dq_rc}"
+    echo "  got:  ${dq_err}"
+fi
+
+# Backslash-newline is a line continuation: bash deletes the pair, so the
+# word it builds is whole.
+assert_exit 2 "line-continuation find predicate denied" "$(bash_json "find ${HOME}/code/repo -delet\\
+e")"
+assert_exit 2 "line-continuation leading dash denied" "$(bash_json "find ${HOME}/code/repo -\\
+delete")"
+assert_exit 2 "line-continuation git branch -D denied" "$(bash_json 'git branch -\
+D x')"
+assert_exit 2 "line-continuation checkout pathspec denied" "$(bash_json 'git checkout -\
+- f')"
+
+# Pathname expansion. The gate itself permits creating the dash-named file a
+# glob needs (temp roots are allowed write roots), so this is one command away.
+assert_exit 2 "glob find predicate denied" "$(bash_json "find ${HOME}/code/repo -dele*")"
+assert_exit 2 "bracket glob find predicate denied" "$(bash_json "find ${HOME}/code/repo [-]delete")"
+assert_exit 2 "question glob find predicate denied" "$(bash_json "find ${HOME}/code/repo ?delete")"
+assert_exit 2 "glob sed flag denied" "$(bash_json 'sed -? s/a/b/ f')"
+assert_exit 2 "glob rm inside an allowed root denied" "$(bash_json 'rm -rf /tmp/scratch/*')"
+glob_err=$(printf '%s' "$(bash_json 'rm -rf /tmp/scratch/*')" | python3 "${GUARD}" 2>&1 >/dev/null)
+glob_rc=$?
+if [ "${glob_rc}" = "2" ] \
+    && printf '%s' "${glob_err}" | grep -q 'remove the directory itself'; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: glob denial names the remedy"
+    echo "  exit: ${glob_rc}"
+    echo "  got:  ${glob_err}"
+fi
+assert_exit 0 "quoted glob for find -name allowed" "$(bash_json "find . -name '*.py'")"
+assert_exit 0 "glob for a read-only grep allowed" "$(bash_json 'grep -rn pat src/*.py')"
+assert_exit 0 "glob for a read-only ls allowed" "$(bash_json 'ls /tmp/x/*')"
+
+# The rest of the `$`-expansion family, as sed arguments.
+assert_exit 2 "prefix-strip expansion as sed flag denied" "$(bash_json 'sed ${A#p} s/a/b/ f')"
+assert_exit 2 "array-subscript expansion as sed flag denied" "$(bash_json 'sed ${A[0]} s/a/b/ f')"
+assert_exit 2 "all-args star as sed flag denied" "$(bash_json 'sed $* s/a/b/ f')"
+assert_exit 2 "arg-count parameter as sed flag denied" "$(bash_json 'sed $# s/a/b/ f')"
+assert_exit 2 "exit-status parameter as sed flag denied" "$(bash_json 'sed $? s/a/b/ f')"
+assert_exit 2 "last-bg-pid parameter as sed flag denied" "$(bash_json 'sed $! s/a/b/ f')"
+assert_exit 2 "script-name parameter as sed flag denied" "$(bash_json 'sed $0 s/a/b/ f')"
+assert_exit 2 "shell-flags parameter as sed flag denied" "$(bash_json 'sed $- s/a/b/ f')"
+
+# `\cX` decodes the way bash does. An `X.upper() ^ 0x40` agrees for letters
+# and is wrong for everything else, so this compares against real printf.
+cx_bad=0
+# Two escapes are left out of the comparison: `\c@` decodes to NUL, which
+# command substitution strips, and `\c?` is 0x7f on bash >= 4 but 0x1f on bash
+# 3.2 — comparing it would test the shell's version. Neither is a dash, which
+# is the only byte this gate turns on, and the check below pins that property
+# for every escape directly.
+for cx in '-' 'm' 'M' '[' 'a' 'A'; do
+    want=$(eval "printf '%s' \$'\\c${cx}'" | od -An -tx1 | tr -d ' \n')
+    got=$(python3 - "${GUARD}" "${cx}" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1])
+g = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(g)
+text, ok = g.decode_ansi_c("\\c" + sys.argv[2])
+print("".join("%02x" % b for b in text.encode()) if ok else "UNDECODED")
+PY
+)
+    [ "${want}" = "${got}" ] || { cx_bad=1; echo "  \\c${cx}: bash=${want} guard=${got}"; }
+done
+if [ "${cx_bad}" = "0" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: \\cX decoding matches bash"
+fi
+
+# The property the flag checks actually rest on, and the reason the two
+# escapes above can sit out the comparison: no `\cX` decodes to a dash, so the
+# escape can never assemble `-i` or `-delete` however bash spells it.
+if python3 - "${GUARD}" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1])
+g = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(g)
+bad = [chr(c) for c in range(1, 128)
+       if g.decode_ansi_c("\\c" + chr(c))[0] == "-"]
+print("dash-producing escapes: %r" % bad)
+sys.exit(1 if bad else 0)
+PY
+then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: no \\cX escape decodes to a dash"
+fi
+
+# A relative path is resolved against the HOOK's working directory, and `cd`
+# moves bash's without moving the guard's. With a session started in an
+# allowed root that let `cd <repo> && rm -rf ./x` through while bash deleted
+# a repo file, so a relative path after a `cd` is denied.
+CD_PWD="$(pwd)"
+mkdir -p "${HOME}/.claude/scratch"
+if cd "${HOME}/.claude/scratch"; then
+    assert_exit 2 "relative rm after a cd denied" "$(bash_json "cd ${HOME}/code/repo && rm -rf ./x")"
+    assert_exit 2 "bare relative rm after a cd denied" "$(bash_json "cd ${HOME}/code/repo && rm -f victim.txt")"
+    assert_exit 2 "relative touch after a cd denied" "$(bash_json "cd ${HOME}/code/repo && touch pwn.txt")"
+    assert_exit 2 "relative redirect after a cd denied" "$(bash_json "cd ${HOME}/code/repo && echo hi > pwn.txt")"
+    cd_err=$(printf '%s' "$(bash_json "cd ${HOME}/code/repo && rm -rf ./x")" | python3 "${GUARD}" 2>&1 >/dev/null)
+    if printf '%s' "${cd_err}" | grep -q 'absolute path'; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        echo "FAIL: relative-path-after-cd denial names the absolute-path remedy"
+        echo "  got: ${cd_err}"
+    fi
+    # An absolute path after a cd is unaffected, and so is a cd with no write.
+    assert_exit 0 "absolute rm after a cd allowed" "$(bash_json "cd ${HOME}/code/repo && rm -rf \$TMPDIR/x")"
+    assert_exit 0 "read-only git after a cd allowed" "$(bash_json "cd ${HOME}/code/repo && git status")"
+    # Without a cd the guard's cwd IS bash's, so a relative path is judged
+    # against the right directory and stays allowed.
+    assert_exit 0 "relative rm with no cd allowed" "$(bash_json 'rm -f scratch-file.txt')"
+    cd "${CD_PWD}" || exit 1
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: could not cd into the allowed-write-root scratch dir"
+fi
+
+# `~+` is bash's `$PWD` and `~-` its `$OLDPWD`; `~0`/`~+2`/`~-2` index the
+# dirstack. Python's expanduser implements none of them, so they stayed
+# literal and realpath read them against the GUARD's directory — which let
+# `cd <repo> && rm -f ~+/victim.txt` resolve back into an allowed root and
+# pass while bash deleted a repo file. They are as cwd-dependent as `./x`.
+assert_exit 2 "cwd-tilde rm after a cd denied" "$(bash_json "cd ${HOME}/code/repo && rm -f ~+/victim.txt")"
+assert_exit 2 "cwd-tilde touch after a cd denied" "$(bash_json "cd ${HOME}/code/repo && touch ~+/pwn.txt")"
+assert_exit 2 "cwd-tilde redirect after a cd denied" "$(bash_json "cd ${HOME}/code/repo && echo hi > ~+/pwn.txt")"
+assert_exit 2 "oldpwd-tilde rm after two cds denied" "$(bash_json "cd ${HOME}/code/repo && cd /tmp && rm -f ~-/victim.txt")"
+assert_exit 2 "dirstack-tilde rm denied" "$(bash_json 'rm -f ~0/victim.txt')"
+assert_exit 2 "cwd-tilde rm with no cd denied" "$(bash_json 'rm -f ~+/victim.txt')"
+assert_exit 2 "cwd-tilde redirect with no cd denied" "$(bash_json 'echo hi > ~+/pwn.txt')"
+tilde_err=$(printf '%s' "$(bash_json 'rm -f ~+/victim.txt')" | python3 "${GUARD}" 2>&1 >/dev/null)
+tilde_rc=$?
+if [ "${tilde_rc}" = "2" ] && printf '%s' "${tilde_err}" | grep -q 'absolute path'; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: cwd-tilde denial names the absolute-path remedy"
+    echo "  exit: ${tilde_rc}"
+    echo "  got:  ${tilde_err}"
+fi
+# path_allowed refuses the cwd tildes outright, which is what denies the
+# commands above — so relative_path's own answer for them is checked here
+# directly. It is the function the message routing and any later caller read,
+# and a path whose meaning depends on the working directory has to say so.
+if python3 - "${GUARD}" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1])
+g = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(g)
+cases = [("~+/x", True), ("~-/x", True), ("~0/x", True), ("~+2/x", True),
+         ("~-2/x", True), ("./x", True), ("x", True),
+         ("~/x", False), ("/abs/x", False), ("~user/x", False)]
+wrong = [(t, w, g.relative_path(t)) for t, w in cases
+         if g.relative_path(t) is not w]
+print("relative_path disagreements: %r" % wrong)
+sys.exit(1 if wrong else 0)
+PY
+then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: relative_path calls the cwd tildes working-directory-dependent"
+fi
+
+# A plain `~/` is anchored to HOME, not to the working directory.
+assert_exit 0 "home tilde rm still allowed" "$(bash_json 'rm -f ~/.claude/x')"
+assert_exit 0 "home tilde mkdir still allowed" "$(bash_json 'mkdir -p ~/code/plans/x')"
+assert_exit 0 "home tilde redirect still allowed" "$(bash_json 'echo hi > ~/.claude/x')"
+
+# Bash expands a parameter and THEN globs the result, so a glob character
+# inside a value the guard CAN resolve becomes a different word entirely —
+# `GLOBVAR='-dele*'` with a `-delete` file in the working directory reaches
+# find as a write predicate. The raw word shows no glob, so only the value
+# check catches it.
+export EVIL_GLOB_VALUE='-dele*'
+export EVIL_GLOB_PATH='/tmp/x/*'
+export PLAIN_VALUE='-delete-nomatch'
+assert_exit 2 "glob-valued variable as a find predicate denied" "$(bash_json "find ${HOME}/code/repo \$EVIL_GLOB_VALUE")"
+assert_exit 2 "glob-valued variable as a sed flag denied" "$(bash_json 'sed $EVIL_GLOB_VALUE s/a/b/ f')"
+assert_exit 2 "glob-valued variable as a scratch path denied" "$(bash_json 'rm -rf $EVIL_GLOB_PATH')"
+assert_exit 2 "glob-valued variable as a redirect target denied" "$(bash_json 'echo hi > $EVIL_GLOB_PATH')"
+glob_val_err=$(printf '%s' "$(bash_json 'sed $EVIL_GLOB_VALUE s/a/b/ f')" | python3 "${GUARD}" 2>&1 >/dev/null)
+glob_val_rc=$?
+if [ "${glob_val_rc}" = "2" ] \
+    && printf '%s' "${glob_val_err}" | grep -q 'glob character'; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: glob-valued variable denial names globbing, not \$IFS"
+    echo "  exit: ${glob_val_rc}"
+    echo "  got:  ${glob_val_err}"
+fi
+# A resolvable value with neither glob nor $IFS characters is still spliced
+# and checked as its value, and a quoted one is never re-expanded at all.
+assert_exit 0 "plain-valued variable as a find predicate allowed" "$(bash_json "find ${HOME}/code/repo \$PLAIN_VALUE")"
+assert_exit 0 "quoted glob-valued variable allowed" "$(bash_json 'echo "$EVIL_GLOB_VALUE"')"
+assert_exit 0 "resolved variable in a scratch path still allowed" "$(bash_json 'rm -rf $TMPDIR/advisor-scratch')"
+
+# bash carries its words as C strings, so a NUL-producing escape ends the
+# word: `$'a\c@b'` is the one-character word `a`. The decoder truncates the
+# same way, which can only shorten a word — never hide a flag inside one.
+nul_bad=0
+for nul in 'c@' 'x00' '000'; do
+    want=$(eval "printf '%s' \$'a\\${nul}b'" | od -An -c | tr -d ' \n')
+    got=$(python3 - "${GUARD}" "${nul}" <<'PY'
+import importlib.util, subprocess, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1])
+g = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(g)
+text, ok = g.decode_ansi_c("a\\" + sys.argv[2] + "b")
+sys.stdout.write(text if ok else "UNDECODED")
+PY
+)
+    got=$(printf '%s' "${got}" | od -An -c | tr -d ' \n')
+    [ "${want}" = "${got}" ] || { nul_bad=1; echo "  \\${nul}: bash=${want} guard=${got}"; }
+done
+if [ "${nul_bad}" = "0" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: a NUL escape ends the word the way bash ends it"
+fi
+
+# ─── Malformed input: no traceback, no hang ──────────────────────────────────
+
+assert_no_crash() {
+    # $1 label, $2 hook-json. Any exit but 0/2 — or a traceback — is a bug.
+    local label="$1"
+    local err
+    local rc
+    err=$(printf '%s' "$2" | python3 "${GUARD}" 2>&1 >/dev/null)
+    rc=$?
+    if { [ "${rc}" = "0" ] || [ "${rc}" = "2" ]; } \
+        && ! printf '%s' "${err}" | grep -q "Traceback"; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        echo "FAIL: malformed input handled — ${label}"
+        echo "  exit: ${rc}"
+        echo "  got:  ${err}"
+    fi
+}
+
+assert_no_crash "unterminated single quote" "$(bash_json "sed 'abc")"
+assert_no_crash "unterminated double quote" "$(bash_json 'sed "abc')"
+assert_no_crash "unterminated ansi-c quote" "$(bash_json "sed \$'abc")"
+assert_no_crash "unterminated brace" "$(bash_json 'sed ${abc')"
+assert_no_crash "unterminated indirect brace" "$(bash_json 'sed ${!abc')"
+assert_no_crash "lone dollar" "$(bash_json 'sed $')"
+assert_no_crash "trailing backslash" "$(bash_json 'sed abc\')"
+assert_no_crash "ansi-c hex with no digits" "$(bash_json "sed \$'\\x'")"
+assert_no_crash "ansi-c unicode past range" "$(bash_json "sed \$'\\UFFFFFFFF'")"
+assert_no_crash "ansi-c trailing backslash" "$(bash_json "sed \$'abc\\\\")"
+assert_no_crash "5000 indirect expansions" "$(bash_json "sed $(python3 -c 'print("\x24{!A}" * 5000)')")"
+assert_no_crash "5000 hex escapes" "$(bash_json "sed \$'$(python3 -c 'print("\\x41" * 5000)')'")"
+assert_no_crash "5000 quote pairs" "$(bash_json "sed $(python3 -c "print(\"''\" * 5000)")")"
 
 # ─── Posture hook ────────────────────────────────────────────────────────────
 
