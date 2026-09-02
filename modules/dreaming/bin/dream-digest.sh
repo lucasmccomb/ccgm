@@ -178,15 +178,19 @@ out.append("")
 
 # --- Durable canary banner (adrev-014 + #753 handoff) ----------------------
 active_incidents = canary.get("active_incidents") or {}
-# Reduce-phase parse failures (#769 Stage-2 P1 #1): main() aborts without
-# writing proposals or advancing watermarks when the reduce model never
-# returns parseable JSON, even after the retry nudge. That abort is
+# Reduce-phase failures (#769 Stage-2 P1 #1): main() aborts without
+# writing proposals or advancing watermarks when the reduce call never
+# returns a usable proposal array. That abort is
 # otherwise only a stderr line an unattended launchd job will not
 # surface -- record_reduce_failure_incident() writes it into this SAME
 # durable file so it gets the same loud, persists-until-acknowledged
 # banner as a schema_canary incident.
 reduce_failures = canary.get("reduce_failures") or {}
-if active_incidents or reduce_failures:
+# Map calls that stopped at the output cap (#1026). Same contract as a
+# reduce failure, scoped to one slug: its evidence was paid for but never
+# extracted, so its watermark was held and it is re-mined next run.
+truncated_call_incidents = canary.get("truncated_calls") or {}
+if active_incidents or reduce_failures or truncated_call_incidents:
     out.append("## ⚠️ Canary banner (durable — shown until acknowledged)")
     out.append("")
     if active_incidents:
@@ -196,9 +200,15 @@ if active_incidents or reduce_failures:
             out.append(f"- `{slug}` (first seen {info.get('date', '?')}): {info.get('detail', '')}")
         out.append("")
     if reduce_failures:
-        out.append("**Reduce-phase parse failures (mined evidence NOT consumed, watermark NOT advanced):**")
+        out.append("**Reduce-phase failures (mined evidence NOT consumed, watermark NOT advanced):**")
         out.append("")
         for slug, info in sorted(reduce_failures.items()):
+            out.append(f"- `{slug}` (last failed {info.get('date', '?')}): {info.get('detail', '')}")
+        out.append("")
+    if truncated_call_incidents:
+        out.append("**Map calls that stopped at the output cap (mined evidence NOT consumed, watermark NOT advanced):**")
+        out.append("")
+        for slug, info in sorted(truncated_call_incidents.items()):
             out.append(f"- `{slug}` (last failed {info.get('date', '?')}): {info.get('detail', '')}")
         out.append("")
 
@@ -215,6 +225,20 @@ if run_summary is not None:
         for slug, reason in sorted(skip_reasons.items()):
             out.append(f"  - `{slug}`: {reason}")
     out.append(f"- map calls: {run_summary.get('map_calls', 0)}, reduce calls: {run_summary.get('reduce_calls', 0)}")
+    # #1026: a call that stopped at the output cap is a failed extraction,
+    # not a short answer. Surfaced here so truncations in an unattended
+    # run are visible in the same place as its call counts.
+    #
+    # Keep single quotes balanced in this heredoc, apostrophes included:
+    # bash 3.2 tracks quote state inside a $( ... ) command substitution
+    # even for a quoted heredoc body, so an unpaired one makes the whole
+    # script fail to parse on macOS system bash.
+    truncated_calls = run_summary.get("truncated_calls", 0)
+    if truncated_calls:
+        out.append(
+            f"- **calls that stopped at the output cap: {truncated_calls}** "
+            "(failed extractions -- raise `max_output_tokens` if this repeats)"
+        )
     cost = run_summary.get("cost_breakdown") or {}
     if cost:
         out.append(

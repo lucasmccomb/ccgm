@@ -78,6 +78,12 @@ fi
 # Default config.json (§3.3 config keys — matches dream_analyze.py's
 # DEFAULT_CONFIG plus the retention keys dream-daily.sh reads). Written
 # only if missing — no prior version of this file exists to migrate.
+#
+# `cost_pricing` seeds real per-MTok rates the way autoheal-install.sh
+# does (#1025). It used to ship empty, which sent every install through
+# dream_analyze.py's FALLBACK_PRICING constant — so a price correction
+# needed a code edit to take effect. Seeding it here means a future
+# Anthropic price change is a config edit.
 # ---------------------------------------------------------------------
 
 if [ ! -f "${DREAMING_DIR}/config.json" ]; then
@@ -87,14 +93,17 @@ if [ ! -f "${DREAMING_DIR}/config.json" ]; then
   "map_model": "claude-sonnet-5",
   "reduce_model": "claude-opus-4-8",
   "max_input_tokens": 200000,
-  "max_output_tokens": 4096,
+  "max_output_tokens": 16000,
   "daily_cost_cap_usd": 10.00,
   "lookback_days": 7,
   "auto_apply_counters": false,
   "promotion_min_sessions": 3,
   "promotion_min_agents": 2,
   "scopes": [],
-  "cost_pricing": {},
+  "cost_pricing": {
+    "claude-sonnet-5":  {"input_per_million": 2, "output_per_million": 10},
+    "claude-opus-4-8":  {"input_per_million": 5, "output_per_million": 25}
+  },
   "retention_gzip_days": 30,
   "retention_delete_days": 60
 }

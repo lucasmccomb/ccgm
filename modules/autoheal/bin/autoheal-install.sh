@@ -95,12 +95,19 @@ if [ ! -f "${AUTOHEAL_DIR}/config.json" ]; then
   "webhook_token": "${WEBHOOK_TOKEN}",
   "webhook_kinds": ["proposal", "event", "digest"],
   "webhook_max_per_run": 100,
-  "model": "claude-sonnet-4-6",
-  "default_model": "claude-sonnet-4-6",
+  "model": "claude-sonnet-5",
+  "default_model": "claude-sonnet-5",
   "cost_pricing": {
+    "claude-fable-5-1":   {"input_per_million": 10,   "output_per_million": 50},
+    "claude-fable-5":     {"input_per_million": 10,   "output_per_million": 50},
+    "claude-mythos-5-1":  {"input_per_million": 10,   "output_per_million": 50},
+    "claude-mythos-5":    {"input_per_million": 10,   "output_per_million": 50},
+    "claude-opus-5":      {"input_per_million": 5,    "output_per_million": 25},
+    "claude-opus-4-8":    {"input_per_million": 5,    "output_per_million": 25},
+    "claude-sonnet-5":    {"input_per_million": 2,    "output_per_million": 10},
+    "claude-haiku-4-5":   {"input_per_million": 1,    "output_per_million": 5},
     "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
-    "claude-opus-4-7":    {"input_per_million": 15,   "output_per_million": 75},
-    "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4}
+    "claude-opus-4-7":    {"input_per_million": 5,    "output_per_million": 25}
   },
   "max_input_tokens": 200000,
   "daily_cost_cap_usd": 10.00,
@@ -118,10 +125,23 @@ import sys
 
 path = sys.argv[1]
 
+# The models the analyzer can call under structured outputs, each with
+# its published per-MTok rate (Current Models table, checked 2026-09-02),
+# plus two priced-but-not-gated entries: claude-sonnet-4-6 (the pin this
+# script migrates below) and claude-opus-4-7 (older cost.log rows name
+# it). Mythos is priced at the Fable rate on the published statement that
+# they are the same tier at the same per-token price.
 DEFAULT_PRICING = {
+    "claude-fable-5-1":   {"input_per_million": 10,   "output_per_million": 50},
+    "claude-fable-5":     {"input_per_million": 10,   "output_per_million": 50},
+    "claude-mythos-5-1":  {"input_per_million": 10,   "output_per_million": 50},
+    "claude-mythos-5":    {"input_per_million": 10,   "output_per_million": 50},
+    "claude-opus-5":      {"input_per_million": 5,    "output_per_million": 25},
+    "claude-opus-4-8":    {"input_per_million": 5,    "output_per_million": 25},
+    "claude-sonnet-5":    {"input_per_million": 2,    "output_per_million": 10},
+    "claude-haiku-4-5":   {"input_per_million": 1,    "output_per_million": 5},
     "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
-    "claude-opus-4-7":    {"input_per_million": 15,   "output_per_million": 75},
-    "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4},
+    "claude-opus-4-7":    {"input_per_million": 5,    "output_per_million": 25},
 }
 
 try:
@@ -137,8 +157,27 @@ dirty = False
 if "cost_pricing" not in cfg or not isinstance(cfg.get("cost_pricing"), dict):
     cfg["cost_pricing"] = DEFAULT_PRICING
     dirty = True
+else:
+    # #1028 moved the analyzer to claude-sonnet-5. An install that
+    # already has a cost_pricing block keeps whatever rates it chose --
+    # this only ADDS entries it has never seen, so the model the
+    # analyzer now calls has a price instead of falling through to a
+    # warning. Never overwrites a rate the operator set.
+    for model_id, rates in DEFAULT_PRICING.items():
+        if model_id not in cfg["cost_pricing"]:
+            cfg["cost_pricing"][model_id] = rates
+            dirty = True
+
+# #1034: migrate an install still pinned to claude-sonnet-4-6, which
+# cannot honor the structured outputs the analyzer now sends. Only that
+# exact value is rewritten -- any other pin is the operator's choice and
+# is left alone.
+for _model_key in ("model", "default_model"):
+    if cfg.get(_model_key) == "claude-sonnet-4-6":
+        cfg[_model_key] = "claude-sonnet-5"
+        dirty = True
 if "default_model" not in cfg:
-    cfg["default_model"] = cfg.get("model", "claude-sonnet-4-6")
+    cfg["default_model"] = cfg.get("model", "claude-sonnet-5")
     dirty = True
 # Issue #517: backfill the new max_input_tokens key without overriding
 # a value the user has already chosen.

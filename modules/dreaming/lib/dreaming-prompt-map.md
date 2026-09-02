@@ -50,7 +50,8 @@ exactly where a durable learning belongs.
 
 ## What to output
 
-Emit ONLY a single JSON object, no prose, no code fences:
+A single JSON object. The API enforces the schema on the response, so
+what follows documents the contract rather than requesting it:
 
 ```
 {"candidates": [<candidate>, <candidate>, ...]}
@@ -64,7 +65,7 @@ Each `<candidate>` is:
   "content": "<one paragraph, paraphrased, actionable, <=800 chars>",
   "evidence": [{"session_id": "<from the cluster/session data>", "excerpt": "<copy an excerpt from the bundle verbatim -- excerpts are ALREADY redacted, this is the one place copying is correct>"}],
   "occurrence_count": <number of friction events in the bundle supporting this candidate>,
-  "notes": "<optional: anything the reduce step should know, e.g. 'this may relate to an existing pitfall about the same tool'>"
+  "notes": "<anything the reduce step should know, e.g. 'this may relate to an existing pitfall about the same tool'; null when there is nothing to add>"
 }
 ```
 
@@ -86,9 +87,3 @@ friction clusters are one-off with no clear pattern), return
 `{"candidates": []}`. An empty response is the correct answer far more
 often than a proposal-shaped one -- most sessions produce nothing durable
 worth remembering.
-
-## Output reminder
-
-Emit ONLY the JSON object described above. No preamble, no postscript, no
-markdown code fence. On any uncertainty about output shape, return
-`{"candidates": []}`.

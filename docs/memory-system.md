@@ -245,8 +245,10 @@ Dreaming is a nightly, cost-capped, out-of-band pipeline that mines session tran
 
 `dream_analyze.py` runs a map-reduce over the mined slugs:
 
-- **Map** — one call per due slug (default model `claude-sonnet-5`): the redacted evidence bundle → candidate learnings, each schema-validated.
-- **Reduce** — one call across every planned slug's candidates plus a current-store projection (default model `claude-opus-4-8`): candidates → per-change proposals. Unparseable JSON is retried once with a JSON-only nudge; still unparseable fails the reduce, records an incident, and advances no watermark.
+- **Map** — one call per due slug (default model `claude-sonnet-5`): the redacted evidence bundle → candidate learnings, each schema-validated. Runs with thinking disabled at `effort: low` — this is classification-shaped extraction, and Sonnet 5 thinks by default unless told otherwise.
+- **Reduce** — one call across every planned slug's candidates plus a current-store projection (default model `claude-opus-4-8`): candidates → per-change proposals. Runs with thinking disabled and the model's default effort. A reduce that returns no usable proposal array fails the reduce, records an incident, and advances no watermark.
+
+Both calls send `output_config.format` with a JSON schema, so the response shape is enforced by the API rather than requested in prose. `max_tokens` is a backstop at 16000, not a tuning knob, paired with a 300s curl timeout so the cap is reachable. A map call that stops at the cap is a failed extraction: that slug's watermark is held so its evidence is re-mined next run, a durable incident lands in the canary banner, and the count reaches the run summary the digest renders. The preflight prices a call at a separate planning figure, so raising the backstop does not shrink the plan.
 
 A preflight cost plan walks due slugs *least-recently-dreamed first*, accumulating estimated map+reduce cost and stopping before it would exceed a `$10/day` cap (configurable). `--offline <dir>` replaces every `curl` with canned fixtures for deterministic, no-network testing. `load_config()` auto-migrates a legacy `auto_apply_counters: true` flag to `optimistic_integration.enabled: true` **in memory** (never rewriting disk) so a prior opt-in survives the rename.
 

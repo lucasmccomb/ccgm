@@ -1,0 +1,18 @@
+{
+  "_comment": "A map response that stopped at the output cap (#1026): the JSON is cut off mid-string, so nothing parses. The run must hold this slug's watermark and record a durable incident rather than consuming its mined evidence.",
+  "id": "msg_fixture_truncated_map",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-fixture-map",
+  "stop_reason": "max_tokens",
+  "usage": {
+    "input_tokens": 500,
+    "output_tokens": 16000
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"candidates\": [{\"type\": \"pitfall\", \"content\": \"Running ./deploy.sh --env prod outside the configured business-hours window is blocked by a pre-tool-use hook; the visible error looks like a permission error but the real cause"
+    }
+  ]
+}

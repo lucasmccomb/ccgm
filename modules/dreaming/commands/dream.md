@@ -84,8 +84,13 @@ This command is a thin Claude reader, not a shell script. The agent:
 See `modules/dreaming/lib/dream_analyze.py`'s `DEFAULT_CONFIG` for the full
 schema. Defaults: `enabled: true`, `auto_apply_counters: false`,
 `map_model: "claude-sonnet-5"`, `reduce_model: "claude-opus-4-8"`,
-`daily_cost_cap_usd: 10.00`, `promotion_min_sessions: 3`,
-`promotion_min_agents: 2`.
+`max_output_tokens: 16000`, `daily_cost_cap_usd: 10.00`,
+`promotion_min_sessions: 3`, `promotion_min_agents: 2`.
+
+`max_output_tokens` is a backstop, not a tuning knob: raise it if calls
+start stopping at the cap (the digest counts those), and note that the
+preflight cost plan prices a call at its own planning figure, so raising
+it does not shrink the plan.
 
 `auto_apply_counters` is the **legacy** verify-only flag, kept only for
 backward compatibility — it is not the flag to set on a fresh config.

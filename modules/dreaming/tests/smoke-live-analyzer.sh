@@ -61,15 +61,13 @@ cp "${FRICTION_FIXTURE}" "${PROJECTS_ROOT}/session-a/friction.jsonl"
 # prompts against real friction data).
 sed 's/fixture-friction-0001/fixture-friction-0002/g' "${FRICTION_FIXTURE}" > "${PROJECTS_ROOT}/session-b/friction.jsonl"
 
-# Leave max_output_tokens at its production default (4096). A lower cap
-# was tried here and reliably truncated real responses: claude-sonnet-5 is
-# a reasoning model that emits a "thinking" content block ahead of the
-# "text" block, both counted against the SAME max_tokens budget, so an
-# aggressive cap risks cutting the JSON text off mid-response (a parse
-# failure, not a dream_analyze.py bug -- root-caused by comparing a direct
-# curl call at max_output_tokens=1024, which truncated, against the same
-# call at the production default, which did not). Cost stays bounded by
-# daily_cost_cap_usd instead of an unrealistically tight output cap.
+# Leave max_output_tokens at its production default (16000). A lower cap
+# was tried here and reliably truncated real responses: an earlier run at
+# 1024 cut the JSON off mid-response while the production default did
+# not. Since #1026 the map and reduce calls both disable thinking, so
+# thinking tokens no longer share the budget -- but the cap stays a
+# backstop either way, and cost stays bounded by daily_cost_cap_usd
+# rather than by an unrealistically tight output cap.
 cat > "${DREAMING_DIR}/config.json" <<'JSON'
 {"daily_cost_cap_usd": 1.0}
 JSON

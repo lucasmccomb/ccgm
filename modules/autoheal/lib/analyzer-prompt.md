@@ -49,7 +49,9 @@ proposal-free — say `{"proposals": []}`.
 
 ## What to propose
 
-Each proposal is a JSON object matching `proposal-schema.json`:
+Each proposal is a JSON object matching `proposal-schema.json`. The API
+enforces that schema on the response, so what follows documents the
+contract rather than requesting it:
 
 ```
 {
@@ -71,14 +73,11 @@ Each proposal is a JSON object matching `proposal-schema.json`:
 }
 ```
 
-Output a single JSON object wrapping these:
+A single JSON object wraps these:
 
 ```
 {"proposals": [<proposal>, <proposal>, ...]}
 ```
-
-No prose. No commentary. No code fences. If you are about to write
-anything other than that JSON object, stop and emit `{"proposals": []}`.
 
 ## Constraints (hard rules — violating any disqualifies the proposal)
 
@@ -134,8 +133,3 @@ enough to warrant `breadth_score >= 8`, justify why your `confidence`
 is `>= 9`; otherwise reduce the breadth (e.g. propose the
 narrowest-possible literal first, and note the broader pattern in
 `rationale` as a follow-up observation rather than a proposal).
-
-## Output reminder
-
-Emit ONLY the JSON object. No preamble, no postscript, no code fence.
-On any uncertainty about output shape, return `{"proposals": []}`.

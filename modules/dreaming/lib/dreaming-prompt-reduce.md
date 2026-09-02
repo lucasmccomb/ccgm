@@ -91,7 +91,8 @@ sanitization-worthy caution around excerpt text.
 
 ## What to output
 
-Emit ONLY a single JSON object, no prose, no code fences:
+A single JSON object. The API enforces the schema on the response, so
+what follows documents the contract rather than requesting it:
 
 ```
 {"proposals": [<proposal>, <proposal>, ...]}
@@ -137,9 +138,3 @@ Field rules by kind:
 If none of the map candidates clear the bar above, return
 `{"proposals": []}`. An empty response is correct and expected far more
 often than not.
-
-## Output reminder
-
-Emit ONLY the JSON object described above. No preamble, no postscript, no
-markdown code fence. On any uncertainty about output shape, return
-`{"proposals": []}` rather than guessing at a malformed row.
