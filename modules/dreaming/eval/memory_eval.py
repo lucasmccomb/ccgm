@@ -1087,7 +1087,13 @@ def _aggregate_arm_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_total_input_tokens": statistics.fmean(r["total_input_tokens"] for r in executed_runs) if executed_runs else 0.0,
         "mean_output_tokens": statistics.fmean(r["output_tokens"] for r in executed_runs) if executed_runs else 0.0,
         "mean_turns": statistics.fmean(r["turns"] for r in executed_runs) if executed_runs else 0.0,
-        "mean_cost_usd": statistics.fmean(r["run_cost_usd"] for r in executed_runs) if executed_runs else 0.0,
+        # Cost stays over ALL attempted runs, unlike the quality metrics
+        # above: a run that stopped against --max-budget-usd spent real
+        # money before it was flagged, and _build_result_row() multiplies
+        # this by the full `runs` count. Averaging over survivors while
+        # multiplying by everything under-reports spend into the shared
+        # ledger that eval_refresh_cost_cap_usd is checked against.
+        "mean_cost_usd": statistics.fmean(r["run_cost_usd"] for r in runs),
         "format_error_rate": sum(1 for r in runs if r["is_error"]) / len(runs),
         "judge_error_rate": sum(1 for r in runs if r.get("judge_error")) / len(runs),
         "runs": len(runs),
@@ -1274,14 +1280,8 @@ def launch_failure_summary(arms: dict[str, dict[str, Any]]) -> str | None:
     """A human-readable "which arm, how many runs" summary of the launch
     failures in `arms`, or None when every attempted run executed (#1027).
 
-    This is the row-level half of the rule that a run which never executed
-    moves no score: `_aggregate_arm_runs()` keeps such runs out of the
-    means, and a row with ANY of them is bucketed `error` below. Otherwise a
-    partial harness failure still steers the classifier -- a couple of
-    failed launches in the baseline arm leave that arm's mean computed from
-    whichever runs happened to survive, which is a smaller sample, not a
-    measurement of memory. Bucketing `error` makes partial breakage able to
-    CLOSE the gate and never to open it."""
+    This is the evidence half of the row-level rule; the decision half is
+    downgrade_bucket_for_launch_failures() below."""
     parts = []
     for arm in ARMS:
         stats = arms.get(arm) or {}
@@ -1295,6 +1295,49 @@ def launch_failure_summary(arms: dict[str, dict[str, Any]]) -> str | None:
     return "runs that failed to execute: " + ", ".join(parts)
 
 
+def downgrade_bucket_for_launch_failures(
+    bucket: str, arms: dict[str, dict[str, Any]]
+) -> tuple[str, str | None]:
+    """THE INVARIANT: a launch failure may only move a row TOWARD a closed
+    gate, never toward an open one (#1027).
+
+    A row is classified from the runs that executed -- _aggregate_arm_runs()
+    already keeps a run that did not complete out of every mean. But an arm
+    measured on the survivors is a smaller sample, not a measurement of
+    memory, so a row holding one is a harness observation and must not be
+    allowed to open the gate. This function is the single place that decides
+    that, and it is monotone in exactly one direction:
+
+    * `regression` is PRESERVED. A regression is the strongest close-the-gate
+      signal there is, and gate_check() selects regressions by bucket name --
+      overwriting one deletes it from the gate's view. That is how the first
+      cut of this rule turned a real regression plus one flake into an OPEN
+      gate: `(True, "ok")` with the flake, `(False, "1 regression bucket
+      row(s) present")` without it. Preserving it is not an exception to the
+      invariant, it is the invariant.
+    * EVERY other bucket becomes `error` -- including `high_value`, which is
+      the case that matters (a flake in the full_context arm can inflate
+      Δ_sat off runs that never happened), and including the already-inert
+      `redundant` / `inconclusive` / `gap`. One rule with one exception is
+      easier to verify than a list, and `error` states in the row and the
+      summary that the harness, not memory, produced this row.
+
+    `error` is a bucket classify_bucket() never returns and gate_check()
+    treats as neither high_value nor regression, so a downgraded row is
+    inert: it can cost the run its "at least one high_value row" (and, for
+    the live dreamed row, close the gate outright), never open it.
+
+    Returns (bucket, launch_failures) -- the summary string is returned even
+    when the bucket is preserved, so the flake stays visible in the row and
+    the printed summary either way."""
+    launch_failures = launch_failure_summary(arms)
+    if launch_failures is None:
+        return bucket, None
+    if bucket == "regression":
+        return bucket, launch_failures
+    return "error", launch_failures
+
+
 def _build_result_row(
     *, task_id: str, kind: str, backbone: str, runs: int, offline: bool,
     arms: dict[str, dict[str, Any]], bucket: str, delta: float, delta_sat: float, extra: dict[str, Any] | None = None,
@@ -1304,15 +1347,10 @@ def _build_result_row(
     )
     turn_delta = arms["treatment"]["mean_turns"] - arms["baseline"]["mean_turns"]
     total_cost = sum(a["mean_cost_usd"] * a["runs"] for a in arms.values())
-    # #1027: any arm with a run that never executed makes this row a harness
-    # observation, not a memory measurement. `error` is a bucket
-    # classify_bucket() never returns and gate_check() treats as neither
-    # high_value nor regression, so the row is inert to the gate -- it can
-    # cost the run its "at least one high_value row" (and, for the live
-    # dreamed row, close the gate outright), never open it.
-    launch_failures = launch_failure_summary(arms)
-    if launch_failures is not None:
-        bucket = "error"
+    # #1027: a launch failure may only move this row toward a CLOSED gate.
+    # See downgrade_bucket_for_launch_failures() for why `regression`
+    # survives the downgrade and everything else does not.
+    bucket, launch_failures = downgrade_bucket_for_launch_failures(bucket, arms)
     row = {
         "date": today_iso(),
         "generated_at": _utc_now_iso(),
@@ -1781,6 +1819,13 @@ def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float 
     if not rows:
         return False, "results file is empty"
 
+    # Both selections below are by bucket NAME, which is what makes
+    # downgrade_bucket_for_launch_failures()'s monotonicity load-bearing
+    # rather than cosmetic (#1027). `error` matches neither: a row whose
+    # harness misbehaved can cost the run its high_value row but can never
+    # supply one. `regression` is preserved through that downgrade for the
+    # same reason read from the other side -- a regression the override
+    # renamed would vanish from this line and open the gate.
     regressions = [r for r in rows if r.get("bucket") == "regression"]
     if regressions:
         return False, f"{len(regressions)} regression bucket row(s) present"

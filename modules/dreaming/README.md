@@ -215,15 +215,19 @@ Two rules keep that shut:
   reports `harness broken: every agent run failed to execute on <date>`;
   the next run that produces results clears it.
 
-A run that never executed moves no score, in either direction. It is not
-sent to the judge (nothing to grade, and on a broken harness that would be a
-whole task's judge calls spent before the abort fires) and it is excluded
-from every mean the classifier reads -- flooring it to zero instead pulls the
-arm's mean down, and two failed launches in a five-run baseline arm are
-enough to classify the row `high_value` and open the gate on a partially
-broken harness. A row is only as good as its worst arm: any arm with a
-failed launch buckets the row `error`, naming the arm and the failed/total
-count, so partial harness failure can only close the gate, never open it.
+**A launch failure may only move a row toward a closed gate, never toward
+an open one.** A run that never executed is not sent to the judge (nothing
+to grade, and on a broken harness that would be a whole task's judge calls
+spent before the abort fires) and is excluded from every mean the classifier
+reads -- flooring it to zero instead pulls the arm's mean down, and two
+failed launches in a five-run baseline arm are enough to classify a row
+`high_value`. Cost is the exception: a run stopped against
+`--max-budget-usd` spent real money, and spend is not a quality metric. A
+row is only as good as its worst arm, so any arm holding a failed run
+downgrades the row to `error` -- except a `regression`, which is preserved,
+because the gate selects regressions by bucket name and relabelling one
+would delete it from the gate's view. `downgrade_bucket_for_launch_failures()`
+is the single place that decides this.
 
 The judge call is one Messages API request per run: no sampling parameters
 (every judge model from Opus 4.7 / Sonnet 5 on returns 400 for one),

@@ -2199,7 +2199,12 @@ class PartialLaunchFailureTests(unittest.TestCase):
         self.assertEqual(stats["mean_total_input_tokens"], 1000.0)
         self.assertEqual(stats["mean_output_tokens"], 20.0)
         self.assertEqual(stats["mean_turns"], 2.0)
-        self.assertEqual(stats["mean_cost_usd"], 0.01)
+        # Cost is the exception: it is spend, not a quality metric. A run
+        # stopped against --max-budget-usd is flagged is_error but already
+        # spent, and _build_result_row() multiplies this by the full `runs`
+        # count -- averaging over survivors while multiplying by everything
+        # under-reports into the shared cost ledger.
+        self.assertAlmostEqual(stats["mean_cost_usd"], 0.02 / 3)
         # The rates keep every attempted run in the denominator -- that is
         # what makes format_error_rate a failure RATE.
         self.assertAlmostEqual(stats["format_error_rate"], 1 / 3)
@@ -2216,6 +2221,129 @@ class PartialLaunchFailureTests(unittest.TestCase):
         self.assertIn("full_context 1/5", summary)
         self.assertNotIn("treatment", summary)
         self.assertIsNone(me.launch_failure_summary({a: {"runs": 5, "format_error_rate": 0.0} for a in me.ARMS}))
+
+
+# ---------------------------------------------------------------------------
+# #1027 THE INVARIANT: a launch failure may only move a row TOWARD a closed
+# gate, never toward an open one. The first cut of the downgrade violated it
+# in the one place it mattered -- it overwrote `regression`, which
+# gate_check() selects by name, so a real regression plus one flake opened
+# the gate. These tests assert the invariant through gate_check(), not by
+# reading bucket names, because the gate is what the invariant is about.
+# ---------------------------------------------------------------------------
+
+class LaunchFailureMonotonicityTests(unittest.TestCase):
+    ALL_BUCKETS = ("high_value", "regression", "redundant", "inconclusive", "gap")
+
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+        me.evals_dir().mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _arm(mean_score: float, *, failed: int = 0, runs: int = 5) -> dict:
+        return {
+            "mean_score": mean_score, "pass_rate": 1.0, "mean_input_tokens": 100.0,
+            "mean_total_input_tokens": 1000.0, "mean_output_tokens": 20.0, "mean_turns": 2.0,
+            "mean_cost_usd": 0.01, "format_error_rate": failed / runs,
+            "judge_error_rate": 0.0, "runs": runs,
+        }
+
+    def _arms(self, *, failed_arm=None, failed: int = 1) -> dict:
+        return {arm: self._arm(7.0, failed=failed if arm == failed_arm else 0) for arm in me.ARMS}
+
+    def _row(self, bucket: str, *, kind: str = "uplift", task_id: str = "row-under-test",
+             failed_arm=None, failed: int = 1, delta: float = 0.0) -> dict:
+        return me._build_result_row(  # noqa: SLF001
+            task_id=task_id, kind=kind, backbone="m", runs=5, offline=False,
+            arms=self._arms(failed_arm=failed_arm, failed=failed),
+            bucket=bucket, delta=delta, delta_sat=1.0,
+            extra={"mining": {"noise_high_value": False}} if kind == "dreamed" else {},
+        )
+
+    def _gate_on(self, rows: list) -> tuple:
+        for stale in me.evals_dir().glob("*"):
+            stale.unlink()
+        me.write_results(rows, date="2026-09-02")
+        return me.gate_check()
+
+    def _clean_dreamed_high_value(self) -> dict:
+        return self._row("high_value", kind="dreamed", task_id="dreamed-01", delta=3.0)
+
+    # -- (1) the reviewer's repro ------------------------------------------
+    def test_a_regressing_row_with_a_failed_launch_stays_a_regression(self):
+        """One failed baseline launch in a genuinely regressing row must not
+        delete the regression from the gate's view. The row's scores come
+        from the runs that DID execute, so the regression is real; the flake
+        only changes the label."""
+        regressing = self._row("regression", failed_arm="baseline", delta=-5.0)
+        self.assertEqual(regressing["bucket"], "regression")
+        # The flake is still recorded, just not allowed to relabel the row.
+        self.assertIn("baseline 1/5", regressing["task_error"])
+
+        is_open, reason = self._gate_on([regressing, self._clean_dreamed_high_value()])
+        self.assertFalse(is_open, "a launch failure must never hide a regression")
+        self.assertEqual(reason, "1 regression bucket row(s) present")
+
+    def test_the_same_regression_without_a_flake_is_identical_to_the_gate(self):
+        """The control for the test above: the flake changes nothing the
+        gate can see."""
+        clean_regression = self._row("regression", delta=-5.0)
+        self.assertNotIn("task_error", clean_regression)
+        is_open, reason = self._gate_on([clean_regression, self._clean_dreamed_high_value()])
+        self.assertFalse(is_open)
+        self.assertEqual(reason, "1 regression bucket row(s) present")
+
+    # -- (2) the round-2 repro still holds ---------------------------------
+    def test_a_high_value_row_with_failed_launches_is_downgraded_to_error(self):
+        flaked = self._row("high_value", task_id="uplift-01", failed_arm="baseline", failed=2, delta=3.0)
+        self.assertEqual(flaked["bucket"], "error")
+        self.assertIn("baseline 2/5", flaked["task_error"])
+        is_open, reason = self._gate_on([flaked])
+        self.assertFalse(is_open)
+        self.assertEqual(reason, "no high_value rows")
+
+    def test_a_flaked_dreamed_row_cannot_satisfy_the_live_dreamed_clause(self):
+        """The full_context-arm case the review called out: with every run
+        of an arm excluded the classifier can read high_value off nothing at
+        all, and the whole-run abort does not fire because the other arms
+        ran."""
+        flaked = self._row("high_value", kind="dreamed", task_id="dreamed-01",
+                           failed_arm="full_context", delta=3.0)
+        self.assertEqual(flaked["bucket"], "error")
+        is_open, _reason = self._gate_on([flaked])
+        self.assertFalse(is_open)
+
+    # -- (3) the property, over every bucket and every arm -----------------
+    def test_a_launch_failure_never_moves_the_gate_toward_open(self):
+        """For every bucket classify_bucket() can return and every arm:
+        adding a launch failure yields a gate verdict that is closed-or-equal
+        (`open_after` implies `open_before`). Asserted through gate_check()
+        on a real results file, never by inspecting bucket names."""
+        for bucket in self.ALL_BUCKETS:
+            for arm in me.ARMS:
+                with self.subTest(bucket=bucket, arm=arm):
+                    delta = -5.0 if bucket == "regression" else 3.0
+                    before = self._gate_on([
+                        self._row(bucket, delta=delta), self._clean_dreamed_high_value(),
+                    ])
+                    after = self._gate_on([
+                        self._row(bucket, failed_arm=arm, delta=delta), self._clean_dreamed_high_value(),
+                    ])
+                    self.assertFalse(
+                        after[0] and not before[0],
+                        f"a launch failure in {arm} opened the gate on a {bucket} row: "
+                        f"before={before}, after={after}",
+                    )
+
+    def test_the_downgrade_function_states_the_rule_directly(self):
+        arms_clean = self._arms()
+        arms_flaked = self._arms(failed_arm="treatment")
+        for bucket in self.ALL_BUCKETS:
+            with self.subTest(bucket=bucket):
+                self.assertEqual(me.downgrade_bucket_for_launch_failures(bucket, arms_clean), (bucket, None))
+                downgraded, summary = me.downgrade_bucket_for_launch_failures(bucket, arms_flaked)
+                self.assertIn("treatment 1/5", summary, "the flake stays visible either way")
+                self.assertEqual(downgraded, "regression" if bucket == "regression" else "error")
 
 
 # ---------------------------------------------------------------------------
