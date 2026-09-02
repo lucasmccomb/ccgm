@@ -336,41 +336,50 @@ In `dry-run`, print the command.
 
 ### 6.1 Resolve the account id and auth
 
-wrangler's OAuth session (already verified in Phase 0.1 via `wrangler whoami`) carries the `pages (write)` scope this call needs — no separate Cloudflare API token has to be minted just to create a Pages project.
+Primary path — the same one the verified live probe this phase is built on used:
 
-The evidence behind this phase verified the request shape and the precondition against a real account; it does not record the exact command to pull a bearer token out of wrangler's local OAuth session for a raw `curl` call, or a wrangler subcommand that prints the account id. If the environment doesn't already expose a usable bearer (a `CLOUDFLARE_API_TOKEN` the user has set, or a connected Cloudflare MCP server) or the account id, ask the user once rather than guessing at wrangler's credential storage format.
+- **Bearer token:** read the `oauth_token` field out of `~/.wrangler/config/default.toml` (the mode-0600 TOML file `wrangler login` already writes) and send it as `Authorization: Bearer <token>`. **Never print or log this value.**
+- **`<account_id>`:** read the "Account ID" column out of `wrangler whoami`'s output table — the same read-only command Phase 0.1 already runs to confirm auth. No separate account-id call is needed.
 
-### 6.2 Preflight the GitHub App precondition
+Because both values come from the same `wrangler login` session Phase 0.1 already requires, this path asks the user for nothing beyond what Phase 0 already asked for.
 
-No read-only endpoint exists (per the research this phase is built on) to check "is the App installed and does its repo list include mine" ahead of time. So the skill attempts the create in 6.3 and branches on the result:
+Fallback (if the wrangler config file is missing, unreadable, or lives somewhere else on this machine): use a `CLOUDFLARE_API_TOKEN` the user has already set, or a connected Cloudflare MCP server. If neither is available, ask the user once for a token and account id — and tell them to persist the token (e.g. `export CLOUDFLARE_API_TOKEN=...` in their shell profile) so future `/launch` runs do not ask again.
 
-- **Success** (project created, and 6.4's read-back confirms `source.type == "github"`): continue to 6.5.
-- **Failure that looks precondition-related**: the research note does not record the exact error Cloudflare's Pages API returns for "repo not in the App's access list" — community reports describe an `8000007 Project not found`-style failure for a related "broken connection" case, not confirmed as the first-create error. Treat any create failure whose message references the repository, GitHub, or the connection as this case.
+### 6.2 Preflight the GitHub App precondition (the safe pattern, on a throwaway name)
 
-  Print:
+This step doubles as `cloudflare.md`'s documented safe pattern: verify the precondition against a **throwaway**-named project before the real project name is ever touched.
 
-  ```
-  ---
-  Phase 6: Cloudflare Pages — GitHub App not installed (or repo not in its access list)
-  ---
+1. `POST /accounts/<account_id>/pages/projects` with a throwaway name (e.g. `<project_name>-verify`), the same `source` block 6.3 uses, and `deployments_enabled: false` + `production_deployments_enabled: false` (no build should ever run for the throwaway).
+2. `GET /accounts/<account_id>/pages/projects/<throwaway_name>` and assert `result.source.type == "github"`.
+3. **Success:** `DELETE /accounts/<account_id>/pages/projects/<throwaway_name>`, continue to 6.3.
+4. **Failure** — the create failed, or the read-back didn't show `source.type == "github"`. If the throwaway project was actually created, `DELETE` it (best-effort cleanup) before doing anything else. The evidence does not record the exact error Cloudflare's Pages API returns for "repo not in the App's access list" (community reports describe an `8000007 Project not found`-style failure for a related "broken connection" case, not confirmed as the first-create error). Treat any failure whose message references the repository, GitHub, or the connection as this case.
 
-  This is the one step the skill cannot do for you. The Cloudflare
-  "Workers and Pages" GitHub App installs once per GitHub account (or
-  gets a repo added to its list) through the browser -- GitHub Apps
-  cannot be installed via API.
+   Print:
 
-  1. Open: https://github.com/apps/cloudflare-workers-and-pages/installations/new
-  2. Authorize for your account/org.
-  3. If asked to choose "Only select repositories", include <owner>/<project_name>.
-  4. Return here and say "done".
+   ```
+   ---
+   Phase 6: Cloudflare Pages — GitHub App not installed (or repo not in its access list)
+   ---
 
-  The skill will retry the API create once you confirm.
-  ---
-  ```
+   This is the one step the skill cannot do for you. The Cloudflare
+   "Workers and Pages" GitHub App installs once per GitHub account (or
+   gets a repo added to its list) through the browser -- GitHub Apps
+   cannot be installed via API.
 
-  Wait for "done", then retry 6.3 once. If it fails again with the same class of error, fall back to the dashboard: **Workers & Pages > Create > Pages > Connect to Git**, authorize `<owner>/<project_name>`, branch `main`, and the build settings from 6.3's table — the same flow this phase used before this change, kept as the documented escape hatch.
+   1. Open: https://github.com/apps/cloudflare-workers-and-pages/installations/new
+   2. Authorize for your account/org.
+   3. If asked to choose "Only select repositories", include <owner>/<project_name>.
+   4. Return here and say "done".
+
+   The skill will retry once you confirm.
+   ---
+   ```
+
+   Wait for "done", then retry the **throwaway** create (step 1) once. If it fails again with the same class of error: report `BLOCKED` — the real project name was never created or touched — and name the dashboard fallback: **Workers & Pages > Create > Pages > Connect to Git**, authorize `<owner>/<project_name>`, branch `main`, and the build settings from 6.3's table.
 
 ### 6.3 Create the real project
+
+Only reached after 6.2's throwaway create-verify-delete sequence succeeds.
 
 ```
 POST /accounts/<account_id>/pages/projects
@@ -383,6 +392,7 @@ POST /accounts/<account_id>/pages/projects
       "owner": "<owner>",
       "repo_name": "<project_name>",
       "deployments_enabled": true,
+      "production_deployments_enabled": true,
       "pr_comments_enabled": true,
       "preview_deployment_setting": "all"
     }
@@ -390,10 +400,12 @@ POST /accounts/<account_id>/pages/projects
   "build_config": {
     "build_command": "<from the table below>",
     "destination_dir": "<from the table below>",
-    "root_dir": "/"
+    "root_dir": ""
   }
 }
 ```
+
+`root_dir: ""` is the value the verified request actually used, not `"/"`. `production_deployments_enabled: true` is the field that governs production auto-deploy; `preview_deployment_setting: "all"` governs only preview-branch deployments (its own schema description says nothing about production); `deployments_enabled: true` is kept alongside both as the still-accepted deprecated umbrella.
 
 Build settings by framework (unchanged from before this change):
 
@@ -412,11 +424,23 @@ Build settings by framework (unchanged from before this change):
 GET /accounts/<account_id>/pages/projects/<project_name>
 ```
 
-Assert `result.source.type == "github"`. On a mismatch (missing `source`, or any other value): `DELETE /accounts/<account_id>/pages/projects/<project_name>` the bad project, report `BLOCKED` with the read-back body attached, and stop. **Never** fall through to `wrangler pages deploy` to "get something live" — that is exactly the mistake this phase exists to prevent.
+Assert `result.source.type == "github"`. On a mismatch (missing `source`, or any other value) — unexpected at this point, since 6.2 already verified the precondition against a throwaway — `DELETE /accounts/<account_id>/pages/projects/<project_name>` the bad project, report `BLOCKED` with the read-back body attached, and stop. **Never** fall through to `wrangler pages deploy` to "get something live" — that is exactly the mistake this phase exists to prevent.
 
 ### 6.5 First deployment
 
-`deployments_enabled: true` plus the Phase 5 push means Cloudflare triggers the first build automatically once the project's `source` resolves. The research this phase is built on documents a trigger-and-poll recipe (`GET .../builds/.../builds`, watch `status` reach `success`) for Workers Builds, not the Pages API — so this skill does not invent a Pages-specific build-polling endpoint. Phase 9's existing bounded curl retry (5 attempts, 10s apart) is what confirms the deployment landed; no separate trigger call is needed here.
+**Creating the project does not start a build.** The verified live probe's project-create call returned success but triggered nothing; a separate trigger call was required:
+
+```
+POST /accounts/<account_id>/pages/projects/<project_name>/deployments
+```
+
+Capture the returned deployment id, then poll:
+
+```
+GET /accounts/<account_id>/pages/projects/<project_name>/deployments/<deployment_id>
+```
+
+until `stage: deploy, status: success` (or a failure stage/status). The verified run took ~76 seconds end to end across five stages (`queued`, `initialize`, `clone_repo`, `build`, `deploy`); size the bound with margin — 10 attempts, 15s apart (150s) — and report `BLOCKED` with the last observed `stage`/`status` on timeout. Do not rely on Phase 9's `.pages.dev` HTTP check to wait for the build; its own bounded retry (5 attempts, 10s apart = 50s) is sized as a final sanity check after this poll has already confirmed success, not as the wait mechanism.
 
 Capture the assigned URL:
 
@@ -426,7 +450,7 @@ PAGES_URL="https://<project_name>.pages.dev"  # default; override with the URL f
 
 ### 6.6 Dry-run behavior
 
-In `dry-run`, print the exact `POST` body from 6.3 (values substituted) and the `GET` from 6.4, and a note: "No requests sent. Downstream phases assume the project exists at https://<project_name>.pages.dev."
+In `dry-run`, print the throwaway create/read-back/delete sequence from 6.2, the real `POST` body from 6.3 (values substituted), the `GET` from 6.4, and the deployment trigger + poll requests from 6.5 — do not send any of them. End with: "No requests sent. Downstream phases assume the project exists at https://<project_name>.pages.dev."
 
 ---
 

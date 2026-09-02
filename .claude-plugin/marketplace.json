@@ -250,7 +250,7 @@
     },
     {
       "category": "tech-specific",
-      "description": "Cloudflare-specific rules: Pages vs Workers selection, deployment methods, Git integration requirements.",
+      "description": "Cloudflare-specific rules: Pages vs Workers selection, API-first Git integration, Email Service, and token scopes.",
       "name": "cloudflare",
       "source": "./cloudflare",
       "tags": [

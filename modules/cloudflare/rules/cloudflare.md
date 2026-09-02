@@ -46,7 +46,7 @@ This is the single most expensive Cloudflare mistake. Multiple agents have waste
 
 ### Creating a New CF Pages Project (two correct paths)
 
-**Path 1 — API (preferred).** `POST /accounts/{account_id}/pages/projects` accepts a `source` block that connects the project to GitHub at creation time. Confirmed live against a real account on 2026-09-02: the project was created with `source.type: "github"` and deleted cleanly.
+**Path 1 — API (preferred).** `POST /accounts/{account_id}/pages/projects` accepts a `source` block that connects the project to GitHub at creation time. Confirmed live (2026-09-02) with a full end-to-end probe: the project was created with `source.type: "github"`, independently re-confirmed on a separate `GET`, kept (this is the real, permanent project — not a throwaway), and its first build deployed successfully (see "First deployment is not automatic" below).
 
 ```
 POST /accounts/{account_id}/pages/projects
@@ -59,6 +59,7 @@ POST /accounts/{account_id}/pages/projects
       "owner": "<owner>",
       "repo_name": "<repo>",
       "deployments_enabled": true,
+      "production_deployments_enabled": true,
       "pr_comments_enabled": true,
       "preview_deployment_setting": "all"
     }
@@ -66,22 +67,30 @@ POST /accounts/{account_id}/pages/projects
   "build_config": {
     "build_command": "<build command>",
     "destination_dir": "<build output dir>",
-    "root_dir": "/"
+    "root_dir": ""
   }
 }
 ```
 
-`deployments_enabled` is Cloudflare's own schema marking it deprecated in favor of `production_deployments_enabled` and `preview_deployment_setting` for finer control, but it is still accepted; `preview_deployment_setting: "all"` is the non-deprecated way to say "build every branch."
+`root_dir: ""` is the value the verified request actually used — not `"/"`. Neither research note documents `build_config` for the Pages API at all (the only `root_directory: "/"`-shaped text in the evidence is a different field name on the unrelated Workers Builds trigger endpoint); the live probe is the only real example, and it used an empty string.
 
-Auth: the OAuth session `wrangler login` sets up already carries the `pages (write)` scope this call needs — no separate Cloudflare API token has to be minted just to create a Pages project (see "Token scopes and what stays human" below). The research behind this section does not record the exact command to pull a bearer token out of that OAuth session for a raw `curl` call; if nothing in the environment already exposes a usable bearer (a `CLOUDFLARE_API_TOKEN` the user has set, or a connected Cloudflare MCP server), treat that as a gap to ask the user about rather than guessing at wrangler's local credential storage format.
+`deployments_enabled` is Cloudflare's own schema marking it deprecated. Per the schema's own field description, `preview_deployment_setting` controls only whether commits to **preview** branches trigger a preview deployment — it says nothing about production, despite reading like a general "build every branch" switch. `production_deployments_enabled: true` is the field that actually governs production auto-deploy; the verified request sets both it and `preview_deployment_setting: "all"`, and keeps `deployments_enabled: true` alongside them as the still-accepted deprecated umbrella.
 
-**Precondition:** the "Cloudflare Workers and Pages" GitHub App must already be installed on the GitHub account (or org), with the target repo in its selected-repository list (or the App installed for "All repositories"). This is a one-time, per-account browser action — GitHub Apps cannot be installed by API. If the repo is not in the App's access list, the create fails; the research note does not record the exact error body Cloudflare's Pages API returns for that specific case (community reports describe an `8000007 Project not found`-style failure for a related "broken connection" case, not confirmed as the first-create error — treat that as unconfirmed, not the documented failure). **The one thing to stop and ask the user for is the GitHub App install** — everything else in this section is scriptable.
+Auth: the verified request authenticated by reading the `oauth_token` field out of `~/.wrangler/config/default.toml` — the mode-0600 TOML file `wrangler login` already writes — and sending it as `Authorization: Bearer <token>`. This is the same OAuth session Phase 0 of `/launch` already verifies with `wrangler whoami`; no separate token has to be minted just to create a Pages project (see "Token scopes and what stays human" below). **Never print or log this value.** If that file isn't present or readable in a given environment, fall back to a `CLOUDFLARE_API_TOKEN` the user has set, or a connected Cloudflare MCP server — and if the user has to supply one by hand, tell them to persist it (e.g. export it in their shell profile) so future runs don't ask again.
 
-Safe pattern (verify before trusting the create):
-1. Create with a throwaway name and `deployments_enabled: false` (or `preview_deployment_setting: "none"`).
+`{account_id}`: read the "Account ID" column from `wrangler whoami`'s output table — the same read-only command Phase 0 already runs to confirm auth. No separate account-id lookup is needed.
+
+**Precondition:** the "Cloudflare Workers and Pages" GitHub App must already be installed on the GitHub account (or org), with the target repo in its selected-repository list (or the App installed for "All repositories"). This is a one-time, per-account browser action — GitHub Apps cannot be installed by API. If the repo is not in the App's access list, the create fails; the evidence does not record the exact error body Cloudflare's Pages API returns for that specific case — the account behind the live probe already had the App installed, so its create succeeded on the first attempt and this failure path was never exercised (community reports describe an `8000007 Project not found`-style failure for a related "broken connection" case, not confirmed as the first-create error — treat that as unconfirmed, not the documented failure). **The one thing to stop and ask the user for is the GitHub App install** — everything else in this section is scriptable.
+
+**First deployment is not automatic.** Creating the project does not start a build. The live probe's `POST /accounts/{account_id}/pages/projects` returned success but triggered nothing; a separate `POST /accounts/{account_id}/pages/projects/{name}/deployments` was required. That build then ran five stages (`queued`, `initialize`, `clone_repo`, `build`, `deploy`) end to end in about 76 seconds, confirmed by polling `GET /accounts/{account_id}/pages/projects/{name}/deployments/{deployment_id}` every 20 seconds until `stage: deploy, status: success`. Do not assume a prior `git push`, or the project-create call itself, produced a deployment — trigger it explicitly and poll for completion (sized well past 76s) before treating the project as live.
+
+Safe pattern (verify before trusting the create; this is the pattern `/launch` Phase 6 implements):
+1. Create with a throwaway name and `deployments_enabled: false`, `production_deployments_enabled: false` (or `preview_deployment_setting: "none"`).
 2. `GET /accounts/{account_id}/pages/projects/{name}` and assert `result.source.type == "github"`.
 3. `DELETE /accounts/{account_id}/pages/projects/{name}` the throwaway.
-4. Create the real project with the production settings.
+4. Create the real project with the production settings, then trigger and poll its first deployment per the paragraph above.
+
+The live probe itself skipped this and created the real project name directly — it was a single supervised ops run with a human confirming each step. `/launch` runs unsupervised, so it follows the throwaway-first sequence instead: the real project name is only ever created once, successfully.
 
 **Path 2 — Dashboard Connect-to-Git (fallback).** Use this when the GitHub App precondition is unmet and the user needs to install it anyway, or the API is unreachable:
 

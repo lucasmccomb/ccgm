@@ -22,7 +22,7 @@
 
 Only involve the user when you **genuinely cannot proceed** without them:
 - **Credentials and API keys** you don't have access to (ask them to create/provide them)
-- **Third-party dashboard actions** that require their browser session (Cloudflare GitHub App install, Google "Sign in with Google" OAuth client creation/redirect edits, Anthropic API key minting, billing changes)
+- **Third-party dashboard actions** that require their browser session (Cloudflare GitHub App install, scoped Cloudflare API token minting, Google "Sign in with Google" OAuth client creation/redirect edits, Anthropic API key minting, billing changes)
 - **Ambiguous product decisions** where multiple valid directions exist and the user's preference matters
 - **Destructive actions on shared systems** (per the existing safety guidelines)
 
