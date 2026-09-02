@@ -185,7 +185,7 @@ Rollback for a bad auto-integrated batch is `ccgm-learnings-sync revert <sha>` (
 `dream-eval.sh --gate` is the regression gate the optimistic engine must pass nightly. Two rules keep a red gate meaningful, after seven weeks (2026-07-15 to 2026-09-02) in which every nightly run scored 100% format errors because the LaunchAgent's PATH did not include `~/.local/bin`, where Claude Code's native installer puts the CLI:
 
 - The `claude` binary is resolved to an absolute path before any task runs; an unresolvable binary fails the run immediately, naming what it searched, instead of spending anything.
-- A run where **every** agent run failed to execute aborts with the first failure's raw output on stderr and exit 1, writing no results file. A single failed run stays non-fatal.
+- A run where **every** agent run failed to execute aborts with the first failure's raw output on stderr and exit 1, writing no results file and recording `evals/<date>.harness-broken`. While that marker is newer than the newest results file, `--gate` reports `harness broken: ...` — without it an abort would leave the gate reading the previous run's file and reporting `open`. A single failed run stays non-fatal.
 
 The judge is one Messages API call per run: no sampling parameters (current judge models 400 on them), `thinking: {"type": "disabled"}`, and `output_config.format` pinning the `{pass, score}` schema. When reading a red gate, check the run wrote rows at all before treating it as a memory result.
 

@@ -612,6 +612,42 @@ class ResolveClaudeBinTests(unittest.TestCase):
         os.environ["PATH"] = "/nonexistent-dir-for-test"
         self.assertEqual(Path(me.resolve_claude_bin(str(explicit))), explicit)
 
+    def test_a_dot_slash_name_resolves_against_the_cwd_not_the_path(self):
+        """`Path("./claude").parts` is `('claude',)` -- the leading dot is
+        normalized away -- so a parts-based test misroutes `./claude` into
+        the PATH branch. This asserts the outcome the operator asked for;
+        the discriminating case is the sibling test below, where the named
+        file does not exist and the PATH branch silently substitutes an
+        install-dir binary instead of failing."""
+        cwd_dir = self.tmp / "cwd"
+        self._make_executable(cwd_dir)
+        decoy_dir = self.tmp / "decoy"
+        self._make_executable(decoy_dir)
+        os.environ["PATH"] = str(decoy_dir)
+
+        prev_cwd = os.getcwd()
+        os.chdir(cwd_dir)
+        try:
+            resolved = Path(me.resolve_claude_bin("./claude"))
+        finally:
+            os.chdir(prev_cwd)
+
+        self.assertEqual(resolved.parent.name, "cwd", f"resolved to the decoy on PATH instead: {resolved}")
+
+    def test_a_dot_slash_name_that_does_not_exist_raises_rather_than_falling_back(self):
+        """The real hazard behind finding 4: a misrouted `./claude` does not
+        fail when the named file is missing -- it falls through to
+        CLAUDE_BIN_FALLBACK_DIRS and launches whatever is installed there,
+        with no diagnostic that the operator's choice was ignored."""
+        os.environ["PATH"] = str(self._make_executable(self.tmp / "decoy").parent)
+        prev_cwd = os.getcwd()
+        os.chdir(self.tmp)
+        try:
+            with self.assertRaises(me.ClaudeBinaryNotFoundError):
+                me.resolve_claude_bin("./claude")
+        finally:
+            os.chdir(prev_cwd)
+
     def test_an_explicit_path_that_is_not_executable_raises(self):
         not_exec = self.tmp / "explicit" / "claude"
         not_exec.parent.mkdir(parents=True, exist_ok=True)
@@ -1793,39 +1829,125 @@ class WholeRunAbortTests(unittest.TestCase):
             "usage": {"input_tokens": 100, "output_tokens": 20},
         }
 
-    def _run_main(self, run_claude_p_side_effect):
+    @staticmethod
+    def _seed_prior_green_results(date: str = "2026-08-30") -> Path:
+        """The state production is always in: evals/ holds weeks of prior
+        runs, at least one of them gate-opening. An abort that writes
+        nothing leaves THIS file as the newest results, so without the
+        harness-broken marker the gate opens on it."""
+        arm = {"runs": 5, "format_error_rate": 0.0, "judge_error_rate": 0.0, "mean_score": 9.0}
+        green = {
+            "date": date, "task_id": "dreamed-01", "kind": "dreamed", "offline": False,
+            "backbone": "m", "runs": 5, "baseline": arm, "treatment": arm, "full_context": arm,
+            "delta": 2.0, "delta_sat": 1.0, "bucket": "high_value", "cost_usd": 0.5,
+            "mining": {"noise_high_value": False},
+        }
+        me.evals_dir().mkdir(parents=True, exist_ok=True)
+        path = me.evals_dir() / f"{date}.jsonl"
+        path.write_text(json.dumps(green) + "\n", encoding="utf-8")
+        return path
+
+    def _run_main(self, run_claude_p_side_effect, *, date: str = "2026-09-02"):
+        """Returns (exit_code, stderr, judge_calls)."""
         stderr = io.StringIO()
+        judge_calls = []
+
+        def counting_judge(**kwargs):
+            judge_calls.append(kwargs)
+            return {"pass": True, "score": 7.0}, {"input_tokens": 10, "output_tokens": 5}
+
         with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test-fixture"}), \
                 mock.patch("memory_eval.run_claude_p", side_effect=run_claude_p_side_effect), \
-                mock.patch(
-                    "memory_eval._call_judge_api",
-                    return_value=({"pass": True, "score": 7.0}, {"input_tokens": 10, "output_tokens": 5}),
-                ), \
+                mock.patch("memory_eval._call_judge_api", side_effect=counting_judge), \
                 contextlib.redirect_stderr(stderr):
             exit_code = me.main([
                 "--tasks", str(self.tasks_dir / "*.json"),
                 "--runs", "1",
                 "--backbone", "fixture-model",
                 "--claude-bin", "/usr/bin/true",
+                "--date", date,
             ])
-        return exit_code, stderr.getvalue()
+        return exit_code, stderr.getvalue(), judge_calls
 
-    def test_every_run_failing_aborts_with_the_raw_output_and_writes_nothing(self):
+    def test_abort_keeps_the_gate_closed_even_with_a_prior_green_results_file(self):
+        """The fail-open hazard: gate_check() takes the NEWEST evals/*.jsonl,
+        so an abort that writes nothing hands it last week's green file and
+        the gate opens while the harness is provably broken. The marker is
+        what closes it."""
+        prior_green = self._seed_prior_green_results()
+        self.assertEqual(me.gate_check(), (True, "ok"), "fixture must start from an OPEN gate")
+
         self._write_task("01-a.json", "abort-a")
         self._write_task("02-b.json", "abort-b")
 
-        exit_code, stderr = self._run_main(lambda **kwargs: self._launch_failure())
+        exit_code, stderr, _judge_calls = self._run_main(lambda **kwargs: self._launch_failure())
 
         self.assertEqual(exit_code, 1)
         self.assertIn("every agent run failed to execute", stderr)
         # The RAW subprocess detail is attached, not just a rate.
         self.assertIn("No such file or directory", stderr)
-        # Nothing was written, so --gate reports "no results" (harness
-        # broken) rather than a fabricated memory regression.
+        # No results file for tonight -- the prior green one is untouched and
+        # is still what _find_latest_results_file() returns.
+        self.assertFalse(me.results_path_for_date("2026-09-02").exists())
+        self.assertEqual(me._find_latest_results_file(), prior_green)  # noqa: SLF001
+        # ...and the gate is closed anyway, naming the harness.
+        is_open, reason = me.gate_check()
+        self.assertFalse(is_open, "a broken harness must never leave the gate open")
+        self.assertEqual(reason, "harness broken: every agent run failed to execute on 2026-09-02")
+
+    def test_the_marker_is_not_mistaken_for_a_results_file(self):
+        self._write_task("01-a.json", "abort-a")
+        self._run_main(lambda **kwargs: self._launch_failure())
+
+        marker = me.harness_broken_marker_path("2026-09-02")
+        self.assertTrue(marker.is_file())
+        self.assertFalse(marker.name.endswith(".jsonl"))
+        self.assertIsNone(me._find_latest_results_file(), "the results glob must ignore the marker")  # noqa: SLF001
+        recorded = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertIn("No such file or directory", recorded["first_failure"])
+
+    def test_a_later_successful_run_clears_the_marker_and_reopens_the_gate(self):
+        self._write_task("01-a.json", "recover-a")
+        self._run_main(lambda **kwargs: self._launch_failure())
+        self.assertFalse(me.gate_check()[0])
+
+        exit_code, _stderr, _judge = self._run_main(lambda **kwargs: self._healthy_result())
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(me.harness_broken_marker_path("2026-09-02").exists())
+        # The gate now judges the fresh results on their merits (this
+        # fixture has no high_value row), never on the stale marker.
+        is_open, reason = me.gate_check()
+        self.assertFalse(is_open)
+        self.assertNotIn("harness broken", reason)
+
+    def test_a_partial_results_file_from_an_earlier_error_row_is_removed(self):
+        """A task whose own orchestration raises writes a zero-run `error`
+        row, and zero-run arms do not count toward the rate -- so a results
+        file can already be on disk when a later task trips the abort."""
+        malformed = {
+            "id": "malformed", "kind": "canary", "prompt": "p",
+            "fixture": {"files": {"a.txt": 5}}, "criteria": ["c"],
+        }
+        (self.tasks_dir / "01-malformed.json").write_text(json.dumps(malformed), encoding="utf-8")
+        self._write_task("02-broken.json", "broken")
+
+        exit_code, stderr, _judge = self._run_main(lambda **kwargs: self._launch_failure())
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("every agent run failed to execute", stderr)
+        self.assertFalse(me.results_path_for_date("2026-09-02").exists(), "the partial file must not survive the abort")
         self.assertIsNone(me._find_latest_results_file())  # noqa: SLF001
         is_open, reason = me.gate_check()
         self.assertFalse(is_open)
-        self.assertEqual(reason, "no results")
+        self.assertEqual(reason, "harness broken: every agent run failed to execute on 2026-09-02")
+
+    def test_an_all_failing_run_spends_no_judge_calls(self):
+        self._write_task("01-a.json", "no-judge-a")
+        self._write_task("02-b.json", "no-judge-b")
+
+        _exit_code, _stderr, judge_calls = self._run_main(lambda **kwargs: self._launch_failure())
+
+        self.assertEqual(judge_calls, [], "a run that never executed has nothing to grade")
 
     def test_a_partially_failing_run_stays_non_fatal_and_writes_results(self):
         self._write_task("01-ok.json", "partial-ok")
@@ -1834,7 +1956,7 @@ class WholeRunAbortTests(unittest.TestCase):
         def side_effect(**kwargs):
             return self._launch_failure() if "partial-bad" in kwargs["prompt"] else self._healthy_result()
 
-        exit_code, stderr = self._run_main(side_effect)
+        exit_code, stderr, judge_calls = self._run_main(side_effect)
 
         self.assertEqual(exit_code, 0)
         self.assertNotIn("every agent run failed to execute", stderr)
@@ -1843,6 +1965,11 @@ class WholeRunAbortTests(unittest.TestCase):
         rows = {r["task_id"]: r for r in me._read_results_file(results_path)}  # noqa: SLF001
         self.assertEqual(rows["partial-ok"]["baseline"]["format_error_rate"], 0.0)
         self.assertEqual(rows["partial-bad"]["baseline"]["format_error_rate"], 1.0)
+        # Only the arm that actually ran was graded (3 arms x 1 run).
+        self.assertEqual(len(judge_calls), 3)
+        # The failed task's arms still carry a 0.0 score, not a judge error.
+        self.assertEqual(rows["partial-bad"]["baseline"]["mean_score"], 0.0)
+        self.assertEqual(rows["partial-bad"]["baseline"]["judge_error_rate"], 0.0)
 
     def test_an_unresolvable_claude_binary_fails_before_any_task_runs(self):
         self._write_task("01-a.json", "unresolvable")
@@ -1869,6 +1996,9 @@ class WholeRunAbortTests(unittest.TestCase):
         self.assertIn("not found", stderr.getvalue())
         self.assertEqual(ran, [], "no task may run once the binary cannot be resolved")
         self.assertIsNone(me._find_latest_results_file())  # noqa: SLF001
+        # An unresolvable binary is not an aborted RUN -- nothing executed,
+        # so there is no first-failure detail and no marker to write.
+        self.assertFalse(me.harness_broken_marker_path(me.today_iso()).exists())
 
     def test_offline_mode_skips_binary_resolution_entirely(self):
         """--offline never spawns `claude`, so a machine with no CLI at all

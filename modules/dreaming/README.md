@@ -207,8 +207,18 @@ Two rules keep that shut:
 - **A whole-run format-error rate of 1.0 aborts.** One failed arm run stays
   non-fatal; a run where every arm failed is not a measurement, so the
   harness prints the first failure's raw output to stderr, exits non-zero,
-  and writes no results file. `--gate` then reports `no results` instead of
-  a regression nobody measured.
+  writes no results file (dropping any partial file it wrote this run), and
+  records `evals/<date>.harness-broken`. The marker is load-bearing: `evals/`
+  always holds prior runs, so an abort that wrote nothing would otherwise
+  leave `--gate` reading the previous file and reporting `open` on a broken
+  harness. While a marker is newer than the newest results file, `--gate`
+  reports `harness broken: every agent run failed to execute on <date>`;
+  the next run that produces results clears it.
+
+An arm run that failed to execute is never sent to the judge -- there is
+nothing to grade, and on a broken harness that would be a whole task's judge
+calls spent before the abort fires. It carries a 0.0; `format_error_rate`
+carries the reason.
 
 The judge call is one Messages API request per run: no sampling parameters
 (every judge model from Opus 4.7 / Sonnet 5 on returns 400 for one),

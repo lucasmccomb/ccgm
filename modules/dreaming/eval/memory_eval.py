@@ -37,14 +37,19 @@ not open the gate even when its signal-side output looks healthy).
 Fails closed -- same reason shape for "stale" as for "missing".
 
 Fail-loud contract (#1027): a single arm run that fails to execute is
-non-fatal -- it is recorded as a format error and the eval carries on. A
-run where EVERY arm failed is not a measurement at all, so the harness
-aborts with the first failure's raw output on stderr and a non-zero exit
-instead of writing a results file `--gate` would read as a memory
-regression. The `claude` binary is resolved to an absolute path before any
-task runs (see resolve_claude_bin), so the PATH the caller happens to
-export -- a LaunchAgent's is not a login shell's -- cannot decide whether
-the harness works.
+non-fatal -- it is recorded as a format error and the eval carries on, and
+is never sent to the judge (nothing to grade). A run where EVERY arm
+failed is not a measurement at all, so the harness aborts with the first
+failure's raw output on stderr and a non-zero exit instead of writing a
+results file `--gate` would read as a memory regression: it drops any
+partial file it wrote this run and records `evals/<date>.harness-broken`.
+That marker is load-bearing rather than informational -- evals/ always
+holds prior runs, so an abort that merely wrote nothing would leave
+gate_check() reading the PREVIOUS run's file and reporting `open` on a
+harness that provably did not run. The `claude` binary is resolved to an
+absolute path before any task runs (see resolve_claude_bin), so the PATH
+the caller happens to export -- a LaunchAgent's is not a login shell's --
+cannot decide whether the harness works.
 
 Isolation (adrev-003a, CRITICAL): every `claude -p` arm runs under a
 purpose-built, ephemeral `CLAUDE_CONFIG_DIR` + `HOME` containing ONLY a
@@ -184,6 +189,14 @@ CLAUDE_BIN_FALLBACK_DIRS = (
 # itself can write -- are deliberately excluded, or the gate would
 # self-close after every routine reinforcement.
 CONTENT_SHAPING_OPS = {"add", "supersede", "deprecate", "contradict"}
+
+# Filename suffix of the whole-run abort's marker (#1027). NOT ".jsonl": the
+# results glob must not see it as a results file, but gate_check() must see
+# it, or an abort that writes nothing leaves the gate reading the PREVIOUS
+# night's file -- which, once its regression rows clear, is green. That is a
+# broken harness reporting "open", the one direction this gate must never
+# fail in.
+HARNESS_BROKEN_MARKER_SUFFIX = ".harness-broken"
 
 
 class IsolatedConfigError(RuntimeError):
@@ -543,12 +556,25 @@ def resolve_claude_bin(claude_bin: str) -> str:
     executability. Raises ClaudeBinaryNotFoundError, naming everything it
     searched, rather than letting every run degrade into a format error.
 
+    "Is it a path" is decided on the RAW string, not on `Path.parts`:
+    `Path("./claude").parts` is `('claude',)` -- the leading dot normalizes
+    away -- so a parts-based test misroutes `--claude-bin ./claude` into the
+    PATH branch. `shutil.which` happens to honour the dirname when the file
+    exists, but when it does NOT exist the run falls through to
+    CLAUDE_BIN_FALLBACK_DIRS and launches whatever is installed there, with
+    no diagnostic that the operator's choice was ignored.
+
     Absolute, but NOT symlink-resolved: `~/.local/bin/claude` is a symlink
     into a versioned binary, and a CLI update mid-run swings that link and
     can delete the version it pointed at. Keeping the installer's stable
     entry point means a long eval survives an update under it."""
     candidate = Path(claude_bin).expanduser()
-    if candidate.is_absolute() or len(candidate.parts) > 1:
+    caller_gave_a_path = (
+        os.sep in claude_bin
+        or (os.altsep is not None and os.altsep in claude_bin)
+        or claude_bin.startswith((".", "~"))
+    )
+    if caller_gave_a_path:
         absolute = Path(os.path.abspath(candidate))
         if absolute.is_file() and os.access(absolute, os.X_OK):
             return str(absolute)
@@ -958,16 +984,28 @@ def _run_one(
             # main() (#1027); per-row failures stay non-fatal.
             _record_agent_error(f"{task_id} / {arm} / run {run_index}: {result.get('result')}")
 
-    final_files = {} if offline_score is not None else snapshot_workdir(workdir)
-    payload = build_judge_payload(
-        prompt=prompt, criteria=criteria, final_files=final_files,
-        agent_summary=str(result.get("result") or ""),
-    )
-    judged = judge_output(
-        payload, judge_model=judge_model, judge_system_prompt=judge_system_prompt,
-        api_key=api_key, api_url=api_url,
-        offline_score=(offline_score if offline_score is not None else None),
-    )
+    if result.get("is_error"):
+        # #1027: an agent run that never executed has nothing to grade. The
+        # judge would score the untouched fixture -- which on a canary task
+        # scores 10.0, an actively wrong number for a run that did no work --
+        # and on a broken harness that is a full task's judge calls spent
+        # every night before the whole-run abort fires. is_error already
+        # carries the signal via format_error_rate; the score floors at 0.0.
+        # NOT tagged with "error": that key means the JUDGE failed and
+        # excludes the run from mean_score. Here the agent failed, and the
+        # arm should carry the zero.
+        judged = {"pass": False, "score": 0.0, "usage": {"input_tokens": 0, "output_tokens": 0}}
+    else:
+        final_files = {} if offline_score is not None else snapshot_workdir(workdir)
+        payload = build_judge_payload(
+            prompt=prompt, criteria=criteria, final_files=final_files,
+            agent_summary=str(result.get("result") or ""),
+        )
+        judged = judge_output(
+            payload, judge_model=judge_model, judge_system_prompt=judge_system_prompt,
+            api_key=api_key, api_url=api_url,
+            offline_score=(offline_score if offline_score is not None else None),
+        )
 
     usage = result.get("usage") or {}
     # #789: Claude Code caches the static prompt prefix (system prompt,
@@ -1519,6 +1557,31 @@ def _find_latest_results_file() -> Path | None:
     return candidates[-1] if candidates else None
 
 
+def harness_broken_marker_path(date: str) -> Path:
+    """Where the whole-run abort records that the harness, not memory, is why
+    there are no results for `date` (#1027). Deliberately NOT a `.jsonl`:
+    `_find_latest_results_file()`'s glob must never pick it up as results."""
+    return evals_dir() / f"{date}{HARNESS_BROKEN_MARKER_SUFFIX}"
+
+
+def write_harness_broken_marker(*, date: str, detail: str) -> Path:
+    path = harness_broken_marker_path(date)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"date": date, "generated_at": _utc_now_iso(), "first_failure": detail}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _find_latest_harness_broken_marker() -> Path | None:
+    d = evals_dir()
+    if not d.is_dir():
+        return None
+    candidates = sorted(d.glob(f"*{HARNESS_BROKEN_MARKER_SUFFIX}"), key=lambda p: p.stat().st_mtime)
+    return candidates[-1] if candidates else None
+
+
 def _read_results_file(path: Path) -> list[dict[str, Any]]:
     rows = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -1601,7 +1664,8 @@ def latest_content_shaping_mutation_epoch(learnings_root: Path) -> float | None:
 
 
 def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float | None = None) -> tuple[bool, str]:
-    """Returns (open, reason). Fails closed on every branch: missing
+    """Returns (open, reason). Fails closed on every branch: a harness-broken
+    marker newer than the latest results (#1027), missing
     results, stale results (either bound), any regression row, no
     high_value row, no LIVE dreamed row classifying high_value (adrev-305),
     or that live dreamed row's paired noise-only corpus itself yielding a
@@ -1620,6 +1684,17 @@ def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float 
     now = now if now is not None else time.time()
 
     latest = _find_latest_results_file()
+
+    # #1027: a whole-run abort writes no results file, so without this branch
+    # the gate would silently fall back to the PREVIOUS run's file for the
+    # whole freshness window -- opening on a green stale file while tonight's
+    # harness is provably broken. The marker is newer than any results file
+    # only while no successful run has happened since the abort.
+    marker = _find_latest_harness_broken_marker()
+    if marker is not None and (latest is None or marker.stat().st_mtime > latest.stat().st_mtime):
+        broken_date = marker.name[: -len(HARNESS_BROKEN_MARKER_SUFFIX)]
+        return False, f"harness broken: every agent run failed to execute on {broken_date}"
+
     if latest is None:
         return False, "no results"
 
@@ -1863,6 +1938,7 @@ def main(argv: list[str] | None = None) -> int:
     reset_agent_error_samples()
     sandbox_root = Path(tempfile.mkdtemp(prefix="ccgm-eval-sandbox-"))
     all_rows: list[dict[str, Any]] = []
+    wrote_results = False
     try:
         for task in tasks:
             print(f"memory_eval: running task {task['id']} (kind={task['kind']})...", file=sys.stderr)
@@ -1912,13 +1988,31 @@ def main(argv: list[str] | None = None) -> int:
             # KeyboardInterrupt) must not discard already-completed tasks'
             # results either.
             write_results(all_rows, date=date)
+            wrote_results = True
     except HarnessBrokenError as exc:
         print(f"memory_eval: {exc}", file=sys.stderr)
+        # An earlier task whose own orchestration raised writes a zero-run
+        # `error` row before the rate can reach 1.0, so "no results file" is
+        # not an invariant -- drop the partial file this process wrote. Its
+        # content is already gone either way (write_results truncates).
+        if wrote_results:
+            results_path_for_date(date).unlink(missing_ok=True)
+        # The marker is what actually keeps the gate closed: with no results
+        # file, gate_check() would otherwise read the previous run's.
+        marker = write_harness_broken_marker(
+            date=date,
+            detail=_AGENT_ERROR_SAMPLES[0] if _AGENT_ERROR_SAMPLES else "(no raw output captured)",
+        )
+        print(f"memory_eval: wrote {marker}; the gate stays closed until a run produces results", file=sys.stderr)
         return 1
     finally:
         shutil.rmtree(sandbox_root, ignore_errors=True)
 
     results_path = write_results(all_rows, date=date)
+    # A run that produced results clears its own date's abort marker. The
+    # gate's mtime comparison already ignores an older marker; this just
+    # keeps evals/ from accumulating dead ones.
+    harness_broken_marker_path(date).unlink(missing_ok=True)
     print(f"memory_eval: wrote {len(all_rows)} result row(s) to {results_path}", file=sys.stderr)
     print(render_summary_table(all_rows))
     return 0
