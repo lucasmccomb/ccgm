@@ -817,6 +817,30 @@ else
     echo "  exit: ${tilde_rc}"
     echo "  got:  ${tilde_err}"
 fi
+# path_allowed refuses the cwd tildes outright, which is what denies the
+# commands above — so relative_path's own answer for them is checked here
+# directly. It is the function the message routing and any later caller read,
+# and a path whose meaning depends on the working directory has to say so.
+if python3 - "${GUARD}" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1])
+g = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(g)
+cases = [("~+/x", True), ("~-/x", True), ("~0/x", True), ("~+2/x", True),
+         ("~-2/x", True), ("./x", True), ("x", True),
+         ("~/x", False), ("/abs/x", False), ("~user/x", False)]
+wrong = [(t, w, g.relative_path(t)) for t, w in cases
+         if g.relative_path(t) is not w]
+print("relative_path disagreements: %r" % wrong)
+sys.exit(1 if wrong else 0)
+PY
+then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: relative_path calls the cwd tildes working-directory-dependent"
+fi
+
 # A plain `~/` is anchored to HOME, not to the working directory.
 assert_exit 0 "home tilde rm still allowed" "$(bash_json 'rm -f ~/.claude/x')"
 assert_exit 0 "home tilde mkdir still allowed" "$(bash_json 'mkdir -p ~/code/plans/x')"
