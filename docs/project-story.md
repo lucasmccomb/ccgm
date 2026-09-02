@@ -24,12 +24,12 @@ At a higher level, CCGM is an answer to a question: **what does a fully-configur
 | Commits / issues | 430+ commits, 870+ issues and PRs in the first 4 months |
 | Base permission policy | 800+ allow entries, curated deny list, bypass-proof destructive-command blocks |
 | Audit engine | 21 audit packs over a deterministic tool spine + LLM triage |
-| Test infrastructure | 15 structural test scripts, per-module pytest/bash suites, 4 CI workflows, dual-OS (ubuntu + macos) |
-| Documentation | 12-file `docs/` directory (~5,300 lines) with CI-guarded counts |
+| Test infrastructure | 15 structural test scripts, per-module pytest/bash suites, 5 CI workflows, dual-OS (ubuntu + macos) |
+| Documentation | 12-file `docs/` directory (~5,800 lines) with CI-guarded counts |
 | Distribution | Interactive bash installer (canonical), non-interactive agent mode, native Claude Code plugin marketplace (generated projection), per-module manual copy |
 | License | MIT, public repo with a CI-enforced no-personal-data scan |
 
-Development pace by month: March 36 commits (bootstrap), April 177 (peak build-out), May 68, June 90, July 61 — sustained by a solo maintainer orchestrating parallel Claude Code agents, using CCGM itself as the development environment.
+Development pace by month: March 36 commits (bootstrap), April 177 (peak build-out), May 68, June 90, July 82, August 36, September 4 through the 2nd — sustained by a solo maintainer orchestrating parallel Claude Code agents, using CCGM itself as the development environment.
 
 ---
 
@@ -135,6 +135,24 @@ The busiest month, in several waves:
 - **Worktrees as default parallel isolation** (July 13): after a 237 GB disk incident from orphaned build trees, git worktrees became the standard per-unit isolation with *enforced* teardown and a safe janitor (`/worktree-sweep`) that classifies precisely which worktrees are safe to remove.
 - **Model-vetting** (July 19): a security gate for integrating any new AI model — weights provenance, file-format safety, license/data terms, serving-path supply chain, and staged agentic access — written after observing an "announced ≠ released ≠ verified" gap in a flagship open-weights launch.
 
+### Late July – early August 2026 — Docs hygiene, orrery, and install-time hardening (48 commits, July 20 – August 4)
+
+- **Docs and small modules** (July 20–22): a new `CCGM ADHD` output style (adapted from an MIT-licensed community skill) plus an Actionability section folded into the default `CCGM Terse` style; the `writing-system` module (Orwell's six rules as the always-on prose standard, `/rewrite`); `ask-context` — a hard PreToolUse gate blocking `AskUserQuestion` calls whose context the user cannot actually see, closing the recurring failure of a question asked from context that lived only in a thinking block or collapsed tool output.
+- **README catalog and orrery** (July 28–30): the module catalog gained a per-module commands column and an alphabetical-order guard, and the 12 stable commands and hooks it was missing got documented; `orrery` shipped in six epics over two days — parallel read-only scout agents deep-dive a codebase and render a zoomable, embeddable system-design map as one self-contained HTML file, four zoom tiers, file links pinned to an anchor SHA, with an incremental `/orrery update` path — the same one-day-many-epics delivery shape as July's durable memory system.
+- **Install-time and shell-parsing hardening** (August 2–4): three separate bugs sharing one root shape — a piped consumer SIGPIPE-killing a still-writing producer under `set -o pipefail`, bash's builtin `echo` silently swallowing a literal `-n`, and `grep -c` exiting 1 on a zero count under `set -e` — were traced across the structural suite and all 33 bundled audit-skill suites and fixed with herestrings, `printf '%s'`, and `|| true` guards (full detail in Incidents & Lessons, below); the README install-block guard grew a directory-bootstrap check and a disk-resolved over-copy check after both blind spots let a from-scratch-install regression and an over-broad `cp -R` ship green; and `live-testing-guard` shipped after a July 30 incident where a plan-mandated dictation preflight silently swapped every microphone dictation for a canned fixture on the dev machine mid-run — the rule confines live/UI/app testing to a dedicated runner behind a plan-recorded grant, because the incident it answers corrupted input with no crash and no failed assertion.
+- Also: `code-quality`'s simplest-implementation and no-backward-compat-shims rules; the interactive installer's preset menu and its backup set both re-derived from `presets/` and module manifests instead of hand-maintained lists.
+
+### August 2026 (mid-to-late) — Presets contract, ccgm-site, and advisor-mode (8 commits, August 12–31)
+
+- **A machine-readable preset contract** (August 12): `docs/preset-descriptions.json`, seeded from `docs/presets.md`'s prose and key-set-checked against the live preset list, gives the (then-upcoming) ccgm-site something to render — presets had never had a machine-readable description before.
+- **ccgm-site's deploy hook** (August 13): a companion site repo got a guest CI workflow in this repo — on every push to main, POST the site's Cloudflare deploy hook, then poll its live `modules.json` for an advanced `generatedAt`/`sourceSha` before calling the rebuild real; skip-with-notice when the secret is unset, `continue-on-error` throughout, and a stale deploy opens an issue on this repo rather than touching the site's own credentials.
+- **advisor-mode** (August 20, then 30–31; the 79th module): a per-session posture that turns an expensive orchestrator (Fable/Opus) into a pure delegator, held to it by a hard PreToolUse gate rather than a prompt (see Major Systems, below). The follow-ups moved state from one machine-global flag file to one per session — a single session's `/advisor off` had been silently dropping the gate for the other nine of ten sessions running in parallel — added auto-on at SessionStart with an opt-out and idle-session garbage collection, and opened the guard to read-only recon (tool version probes, shell grouping tokens, allowlisted command substitution) it had been wrongly blocking.
+
+### September 2026 (through September 2) — Cloudflare reversal and the advisor-guard's shell-parsing model (4 commits)
+
+- **Cloudflare Pages is API-creatable.** A live run in a sibling project overturned the standing assumption — baked into the `cloudflare` rule, `common-mistakes` #8, and `/launch` — that the dashboard's Connect-to-Git flow was the only way to create a Git-connected Pages project: `POST .../pages/projects` with `source.type: "github"` does it, followed by a separate deployment-trigger call and its own poll step. The rewrite went through three adversarial review rounds after a reviewer caught the source research and the live transcript disagreeing on trigger behavior.
+- **advisor-guard's argument model closed its last shell-parsing gap.** Every flag and predicate check had read an argument's literal text, so a quoted, ANSI-C-quoted, or expansion-carried flag reached real bash unseen. A differential harness — spell every way of disguising a mutating flag against every command that acts on one, run each through the guard and real `bash -c` in a throwaway sandbox, assert that whatever mutated the sandbox was denied — found the gap and, across two review rounds, closed it from 27 live bypasses to zero (the full incident is below, in Incidents & Lessons).
+
 ---
 
 ## Major Systems
@@ -195,8 +213,22 @@ Deterministic Python hooks that make classes of mistakes structurally impossible
 | `sync-ccgm-canonical` | Auto-pulls the canonical clone after CCGM PR merges so symlinked installs update immediately |
 | `port-check`, `agent-tracking-*`, `orphan-process-check` | Multi-agent coordination and cleanup |
 | `reflection-trigger`, `precompact-reflection`, `learnings-inject` | The memory loop's capture nudges and injection |
+| `advisor-guard` | PreToolUse exit-2 hard block on the main agent's file edits and non-orchestration Bash while advisor mode's per-session flag exists; subagent calls and orchestrator work-product paths pass, `ADVISOR_DIRECT=1` is the one-off hatch |
+| `advisor-posture` | UserPromptSubmit: injects the delegate-don't-implement posture (and the session id) every turn the flag exists |
+| `advisor-session-start` | SessionStart: creates this session's advisor-mode flag unless opted out, migrates the legacy single-file flag, and garbage-collects flags whose session has no transcript or has sat idle 3+ days |
+| `advisor-session-end` | SessionEnd: removes this session's advisor-mode flag |
 
 A single escape hatch (`ALLOW_MAIN_COMMIT=1`) opens the related gates consistently for intentional main-only operations.
+
+### Advisor mode
+
+**What it is.** A per-session posture for expensive orchestrator models (Fable/Opus): `/advisor on` turns the main agent into a pure delegator — it writes specs, dispatches cheaper implementer agents, reviews their diffs through the standard two-stage separate-agent review, triages findings, delegates fixes (bounded to three rounds), and merges, but never edits source itself. `/etp` already runs this loop for plan- and issue-shaped work; advisor mode routes ad-hoc requests through the same discipline instead of letting the orchestrator implement inline.
+
+**Enforcement.** A PreToolUse hook hard-blocks the main agent's file edits outside a short list of orchestrator work-product paths (`~/.claude/`, temp/scratchpad roots, `~/code/plans/`, `~/code/docs/`, worktree checkouts, plan-mode files) and default-denies Bash to a read-only-plus-orchestration allowlist (read-only git; branch/worktree lifecycle; `gh` PR/issue/run/label management including merge). Denials use exit 2 — the same bypass-surviving convention as branch-guard, because a JSON `permissionDecision: deny` does not survive bypass mode — and a hook-input discriminator (`agent_id`/`agent_type`, present on subagent calls, absent on the main agent's) lets delegated implementers pass untouched; `/advisor off` and the one-off `ADVISOR_DIRECT=1` hatch are the only other ways through.
+
+**Session lifecycle.** State lives at `~/.claude/advisor-mode/<session_id>`, one flag per session rather than one machine-global file — the fix for an incident where a single session's `/advisor off` had silently dropped the gate for the other nine of ten sessions running in parallel. Every session now starts in the mode (`CCGM_ADVISOR_AUTO=false` opts out); a SessionStart hook creates the flag, migrates the old single-file layout, and garbage-collects flags whose session has no transcript or has sat idle more than three days, while a SessionEnd hook removes the flag when the session ends. Only compaction is exempt from the auto-on, so a deliberate `/advisor off` survives it but a resume or `/clear` re-arms the mode.
+
+**The argument-reading model.** Bash turns a typed command line into `argv` through seven steps; the guard's normalizer reproduces three of them — quote removal, backslash-escape removal, and substitution of a variable the hook process can itself resolve — so a flag spelled `'-i'`, `\-i`, `$'-i'`, or `$"-i"` all reach the same check as `-i`. It refuses the other four outright, for any command that is not read-only: brace expansion, `$IFS` word splitting, pathname globbing, and an undecodable `$'...'` escape each turn one typed word into several `argv` words that no per-word check can represent, so rather than model them the guard denies. Getting there took three follow-up PRs — one closing holes an earlier review reproduced by hand, one closing two gaps that PR had left named but unfixed (`$VAR` and `$'...'` carriers) — and finally this normalizer, proven by a differential test harness built for the job: it spells every mutating flag every way against every command that acts on one, runs each through both the guard and real `bash -c` in a throwaway sandbox, and asserts that whatever mutated the sandbox was denied. Building it found 27 live bypasses in the guard as it stood; a second adversarial review round on that same PR found 5 more; the shipped head has zero.
 
 ### Argus (visual ATDD)
 
@@ -228,10 +260,11 @@ Highlights of the catalog:
 - **Common mistakes** — a living record of recurring failure patterns (shallow monorepo exploration, branching without checking open PRs, platform-specific traps) with the concrete behavior change each demands.
 - **Model vetting** — the staged-access security gate for new models (provenance → format safety → license/terms → serving path → staged agentic access from chat-only to sandboxed to reviewed-implementer).
 - **Writing system** — Orwell's six rules (1946) as the always-on prose standard, added July 2026 after the observation that banning AI-tell words one at a time ("no delve", "no em dashes") treats symptoms while every README still ships in the same voice. The rule governs prose only (never code or technical terms), `/rewrite` applies it to existing text, and `/editorial-critique`'s detectors now cite the same six rules as their baseline — one standard, two enforcement points.
+- **Advisor mode** — a per-session posture, not just a rule: while `/advisor` is on, a hard PreToolUse gate makes "delegate, never implement" mechanical instead of advisory, closing the exact gap prior-art research found in production orchestrators — a prompt-only version of this discipline holds until an integration-pressure moment, then gets quietly overridden.
 
 ## Command Surface
 
-86 slash commands, grouped:
+87 slash commands, grouped:
 
 | Cluster | Commands |
 |---------|----------|
@@ -242,7 +275,7 @@ Highlights of the catalog:
 | Memory & learning | `/reflect`, `/consolidate`, `/retro`, `/dream`, `/dream-digest`, `/dream-apply`, `/dream-review`, `/dream-scorecard`, `/compound`, `/compound-refresh`, `/skillify` |
 | Autoheal | `/autoheal`, `/autoheal-digest`, `/autoheal-toggle`, `/autoheal-snooze`, `/autoheal-apply`, `/permission-fix`, `/permission-audit` |
 | Session lifecycle | `/startup`, `/handoff`, `/sds`, `/checkpoint`, `/recall` |
-| Safety modes | `/freeze`, `/unfreeze`, `/guard` |
+| Safety modes | `/freeze`, `/unfreeze`, `/guard`, `/advisor` |
 | Worktrees | `/worktree-start`, `/worktree-finish`, `/worktree-sweep` |
 | Multi-agent & remote | `/workspace-setup`, `/dispatch`, `/dispatch-status`, `/dispatch-stop`, `/vm-manage`, `/onremote`, `/agents` |
 | Research & content | `/research`, `/deepresearch`, `/brand`, `/brand-check`, `/transcript`, `/copycat` |
@@ -270,7 +303,8 @@ Decisions with their rationale, in roughly the order they were made:
 15. **Deprecate, don't delete.** The Go agent-manager was superseded but stays in-repo for existing users, excluded from presets — install-base compatibility over repo tidiness.
 16. **Ship capabilities wired-but-off when the evidence isn't in.** Optimistic memory integration is fully built, red-teamed, and held closed by its own eval gate until mined memory beats the full-context baseline — the gate's honesty matters more than the feature's activation.
 17. **Dogfooding as architecture.** CCGM develops itself: symlink installs from a canonical clone, a reverse-sync command for changes made in the live config, workspace clones for parallel CCGM development, and a post-merge hook that updates the canonical clone automatically.
-18. **Cloudflare Pages creation is API-first, dashboard second.** A live run in a sibling project confirmed `POST .../pages/projects` with `source.type: "github"` creates a real, permanent Git-connected Pages project, with a one-time Cloudflare GitHub App install as the only precondition — overturning the assumption baked into the `cloudflare` rule, `common-mistakes` #8, and all of `/launch` that the dashboard's Connect-to-Git flow was the only way in. The API call does not start the first build; a separate deployment-trigger call is required and now has its own poll step. The rewrite went through three adversarial review rounds after a reviewer found the source research notes and the live transcript disagreeing on trigger behavior and field placement — the transcript, the primary evidence, won every time.
+18. **Capability removal, not prompting, is what holds a delegation posture.** Prior-art research into production orchestrator incidents found the same pattern three separate times: a prompt-only "you never implement" instruction holds until an integration-pressure moment, then the orchestrator patches inline anyway — and the fix that held in every documented case was removing the capability, not writing a better prompt. Advisor mode's PreToolUse gate applies that lesson to CCGM itself: a denial is steering ("delegate this"), not an obstacle, and hardening the gate's own shell-parsing model went through the same discipline it enforces — spec it, delegate it, adversarially review it, fix, repeat.
+19. **Cloudflare Pages creation is API-first, dashboard second.** A live run in a sibling project confirmed `POST .../pages/projects` with `source.type: "github"` creates a real, permanent Git-connected Pages project, with a one-time Cloudflare GitHub App install as the only precondition — overturning the assumption baked into the `cloudflare` rule, `common-mistakes` #8, and all of `/launch` that the dashboard's Connect-to-Git flow was the only way in. The API call does not start the first build; a separate deployment-trigger call is required and now has its own poll step. The rewrite went through three adversarial review rounds after a reviewer found the source research notes and the live transcript disagreeing on trigger behavior and field placement — the transcript, the primary evidence, won every time.
 
 ## Incidents & Lessons
 
@@ -318,7 +352,7 @@ Every one of these produced a durable control, not just a fix:
 
 - **Structural suite** (bash): manifest validation for every module, template-expansion checks, settings-merge tests, backup/restore, link-mode, uninstaller un-merge, YAML frontmatter strictness, doc-count/preset-coverage guards, and the no-personal-data scan.
 - **Per-module unit tests**: pytest for Python libraries (the learnings store, miner, analyzer, eligibility core each carry their own suites, including red-team/poisoning tests and offline fixture-driven end-to-end chain smokes that run with no network and no API key), bash tests for shell tooling.
-- **CI**: four GitHub Actions workflows — the main structural suite, the memory-module suite on both ubuntu and macos (macOS is ground truth for a macOS-first tool), the Go module build, and a release workflow. The plugin-marketplace generator runs in `--check` mode so a stale generated catalog fails the build.
+- **CI**: five GitHub Actions workflows — the main structural suite, the memory-module suite on both ubuntu and macos (macOS is ground truth for a macOS-first tool), the Go module build, a release workflow, and a guest workflow that verifies the companion ccgm-site's Cloudflare Pages deploy actually landed on every push to main (skip-with-notice when its secret is unset, so it never reds this repo's own CI). The plugin-marketplace generator runs in `--check` mode so a stale generated catalog fails the build.
 - **Determinism as testability**: offline fixture modes for every network-touching pipeline, canned-response analyzers, and eval harnesses with fixed seed tasks make nightly automation regression-testable.
 
 ## The Meta Loop
@@ -339,3 +373,4 @@ CCGM's most distinctive property is that it is built *by* the environment it con
 - Rebuilt a codebase auditor as a 21-pack engine over a deterministic multi-tool spine with schema-validated, fingerprinted findings, baseline/delta classification, and suppression/provenance workflows.
 - Ran a solo-maintainer, multi-agent development practice — parallel implementer agents in isolated worktrees, spec-driven delegation, fresh-context two-stage review, adversarial plan gauntlets — that sustained 430+ issue-tracked, CI-gated merges in four months, including three separate 8-epic subsystems each landed in a single day.
 - Converted every production incident into a deterministic control: hard pre-edit branch gates, enforced worktree teardown, concurrency caps derived from measured throttle data, and sync mechanisms proven sound against real data-loss findings.
+- Hard-enforced a delegation posture for its own most expensive orchestrator sessions with a PreToolUse gate, then adversarially proved it against real bash: a differential harness spelling every way to disguise a mutating shell flag took the guard from 27 live parsing bypasses to zero across two review rounds, each verified by comparing the guard's decision to actual `bash -c` execution in a throwaway sandbox.
