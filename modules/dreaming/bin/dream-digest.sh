@@ -216,8 +216,13 @@ if run_summary is not None:
             out.append(f"  - `{slug}`: {reason}")
     out.append(f"- map calls: {run_summary.get('map_calls', 0)}, reduce calls: {run_summary.get('reduce_calls', 0)}")
     # #1026: a call that stopped at the output cap is a failed extraction,
-    # not a short answer. Surfaced here so an unattended run's truncations
-    # are visible in the same place as its call counts.
+    # not a short answer. Surfaced here so truncations in an unattended
+    # run are visible in the same place as its call counts.
+    #
+    # Keep single quotes balanced in this heredoc, apostrophes included:
+    # bash 3.2 tracks quote state inside a $( ... ) command substitution
+    # even for a quoted heredoc body, so an unpaired one makes the whole
+    # script fail to parse on macOS system bash.
     truncated_calls = run_summary.get("truncated_calls", 0)
     if truncated_calls:
         out.append(
