@@ -58,7 +58,6 @@ POST /accounts/{account_id}/pages/projects
     "config": {
       "owner": "<owner>",
       "repo_name": "<repo>",
-      "production_branch": "main",
       "deployments_enabled": true,
       "pr_comments_enabled": true,
       "preview_deployment_setting": "all"
