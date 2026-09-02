@@ -67,14 +67,21 @@ unescaped first). What a checked substitution returns is an argument for
 read-only commands only: `echo $(git rev-parse HEAD)` passes,
 `sed $(echo -i) …` does not.
 
-Every argument is read the way bash will pass it — quotes removed, adjacent
-spans joined, backslash escapes dropped, `$'…'` bodies decoded — so quoting
-a flag no longer hides it (`sed '-i' f`, `sed -''i f`, `find . $'-delete'`
-are all denied). An expansion the guard cannot resolve is denied when it
-begins an argument or sits inside a flag before its first `=`
-(`A=-i; sed $A f`, `A=i; sed -$A f`), so pass the value written out;
-`echo $A`, `grep $PAT f`, `gh pr edit 1 --title=$T` and `rm -rf $TMPDIR/x`
-still pass. The guard resolves `$CLAUDE_CODE_SESSION_ID` from its own
+Every argument is read the way bash will pass it — quotes removed
+(`'-i'`, `-''i`, `$'-i'`, `$"-i"`), adjacent spans joined, backslash escapes
+and line continuations dropped — so spelling a flag differently no longer
+hides it. What bash does that the guard cannot reproduce is refused instead
+of guessed at, because brace expansion, `$IFS` word splitting and globbing
+each turn one typed word into several: a brace group (`-delet{e,e}`), an
+unquoted glob (`-dele*`, `[-]delete`), an unquoted expansion the guard cannot
+resolve anywhere in a word (`find <dir>$IFS-delete`), and an undecodable
+`$'…'` escape are all denied for a command that is not read-only. A
+double-quoted expansion cannot be word-split, so it keeps the narrower rule —
+denied leading or inside a flag before its first `=`, allowed after it, which
+is what keeps `gh pr edit 1 --title="$T"` usable. `echo $A`, `grep $PAT f`
+and `rm -rf $TMPDIR/x` still pass. A relative path after a `cd` is denied:
+the guard resolves it against its own working directory, not the one bash
+will be in. The guard resolves `$CLAUDE_CODE_SESSION_ID` from its own
 validated session context, so the per-session `/advisor on`/`off` flag
 commands keep working even when the hook subprocess does not carry the
 variable.

@@ -64,23 +64,38 @@ denied outright. Shell grouping tokens (`{`, `(`) are structure, not
 commands. A known dev-tool binary is allowed when its only arguments are
 version/identity probes (`node -v`, `wrangler whoami`).
 
-Every check reads the word bash will actually pass, not the characters as
-typed. normalize_word() removes quotes, joins adjacent spans (`-''i` is
-`-i`), drops backslash escapes, and decodes `$'...'` bodies, so a flag hidden
-behind quoting reaches the flag scans intact (issue #1017). One normalizer
-feeds every argument check; there is no per-check special case per carrier.
+Bash performs seven steps between the typed line and argv. normalize_word()
+carries out three of them — quote removal (including `$'...'` and `$"..."`),
+backslash-escape removal, and resolvable-variable substitution — so a flag
+spelled `'-i'`, `-''i`, `\\-i`, `$'-i'` or `$"-i"` reaches the flag scans as
+`-i` (issue #1017). One normalizer feeds every argument check; there is no
+per-check special case per carrier.
 
-Expansion is not modeled; it is bounded. A word carrying a `$`-introduced
-expansion this process cannot resolve — `${!A}`, `${#A}`, `${A:-x}`, `$1`,
-`$@`, `$_`, or an undecodable `$'...'` escape — is denied for a first word
-that is not READ_ONLY when the expansion begins the word, or sits before the
-first `=` of a flag-shaped word (`-$A`, `--in-pl$A`). The shell expands it
-into real argv and the assignment that set it was dropped as an env prefix
-(`A=-i; sed $A f` really edits in place), so the letters of the flag are
-unknowable. A `$NAME` this process's own environment resolves is checked as
-its value, so `rm -rf $TMPDIR/x` still reaches the path check as a path; one
-that only follows a flag's `=` (`--title=$T`) is left alone. Any unresolved
-expansion in a redirect target or a scratch-op path is denied outright.
+The other four are NOT modelled, they are refused. Brace expansion, `$IFS`
+word splitting and pathname expansion each turn ONE typed word into SEVERAL
+argv words, which no per-word check can express, and an expansion this
+process cannot resolve could be anything at all. So a word carrying any of
+them is denied outright for a first word that is not READ_ONLY:
+
+  - an undecodable `$'...'` escape;
+  - a brace group (`-delet{e,e}`, `{--,tracked.txt}`, `$TMPDIR/{a,../repo/f}`);
+  - an unquoted glob character (`-dele*`, `[-]delete`, `?delete`);
+  - an UNQUOTED expansion this process cannot resolve, wherever it sits
+    (`find <dir>$IFS-delete` is a plain, non-flag-shaped word that becomes a
+    write predicate), or a resolvable one whose value carries $IFS whitespace.
+
+A DOUBLE-QUOTED expansion cannot be word-split, so it keeps the narrower
+positional rules: denied when it begins the word or sits before the first `=`
+of a flag-shaped word (`-$A`, `--in-pl$A`), allowed after that `=`. That
+carve-out exists to keep `--title="$T"` usable, and nothing more. A `$NAME`
+this process's own environment resolves is checked as its value, so
+`rm -rf $TMPDIR/x` still reaches the path check as a path. Any unresolved
+word in a redirect target or a scratch-op path is denied outright.
+
+path_allowed resolves a relative path against THIS process's cwd, which `cd`
+does not move even though it moves bash's. Once a segment has changed
+directory, a later relative scratch-op path or redirect target is denied for
+that reason.
 
 One quote/escape rule serves mask_quotes, find_substitutions and
 match_paren: scan_states() is their shared scanner, and a backslash escapes
@@ -94,9 +109,11 @@ step above.
 
 KNOWN GAPS (documented in rules/advisor-mode.md): awk/heredoc bodies can
 smuggle writes past the segment scan; wrapper commands are denied outright
-rather than unwrapped (env/xargs/shells); an expansion the normalizer cannot
-read is denied rather than modeled. Over-denial is the accepted direction:
-the recipe in every denial names the delegation path.
+rather than unwrapped (env/xargs/shells); a relative path is resolved against
+this process's working directory rather than bash's, so after a `cd` it is
+denied instead of checked; and anything the normalizer marks unresolvable is
+denied rather than read. Over-denial is the accepted direction: the recipe in
+every denial names the delegation path.
 """
 
 import json
@@ -203,6 +220,21 @@ ANSI_C_ESCAPES = {
 }
 HEX_DIGITS = "0123456789abcdefABCDEF"
 
+# A brace group bash will expand into several words: `{a,b}`, `{1..5}`.
+# Matched over the word's UNQUOTED literal text only, so `{a','b}` (a
+# quoted comma) stays one word and `${A:-x,y}` is judged as the
+# expansion it is, not as a brace group.
+BRACE_GROUP_RE = re.compile(r"\{[^{}]*(?:,|\.\.)[^{}]*\}")
+# Pathname-expansion metacharacters. Unquoted, bash replaces the word
+# with whatever file names match — a file called `-delete` in the working
+# directory turns `find <dir> -dele*` into `find <dir> -delete`.
+GLOB_CHARS = "*?["
+# The default $IFS. A value carrying any of these is split into several
+# argv words when it is substituted unquoted.
+IFS_WHITESPACE = " \t\n"
+# Commands that move bash's working directory out from under the guard's.
+CD_COMMANDS = {"cd", "pushd", "popd"}
+
 VAR_ARG_REASON = (
     "an argument begins with — or is a flag carrying — a `$VAR`-style "
     "expansion this gate cannot resolve, and a command that is not "
@@ -213,6 +245,40 @@ VAR_ARG_REASON = (
     "out, or delegate it."
 )
 
+SPLIT_ARG_REASON = (
+    "an argument carries an unquoted `$VAR`-style expansion this gate "
+    "cannot resolve, and a command that is not read-only may not take "
+    "one. The shell expands it into real argv and splits the value on "
+    "`$IFS`, so an `A=-i` earlier on the line turns `sed $A …` into an "
+    "in-place edit, and `find <dir>$IFS-delete` reaches find as two "
+    "words with the second a flag. Run the command with the value "
+    "written out, double-quote the expansion if it is meant to stay one "
+    "word, or delegate it."
+)
+
+BRACE_ARG_REASON = (
+    "an argument contains a brace group (`{a,b}`, `{1..5}`), which bash "
+    "expands into several words after this gate has read one — so `find "
+    "<dir> -delet{e,e}` reaches find as a write predicate the guard never "
+    "saw. Write the values out, pass a long body with `--body-file`, or "
+    "delegate the command."
+)
+
+GLOB_ARG_REASON = (
+    "an argument contains an unquoted glob character (`*`, `?`, `[`), "
+    "and bash replaces it with whatever file names match — a file named "
+    "`-delete` in the working directory becomes a flag. Quote the "
+    "pattern, name the files, remove the directory itself instead of "
+    "globbing its contents, or delegate the command."
+)
+
+CD_PATH_REASON = (
+    "this command changes directory and then uses a relative path. The "
+    "guard resolves that path against its own working directory, not "
+    "the one bash will be in, so where the write lands is unknowable. "
+    "Write the absolute path out, or delegate the command."
+)
+
 ANSI_ARG_REASON = (
     "an argument carries a `$'…'` escape this gate cannot decode, so the "
     "word bash would pass is unknowable — and a command that is not "
@@ -221,9 +287,9 @@ ANSI_ARG_REASON = (
 )
 
 VAR_TARGET_REASON = (
-    "an expansion this gate cannot resolve is used as a redirect target, so "
-    "the guard cannot check where the output would land. Write the path "
-    "out, or delegate the command."
+    "an expansion, brace group, or glob this gate cannot resolve to one "
+    "path is used as a redirect target, so the guard cannot check where "
+    "the output would land. Write the path out, or delegate the command."
 )
 
 BACKTICK_HINT = (
@@ -428,6 +494,18 @@ def scan_states(cmd):
             yield ("'", False)  # the `'` it opens with
             i += 2
             continue
+        if quote is None and c == "$" and cmd[i + 1:i + 2] == '"':
+            # `$"…"` is locale-translation quoting: with no message
+            # catalogue bash returns the text unchanged, so it is a
+            # double-quoted span whose leading `$` belongs to it. Read as
+            # a literal `$` plus a plain `"` span it left a stray dollar
+            # on the front of the word and `$"-delete"` matched no flag
+            # check (issue #1017).
+            quote = '"'
+            yield ('"', False)  # the `$`
+            yield ('"', False)  # the `"` it opens with
+            i += 2
+            continue
         if quote is None and c in ("'", '"'):
             quote = c
         elif c == quote:
@@ -464,22 +542,31 @@ class Word:
     `text` is the word after quote removal, escape removal, `$'...'` decoding
     and resolvable-variable substitution — the characters the command really
     receives, which is what every literal check in this file needs to read.
-    The three flags name what could NOT be resolved, in the positions where
-    that decides the command (issue #1017).
+
+    `blockers` names the bash steps between the typed word and argv that this
+    process cannot carry out, so `text` is not the whole story: an undecodable
+    `$'…'` body, a brace group, a glob, or an unquoted expansion that bash
+    will split on `$IFS`. Each denies the word outright for a command that is
+    not read-only, because three of them turn ONE typed word into SEVERAL
+    argv words and no per-word check can express that (issue #1017).
+
+    `leading_unresolved` and `flag_unresolved` are the narrower, positional
+    rules that remain for a DOUBLE-QUOTED expansion, which bash cannot
+    word-split — they are what keeps `--title="$T"` usable.
     """
 
     __slots__ = ("text", "unresolved", "leading_unresolved",
-                 "flag_unresolved", "undecodable")
+                 "flag_unresolved", "blockers")
 
-    def __init__(self, text, marks, undecodable):
+    def __init__(self, text, marks, blockers):
         self.text = text
-        self.undecodable = undecodable
-        self.unresolved = bool(marks) or undecodable
+        self.blockers = blockers
+        self.unresolved = bool(marks) or bool(blockers)
         # An expansion at the very start of the word: the whole argument is
         # unknowable, so it can be a flag, a `--`, or a path (issue #1014).
         self.leading_unresolved = 0 in marks
         # A flag-shaped word whose LETTERS are unknowable. An expansion after
-        # the first `=` is a value (`--title=$T`), not part of the flag.
+        # the first `=` is a value (`--title="$T"`), not part of the flag.
         limit = text.find("=")
         if limit < 0:
             limit = len(text)
@@ -514,7 +601,12 @@ def decode_ansi_c(body):
             i += 1
             if i >= n:
                 return "".join(out), False
-            out.append(chr(ord(body[i].upper()) ^ 0x40))
+            # bash masks to the low five bits, with `?` the one special
+            # case (DEL). An `X.upper() ^ 0x40` agrees for letters and
+            # is wrong for everything else: `$'\c-' is CR (0x0d), not
+            # `m`. Verified against printf for - m M ? [ a A @.
+            ch = body[i]
+            out.append(chr(0x7F if ch == "?" else ord(ch) & 0x1F))
             i += 1
             continue
         if e in "01234567":  # \nnn — up to three octal digits
@@ -581,34 +673,50 @@ def scan_expansion(s, i):
     return i + 1, None, False  # `$` before anything else is literal
 
 
-def expand_run(s, states):
-    """Quote-removed text of an unquoted or double-quoted run.
+def expand_run(s, states, quoted):
+    """Quote-removed text of an unquoted (`quoted` False) or double-quoted run.
 
-    Returns (text, marks): `marks` are offsets into `text` where an expansion
-    this process cannot resolve begins. A resolvable `$NAME` is replaced by
-    its value, so the checks downstream read the real argument.
+    Returns (text, marks, splits): `marks` are offsets into `text` where an
+    expansion this process cannot resolve begins, and `splits` is True when
+    bash would word-split this run into more than one argv word.
+
+    A resolvable `$NAME` is replaced by its value, so the checks downstream
+    read the real argument — unless the run is unquoted and the value carries
+    $IFS whitespace, in which case splicing it would build one word where bash
+    builds two (`EVIL=" -delete"; find <dir>$EVIL`), so it is reported instead.
+    An UNQUOTED expansion this process cannot resolve is reported the same
+    way, wherever it sits: `find <dir>$IFS-delete` is a plain, non-flag-shaped
+    word that becomes a write predicate (issue #1017).
     """
     parts = []
     marks = []
+    splits = False
     length = 0
     i, n = 0, len(s)
     while i < n:
         c = s[i]
         if c == "\\" and states[i][1] and i + 1 < n:
-            parts.append(s[i + 1])
-            length += 1
+            # `\` before a newline is a line continuation: bash deletes the
+            # pair outright rather than keeping the newline, so `-delet\<LF>e`
+            # reaches find as `-delete`.
+            if s[i + 1] != "\n":
+                parts.append(s[i + 1])
+                length += 1
             i += 2
             continue
         if c == "$" and not states[i][1]:
             end, name, is_expansion = scan_expansion(s, i)
+            value = os.environ.get(name) if name is not None else None
             if not is_expansion:
                 parts.append(s[i:end])
                 length += end - i
-            elif name is not None and name in os.environ:
-                value = os.environ[name]
+            elif value is not None and not (
+                    not quoted and any(w in value for w in IFS_WHITESPACE)):
                 parts.append(value)
                 length += len(value)
             else:
+                if not quoted:
+                    splits = True
                 marks.append(length)
                 parts.append(s[i:end])
                 length += end - i
@@ -617,7 +725,37 @@ def expand_run(s, states):
         parts.append(c)
         length += 1
         i += 1
-    return "".join(parts), marks
+    return "".join(parts), marks, splits
+
+
+def unquoted_specials(raw, states):
+    """(brace_group, glob) over the word's UNQUOTED, unexpanded literal text.
+
+    Quoted and escaped characters are masked out because bash does neither
+    brace nor pathname expansion on them, and a `${…}` expansion is masked
+    too: its braces are not a brace group and a `[` inside it is a subscript,
+    not a glob. Masking keeps the offsets so a group cannot form across a
+    span it does not actually span.
+    """
+    bare = []
+    i, n = 0, len(raw)
+    while i < n:
+        quote, escaped = states[i]
+        if quote is not None or escaped:
+            bare.append("\x01")
+            i += 1
+            continue
+        if raw[i] == "$" and raw[i + 1:i + 2] == "{":
+            end = raw.find("}", i + 2)
+            end = n if end < 0 else end + 1
+            bare.append("\x01" * (end - i))
+            i = end
+            continue
+        bare.append(raw[i])
+        i += 1
+    bare = "".join(bare)
+    return (BRACE_GROUP_RE.search(bare) is not None,
+            any(c in bare for c in GLOB_CHARS))
 
 
 def normalize_word(raw):
@@ -626,14 +764,19 @@ def normalize_word(raw):
     Spans are found with scan_states — the file's one scanner — so this
     agrees with mask_quotes and the substitution finder about where a quoted
     span ends. Adjacent spans concatenate, exactly as the shell joins them:
-    `-''i`, `-"i"` and `$'-i'` all normalize to `-i`.
+    `-''i`, `-"i"`, `$'-i'` and `$"-i"` all normalize to `-i`.
+
+    What cannot be carried out here is recorded in `blockers` rather than
+    guessed at: brace and pathname expansion and $IFS word splitting each
+    turn one typed word into several argv words, which no single Word can
+    represent.
     """
     states = list(scan_states(raw))
     n = len(raw)
     parts = []
     marks = []
+    blockers = []
     length = 0
-    undecodable = False
     i = 0
     while i < n:
         quote = states[i][0]
@@ -641,8 +784,10 @@ def normalize_word(raw):
             j = i
             while j < n and states[j][0] is None:
                 j += 1
-            text, run_marks = expand_run(raw[i:j], states[i:j])
+            text, run_marks, splits = expand_run(raw[i:j], states[i:j], False)
             marks.extend(length + m for m in run_marks)
+            if splits and "split" not in blockers:
+                blockers.append("split")
             parts.append(text)
             length += len(text)
             i = j
@@ -650,8 +795,8 @@ def normalize_word(raw):
         # A quoted span. Inside one, an unescaped delimiter character can
         # only BE the delimiter, so this finds the end without a second
         # scanner: `'a''b'` is two spans, not one span holding two quotes.
-        ansi = quote == "'" and raw[i] == "$"
-        i += 2 if ansi else 1  # step over `$'` or the single delimiter
+        dollar = raw[i] == "$"  # `$'…'` or `$"…"` — the `$` opens the span
+        i += 2 if dollar else 1
         start = i
         while i < n and not (states[i][0] == quote and not states[i][1]
                              and raw[i] == quote):
@@ -660,17 +805,22 @@ def normalize_word(raw):
         body = raw[start:end]
         i += 1  # step over the closing delimiter (or past the end)
         if quote == '"':
-            text, run_marks = expand_run(body, states[start:end])
+            text, run_marks, _ = expand_run(body, states[start:end], True)
             marks.extend(length + m for m in run_marks)
-        elif ansi:
+        elif dollar:
             text, decoded = decode_ansi_c(body)
-            if not decoded:
-                undecodable = True
+            if not decoded and "ansi" not in blockers:
+                blockers.append("ansi")
         else:
             text = body  # a POSIX single-quoted span is literal
         parts.append(text)
         length += len(text)
-    return Word("".join(parts), marks, undecodable)
+    braced, globbed = unquoted_specials(raw, states)
+    if braced:
+        blockers.append("brace")
+    if globbed:
+        blockers.append("glob")
+    return Word("".join(parts), marks, blockers)
 
 
 def split_words(text):
@@ -761,8 +911,21 @@ def split_segments(cmd, masked):
 REDIRECT_RE = re.compile(r"(\d*>{1,2}&?\d*|&>{1,2})[ \t]*([^\s;|&<>]*)")
 
 
-def redirects_allowed(cmd, masked):
-    """Every >-family redirection target must be an allowed write path."""
+def relative_path(text):
+    """True when a path's meaning depends on the working directory."""
+    return not (text.startswith("/") or text.startswith("~"))
+
+
+def redirects_allowed(cmd, masked, moves_cwd):
+    """Every >-family redirection target must be an allowed write path.
+
+    `moves_cwd` says the command contains a `cd`. path_allowed resolves a
+    relative path against THIS process's working directory, and `cd` changes
+    bash's without changing the guard's — so with a session started in an
+    allowed root, `cd <repo> && echo hi > pwn.txt` resolved the target back
+    into that root and passed while bash wrote into the repo. A relative
+    target is unknowable once the command moves, so it is denied.
+    """
     states = list(scan_states(cmd))
     for m in REDIRECT_RE.finditer(masked):
         op = m.group(1)
@@ -779,6 +942,8 @@ def redirects_allowed(cmd, masked):
                            "/dev/tty"):
             continue
         if target.unresolved or not path_allowed(target.text):
+            return False, target
+        if moves_cwd and relative_path(target.text):
             return False, target
     return True, None
 
@@ -844,11 +1009,20 @@ def gh_segment_allowed(words):
     return verb in verbs if verb else True  # bare group prints help
 
 
-def scratch_op_allowed(words):
+def scratch_op_allowed(words, after_cd):
+    """Every path argument must land in an allowed write root.
+
+    `after_cd` says an earlier segment of this command moved bash's working
+    directory. path_allowed resolves a relative path against the guard's own
+    cwd, which `cd` does not change, so a relative path is unknowable from
+    that point on and is denied (see redirects_allowed).
+    """
     for w in words[1:]:
         if w.text.startswith("-"):
             continue
         if w.unresolved or not path_allowed(w.text):
+            return False
+        if after_cd and relative_path(w.text):
             return False
     return True
 
@@ -859,12 +1033,28 @@ def strip_grouping(segment):
     `{` and `(` are structure, not commands. What the group contains is still
     checked as an ordinary segment, so `(git push)` reads as `git push` and
     stays denied; a segment that was pure structure (a lone `}`) empties out.
+
+    A brace token only groups when it stands as its own word — bash reads
+    `{echo` as a command name and `-{D,D}` as one word. Stripping a `}` glued
+    to the text before it took the closing brace off a brace group and hid it
+    from the brace check (issue #1017). `(` and `)` need no such test: a
+    subshell's parentheses are operators and never part of a word.
     """
     s = segment.strip()
-    while s and s[0] in "{(":
-        s = s[1:].lstrip()
-    while s and s[-1] in "})":
-        s = s[:-1].rstrip()
+    while s:
+        if s[0] == "(":
+            s = s[1:].lstrip()
+        elif s[0] == "{" and (len(s) == 1 or s[1] in " \t\n"):
+            s = s[1:].lstrip()
+        else:
+            break
+    while s:
+        if s[-1] == ")":
+            s = s[:-1].rstrip()
+        elif s[-1] == "}" and (len(s) == 1 or s[-2] in " \t\n;"):
+            s = s[:-1].rstrip()
+        else:
+            break
     return s
 
 
@@ -885,71 +1075,56 @@ def open_consumer(words):
     return bool(words) and words[0].text.rsplit("/", 1)[-1] in READ_ONLY
 
 
-def placeholder_misuse(segment):
-    """True when a checked substitution stands in for an argument to a
-    command that is not read-only.
+# Blocker key -> denial message, in the order the message is chosen. A word
+# can carry several; the first one named is the one that best explains what
+# bash would do with it.
+BLOCKER_REASONS = (
+    ("ansi", ANSI_ARG_REASON),
+    ("split", SPLIT_ARG_REASON),
+    ("brace", BRACE_ARG_REASON),
+    ("glob", GLOB_ARG_REASON),
+)
 
-    A verified substitution collapses to a placeholder, and the shell
-    word-splits its output into real argv: `sed $(echo -i) …` IS `sed -i …`.
-    Checking the inner command read-only says nothing about its output, so
-    only plain read-only consumers may take one — every branch in
-    bash_segment_allowed decides on literal argument text (`-i`, `-delete`,
-    `-o`, `-X`, a path) that a placeholder silently slips past.
 
-    The deny decision and its message both read this, so the message can name
-    what actually happened instead of quoting a token the user never typed.
+def argument_blocker(segment):
+    """Why a command that is not read-only may not take one of its arguments.
+
+    Returns the denial text, or None when every argument is readable. One
+    predicate, because every case is the same case: the guard cannot tell
+    what bash will hand the command, and every branch below decides on
+    literal argument text (`-i`, `-delete`, `-o`, `-X`, `--`, a path) that an
+    unreadable word walks straight past.
+
+    Read-only consumers take anything — `echo $A`, `grep "$PAT" f`,
+    `cd $DIR`, `printf '%s' $'\\e[0m'` cannot write whatever it turns out
+    to be.
     """
     words = segment_words(segment)
     if open_consumer(words):
-        return False
-    return any(SUBST_PLACEHOLDER in w.text for w in words)
+        return None
+    if any(SUBST_PLACEHOLDER in w.text for w in words):
+        return SUBST_ARG_REASON
+    for key, reason in BLOCKER_REASONS:
+        if any(key in w.blockers for w in words):
+            return reason
+    if any(w.leading_unresolved or w.flag_unresolved for w in words):
+        return VAR_ARG_REASON
+    return None
 
 
-def var_misuse(segment):
-    """True when a command that is not read-only takes an argument whose
-    expansion this gate cannot resolve, in a position that decides the
-    command.
-
-    Two positions do: the START of a word (the whole argument is unknowable,
-    so it can be `-i`, `--`, or a repo path) and inside a flag-shaped word
-    before its first `=` (the flag's LETTERS are unknowable, so `A=i` turns
-    `sed -$A f` into an in-place edit). An expansion after a flag's `=`
-    (`--title=$T`) is a value, and one in a plain word (`s/a/b/$A`) can
-    become neither a flag nor a fresh path — both are left alone.
-
-    The deny decision and its message both read this predicate.
-    """
+def moves_cwd(segment):
+    """True when this segment changes bash's working directory."""
     words = segment_words(segment)
-    if open_consumer(words):
-        return False
-    return any(w.leading_unresolved or w.flag_unresolved for w in words)
+    return bool(words) and words[0].text.rsplit("/", 1)[-1] in CD_COMMANDS
 
 
-def ansi_misuse(segment):
-    """True when a command that is not read-only takes a `$'…'` word this
-    gate could not fully decode.
-
-    Position does not matter here: a body that stopped decoding could hold
-    any character at all, so the word bash passes is unknown wherever it
-    sits. Read-only consumers still take one.
-    """
-    words = segment_words(segment)
-    if open_consumer(words):
-        return False
-    return any(w.undecodable for w in words)
-
-
-def bash_segment_allowed(segment):
+def bash_segment_allowed(segment, after_cd=False):
     words = segment_words(segment)
     if not words:
         return True
     first = words[0].text.rsplit("/", 1)[-1]  # /usr/bin/git → git
     args = [w.text for w in words[1:]]
-    if placeholder_misuse(segment):
-        return False
-    if ansi_misuse(segment):
-        return False
-    if var_misuse(segment):
+    if argument_blocker(segment) is not None:
         return False
     if first == "sed":
         # -i in any form: bare, with attached suffix (-i.bak), inside a
@@ -969,7 +1144,7 @@ def bash_segment_allowed(segment):
     if first in READ_ONLY:
         return True
     if first in SCRATCH_OPS:
-        return scratch_op_allowed(words)
+        return scratch_op_allowed(words, after_cd)
     if first == "git":
         return git_segment_allowed(words)
     if first == "gh":
@@ -1104,24 +1279,32 @@ def check_command(command, depth=0):
         command = command[:start] + SUBST_PLACEHOLDER + command[end:]
     if spans:
         masked = mask_quotes(command)
-    ok, target = redirects_allowed(command, masked)
+    segments = split_segments(command, masked)
+    cd_anywhere = any(moves_cwd(seg) for seg in segments)
+    ok, target = redirects_allowed(command, masked, cd_anywhere)
     if not ok:
         if SUBST_PLACEHOLDER in target.text:
             return SUBST_TARGET_REASON
         if target.unresolved:
             return VAR_TARGET_REASON
+        if cd_anywhere and relative_path(target.text):
+            return CD_PATH_REASON
         return ("redirecting output into `%s` writes outside the "
                 "orchestrator's work-product paths." % target.text)
-    for segment in split_segments(command, masked):
-        if not bash_segment_allowed(segment):
-            if placeholder_misuse(segment):
-                return SUBST_ARG_REASON
-            if ansi_misuse(segment):
-                return ANSI_ARG_REASON
-            if var_misuse(segment):
-                return VAR_ARG_REASON
+    after_cd = False
+    for segment in segments:
+        if not bash_segment_allowed(segment, after_cd):
+            reason = argument_blocker(segment)
+            if reason is not None:
+                return reason
+            if after_cd and any(relative_path(w.text)
+                                for w in segment_words(segment)[1:]
+                                if not w.text.startswith("-")):
+                return CD_PATH_REASON
             return ("`%s` is not on the orchestrator's read-only/"
                     "orchestration allowlist." % segment.strip())
+        if moves_cwd(segment):
+            after_cd = True
     return None
 
 

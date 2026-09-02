@@ -3,13 +3,18 @@
 # what REAL bash does, not with what the guard was expected to say.
 #
 # The invariant under test is one line: IF BASH MUTATED THE SANDBOX, THE GUARD
-# EXITED 2. Nothing else is asserted — the guard is allowed to over-deny, which
+# DENIED. Nothing else is asserted — the guard is allowed to over-deny, which
 # is this gate's stated direction, but it may never let a write through.
 #
-# This is the method that found issue #1017 (quoted, ANSI-C and expansion flag
-# carriers walking past the literal flag scans). It runs a generated
-# carrier x command matrix, so adding a carrier or a command is one line and
-# every combination of the two is covered without hand-listing rows.
+# "Denied" means exit 2 AND a denial written to stderr. Exit 2 alone is not
+# enough: python itself exits 2 when it cannot open a file, so a missing or
+# moved guard would otherwise read as a denial on every row and the suite
+# would report a perfect green while nothing was ever checked. The controls
+# below catch the same class before the matrix runs.
+#
+# The matrix axis is BASH's expansion stages, not the normalizer's feature
+# list — a matrix built from the implementation's own model cannot find a
+# bypass outside that model. Adding a carrier or a command is one line.
 #
 # Everything happens inside a throwaway sandbox: a fake HOME, a fake repo with
 # a victim file and a scratch git branch, and the session flag for a fixed
@@ -22,7 +27,10 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-GUARD="${MODULE_ROOT}/hooks/advisor-guard.py"
+# ADVISOR_GUARD lets a caller point this at another build of the guard — used
+# to prove the harness fails when the guard cannot run, and to re-run the
+# matrix against an older revision.
+GUARD="${ADVISOR_GUARD:-${MODULE_ROOT}/hooks/advisor-guard.py}"
 
 PASS=0
 FAIL=0
@@ -42,9 +50,67 @@ REPO="${HOME}/code/repo"
 PRISTINE="${TMP}/pristine"
 VICTIM="${REPO}/victim.txt"
 PWNED="${REPO}/pwn.txt"
+GUARD_IN="${TMP}/guard-in.json"
+GUARD_ERR="${TMP}/guard-err.txt"
 
 cleanup() { python3 -c "import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)" "${TMP}"; }
 trap cleanup EXIT
+
+# ─── Running the guard ───────────────────────────────────────────────────────
+
+GUARD_RC=0
+GUARD_DENIED=0
+
+# The hook input is built in bash rather than by a python subprocess: the
+# matrix is ~200 rows and interpreter startup dominates the runtime. Only the
+# four characters the carriers can produce need escaping; anything else would
+# make the JSON invalid, the guard would fail open, and the row would report
+# loudly as "guard allowed" rather than passing quietly.
+json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "${s}"
+}
+
+run_guard() {
+    printf '{"tool_name":"Bash","tool_input":{"command":"%s"},"session_id":"%s"}' \
+        "$(json_escape "$1")" "${SID}" > "${GUARD_IN}"
+    python3 "${GUARD}" < "${GUARD_IN}" >/dev/null 2>"${GUARD_ERR}"
+    GUARD_RC=$?
+    if [ "${GUARD_RC}" = "2" ] && [ -s "${GUARD_ERR}" ]; then
+        GUARD_DENIED=1
+    else
+        GUARD_DENIED=0
+    fi
+}
+
+# ─── Controls: the harness must be able to tell allow from deny ─────────────
+
+if [ ! -f "${GUARD}" ]; then
+    echo "FAIL: guard not found at ${GUARD} — nothing was checked"
+    exit 1
+fi
+
+run_guard 'git commit -m x'
+if [ "${GUARD_DENIED}" = "1" ]; then
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: positive control — the guard did not deny \`git commit -m x\`"
+    echo "  exit: ${GUARD_RC}   stderr: $(cat "${GUARD_ERR}")"
+    exit 1
+fi
+
+run_guard 'git status'
+if [ "${GUARD_RC}" = "0" ] && [ "${GUARD_DENIED}" = "0" ]; then
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: negative control — the guard did not allow \`git status\`"
+    echo "  exit: ${GUARD_RC}   stderr: $(cat "${GUARD_ERR}")"
+    exit 1
+fi
 
 # ─── Sandbox fixture ─────────────────────────────────────────────────────────
 
@@ -104,9 +170,11 @@ fi
 # ─── Carriers: every way to spell one token ──────────────────────────────────
 
 # Each sets CARRY_TOKEN (how the token is written) and CARRY_PREFIX (any
-# assignment segments the spelling needs first). A carrier that hides the
-# token from a literal scan is exactly the class issue #1017 covers.
-CARRIERS="bare squote dquote split backslash ansi ansihex ansioct ansiuni var dqvar indirect default flagvar"
+# assignment segments the spelling needs first). The first block is
+# character-level — quoting and escapes that hide a flag from a literal scan.
+# The second is word-level: bash steps that turn ONE typed word into SEVERAL
+# argv words, which is the class a per-word model cannot express.
+CARRIERS="bare squote dquote split backslash ansi ansihex ansioct ansiuni var dqvar indirect default flagvar dqdollar brace ifs contin glob"
 
 enc_ansi() {  # per-character \xHH / \NNN / \uHHHH bodies
     local fmt="$1" s="$2" i c out=""
@@ -141,6 +209,20 @@ B=${tok}"; CARRY_TOKEN='${!A}' ;;
             else
                 CARRY_PREFIX="A=${tok}"; CARRY_TOKEN='$A'
             fi ;;
+        # `$"…"` is locale-translation quoting; with no catalogue bash returns
+        # the text unchanged, so it is another way to spell the bare token.
+        dqdollar)  CARRY_TOKEN="\$\"${tok}\"" ;;
+        # Brace expansion: one typed word, two argv words.
+        brace)     CARRY_TOKEN="{${tok},${tok}}" ;;
+        # $IFS word splitting, with the expansion MID-word (a leading one is
+        # already denied by the positional rule, so it would prove nothing).
+        ifs)       CARRY_TOKEN=".\$IFS${tok}" ;;
+        # Line continuation: bash deletes the backslash-newline pair.
+        contin)    CARRY_TOKEN="${tok:0:1}\\
+${tok:1}" ;;
+        # Pathname expansion against the run directory, which holds a file
+        # named after each flag token (see GLOB_BAIT below).
+        glob)      CARRY_TOKEN="${tok:0:$(( ${#tok} - 1 ))}*" ;;
         *) echo "unknown carrier ${kind}" >&2; exit 1 ;;
     esac
 }
@@ -192,16 +274,17 @@ cmd_cwd() {  # git needs to run inside the fake repo
     esac
 }
 
-# ─── The loop ────────────────────────────────────────────────────────────────
-
-guard_exit() {
-    python3 - "$1" "${SID}" <<'PY' | python3 "${GUARD}" >/dev/null 2>&1
-import json, sys
-print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]},
-                  "session_id": sys.argv[2]}))
+# Bait for the glob carrier: a file named after each flag token, in the
+# directory the non-git rows run from. `find <repo> -dele*` then reaches find
+# as `-delete`. Creating these is itself allowed by the gate — temp roots are
+# allowed write roots — which is what makes the glob carrier one command away.
+python3 - "${TMP}" <<'PY'
+import os, sys
+for name in ("-i", "-delete", "-exec", "-o", "--", "-D", "-X"):
+    open(os.path.join(sys.argv[1], name), "w").close()
 PY
-    return $?
-}
+
+# ─── The loop ────────────────────────────────────────────────────────────────
 
 # reset_sandbox restores the pristine tree, so the "clean" hash is constant.
 reset_sandbox
@@ -218,8 +301,8 @@ ${full}"
         fi
         ROWS=$((ROWS + 1))
 
-        guard_exit "${full}"
-        rc=$?
+        run_guard "${full}"
+        denied="${GUARD_DENIED}"
 
         mutated=0
         if cmd_runs_bash "${cmd_key}"; then
@@ -233,11 +316,11 @@ ${full}"
         fi
 
         # The differential invariant: bash wrote, so the guard had to deny.
-        if [ "${mutated}" = "1" ] && [ "${rc}" != "2" ]; then
+        if [ "${mutated}" = "1" ] && [ "${denied}" != "1" ]; then
             FAIL=$((FAIL + 1))
             echo "FAIL: bash mutated the sandbox but the guard allowed it"
             echo "  carrier: ${carrier}   command: ${cmd_key}"
-            echo "  guard exit: ${rc}"
+            echo "  guard exit: ${GUARD_RC}"
             echo "  command: ${full}"
         else
             PASS=$((PASS + 1))
@@ -246,12 +329,13 @@ ${full}"
         # The bash side proves the invariant only where bash actually wrote.
         # This pins the rest of the matrix — no spelling of a mutating flag is
         # allowed, including the gh rows that never run.
-        if [ "${rc}" = "2" ]; then
+        if [ "${denied}" = "1" ]; then
             PASS=$((PASS + 1))
         else
             FAIL=$((FAIL + 1))
             echo "FAIL: guard allowed a mutating flag"
             echo "  carrier: ${carrier}   command: ${cmd_key}"
+            echo "  guard exit: ${GUARD_RC}"
             echo "  command: ${full}"
         fi
     done
