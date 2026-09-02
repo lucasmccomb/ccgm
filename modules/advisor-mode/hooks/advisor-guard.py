@@ -532,10 +532,12 @@ def decode_ansi_c(body):
                 j += 1
             if j == i:
                 return "".join(out), False  # \x with no digits
-            try:
-                out.append(chr(int(body[i:j], 16)))
-            except ValueError:
+            code = int(body[i:j], 16)
+            if code > 0x10FFFF:
+                # Checked rather than caught: chr() raises ValueError on some
+                # Python versions and OverflowError on others.
                 return "".join(out), False  # past the Unicode range
+            out.append(chr(code))
             i = j
             continue
         return "".join(out), False  # unrecognized escape — never guess
