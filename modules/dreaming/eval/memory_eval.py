@@ -989,11 +989,15 @@ def _run_one(
         # judge would score the untouched fixture -- which on a canary task
         # scores 10.0, an actively wrong number for a run that did no work --
         # and on a broken harness that is a full task's judge calls spent
-        # every night before the whole-run abort fires. is_error already
-        # carries the signal via format_error_rate; the score floors at 0.0.
-        # NOT tagged with "error": that key means the JUDGE failed and
-        # excludes the run from mean_score. Here the agent failed, and the
-        # arm should carry the zero.
+        # every night before the whole-run abort fires.
+        #
+        # The placeholder score below is NEVER averaged into anything: the
+        # row is tagged `launch_error` and _aggregate_arm_runs() drops it
+        # from every mean. Recording an untagged 0.0 here was itself a
+        # fail-open -- two failed launches in a five-run baseline arm pulled
+        # the mean down far enough to classify the row `high_value` and
+        # open the gate on a partially broken harness. A run that did not
+        # execute must not move a score in EITHER direction.
         judged = {"pass": False, "score": 0.0, "usage": {"input_tokens": 0, "output_tokens": 0}}
     else:
         final_files = {} if offline_score is not None else snapshot_workdir(workdir)
@@ -1031,6 +1035,11 @@ def _run_one(
         "judge_input_tokens": int(judged.get("usage", {}).get("input_tokens", 0) or 0),
         "judge_output_tokens": int(judged.get("usage", {}).get("output_tokens", 0) or 0),
         "is_error": bool(result.get("is_error", False)),
+        # #1027: None when the agent process ran; a string naming the
+        # failure when it never executed. Consumed by _aggregate_arm_runs()
+        # to exclude this run from every mean -- the sibling of
+        # "judge_error" one level down the same pipeline.
+        "launch_error": (str(result.get("result")) if result.get("is_error") else None),
         # Stage-2 #771: None on a genuine judge verdict (including the
         # --offline canned path); a non-empty string whenever `score`
         # above is a failure sentinel, not a real judgment -- consumed by
@@ -1059,15 +1068,26 @@ def _aggregate_arm_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     # run can succeed while its judge call fails, and vice versa);
     # judge_error_rate is the judge-side counterpart, tracked separately so
     # gate_check() can refuse to trust a classification built on it.
-    scored_runs = [r for r in runs if not r.get("judge_error")]
+    #
+    # #1027: a run that never EXECUTED is excluded one level earlier, from
+    # every mean rather than only the score ones. Its token, turn and cost
+    # figures are all zero -- averaging them in understates the arm on
+    # exactly the metrics classify_bucket() compares. The rates below stay
+    # over ALL attempted runs: format_error_rate is the failure rate, so
+    # its denominator must be everything that was tried.
+    # Keyed on `is_error` as well as the tag: `is_error` is the canonical
+    # per-run flag (format_error_rate is computed from it), and one
+    # predicate over both keeps the two from drifting apart.
+    executed_runs = [r for r in runs if not (r.get("is_error") or r.get("launch_error"))]
+    scored_runs = [r for r in executed_runs if not r.get("judge_error")]
     return {
         "mean_score": statistics.fmean(r["score"] for r in scored_runs) if scored_runs else 0.0,
         "pass_rate": (sum(1 for r in scored_runs if r["pass"]) / len(scored_runs)) if scored_runs else 0.0,
-        "mean_input_tokens": statistics.fmean(r["input_tokens"] for r in runs),
-        "mean_total_input_tokens": statistics.fmean(r["total_input_tokens"] for r in runs),
-        "mean_output_tokens": statistics.fmean(r["output_tokens"] for r in runs),
-        "mean_turns": statistics.fmean(r["turns"] for r in runs),
-        "mean_cost_usd": statistics.fmean(r["run_cost_usd"] for r in runs),
+        "mean_input_tokens": statistics.fmean(r["input_tokens"] for r in executed_runs) if executed_runs else 0.0,
+        "mean_total_input_tokens": statistics.fmean(r["total_input_tokens"] for r in executed_runs) if executed_runs else 0.0,
+        "mean_output_tokens": statistics.fmean(r["output_tokens"] for r in executed_runs) if executed_runs else 0.0,
+        "mean_turns": statistics.fmean(r["turns"] for r in executed_runs) if executed_runs else 0.0,
+        "mean_cost_usd": statistics.fmean(r["run_cost_usd"] for r in executed_runs) if executed_runs else 0.0,
         "format_error_rate": sum(1 for r in runs if r["is_error"]) / len(runs),
         "judge_error_rate": sum(1 for r in runs if r.get("judge_error")) / len(runs),
         "runs": len(runs),
@@ -1250,6 +1270,31 @@ def run_task(
     return rows
 
 
+def launch_failure_summary(arms: dict[str, dict[str, Any]]) -> str | None:
+    """A human-readable "which arm, how many runs" summary of the launch
+    failures in `arms`, or None when every attempted run executed (#1027).
+
+    This is the row-level half of the rule that a run which never executed
+    moves no score: `_aggregate_arm_runs()` keeps such runs out of the
+    means, and a row with ANY of them is bucketed `error` below. Otherwise a
+    partial harness failure still steers the classifier -- a couple of
+    failed launches in the baseline arm leave that arm's mean computed from
+    whichever runs happened to survive, which is a smaller sample, not a
+    measurement of memory. Bucketing `error` makes partial breakage able to
+    CLOSE the gate and never to open it."""
+    parts = []
+    for arm in ARMS:
+        stats = arms.get(arm) or {}
+        total = int(stats.get("runs", 0) or 0)
+        rate = float(stats.get("format_error_rate", 0.0) or 0.0)
+        if total <= 0 or rate <= 0:
+            continue
+        parts.append(f"{arm} {round(rate * total)}/{total}")
+    if not parts:
+        return None
+    return "runs that failed to execute: " + ", ".join(parts)
+
+
 def _build_result_row(
     *, task_id: str, kind: str, backbone: str, runs: int, offline: bool,
     arms: dict[str, dict[str, Any]], bucket: str, delta: float, delta_sat: float, extra: dict[str, Any] | None = None,
@@ -1259,6 +1304,15 @@ def _build_result_row(
     )
     turn_delta = arms["treatment"]["mean_turns"] - arms["baseline"]["mean_turns"]
     total_cost = sum(a["mean_cost_usd"] * a["runs"] for a in arms.values())
+    # #1027: any arm with a run that never executed makes this row a harness
+    # observation, not a memory measurement. `error` is a bucket
+    # classify_bucket() never returns and gate_check() treats as neither
+    # high_value nor regression, so the row is inert to the gate -- it can
+    # cost the run its "at least one high_value row" (and, for the live
+    # dreamed row, close the gate outright), never open it.
+    launch_failures = launch_failure_summary(arms)
+    if launch_failures is not None:
+        bucket = "error"
     row = {
         "date": today_iso(),
         "generated_at": _utc_now_iso(),
@@ -1277,6 +1331,8 @@ def _build_result_row(
         "cost_usd": round(total_cost, 6),
         "bucket": bucket,
     }
+    if launch_failures is not None:
+        row["task_error"] = launch_failures
     if extra:
         row.update(extra)
     return row
@@ -1574,6 +1630,19 @@ def write_harness_broken_marker(*, date: str, detail: str) -> Path:
     return path
 
 
+def clear_harness_broken_markers() -> int:
+    """Remove every abort marker in evals/. Called on the success path: a run
+    that produced results has demonstrated the harness works."""
+    d = evals_dir()
+    if not d.is_dir():
+        return 0
+    removed = 0
+    for marker in d.glob(f"*{HARNESS_BROKEN_MARKER_SUFFIX}"):
+        marker.unlink(missing_ok=True)
+        removed += 1
+    return removed
+
+
 def _find_latest_harness_broken_marker() -> Path | None:
     d = evals_dir()
     if not d.is_dir():
@@ -1690,9 +1759,11 @@ def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float 
     # whole freshness window -- opening on a green stale file while tonight's
     # harness is provably broken. The marker is newer than any results file
     # only while no successful run has happened since the abort.
+    # `>=`, not `>`: on a filesystem with 1-second mtime granularity a marker
+    # written in the same second as the newest results must not lose the tie.
     marker = _find_latest_harness_broken_marker()
-    if marker is not None and (latest is None or marker.stat().st_mtime > latest.stat().st_mtime):
-        broken_date = marker.name[: -len(HARNESS_BROKEN_MARKER_SUFFIX)]
+    if marker is not None and (latest is None or marker.stat().st_mtime >= latest.stat().st_mtime):
+        broken_date = marker.name[: -len(HARNESS_BROKEN_MARKER_SUFFIX)] or "an unknown date"
         return False, f"harness broken: every agent run failed to execute on {broken_date}"
 
     if latest is None:
@@ -1801,7 +1872,11 @@ def render_summary_table(rows: list[dict[str, Any]]) -> str:
             r["task_id"], r["kind"], r["backbone"],
             f"{r['baseline']['mean_score']:.2f}", f"{r['treatment']['mean_score']:.2f}", f"{r['full_context']['mean_score']:.2f}",
             f"{r['delta']:+.2f}", f"{r['delta_sat']:+.2f}", bucket_cell,
-            f"{r['treatment']['format_error_rate'] * 100:.0f}",
+            # Worst-case across the arms, like judge_err% beside it: a
+            # launch failure in ANY arm now buckets the row `error`
+            # (#1027), so showing only treatment's rate would leave the
+            # reason for that bucket invisible in the printed summary.
+            f"{max((r.get(arm) or {}).get('format_error_rate', 0.0) or 0.0 for arm in ARMS) * 100:.0f}",
             f"{judge_err_rate * 100:.0f}",
         ]))
     bucket_counts: dict[str, int] = {}
@@ -1815,6 +1890,12 @@ def render_summary_table(rows: list[dict[str, Any]]) -> str:
         lines.append(
             "judge_err% > 0 on at least one row -- judge API transport/parse failures occurred; "
             "affected runs are excluded from mean_score, not averaged in as a fabricated 0.0 (Stage-2 #771)"
+        )
+    if bucket_counts.get("error"):
+        lines.append(
+            "bucket `error` -- the row's own orchestration failed, or an arm had a run that never "
+            "executed; either way it is a harness observation, not a memory measurement, and the "
+            "gate treats it as neither high_value nor regression (#1027)"
         )
     return "\n".join(lines)
 
@@ -1938,7 +2019,13 @@ def main(argv: list[str] | None = None) -> int:
     reset_agent_error_samples()
     sandbox_root = Path(tempfile.mkdtemp(prefix="ccgm-eval-sandbox-"))
     all_rows: list[dict[str, Any]] = []
-    wrote_results = False
+    # st_mtime_ns of this process's last write_results(), or None if it never
+    # wrote. Not a bool: the abort's unlink must remove the file THIS process
+    # wrote and not one a concurrent same-date run finished in the meantime
+    # (#1027 review). Concurrent same-date runs are already unsafe --
+    # write_results() truncates -- but deleting another run's paid-for rows
+    # is a new way to lose them, and the check costs one stat().
+    wrote_results: int | None = None
     try:
         for task in tasks:
             print(f"memory_eval: running task {task['id']} (kind={task['kind']})...", file=sys.stderr)
@@ -1988,15 +2075,27 @@ def main(argv: list[str] | None = None) -> int:
             # KeyboardInterrupt) must not discard already-completed tasks'
             # results either.
             write_results(all_rows, date=date)
-            wrote_results = True
+            wrote_results = results_path_for_date(date).stat().st_mtime_ns
     except HarnessBrokenError as exc:
         print(f"memory_eval: {exc}", file=sys.stderr)
         # An earlier task whose own orchestration raised writes a zero-run
         # `error` row before the rate can reach 1.0, so "no results file" is
         # not an invariant -- drop the partial file this process wrote. Its
-        # content is already gone either way (write_results truncates).
-        if wrote_results:
-            results_path_for_date(date).unlink(missing_ok=True)
+        # content is already gone either way (write_results truncates). The
+        # mtime check keeps this from deleting a concurrent run's results.
+        if wrote_results is not None:
+            partial = results_path_for_date(date)
+            try:
+                still_ours = partial.stat().st_mtime_ns == wrote_results
+            except OSError:
+                still_ours = False
+            if still_ours:
+                partial.unlink(missing_ok=True)
+            else:
+                print(
+                    f"memory_eval: {partial} changed since this run wrote it; leaving it alone",
+                    file=sys.stderr,
+                )
         # The marker is what actually keeps the gate closed: with no results
         # file, gate_check() would otherwise read the previous run's.
         marker = write_harness_broken_marker(
@@ -2009,10 +2108,14 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(sandbox_root, ignore_errors=True)
 
     results_path = write_results(all_rows, date=date)
-    # A run that produced results clears its own date's abort marker. The
-    # gate's mtime comparison already ignores an older marker; this just
-    # keeps evals/ from accumulating dead ones.
-    harness_broken_marker_path(date).unlink(missing_ok=True)
+    # A run that produced results has proved the harness works, whatever
+    # date it wrote -- so it clears EVERY marker, not just its own date's
+    # (#1027 review). Clearing only one leaves a marker whose mtime sorts
+    # newest (an NTP correction, a restore, an `rsync -a` of ~/.claude)
+    # holding the gate closed forever, with nothing to recover it: evals/ is
+    # not swept by retention and no doc tells an operator the file exists.
+    # It also stops markers accumulating one per aborted night.
+    clear_harness_broken_markers()
     print(f"memory_eval: wrote {len(all_rows)} result row(s) to {results_path}", file=sys.stderr)
     print(render_summary_table(all_rows))
     return 0

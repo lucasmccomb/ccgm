@@ -215,10 +215,15 @@ Two rules keep that shut:
   reports `harness broken: every agent run failed to execute on <date>`;
   the next run that produces results clears it.
 
-An arm run that failed to execute is never sent to the judge -- there is
-nothing to grade, and on a broken harness that would be a whole task's judge
-calls spent before the abort fires. It carries a 0.0; `format_error_rate`
-carries the reason.
+A run that never executed moves no score, in either direction. It is not
+sent to the judge (nothing to grade, and on a broken harness that would be a
+whole task's judge calls spent before the abort fires) and it is excluded
+from every mean the classifier reads -- flooring it to zero instead pulls the
+arm's mean down, and two failed launches in a five-run baseline arm are
+enough to classify the row `high_value` and open the gate on a partially
+broken harness. A row is only as good as its worst arm: any arm with a
+failed launch buckets the row `error`, naming the arm and the failed/total
+count, so partial harness failure can only close the gate, never open it.
 
 The judge call is one Messages API request per run: no sampling parameters
 (every judge model from Opus 4.7 / Sonnet 5 on returns 400 for one),

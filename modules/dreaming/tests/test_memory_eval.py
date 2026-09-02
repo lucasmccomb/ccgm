@@ -2000,6 +2000,50 @@ class WholeRunAbortTests(unittest.TestCase):
         # so there is no first-failure detail and no marker to write.
         self.assertFalse(me.harness_broken_marker_path(me.today_iso()).exists())
 
+    def test_a_successful_run_clears_every_marker_not_only_its_own_date(self):
+        """A marker whose mtime sorts newest holds the gate closed against a
+        results file that is newer by date (an NTP correction, a restore, an
+        `rsync -a` of ~/.claude), and nothing sweeps evals/. A run that
+        produced results has proved the harness works, whatever date it
+        wrote, so it clears all of them."""
+        self._write_task("01-a.json", "sweep-a")
+        self._run_main(lambda **kwargs: self._launch_failure(), date="2026-09-01")
+        self._run_main(lambda **kwargs: self._launch_failure(), date="2026-09-02")
+        markers = sorted(pth.name for pth in me.evals_dir().glob("*.harness-broken"))
+        self.assertEqual(markers, ["2026-09-01.harness-broken", "2026-09-02.harness-broken"])
+
+        exit_code, _stderr, _judge = self._run_main(lambda **kwargs: self._healthy_result(), date="2026-09-03")
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(list(me.evals_dir().glob("*.harness-broken")), [])
+        self.assertNotIn("harness broken", me.gate_check()[1])
+
+    def test_the_abort_leaves_a_concurrent_runs_results_file_alone(self):
+        """The unlink must remove the file THIS process wrote, not whatever
+        is at that path -- a second eval finishing for the same date has
+        already paid for its rows."""
+        malformed = {
+            "id": "malformed", "kind": "canary", "prompt": "p",
+            "fixture": {"files": {"a.txt": 5}}, "criteria": ["c"],
+        }
+        (self.tasks_dir / "01-malformed.json").write_text(json.dumps(malformed), encoding="utf-8")
+        self._write_task("02-broken.json", "broken")
+        other_run = json.dumps({"task_id": "from-another-process", "bucket": "redundant"})
+
+        def side_effect(**kwargs):
+            # A concurrent, healthy run finishes for the same date while
+            # this process is still in its task loop.
+            me.results_path_for_date("2026-09-02").write_text(other_run + "\n", encoding="utf-8")
+            return self._launch_failure()
+
+        exit_code, stderr, _judge = self._run_main(side_effect)
+
+        self.assertEqual(exit_code, 1)
+        self.assertTrue(me.results_path_for_date("2026-09-02").exists())
+        self.assertIn("from-another-process", me.results_path_for_date("2026-09-02").read_text(encoding="utf-8"))
+        self.assertIn("changed since this run wrote it", stderr)
+        # The marker still closes the gate -- the harness broke later today.
+        self.assertIn("harness broken", me.gate_check()[1])
+
     def test_offline_mode_skips_binary_resolution_entirely(self):
         """--offline never spawns `claude`, so a machine with no CLI at all
         must still be able to run the plumbing check."""
@@ -2014,6 +2058,164 @@ class WholeRunAbortTests(unittest.TestCase):
                 "--runs", "1", "--backbone", "fixture-model",
             ])
         self.assertEqual(exit_code, 0)
+
+
+# ---------------------------------------------------------------------------
+# #1027: a run that never executed must move no score in EITHER direction,
+# and a row containing one is a harness observation rather than a memory
+# measurement. Flooring such a run to 0.0 and averaging it in was itself a
+# fail-open: two failed launches in a five-run baseline arm pulled the mean
+# down far enough to classify the row high_value and open the gate.
+# ---------------------------------------------------------------------------
+
+class PartialLaunchFailureTests(unittest.TestCase):
+    """The arm order run_arms() uses is ARMS == (baseline, treatment,
+    full_context), `runs` sequential calls each, so with --runs 5 the first
+    two run_claude_p calls are baseline runs 0 and 1."""
+
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+        me.reset_agent_error_samples()
+        self.addCleanup(me.reset_agent_error_samples)
+        self.tasks_dir = self.tmp / "tasks"
+        self.tasks_dir.mkdir()
+        task = {
+            "id": "flake", "kind": "canary", "prompt": "do the thing",
+            "fixture": {"files": {"a.txt": "x\n"}}, "criteria": ["c"],
+            "seed_learnings": [{"type": "pattern", "content": "a seeded fact", "confidence": 8}],
+        }
+        (self.tasks_dir / "01.json").write_text(json.dumps(task), encoding="utf-8")
+
+    # Scores chosen so a HEALTHY row is genuinely high_value: baseline 4.0,
+    # treatment 7.0 (delta +3.0, over the 1.5 threshold), full_context 6.0
+    # (delta_sat +1.0, so the Δ_sat precondition holds too).
+    ARM_SCORES = {"baseline": 4.0, "treatment": 7.0, "full_context": 6.0}
+
+    @staticmethod
+    def _arm_of(*, inject: bool, prompt: str) -> str:
+        if inject:
+            return "treatment"
+        return "full_context" if "Relevant project context" in prompt else "baseline"
+
+    @staticmethod
+    def _healthy(arm: str):
+        return {
+            "is_error": False, "result": f"arm={arm}", "num_turns": 2, "total_cost_usd": 0.01,
+            "usage": {"input_tokens": 100, "output_tokens": 20},
+        }
+
+    @staticmethod
+    def _failed():
+        return {
+            "is_error": True, "result": "claude -p failed to launch: [Errno 2] ... 'claude'",
+            "usage": {}, "num_turns": 0, "total_cost_usd": 0.0,
+        }
+
+    def _run(self, *, failing_call_indexes: set):
+        """The judge reads the arm back off `agent_summary`, so each arm gets
+        a fixed score and the only thing a failed launch can change is
+        whether the run counts at all."""
+        calls = {"n": 0}
+
+        def run_claude_p(**kwargs):
+            calls["n"] += 1
+            if calls["n"] in failing_call_indexes:
+                return self._failed()
+            return self._healthy(self._arm_of(inject=kwargs["inject"], prompt=kwargs["prompt"]))
+
+        def judge(**kwargs):
+            arm = kwargs["user_obj"]["agent_summary"].split("=", 1)[1]
+            return ({"pass": True, "score": self.ARM_SCORES[arm]},
+                    {"input_tokens": 10, "output_tokens": 5})
+
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test-fixture"}), \
+                mock.patch("memory_eval.run_claude_p", side_effect=run_claude_p), \
+                mock.patch("memory_eval._call_judge_api", side_effect=judge), \
+                contextlib.redirect_stderr(io.StringIO()):
+            exit_code = me.main([
+                "--tasks", str(self.tasks_dir / "*.json"), "--runs", "5",
+                "--backbone", "fixture-model", "--claude-bin", "/usr/bin/true",
+                "--date", "2026-09-02",
+            ])
+        self.assertEqual(exit_code, 0)
+        rows = me._read_results_file(me.results_path_for_date("2026-09-02"))  # noqa: SLF001
+        self.assertEqual(len(rows), 1)
+        return rows[0]
+
+    def test_all_launches_succeeding_is_unaffected(self):
+        """The control: every run executes, so the row classifies on its
+        merits -- high_value with these scores."""
+        row = self._run(failing_call_indexes=set())
+        self.assertEqual(row["bucket"], "high_value")
+        self.assertEqual(row["baseline"]["mean_score"], 4.0)
+        self.assertEqual(row["treatment"]["mean_score"], 7.0)
+        self.assertEqual(row["delta"], 3.0)
+        self.assertEqual(row["baseline"]["format_error_rate"], 0.0)
+        self.assertNotIn("task_error", row)
+
+    def test_two_of_five_baseline_launches_failing_buckets_the_row_error(self):
+        """Same scores as the control, two baseline runs never launched."""
+        row = self._run(failing_call_indexes={1, 2})
+
+        # The two runs that never executed contribute no score in either
+        # direction: the arm's mean is still 4.0, not (3*4 + 2*0)/5 == 2.4.
+        self.assertEqual(row["baseline"]["mean_score"], 4.0)
+        self.assertEqual(row["baseline"]["format_error_rate"], 0.4)
+        # The launched runs alone would still read as high_value (delta 3.0),
+        # so the row-level rule is what stops a partial harness failure
+        # from opening the gate.
+        self.assertEqual(row["delta"], 3.0)
+        self.assertEqual(row["bucket"], "error")
+        self.assertIn("baseline 2/5", row["task_error"])
+
+    def test_a_partially_failed_row_cannot_open_the_gate(self):
+        self._run(failing_call_indexes={1, 2})
+        is_open, reason = me.gate_check()
+        self.assertFalse(is_open)
+        self.assertNotEqual(reason, "ok")
+
+    def test_launch_failures_are_excluded_from_every_mean_not_only_the_score(self):
+        """Token, turn and cost figures of a run that never executed are all
+        zero -- averaging them in understates the arm on exactly the metrics
+        classify_bucket()'s efficiency path compares."""
+        def executed(score):
+            return {
+                "score": score, "pass": True, "input_tokens": 100, "total_input_tokens": 1000,
+                "output_tokens": 20, "turns": 2, "run_cost_usd": 0.01,
+                "is_error": False, "judge_error": None, "launch_error": None,
+            }
+
+        def never_launched():
+            return {
+                "score": 0.0, "pass": False, "input_tokens": 0, "total_input_tokens": 0,
+                "output_tokens": 0, "turns": 0, "run_cost_usd": 0.0,
+                "is_error": True, "judge_error": None, "launch_error": "failed to launch",
+            }
+
+        stats = me._aggregate_arm_runs([executed(8.0), executed(8.0), never_launched()])  # noqa: SLF001
+        self.assertEqual(stats["mean_score"], 8.0)
+        self.assertEqual(stats["pass_rate"], 1.0)
+        self.assertEqual(stats["mean_input_tokens"], 100.0)
+        self.assertEqual(stats["mean_total_input_tokens"], 1000.0)
+        self.assertEqual(stats["mean_output_tokens"], 20.0)
+        self.assertEqual(stats["mean_turns"], 2.0)
+        self.assertEqual(stats["mean_cost_usd"], 0.01)
+        # The rates keep every attempted run in the denominator -- that is
+        # what makes format_error_rate a failure RATE.
+        self.assertAlmostEqual(stats["format_error_rate"], 1 / 3)
+        self.assertEqual(stats["runs"], 3)
+
+    def test_launch_failure_summary_names_each_failing_arm(self):
+        arms = {
+            "baseline": {"runs": 5, "format_error_rate": 0.4},
+            "treatment": {"runs": 5, "format_error_rate": 0.0},
+            "full_context": {"runs": 5, "format_error_rate": 0.2},
+        }
+        summary = me.launch_failure_summary(arms)
+        self.assertIn("baseline 2/5", summary)
+        self.assertIn("full_context 1/5", summary)
+        self.assertNotIn("treatment", summary)
+        self.assertIsNone(me.launch_failure_summary({a: {"runs": 5, "format_error_rate": 0.0} for a in me.ARMS}))
 
 
 # ---------------------------------------------------------------------------
