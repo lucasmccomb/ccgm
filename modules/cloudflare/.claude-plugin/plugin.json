@@ -3,7 +3,7 @@
   "author": {
     "name": "CCGM"
   },
-  "description": "Cloudflare-specific rules: Pages vs Workers selection, deployment methods, Git integration requirements.",
+  "description": "Cloudflare-specific rules: Pages vs Workers selection, API-first Git integration, Email Service, and token scopes.",
   "displayName": "Cloudflare Rules",
   "hooks": {
     "SessionStart": [

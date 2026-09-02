@@ -1,6 +1,6 @@
 # launch
 
-A `/launch <spec.md>` skill that takes a one-page spec and walks the agent end-to-end to a deployed Cloudflare Pages site. The skill is a markdown prompt the orchestrating agent reads and follows — ten phases from pre-flight to verification, with one unavoidable hand-off where the user performs the Cloudflare dashboard's Connect-to-Git step.
+A `/launch <spec.md>` skill that takes a one-page spec and walks the agent end-to-end to a deployed Cloudflare Pages site. The skill is a markdown prompt the orchestrating agent reads and follows — ten phases from pre-flight to verification, creating the Pages project via the Cloudflare API by default and handing off to the user only if the one-time Cloudflare GitHub App install is missing.
 
 ## The Karpathy Forcing Function
 
@@ -8,7 +8,7 @@ Karpathy on agent-native infra (Sequoia, 2026-04-29):
 
 > "A lot of the work, a lot of the trouble was not even writing the code for Menu Gen. It was deploying it in Vercel because I had to work with all these different services... I had to go to their settings and the menus and configure my DNS... I would hope that I could give a prompt to an LLM, build menu gen, and then I didn't have to touch anything and it's deployed in that same way on the internet. I think that would be a good kind of a test for whether or not a lot of our infrastructure is becoming more and more agent native."
 
-`/launch` is the test. Going from spec to deployed site requires multiple human-shaped steps today: dashboard project creation, DNS, secret provisioning. CCGM has `/cpm` for ongoing changes, `/ccgm-sync` for module sync, but no end-to-end `/launch`. This skill is also a probe — building it surfaces every place CCGM and Cloudflare infra are still human-shaped, and each gap is a follow-up.
+`/launch` is the test. Going from spec to deployed site requires multiple human-shaped steps today: project creation, DNS, secret provisioning. CCGM has `/cpm` for ongoing changes, `/ccgm-sync` for module sync, but no end-to-end `/launch`. This skill is also a probe — building it surfaces every place CCGM and Cloudflare infra are still human-shaped, and each gap is a follow-up.
 
 ## What This Module Provides
 
@@ -30,7 +30,7 @@ cp modules/launch/examples/sample-spec.md ~/.claude/skills/launch/examples/sampl
 
 ## Dependencies
 
-- `cloudflare` — encodes the Connect-to-Git rule the skill must respect. The skill never runs `wrangler pages deploy <new-name>` for project creation; it stops at the Pages-creation step and asks the user to perform the dashboard flow. See the constraint section below.
+- `cloudflare` — encodes the Git-integration rule the skill must respect. The skill never runs `wrangler pages deploy <new-name>` for project creation; it creates the project via the Pages API by default and stops only if the one-time GitHub App precondition is unmet. See the constraint section below.
 - `git-workflow` — branch-from-origin/main, no AI attribution, PR template discipline.
 - `docs-for-agents` — Phase 3 of the skill scaffolds an `AGENTS.md` next to the project README so the deployed project is itself agent-native.
 
@@ -53,17 +53,16 @@ The skill expects a one-page spec in the format documented by `code-quality/rule
 3. Skill performs Phase 0 pre-flight (auth checks for `gh` and `wrangler`, spec parseability).
 4. Skill parses the spec and confirms project name, framework default (Vite + React TS), required secrets.
 5. Skill creates the GitHub repo, scaffolds the project, implements the spec, commits incrementally, pushes to `main`.
-6. Skill stops at Phase 6 and tells the user: "Open the Cloudflare dashboard, Workers & Pages > Create > Pages > Connect to Git, point it at this repo, use these build settings, then say 'done' to continue."
-7. User performs the Connect-to-Git step in the browser.
-8. Skill resumes, provisions secrets via `wrangler pages secret put`, optionally attaches a custom domain, verifies the deployed URL, and reports.
+6. Skill verifies the GitHub App precondition against a throwaway-named project first, then creates the real Pages project via the Cloudflare API (`source.type: "github"`) with a read-back check, then explicitly triggers and polls the first deployment (Cloudflare does not start a build on project-create alone). If the one-time GitHub App precondition is unmet, it stops and tells the user to install it once, then retries.
+7. Skill provisions secrets via `wrangler pages secret put`, optionally attaches a custom domain, verifies the deployed URL, and reports.
 
 ## Constraints (Non-Negotiable)
 
-### Connect-to-Git only — no direct-upload Pages projects, ever
+### Git-connected only — no direct-upload Pages projects, ever
 
 The single most expensive Cloudflare mistake is creating a direct-upload Pages project (via `wrangler pages deploy <new-name>`) instead of a Git-connected one. Cloudflare does not support retrofitting Git integration onto an existing direct-upload project. The only fix is to delete and recreate, which means migrating custom domains, env vars, and bindings — multi-session production work.
 
-**The `/launch` skill MUST NEVER run `wrangler pages deploy` to create a new project.** It stops at the Pages-creation step and instructs the user to perform the Connect-to-Git dashboard flow. This is enforced in the skill prompt's Phase 6, with explicit anti-pattern callouts. See `modules/cloudflare/rules/cloudflare.md` for the full rule.
+**The `/launch` skill MUST NEVER run `wrangler pages deploy` to create a new project.** It verifies the precondition against a throwaway project first, creates the real project via the Cloudflare Pages API (`source.type: "github"`) with a read-back check, then explicitly triggers and polls the first deployment (it does not start on its own); the dashboard's Connect-to-Git flow is the fallback when the GitHub App precondition is unmet or the API is unreachable. This is enforced in the skill prompt's Phase 6, with explicit anti-pattern callouts. See `modules/cloudflare/rules/cloudflare.md` for the full rule.
 
 ### No AI attribution
 
@@ -82,7 +81,7 @@ The skill takes a spec. It does not generate a spec. If the spec is missing deta
 - Project scaffold (default: Vite + React TypeScript; spec can override)
 - Implementation of spec deliverables
 - Push to GitHub
-- Pages project creation via Connect-to-Git (user performs the dashboard step)
+- Pages project creation via the Cloudflare API (`source.type: "github"`), with dashboard Connect-to-Git as the fallback when the GitHub App precondition is unmet
 - Secret provisioning via `wrangler pages secret put`
 - Optional custom domain attachment
 - Verification: `curl` against the assigned Pages URL, confirm 200 + expected content
@@ -114,9 +113,9 @@ CCGM skills are markdown prompts the orchestrating agent reads and follows. They
 
 The natural seams of "launch a site from a spec" are: pre-flight, parse, repo creation, scaffold, implement, push, Pages, secrets, domain, verify, report. Collapsing them into three loses the failure-resume points — if the skill fails at "secrets," you do not want to re-run "scaffold." The phases correspond to resumable units of work.
 
-### Why we stop for the Connect-to-Git step
+### Why we stop only for the GitHub App install
 
-The Cloudflare dashboard's Connect-to-Git flow requires the user's browser session and explicit OAuth authorization for the GitHub repo. There is no `wrangler` command that creates a Git-integrated Pages project. The Cloudflare API surface (per the `cloudflare` module's rule) does not expose this either. The skill stops, explains exactly what to do, and resumes when the user confirms. This is the one place `/launch` is human-shaped, and the gap is filed as part of the issue's "forcing function" framing.
+The Cloudflare Pages API creates a Git-connected project directly (`source.type: "github"`) — there is no dashboard-only requirement for project creation. What the API cannot do is the very first authorization of the "Cloudflare Workers and Pages" GitHub App on an account: GitHub Apps only install through a browser consent flow, never an API. That authorization is one-time per GitHub account (or org), not per-repo and not per-project, so once it exists the skill never stops here again for that account. The skill attempts the API create, and stops only when it hits that precondition — explaining exactly what to do and resuming once the user confirms. This is the one place `/launch` is still human-shaped, and it is a much smaller gap than the dashboard-every-time flow this replaced.
 
 ## Karpathy citation
 

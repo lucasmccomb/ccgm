@@ -40,7 +40,7 @@ A one-page tool that takes pasted text and returns word count, character count (
 
 - `https://word-counter.pages.dev` returns HTTP 200 with the literal string `Word Counter` in the rendered HTML (this is what the success_criteria block above encodes).
 - Pasting "hello world" into the textarea displays "2 words, 11 characters (with spaces), 10 characters (no spaces), 1 second reading time."
-- Pushing a commit to `main` triggers an auto-deploy in the Cloudflare dashboard (the Connect-to-Git step from `/launch` Phase 6 is what makes this true; verify by checking the dashboard's Deployments tab shows the most recent commit).
+- Pushing a commit to `main` triggers an auto-deploy (the Pages project's `source.type: "github"`, set by `/launch` Phase 6's API create, is what makes this true; verify by checking the dashboard's Deployments tab shows the most recent commit).
 
 ## Notes (optional, ignored by the skill)
 

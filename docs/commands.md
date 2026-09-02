@@ -1752,9 +1752,9 @@ Takes a loose, half-formed idea and interviews you until the concept is sharp en
 
 **One-page spec to a deployed Cloudflare Pages site.**
 
-Ten phases, run end to end: pre-flight, parse the spec, create the GitHub repo, scaffold, implement the deliverables, push, create the Pages project via Connect-to-Git, provision secrets, optionally attach a custom domain, then verify and report. Default scaffold is Vite + React + TypeScript; the spec can override it.
+Ten phases, run end to end: pre-flight, parse the spec, create the GitHub repo, scaffold, implement the deliverables, push, verify the GitHub App precondition against a throwaway project and create the real Pages project via the Cloudflare API (dashboard Connect-to-Git as fallback), then explicitly trigger and poll its first deployment, provision secrets, optionally attach a custom domain, then verify and report. Default scaffold is Vite + React + TypeScript; the spec can override it.
 
-The skill stops exactly once, for the Cloudflare Connect-to-Git dashboard step, which needs your browser session. That stop is deliberate and not worked around: `/launch` never runs `wrangler pages deploy <new-name>` to create a project, because a direct-upload Pages project cannot be given Git integration afterward. Recovering from that mistake means deleting the project and migrating domains, env vars, and bindings to a replacement.
+The skill stops only if the one-time Cloudflare GitHub App install is missing on the account, which needs your browser session. That stop is deliberate and not worked around: `/launch` never runs `wrangler pages deploy <new-name>` to create a project, because a direct-upload Pages project cannot be given Git integration afterward. Recovering from that mistake means deleting the project and migrating domains, env vars, and bindings to a replacement.
 
 **Modes**: interactive (default), `mode:dry-run`. Dry-run prints every `gh`, `git`, `npm`, `wrangler`, and `curl` command that would run, in order, with the inputs each would receive, and executes nothing - no repos created, no files written, no deployments. Use it to check the skill against a spec before spending a real Cloudflare project.
 

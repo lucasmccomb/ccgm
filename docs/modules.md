@@ -921,7 +921,7 @@ One-prompt spec to deployed Cloudflare Pages site.
 
 **Installs**: `skills/launch/`, `examples/sample-spec.md`
 
-**What it does**: `/launch` takes a one-page spec and reaches a deployed Cloudflare Pages site without further human input — except for the unavoidable Connect-to-Git dashboard step, which the skill stops to ask for. Inspired by Karpathy's Sequoia talk on shrinking the prompt-to-production loop. Doubles as a forcing function for surfacing every place the infra is still human-shaped.
+**What it does**: `/launch` takes a one-page spec and reaches a deployed Cloudflare Pages site without further human input — except a one-time Cloudflare GitHub App install, which the skill stops to ask for only if it's missing (Pages project creation is throwaway-verified, then explicitly deploy-triggered and polled, since Cloudflare does not start a build on project-create alone). Inspired by Karpathy's Sequoia talk on shrinking the prompt-to-production loop. Doubles as a forcing function for surfacing every place the infra is still human-shaped.
 
 **Dependencies**: cloudflare, git-workflow, docs-for-agents
 
@@ -1093,7 +1093,7 @@ Eight documented anti-patterns extracted from real mistakes.
 5. **Premature solutions** - check linter configs and existing patterns first
 6. **Git multi-clone confusion** - branch from `origin/main`, check sibling clones
 7. **Cloudflare Pages vs Workers** - know which product to use
-8. **CF Pages without Git integration** - must be created with Git integration at inception (cannot be retrofitted)
+8. **CF Pages without Git integration** - must be created with Git integration at inception, via the API or the dashboard (cannot be retrofitted)
 
 **Dependencies**: None
 
@@ -1277,10 +1277,12 @@ Cloudflare Pages and Workers deployment guide.
 
 **What it does**: Prevents common Cloudflare deployment mistakes:
 
-- **Pages vs Workers**: Comparison table for choosing the right product
-- **Git integration**: Pages projects MUST be created via Connect-to-Git at inception — Cloudflare cannot retrofit Git integration onto an existing direct-upload project
-- **Red flags**: How to detect a misconfigured Pages project
+- **Pages vs Workers**: Comparison table for choosing the right product, plus the 2026 platform steer toward Workers + static assets for new SPAs
+- **Git integration**: Pages projects MUST be created with Git integration at inception — via the Pages API (`source.type: "github"`, precondition: a one-time Cloudflare GitHub App install) or the dashboard's Connect-to-Git flow. Cloudflare cannot retrofit Git integration onto an existing direct-upload project
+- **Red flags**: How to detect a misconfigured Pages project, including the programmatic read-back check
 - **Migration**: The destructive remediation procedure if you inherit a Pages project without Git integration
+- **Email Service**: Setup and pricing for Cloudflare's public-beta email sending API
+- **Token scopes**: What wrangler's OAuth session already covers vs. what needs a separately-minted API token or stays human-only
 
 **Dependencies**: None
 
