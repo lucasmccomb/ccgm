@@ -1,5 +1,5 @@
 ---
-description: Deep root-cause debugging with Opus 4.6 - reproduce, hypothesize, instrument, diagnose, fix, verify. Use when asked to fix bugs, debug errors, investigate failures, or troubleshoot unexpected behavior.
+description: Deep root-cause debugging - reproduce, hypothesize, instrument, diagnose, fix, verify. Use when asked to fix bugs, debug errors, investigate failures, or troubleshoot unexpected behavior.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, WebSearch, WebFetch, AskUserQuestion
 argument-hint: <problem description or error message>
 ---

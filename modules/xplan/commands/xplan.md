@@ -16,7 +16,7 @@ A human-in-the-loop planning framework that interviews you upfront, deeply resea
 | **`--light`** | Skipped | Reduced (inferred) | Internal default | Internal | Optional (no adversarial sequence) | Full section-by-section at end |
 | **`--autonomous`** | Skipped | **Full** | Internal (best-fit) | Internal (best-fit) | **Full standard + adversarial sequence (always)** | Structured plan-as-artifact presentation at end |
 
-**Reviews are two-staged**: Phase 4 runs the standard *constructive* peer review (security / architecture / business-logic) against the draft; Phase 5.7 then runs an *adversarial* review sequence — **3 sequential `adrev-reviewer` passes** (Opus 4.8, max effort), each attacking the plan after the previous pass's fixes are incorporated, the third being the final review of the fully-hardened plan. A completed plan has had **six independent reviews in the full configuration** (3 standard + 3 adversarial).
+**Reviews are two-staged**: Phase 4 runs the standard *constructive* peer review (security / architecture / business-logic) against the draft; Phase 5.7 then runs an *adversarial* review sequence — **3 sequential `adrev-reviewer` passes** (the current Opus-tier model, max effort), each attacking the plan after the previous pass's fixes are incorporated, the third being the final review of the fully-hardened plan. A completed plan has had **six independent reviews in the full configuration** (3 standard + 3 adversarial).
 
 `--light` is the *fast* path - reduced depth, minimal interaction. `--autonomous` is the *deep* path - maximum depth, zero interruption until the final gate. Pick `--autonomous` when you know exactly what you want to plan and prefer reviewing a finished artifact to answering questions during creation.
 
@@ -42,7 +42,7 @@ Specify cheaper models when spawning sub-agents to conserve usage without sacrif
 | Phase 1 | Research agents (via /deepresearch) | sonnet |
 | Phase 2 | Naming agent | sonnet |
 | Phase 4 | Standard review agents (security, architecture, business) | sonnet |
-| Phase 5.7 | **Adversarial review passes (`adrev-reviewer` ×3, sequential)** | **opus (Opus 4.8), maximum reasoning effort** |
+| Phase 5.7 | **Adversarial review passes (`adrev-reviewer` ×3, sequential)** | **opus, maximum reasoning effort** |
 | Phase 7 | Execution agents (epic implementation) | sonnet |
 
 The orchestrator (this session) stays on the current model for all synthesis, architecture, and interactive decisions. Simple background tasks (file checks, directory setup, issue creation) can use haiku if spawned as agents.
@@ -126,7 +126,7 @@ Store whether `--light` is active. It affects Phases 0.5, 1.5, 2.5, 2.6, 2.7, an
 Store whether `--autonomous` is active. It affects Phases 0.5, 1.5, 2, 2.5, 2.6, 2.7, 4.0, 5.7, and 6. Autonomous mode implies:
 - All `AskUserQuestion` calls in those phases are skipped
 - Research runs at Full depth (all 7 agents) unconditionally
-- Reviews run at Full (security + architecture + business) unconditionally, AND the Phase 5.7 adversarial review sequence is locked ON (3 sequential `adrev-reviewer` passes on Opus 4.8, each incorporating its fixes before the next; any P0/P1 the final pass leaves unresolved are surfaced at the final gate rather than prompted mid-flow)
+- Reviews run at Full (security + architecture + business) unconditionally, AND the Phase 5.7 adversarial review sequence is locked ON (3 sequential `adrev-reviewer` passes on the current Opus-tier model, each incorporating its fixes before the next; any P0/P1 the final pass leaves unresolved are surfaced at the final gate rather than prompted mid-flow)
 - Tech stack and scope are chosen via best-guess inference and documented in decisions.md
 - The final walkthrough (Phase 6) presents the plan as a completed artifact, not per-section sign-offs
 - The Phase 6.5 Final Gate still fires - it is the single user interaction point
@@ -1464,7 +1464,7 @@ Re-run 5.6.1, 5.6.2, and 5.6.3 after every round of fixes. Do not advance to Pha
 
 **Why sequential, not parallel**: each review must see the plan as hardened by the one before it. Review 2 should attack the plan *with Review 1's fixes already in place* (and probe whether those fixes introduced new weaknesses); Review 3 — the final review — attacks the plan with both prior passes incorporated, so it judges the fully-hardened artifact. Running them in parallel would have all three attack the same un-hardened plan and re-raise the same issues. Sequential reviews compound; parallel reviews duplicate. This also lets each reviewer use the `adrev-reviewer` agent's native **apply** mode safely — only one reviewer ever edits `plan.md` at a time, so there is no concurrent-write hazard.
 
-**Announce at start**: "Running the Phase 5.7 adversarial review sequence — three sequential `adrev-reviewer` passes (Opus 4.8, maximum reasoning effort). Each attacks the plan after the previous pass's fixes are incorporated; the third is the final review of the fully-hardened plan."
+**Announce at start**: "Running the Phase 5.7 adversarial review sequence — three sequential `adrev-reviewer` passes (the current Opus-tier model, maximum reasoning effort). Each attacks the plan after the previous pass's fixes are incorporated; the third is the final review of the fully-hardened plan."
 
 ### 5.7.0 When This Phase Runs
 
@@ -1492,7 +1492,7 @@ Pass 3 — FINAL review (attacks the fully-hardened plan)  →  incorporate  →
 proceed to Phase 6
 ```
 
-Every pass uses **`model: opus`** (Opus 4.8 — the most capable model) **at maximum reasoning effort**. Do NOT downgrade these to sonnet: adversarial review is the one phase where reviewer quality dominates cost, and the user pays for the deep pass precisely here.
+Every pass uses **`model: opus`** (the current Opus-tier model) **at maximum reasoning effort**. Do NOT downgrade these to sonnet: adversarial review is the one phase where reviewer quality dominates cost, and the user pays for the deep pass precisely here.
 
 Each pass runs the full attack battery. Give each a **distinct lead lens** via `focus` so the three passes press hardest on different angles rather than repeating one another:
 
