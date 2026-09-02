@@ -506,13 +506,16 @@ RC=$?
 assert_eq "${RC}" "0" "pricing unknown: analyzer exits 0"
 
 T7C_COST_VAL=$(read_cost_field "${T7C_DIR}/cost.log" "${TODAY}" 3)
-assert_eq "${T7C_COST_VAL}" "0.007200" "pricing unknown: cost falls back to sonnet (\$3/M + \$15/M)"
+# The last-resort rate tracks the model the analyzer actually calls
+# (claude-sonnet-5, $2/M in + $10/M out since #1028), not the retired pin:
+#   (1200*2 + 240*10) / 1e6 = (2400 + 2400) / 1e6 = 0.004800
+assert_eq "${T7C_COST_VAL}" "0.004800" "pricing unknown: cost falls back to the analyzer's own model (\$2/M + \$10/M)"
 T7C_MODEL_VAL=$(read_cost_field "${T7C_DIR}/cost.log" "${TODAY}" 4)
 assert_eq "${T7C_MODEL_VAL}" "claude-mystery-9-9" "pricing unknown: configured model id still recorded for traceability"
 
 T7C_ERR=$(cat "${T7C_HOME}/run.err")
 assert_contains "${T7C_ERR}" "no cost_pricing for model claude-mystery-9-9" "pricing unknown: stderr warning emitted"
-assert_contains "${T7C_ERR}" "falling back" "pricing unknown: stderr explains fallback"
+assert_contains "${T7C_ERR}" "falling back to claude-sonnet-5" "pricing unknown: stderr names the model it fell back to"
 
 # Test 7d — back-compat: a cost.log written by older code (no model
 # field) parses cleanly when summing today's spend (cap check).
@@ -546,6 +549,177 @@ fi
 
 # Cleanup test 7 dirs.
 for d in "${T7A_HOME}" "${T7B_HOME}" "${T7C_HOME}" "${T7D_HOME}"; do
+    rm -rf "${d}"
+done
+
+# ---------------------------------------------------------------------
+# Test 8 — request shape on the wire (#1026, #1028).
+#
+# The fixture path short-circuits curl, so this test shims curl on PATH
+# instead: the shim keeps the real request body the analyzer built and
+# answers with the same fixture. Every field checked here belongs in the
+# body; none of them is a header.
+# ---------------------------------------------------------------------
+
+T8_HOME=$(mktemp -d -t autoheal_t8.XXXXXX)
+T8_DIR="${T8_HOME}/autoheal"
+mk_state "${T8_DIR}"
+write_events "${T8_DIR}/events/${YESTERDAY}.jsonl" 3
+
+T8_BIN="${T8_HOME}/bin"
+mkdir -p "${T8_BIN}"
+cat > "${T8_BIN}/curl" <<EOF
+#!/usr/bin/env bash
+# Capture the request body, then answer with the fixture.
+prev=""
+for arg in "\$@"; do
+    case "\${arg}" in
+        --data-binary)
+            prev="databinary"
+            ;;
+        @*)
+            if [ "\${prev}" = "databinary" ]; then
+                cp "\${arg#@}" "${T8_HOME}/request.json"
+            fi
+            prev=""
+            ;;
+        *)
+            prev=""
+            ;;
+    esac
+done
+cat "${FIXTURE}"
+EOF
+chmod +x "${T8_BIN}/curl"
+
+env \
+    HOME="${T8_HOME}" \
+    PATH="${T8_BIN}:${PATH}" \
+    CCGM_AUTOHEAL_DIR="${T8_DIR}" \
+    CCGM_AUTOHEAL_TODAY="${TODAY}" \
+    ANTHROPIC_API_KEY="sk-test-not-a-real-key" \
+    bash "${ANALYZER}" >"${T8_HOME}/run.out" 2>"${T8_HOME}/run.err"
+RC=$?
+assert_eq "${RC}" "0" "request shape: analyzer exits 0 against the capturing curl shim"
+assert_file_exists "${T8_HOME}/request.json" "request shape: request body captured"
+
+if [ -f "${T8_HOME}/request.json" ]; then
+    REQ_CHECK=$(python3 - "${T8_HOME}/request.json" "${MODULE_ROOT}/lib/proposal-schema.json" <<'PY'
+import json
+import sys
+
+body = json.load(open(sys.argv[1], encoding="utf-8"))
+proposal_schema = json.load(open(sys.argv[2], encoding="utf-8"))
+problems = []
+
+
+def want(label, actual, expected):
+    if actual != expected:
+        problems.append(f"{label}: expected {expected!r}, got {actual!r}")
+
+
+want("model", body.get("model"), "claude-sonnet-5")
+want("max_tokens", body.get("max_tokens"), 16000)
+want("thinking", body.get("thinking"), {"type": "disabled"})
+
+oc = body.get("output_config") or {}
+want("effort", oc.get("effort"), "low")
+fmt = oc.get("format") or {}
+want("format.type", fmt.get("type"), "json_schema")
+
+schema = fmt.get("schema") or {}
+want("schema.required", schema.get("required"), ["proposals"])
+want("schema.additionalProperties", schema.get("additionalProperties"), False)
+item = ((schema.get("properties") or {}).get("proposals") or {}).get("items") or {}
+want("item.additionalProperties", item.get("additionalProperties"), False)
+
+# The offered fields are exactly proposal-schema.json's own required set,
+# so what the model is held to and what the post-parse check validates
+# cannot drift apart.
+want("item.required", sorted(item.get("required", [])), sorted(proposal_schema.get("required", [])))
+want("item.properties", sorted(item.get("properties", {})), sorted(proposal_schema.get("required", [])))
+
+# Bounds the structured-outputs subset rejects must not survive.
+banned = {"minimum", "maximum", "multipleOf", "minLength", "maxLength",
+          "minItems", "maxItems", "uniqueItems", "pattern", "default"}
+
+
+def walk(node):
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from walk(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from walk(value)
+
+
+for node in walk(schema):
+    for keyword in sorted(banned & set(node)):
+        problems.append(f"unsupported schema keyword survived: {keyword}")
+
+print("OK" if not problems else "; ".join(problems))
+PY
+)
+    assert_eq "${REQ_CHECK}" "OK" "request shape: model, cap, thinking, effort, and output schema are all as specified"
+
+    # None of the output-contract fields travels as a header.
+    assert_contains "$(grep -- '-H "' "${ANALYZER}" | tr -d '\n')" "anthropic-version" "request shape: headers are auth/version/content-type only"
+    for banned_hdr in "thinking" "effort" "output_config" "json_schema"; do
+        if grep -- '-H "' "${ANALYZER}" | grep -q "${banned_hdr}"; then
+            FAIL=$((FAIL + 1))
+            echo "FAIL: request shape: ${banned_hdr} must not be sent as a header"
+        else
+            PASS=$((PASS + 1))
+        fi
+    done
+fi
+
+# Test 8b — a response that stopped at the output cap is reported as a
+# failed extraction, not a quiet zero-proposal day (#1026).
+T8B_HOME=$(mktemp -d -t autoheal_t8b.XXXXXX)
+T8B_DIR="${T8B_HOME}/autoheal"
+mk_state "${T8B_DIR}"
+write_events "${T8B_DIR}/events/${YESTERDAY}.jsonl" 3
+
+TRUNCATED_FIXTURE="${T8B_HOME}/truncated-response.json"
+python3 - "${FIXTURE}" "${TRUNCATED_FIXTURE}" <<'PY'
+import json
+import sys
+
+resp = json.load(open(sys.argv[1], encoding="utf-8"))
+resp["stop_reason"] = "max_tokens"
+with open(sys.argv[2], "w", encoding="utf-8") as fh:
+    json.dump(resp, fh)
+PY
+
+env \
+    HOME="${T8B_HOME}" \
+    CCGM_AUTOHEAL_DIR="${T8B_DIR}" \
+    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${TRUNCATED_FIXTURE}" \
+    CCGM_AUTOHEAL_TODAY="${TODAY}" \
+    ANTHROPIC_API_KEY="x" \
+    bash "${ANALYZER}" >"${T8B_HOME}/run.out" 2>"${T8B_HOME}/run.err"
+RC=$?
+assert_eq "${RC}" "0" "truncation: analyzer still exits 0 (the day is reported, not fatal)"
+T8B_ERR=$(cat "${T8B_HOME}/run.err")
+assert_contains "${T8B_ERR}" "stop_reason=max_tokens" "truncation: stderr names the cap stop and the day"
+T8B_OUT=$(cat "${T8B_HOME}/run.out")
+assert_contains "${T8B_OUT}" '"truncated": 1' "truncation: the per-day summary carries the count"
+
+# Test 8c — the fence stripper is gone; a fenced body is a failure now.
+assert_contains "${ANALYZER_SRC}" "structured outputs" "no fence stripper: parse_proposals documents why it does not strip"
+case "${ANALYZER_SRC}" in
+    *'Strip an optional code fence'*)
+        FAIL=$((FAIL + 1))
+        echo "FAIL: no fence stripper: the code-fence stripping branch must be gone (#1028)"
+        ;;
+    *)
+        PASS=$((PASS + 1))
+        ;;
+esac
+
+for d in "${T8_HOME}" "${T8B_HOME}"; do
     rm -rf "${d}"
 done
 

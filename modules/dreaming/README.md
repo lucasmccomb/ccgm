@@ -131,11 +131,19 @@ The **nightly map->reduce analyzer**, on top of Epic 2's miner:
   every Messages API call with a canned response file -- no network, no
   `ANTHROPIC_API_KEY` required.
 - `lib/dream_analyze.py` -- the orchestrator itself (Python; everything
-  above lives here, `bin/dream-analyze.sh` is a thin wrapper).
+  above lives here, `bin/dream-analyze.sh` is a thin wrapper). Both calls
+  set `thinking`, `output_config.effort`, and `output_config.format`
+  explicitly in the request body: map runs thinking-disabled at `effort:
+  low` (classification-shaped extraction), reduce runs thinking-disabled
+  at the model's default effort, and each sends the JSON schema its
+  response must satisfy. `max_tokens` (16000) is a backstop -- a call
+  that stops at it is reported as a failed extraction and counted in the
+  run summary, never read as a short answer.
 - `lib/dreaming-prompt-map.md` / `lib/dreaming-prompt-reduce.md` -- the two
   system prompts, both opening with an untrusted-input threat-model block
   (excerpts are mined from other agents' sessions -- data, never
-  instructions).
+  instructions). Each states its output contract once; the API enforces
+  the shape, so the prompts document it rather than pleading for it.
 - `lib/proposal-schema.json` -- the per-change proposal row contract every
   written row is validated against before it touches disk.
 - `bin/dream-digest.sh` -- renders `~/.claude/dreaming/digests/{date}.md`:

@@ -23,8 +23,10 @@ import json
 import os
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "lib"))
@@ -999,6 +1001,36 @@ class ProposalSchemaStampedFieldsTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class PricingTests(unittest.TestCase):
+    # Per-MTok list prices for the models this module names by default,
+    # as published on the Anthropic pricing page (checked 2026-09-02).
+    # Pinned here rather than read from FALLBACK_PRICING so a model swap
+    # that forgets to bring its price along fails loudly instead of
+    # carrying the previous generation's rate forward -- the exact shape
+    # of #1025, where Sonnet 4.6's and Opus 4.1's rates sat under Sonnet
+    # 5 and Opus 4.8 keys and overstated logged spend about 2.2x.
+    PUBLISHED_PRICES = {
+        "claude-sonnet-5": {"input_per_million": 2.0, "output_per_million": 10.0},
+        "claude-opus-4-8": {"input_per_million": 5.0, "output_per_million": 25.0},
+    }
+
+    def test_fallback_pricing_matches_published_rates_for_each_default_model(self):
+        for model in (da.DEFAULT_MAP_MODEL, da.DEFAULT_REDUCE_MODEL):
+            with self.subTest(model=model):
+                self.assertIn(
+                    model, self.PUBLISHED_PRICES,
+                    f"{model} is a default model with no published price in this test's table -- "
+                    "add the current rate here when swapping models",
+                )
+                self.assertIn(model, da.FALLBACK_PRICING, f"{model} has no FALLBACK_PRICING entry")
+                self.assertEqual(da.FALLBACK_PRICING[model], self.PUBLISHED_PRICES[model])
+
+    def test_fallback_pricing_covers_exactly_the_default_models(self):
+        self.assertEqual(
+            set(da.FALLBACK_PRICING), {da.DEFAULT_MAP_MODEL, da.DEFAULT_REDUCE_MODEL},
+            "FALLBACK_PRICING is the last resort for the models this module names by default; "
+            "an entry for anything else is stale, and a missing one prices a real call wrong",
+        )
+
     def test_resolve_pricing_uses_fallback_for_known_default_model(self):
         pricing = da.resolve_pricing({}, da.DEFAULT_MAP_MODEL)
         self.assertEqual(pricing, da.FALLBACK_PRICING[da.DEFAULT_MAP_MODEL])
@@ -1017,6 +1049,201 @@ class PricingTests(unittest.TestCase):
         pricing = {"input_per_million": 3.0, "output_per_million": 15.0}
         cost = da.estimate_call_cost_usd(1_000_000, 1_000_000, pricing)
         self.assertAlmostEqual(cost, 18.0)
+
+    def test_planning_estimate_is_independent_of_the_output_cap(self):
+        # #1026: the cap is a backstop; pricing every planned call at the
+        # backstop would shrink the plan for no reason. Raising
+        # max_output_tokens must leave the preflight estimate alone.
+        bundles = {"widget-app": {"token_estimate": 500, "sessions": []}}
+        kwargs = dict(
+            map_system_prompt="x" * 100,
+            reduce_system_prompt="y" * 100,
+            store_projection_token_estimate_fn=lambda scopes: 0,
+            remaining_budget_usd=1000.0,
+        )
+        low = dict(da.DEFAULT_CONFIG, max_output_tokens=4096)
+        high = dict(da.DEFAULT_CONFIG, max_output_tokens=64000)
+        _, low_breakdown = da.plan_run(bundles, cfg=low, **kwargs)
+        _, high_breakdown = da.plan_run(bundles, cfg=high, **kwargs)
+        self.assertEqual(
+            low_breakdown["estimated_total_cost_usd"], high_breakdown["estimated_total_cost_usd"],
+            "the preflight prices a call at PLANNING_OUTPUT_TOKENS, not at whatever the cap allows",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Request shape: what actually goes on the wire (#1026, #1028). Every field
+# belongs in the body; none of them is a header.
+# ---------------------------------------------------------------------------
+
+class RequestShapeTests(unittest.TestCase):
+    @staticmethod
+    def _fake_proc(body: str, http_code: str = "200"):
+        return types.SimpleNamespace(returncode=0, stdout=f"{body}\n{http_code}", stderr="")
+
+    @staticmethod
+    def _api_body(obj: dict, stop_reason: str = "end_turn") -> str:
+        return json.dumps({
+            "content": [{"type": "text", "text": json.dumps(obj)}],
+            "stop_reason": stop_reason,
+            "usage": {"input_tokens": 11, "output_tokens": 3},
+        })
+
+    def _capture(self, response_obj: dict, *, stop_reason: str = "end_turn"):
+        captured = {}
+
+        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002 - subprocess.run's own kwarg name
+            captured["cmd"] = cmd
+            captured["body"] = json.loads(input)
+            return self._fake_proc(self._api_body(response_obj, stop_reason))
+
+        return captured, fake_run
+
+    def test_map_request_disables_thinking_sets_low_effort_and_the_candidate_schema(self):
+        captured, fake_run = self._capture({"candidates": []})
+        with mock.patch("dream_analyze.subprocess.run", side_effect=fake_run):
+            candidates, usage, truncated = da.run_map(
+                "widget-app", {"slugs": ["widget-app"]}, cfg=dict(da.DEFAULT_CONFIG),
+                map_system_prompt="map system", api_key="sk-test-fixture",
+                api_url="https://api.anthropic.com/v1/messages", offline_dir=None, day="2026-09-02",
+            )
+
+        body = captured["body"]
+        self.assertEqual(body["thinking"], {"type": "disabled"})
+        self.assertEqual(body["output_config"]["effort"], "low")
+        self.assertEqual(body["output_config"]["format"]["type"], "json_schema")
+        self.assertEqual(body["output_config"]["format"]["schema"], da.CANDIDATES_ENVELOPE_SCHEMA)
+        self.assertEqual(body["max_tokens"], da.DEFAULT_MAX_OUTPUT_TOKENS)
+        self.assertEqual(body["model"], da.DEFAULT_MAP_MODEL)
+        # Nothing about the output contract travels as a header.
+        joined_headers = " ".join(
+            captured["cmd"][i + 1] for i, arg in enumerate(captured["cmd"]) if arg == "-H"
+        )
+        for field in ("thinking", "effort", "output_config", "json_schema"):
+            self.assertNotIn(field, joined_headers)
+        self.assertEqual((candidates, usage["output_tokens"], truncated), ([], 3, False))
+
+    def test_reduce_request_disables_thinking_leaves_effort_default_and_sets_the_proposal_schema(self):
+        captured, fake_run = self._capture({"proposals": []})
+        with mock.patch("dream_analyze.subprocess.run", side_effect=fake_run):
+            proposals, _usage, ok, truncated = da.run_reduce(
+                {"widget-app": []}, {}, cfg=dict(da.DEFAULT_CONFIG),
+                reduce_system_prompt="reduce system", api_key="sk-test-fixture",
+                api_url="https://api.anthropic.com/v1/messages", offline_dir=None,
+                instructions=None, day="2026-09-02",
+            )
+
+        body = captured["body"]
+        self.assertEqual(body["thinking"], {"type": "disabled"})
+        self.assertNotIn(
+            "effort", body["output_config"],
+            "reduce is the judgment call in this pipeline -- it runs at the model's default effort",
+        )
+        self.assertEqual(body["output_config"]["format"]["schema"], da.PROPOSALS_ENVELOPE_SCHEMA)
+        self.assertEqual(body["model"], da.DEFAULT_REDUCE_MODEL)
+        self.assertEqual((proposals, ok, truncated), ([], True, False))
+
+    def test_reduce_makes_exactly_one_call_when_the_response_carries_no_proposals(self):
+        # #1028: the retry-with-a-nudge second call is gone. A response
+        # the schema cannot have produced is a failure, not a prompt to
+        # pay for the same call twice.
+        calls = []
+
+        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002
+            calls.append(json.loads(input))
+            return self._fake_proc(self._api_body({"nothing": "useful"}))
+
+        with mock.patch("dream_analyze.subprocess.run", side_effect=fake_run):
+            proposals, _usage, ok, _truncated = da.run_reduce(
+                {"widget-app": []}, {}, cfg=dict(da.DEFAULT_CONFIG),
+                reduce_system_prompt="reduce system", api_key="sk-test-fixture",
+                api_url="https://api.anthropic.com/v1/messages", offline_dir=None,
+                instructions=None, day="2026-09-02",
+            )
+
+        self.assertEqual(len(calls), 1, "one call, not a paid retry")
+        self.assertEqual((proposals, ok), ([], False))
+        self.assertNotIn("_retry_note", calls[0]["messages"][0]["content"])
+
+    def test_a_call_that_stops_at_the_cap_is_reported_as_a_failed_extraction(self):
+        _captured, fake_run = self._capture({"candidates": []}, stop_reason="max_tokens")
+        with mock.patch("dream_analyze.subprocess.run", side_effect=fake_run):
+            _candidates, _usage, truncated = da.run_map(
+                "widget-app", {"slugs": ["widget-app"]}, cfg=dict(da.DEFAULT_CONFIG),
+                map_system_prompt="map system", api_key="sk-test-fixture",
+                api_url="https://api.anthropic.com/v1/messages", offline_dir=None, day="2026-09-02",
+            )
+        self.assertTrue(truncated, "stop_reason=max_tokens means the answer never finished")
+
+    def test_parse_no_longer_strips_a_code_fence(self):
+        # #1028: structured outputs cannot return a fenced body, so the
+        # stripper is gone. Keeping it would hide a caller that is not on
+        # the structured-outputs path.
+        self.assertIsNone(da._parse_json_object('```json\n{"proposals": []}\n```'))  # noqa: SLF001
+        self.assertEqual(da._parse_json_object('{"proposals": []}'), {"proposals": []})  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# Output schemas: the subset the API accepts (#1028).
+# ---------------------------------------------------------------------------
+
+class OutputSchemaTests(unittest.TestCase):
+    UNSUPPORTED_KEYWORDS = (
+        "minimum", "maximum", "multipleOf", "minLength", "maxLength",
+        "minItems", "maxItems", "uniqueItems", "pattern",
+    )
+
+    def _walk(self, node):
+        if isinstance(node, dict):
+            yield node
+            for value in node.values():
+                yield from self._walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from self._walk(value)
+
+    def _schemas(self):
+        return {
+            "candidates": da.CANDIDATES_ENVELOPE_SCHEMA,
+            "proposals": da.PROPOSALS_ENVELOPE_SCHEMA,
+        }
+
+    def test_every_object_closes_additional_properties_and_requires_every_property(self):
+        for name, schema in self._schemas().items():
+            for node in self._walk(schema):
+                if node.get("type") != "object":
+                    continue
+                with self.subTest(schema=name, properties=sorted(node.get("properties", {}))):
+                    self.assertIs(node.get("additionalProperties"), False)
+                    self.assertEqual(
+                        sorted(node.get("required", [])), sorted(node.get("properties", {})),
+                        "the supported subset wants every property listed in `required`; "
+                        "make an optional field nullable instead of omitting it",
+                    )
+
+    def test_no_unsupported_json_schema_keyword_reaches_the_api(self):
+        for name, schema in self._schemas().items():
+            for node in self._walk(schema):
+                for keyword in self.UNSUPPORTED_KEYWORDS:
+                    with self.subTest(schema=name, keyword=keyword):
+                        self.assertNotIn(
+                            keyword, node,
+                            f"{keyword} is not in the structured-outputs schema subset; the bound it "
+                            "expresses belongs in the post-parse validation instead",
+                        )
+
+    def test_schema_enums_track_the_constants_the_code_validates_against(self):
+        candidate = da.CANDIDATES_ENVELOPE_SCHEMA["properties"]["candidates"]["items"]
+        self.assertEqual(
+            set(candidate["properties"]["type"]["enum"]), set(da._VALID_CANDIDATE_TYPES),  # noqa: SLF001
+        )
+        proposal = da.PROPOSALS_ENVELOPE_SCHEMA["properties"]["proposals"]["items"]
+        self.assertEqual(set(proposal["properties"]["kind"]["enum"]), set(da.VALID_PROPOSAL_KINDS))
+
+    def test_both_envelopes_are_json_serializable(self):
+        # They are embedded in the request body verbatim.
+        for schema in self._schemas().values():
+            json.loads(json.dumps(schema))
 
 
 # ---------------------------------------------------------------------------
@@ -1313,14 +1540,14 @@ class MainIntegrationTests(unittest.TestCase):
             "tidy-app": {"token_estimate": 500, "sessions": []},
         }
         # A budget that affords exactly ONE slug's full map+reduce plan
-        # (~$0.43 at default sonnet/opus pricing + max_output_tokens=4096
-        # ceilings) but not two (~$0.56) -- see the cost math in
+        # (~$0.165 at default sonnet/opus pricing and PLANNING_OUTPUT_
+        # TOKENS) but not two (~$0.228) -- see the cost math in
         # PricingTests for the underlying estimate_call_cost_usd() formula
         # this budget was sized against.
         planned, _breakdown = da.plan_run(
             bundles,
             cfg=dict(da.DEFAULT_CONFIG),
-            remaining_budget_usd=0.50,
+            remaining_budget_usd=0.20,
             map_system_prompt="x" * 100,
             reduce_system_prompt="y" * 100,
             store_projection_token_estimate_fn=lambda scopes: 0,

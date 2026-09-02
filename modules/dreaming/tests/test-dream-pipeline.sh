@@ -306,9 +306,10 @@ fi
 
 # ---------------------------------------------------------------------
 # Step 5: reduce-failure durable banner (#769 Stage-2 P1 #1) -- run
-# dream-analyze.sh --offline against a broken (unparseable-after-retry)
-# reduce fixture and assert dream-digest.sh surfaces a loud, durable
-# banner instead of the failure being visible only in stderr.
+# dream-analyze.sh --offline against a reduce fixture that stopped at the
+# output cap and assert dream-digest.sh surfaces a loud, durable banner
+# instead of the failure being visible only in stderr. The same run also
+# covers #1026's truncation count reaching the digest.
 # ---------------------------------------------------------------------
 
 BROKEN_REDUCE_FIXTURES="${SCRIPT_DIR}/fixtures/offline-responses-broken-reduce"
@@ -324,8 +325,10 @@ env "${RUN_ENV[@]}" bash "${DREAM_ANALYZE}" \
     --projects-root "${REDUCE_FAIL_PROJECTS_ROOT}" \
     >"${SANDBOX}/analyze-reducefail.out" 2>"${SANDBOX}/analyze-reducefail.err"
 REDUCE_FAIL_ANALYZE_RC=$?
-assert_eq "${REDUCE_FAIL_ANALYZE_RC}" "1" "dream-analyze.sh exits 1 when reduce never produces parseable output"
+assert_eq "${REDUCE_FAIL_ANALYZE_RC}" "1" "dream-analyze.sh exits 1 when reduce never produces a usable proposal array"
 assert_file_not_exists "${DREAMING_DIR}/proposals/${REDUCE_FAIL_DATE}.jsonl" "no proposals file written on reduce failure"
+REDUCE_FAIL_ERR="$(cat "${SANDBOX}/analyze-reducefail.err")"
+assert_contains "${REDUCE_FAIL_ERR}" "stop_reason=max_tokens" "a call that stopped at the output cap says so on stderr, naming the day"
 
 env "${RUN_ENV[@]}" bash "${DREAM_DIGEST}" "${REDUCE_FAIL_DATE}" \
     >"${SANDBOX}/digest-reducefail.out" 2>"${SANDBOX}/digest-reducefail.err"
@@ -337,8 +340,9 @@ assert_file_exists "${REDUCE_FAIL_DIGEST}" "reduce-failure-day digest file writt
 if [ -f "${REDUCE_FAIL_DIGEST}" ]; then
     REDUCE_FAIL_BODY="$(cat "${REDUCE_FAIL_DIGEST}")"
     assert_contains "${REDUCE_FAIL_BODY}" "Canary banner" "reduce failure surfaces in the same durable canary banner"
-    assert_contains "${REDUCE_FAIL_BODY}" "Reduce-phase parse failures" "reduce failure gets its own labeled section in the banner"
+    assert_contains "${REDUCE_FAIL_BODY}" "Reduce-phase failures" "reduce failure gets its own labeled section in the banner"
     assert_contains "${REDUCE_FAIL_BODY}" "widget-app" "banner names the affected slug"
+    assert_contains "${REDUCE_FAIL_BODY}" "stopped at the output cap: 1" "the digest run summary counts the truncated call (#1026)"
 fi
 
 # ---------------------------------------------------------------------

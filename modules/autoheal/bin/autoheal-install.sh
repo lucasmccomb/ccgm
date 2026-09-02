@@ -95,9 +95,10 @@ if [ ! -f "${AUTOHEAL_DIR}/config.json" ]; then
   "webhook_token": "${WEBHOOK_TOKEN}",
   "webhook_kinds": ["proposal", "event", "digest"],
   "webhook_max_per_run": 100,
-  "model": "claude-sonnet-4-6",
-  "default_model": "claude-sonnet-4-6",
+  "model": "claude-sonnet-5",
+  "default_model": "claude-sonnet-5",
   "cost_pricing": {
+    "claude-sonnet-5":    {"input_per_million": 2,    "output_per_million": 10},
     "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
     "claude-opus-4-7":    {"input_per_million": 15,   "output_per_million": 75},
     "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4}
@@ -119,6 +120,7 @@ import sys
 path = sys.argv[1]
 
 DEFAULT_PRICING = {
+    "claude-sonnet-5":    {"input_per_million": 2,    "output_per_million": 10},
     "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
     "claude-opus-4-7":    {"input_per_million": 15,   "output_per_million": 75},
     "claude-haiku-4-5":   {"input_per_million": 0.80, "output_per_million": 4},
@@ -137,8 +139,18 @@ dirty = False
 if "cost_pricing" not in cfg or not isinstance(cfg.get("cost_pricing"), dict):
     cfg["cost_pricing"] = DEFAULT_PRICING
     dirty = True
+else:
+    # #1028 moved the analyzer to claude-sonnet-5. An install that
+    # already has a cost_pricing block keeps whatever rates it chose --
+    # this only ADDS entries it has never seen, so the model the
+    # analyzer now calls has a price instead of falling through to a
+    # warning. Never overwrites a rate the operator set.
+    for model_id, rates in DEFAULT_PRICING.items():
+        if model_id not in cfg["cost_pricing"]:
+            cfg["cost_pricing"][model_id] = rates
+            dirty = True
 if "default_model" not in cfg:
-    cfg["default_model"] = cfg.get("model", "claude-sonnet-4-6")
+    cfg["default_model"] = cfg.get("model", "claude-sonnet-5")
     dirty = True
 # Issue #517: backfill the new max_input_tokens key without overriding
 # a value the user has already chosen.

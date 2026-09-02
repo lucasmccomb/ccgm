@@ -141,8 +141,20 @@ MAX_INPUT_TOKENS_DEFAULT=200000     # Hard input cap (rough char/4 estimate).
 MAX_INPUT_TOKENS="${MAX_INPUT_TOKENS_DEFAULT}"
 DAILY_COST_CAP_CENTS_DEFAULT=1000   # $10.00/day in cents (issue #529).
 DAILY_COST_CAP_CENTS="${DAILY_COST_CAP_CENTS_DEFAULT}"
-DEFAULT_MODEL="claude-sonnet-4-6"   # Configurable in config.json.
-DEFAULT_MAX_OUTPUT_TOKENS=4096
+# Sonnet 5 since #1028: Sonnet 4.6 does not support structured outputs,
+# which this analyzer now relies on for its response shape. Sonnet 5 is
+# the model dreaming's map phase already uses, and it is cheaper per
+# input token on a call that is ~99.9% input.
+#
+# Sonnet 5 also runs adaptive thinking when `thinking` is absent, where
+# 4.6 did not, so the request below sets thinking and effort explicitly
+# (#1026). Treat that as a prerequisite of any future model bump, not a
+# tune: without it the output cap silently becomes a shared ceiling over
+# thinking plus the JSON answer.
+DEFAULT_MODEL="claude-sonnet-5"
+# A backstop, not a tuning knob. 16000 is the ceiling for a non-streaming
+# request, which is what this script issues.
+DEFAULT_MAX_OUTPUT_TOKENS=16000
 LOOKBACK_DAYS=7                     # Walk back at most this many days.
 CALIBRATION_WINDOW_DAYS=7
 REJECT_GIVEUP_THRESHOLD=7           # After N rejections of the same day,
@@ -591,6 +603,7 @@ analyze_one_day() {
             "${CALIBRATION_MODE}" \
             "${DEFAULT_MODEL}" \
             "${DEFAULT_MAX_OUTPUT_TOKENS}" \
+            "$(proposal_schema_path)" \
             <<'PY'
 import datetime as dt
 import json
@@ -606,6 +619,7 @@ clone_id = sys.argv[6]
 calibration_mode = sys.argv[7] == "true"
 model = sys.argv[8]
 max_output_tokens = int(sys.argv[9])
+proposal_schema_file = sys.argv[10]
 
 
 def load_events(path):
@@ -862,11 +876,77 @@ if final_window is None:
 print(f"excerpt window: {final_window}", file=sys.stderr)
 print(f"estimated input tokens: {est_tokens} (cap {max_input_tokens})", file=sys.stderr)
 
-# Build the API request body.
+# The response schema (#1028). Derived from proposal-schema.json rather
+# than hand-written beside it, so the shape the model is held to and the
+# shape the post-parse validation checks cannot drift apart.
+#
+# Two adaptations, both required by the structured-outputs schema subset:
+#   - Only the schema's own `required` fields are offered. The optional
+#     ones (snoozed_until, auto_apply_blocked, source_events) are runtime
+#     bookkeeping the analyzer never asks the model for, and the subset
+#     wants every offered property listed in `required`.
+#   - Bounds the subset does not accept are dropped: minimum/maximum on
+#     confidence and breadth_score, minItems on session_ids, maxLength on
+#     title and rationale. Those are semantics, not shape, and
+#     validate_against_schema() below still enforces them after the parse.
+SCHEMA_KEYWORD_DENYLIST = {
+    "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+    "minLength", "maxLength", "pattern",
+    "minItems", "maxItems", "uniqueItems",
+    "default",
+}
+
+
+def to_output_schema(node):
+    """Strip the keywords the structured-outputs subset rejects."""
+    if isinstance(node, list):
+        return [to_output_schema(v) for v in node]
+    if not isinstance(node, dict):
+        return node
+    return {
+        k: to_output_schema(v)
+        for k, v in node.items()
+        if k not in SCHEMA_KEYWORD_DENYLIST
+    }
+
+
+def build_proposals_envelope_schema(path):
+    with open(path, "r", encoding="utf-8") as fh:
+        proposal_schema = json.load(fh)
+    required = list(proposal_schema.get("required", []))
+    properties = proposal_schema.get("properties", {})
+    item = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {k: to_output_schema(properties[k]) for k in required if k in properties},
+        "required": [k for k in required if k in properties],
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"proposals": {"type": "array", "items": item}},
+        "required": ["proposals"],
+    }
+
+
+# Build the API request body. `thinking`, `output_config.effort`, and
+# `output_config.format` all travel in the body -- the API takes none of
+# them as a header.
 request_body = {
     "model": model,
     "max_tokens": max_output_tokens,
     "system": analyzer_prompt,
+    # Turning an event log into schema-valid proposals is
+    # classification-shaped extraction, which is the workload the
+    # published effort guidance puts at `low` with thinking disabled.
+    "thinking": {"type": "disabled"},
+    "output_config": {
+        "effort": "low",
+        "format": {
+            "type": "json_schema",
+            "schema": build_proposals_envelope_schema(proposal_schema_file),
+        },
+    },
     "messages": [
         {
             "role": "user",
@@ -1032,20 +1112,25 @@ def extract_assistant_text(resp):
 
 
 def parse_proposals(text):
+    """Read the proposal array out of the assistant text.
+
+    Structured outputs (#1028) make the body schema-valid on any 200, so
+    there is no code fence to strip and no prose to skip past. A body
+    that still fails to parse means the response never finished -- see
+    the stop_reason check below, which reports that as a failed
+    extraction rather than letting it look like a quiet zero-proposal
+    day."""
     text = text.strip()
     if not text:
         return []
-    # Strip an optional code fence the model may emit despite the prompt.
-    if text.startswith("```"):
-        first_nl = text.find("\n")
-        if first_nl != -1:
-            text = text[first_nl + 1 :]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
     try:
         outer = json.loads(text)
     except json.JSONDecodeError:
+        print(
+            "WARN: response body was not valid JSON despite the output schema; "
+            "treating the day as producing no proposals",
+            file=sys.stderr,
+        )
         return []
     if not isinstance(outer, dict):
         return []
@@ -1146,15 +1231,23 @@ def append_cost(path, today, input_tokens, output_tokens, cost_usd, model):
     append_locked(path, line)
 
 
-# Per-model pricing fallback. Matches autoheal-install.sh defaults; the
-# install step is the source of truth, this dict only fires when the
-# config file is unreadable or its cost_pricing block is missing entirely.
+# Per-model pricing fallback (USD per million tokens, as published on the
+# Anthropic pricing page, checked 2026-09-02). Matches autoheal-install.sh
+# defaults; the install step is the source of truth, this dict only fires
+# when the config file is unreadable or its cost_pricing block is missing
+# entirely. claude-sonnet-4-6 stays for installs that have not moved off
+# it; claude-sonnet-5 is the model this analyzer now calls (#1028).
 FALLBACK_PRICING = {
+    "claude-sonnet-5": {"input_per_million": 2.0, "output_per_million": 10.0},
     "claude-sonnet-4-6": {"input_per_million": 3.0, "output_per_million": 15.0},
     "claude-opus-4-7": {"input_per_million": 15.0, "output_per_million": 75.0},
     "claude-haiku-4-5": {"input_per_million": 0.80, "output_per_million": 4.0},
 }
-SONNET_FALLBACK = FALLBACK_PRICING["claude-sonnet-4-6"]
+# The last-resort rate for a model nothing prices. It tracks the model
+# this script actually calls, so the guess is at least the right order of
+# magnitude for the traffic that generated it.
+SONNET_FALLBACK_MODEL = "claude-sonnet-5"
+SONNET_FALLBACK = FALLBACK_PRICING[SONNET_FALLBACK_MODEL]
 
 
 def load_cfg(path):
@@ -1179,7 +1272,7 @@ def resolve_pricing(cfg, fallback_model):
     if not isinstance(pricing, dict) or "input_per_million" not in pricing or "output_per_million" not in pricing:
         sys.stderr.write(
             f"WARNING: no cost_pricing for model {model}; "
-            f"falling back to claude-sonnet-4-6 pricing\n"
+            f"falling back to {SONNET_FALLBACK_MODEL} pricing\n"
         )
         pricing = SONNET_FALLBACK
     return model, pricing
@@ -1208,6 +1301,18 @@ cost = (
     + out_tok * float(pricing["output_per_million"])
 ) / 1_000_000.0
 append_cost(cost_log_path, today_iso, in_tok, out_tok, cost, model_id)
+
+# #1026: a response that stopped at the output cap is a failed
+# extraction, not a short answer. Say so, and carry the count out in the
+# per-day summary so an unattended run does not hide it.
+stop_reason = response.get("stop_reason") if isinstance(response, dict) else None
+truncated = stop_reason == "max_tokens"
+if truncated:
+    print(
+        f"WARN: analyzer response for day {day_iso} stopped at the output cap "
+        "(stop_reason=max_tokens); treating it as a failed extraction, not a short answer",
+        file=sys.stderr,
+    )
 
 text = extract_assistant_text(response)
 proposals = parse_proposals(text)
@@ -1240,6 +1345,7 @@ for prop in proposals:
 print(json.dumps({
     "accepted": accepted,
     "rejected": rejected,
+    "truncated": 1 if truncated else 0,
     "day": day_iso,
 }))
 PY

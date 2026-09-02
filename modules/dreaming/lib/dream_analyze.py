@@ -111,7 +111,18 @@ validate_against_schema = tm.validate_against_schema
 DEFAULT_MAP_MODEL = "claude-sonnet-5"
 DEFAULT_REDUCE_MODEL = "claude-opus-4-8"
 DEFAULT_MAX_INPUT_TOKENS = 200_000
-DEFAULT_MAX_OUTPUT_TOKENS = 4096
+# A backstop, not a tuning knob (#1026). At 4096 this cap was reached by
+# 22.8% of logged map calls; 16000 is the ceiling for a non-streaming
+# request, and both calls here are non-streaming curl POSTs. A response
+# that still stops at the cap is reported as a failed extraction (see
+# run_map/run_reduce), never treated as a short answer.
+DEFAULT_MAX_OUTPUT_TOKENS = 16000
+# What the preflight ASSUMES a call will emit, which is a different
+# question from what the cap allows. Raising the backstop must not
+# quadruple the estimate and starve the nightly run of slugs, so planning
+# keeps the figure the cap used to be -- comfortably above the observed
+# per-call output and unchanged in effect from before #1026.
+PLANNING_OUTPUT_TOKENS = 4096
 DEFAULT_DAILY_COST_CAP_USD = 10.0
 DEFAULT_LOOKBACK_DAYS = 7
 DEFAULT_PROMOTION_MIN_SESSIONS = 3
@@ -129,9 +140,16 @@ BACKOFF_SCHEDULE_SECONDS = (2, 4, 8)
 # config.json has no `cost_pricing` entry for the configured model. Mirrors
 # autoheal's own FALLBACK_PRICING shape and posture (bin/autoheal-analyze.sh)
 # -- a documented, deliberate duplication (bizlogic-006), not a shared import.
+#
+# These are per-MTok list prices as published for each model (#1025).
+# They are not decoration: resolve_pricing() feeds plan_run()'s preflight,
+# so a stale price here decides which slugs get mined. The two entries
+# carried Sonnet 4.6 and Opus 4.1 rates until #1025, which overstated
+# logged spend about 2.2x and tripped the daily cap early. A model swap
+# that forgets to bring its price along fails the pricing test.
 FALLBACK_PRICING: dict[str, dict[str, float]] = {
-    DEFAULT_MAP_MODEL: {"input_per_million": 3.0, "output_per_million": 15.0},
-    DEFAULT_REDUCE_MODEL: {"input_per_million": 15.0, "output_per_million": 75.0},
+    DEFAULT_MAP_MODEL: {"input_per_million": 2.0, "output_per_million": 10.0},
+    DEFAULT_REDUCE_MODEL: {"input_per_million": 5.0, "output_per_million": 25.0},
 }
 
 VALID_PROPOSAL_KINDS = {
@@ -145,6 +163,118 @@ KINDS_REQUIRING_TARGET = {"learning_verify", "learning_contradict", "learning_su
 KINDS_REQUIRING_CONTENT = {"learning_add", "learning_supersede"}
 
 GLOBAL_SLUG = learnings_store.GLOBAL_SLUG
+
+# ---------------------------------------------------------------------------
+# Request shape: thinking, effort, and the output schemas (#1026, #1028)
+# ---------------------------------------------------------------------------
+#
+# Thinking, effort, and the output schema all go in the request body,
+# never a header, and each is set explicitly so a model bump cannot
+# change behaviour by omission. Sonnet 5
+# runs adaptive thinking when `thinking` is absent and Opus 4.8 does not,
+# so the same silent request means two different things depending on which
+# model the config names.
+#
+# Map (Sonnet 5) is a classification-shaped extraction -- evidence bundle
+# to candidate learnings -- which is the workload the published effort
+# guidance puts at `low` with thinking disabled.
+#
+# Reduce (Opus 4.8) gets thinking disabled to pin the behaviour it already
+# had by omission, and no effort override: its judgment about which
+# candidates become store operations is the one place in this pipeline
+# worth the default depth.
+THINKING_DISABLED = {"type": "disabled"}
+MAP_EFFORT = "low"
+
+# JSON Schemas handed to `output_config.format`, so the response is
+# schema-valid by construction instead of by asking the prompt nicely
+# (#1028). Written to the supported subset: every object carries
+# `additionalProperties: false` and lists every property in `required`;
+# no numeric bounds, no string-length bounds, no `minItems` (those are
+# not part of the subset). The semantic checks those bounds would have
+# made still run after the parse -- _validate_map_candidate() and
+# finalize_proposal() are unchanged. The API guarantees shape; this code
+# still decides meaning.
+_NULLABLE_STRING = {"anyOf": [{"type": "string"}, {"type": "null"}]}
+
+_EVIDENCE_ITEM_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "session_id": {"type": "string"},
+        "excerpt": {"type": "string"},
+    },
+    "required": ["session_id", "excerpt"],
+}
+
+CANDIDATES_ENVELOPE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "candidates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"type": "string", "enum": sorted(learnings_store.VALID_TYPES)},
+                    "content": {"type": "string"},
+                    "evidence": {"type": "array", "items": _EVIDENCE_ITEM_SCHEMA},
+                    "occurrence_count": {"type": "integer"},
+                    "notes": _NULLABLE_STRING,
+                },
+                "required": ["type", "content", "evidence", "occurrence_count", "notes"],
+            },
+        },
+    },
+    "required": ["candidates"],
+}
+
+PROPOSALS_ENVELOPE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "proposals": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {"type": "string", "enum": sorted(VALID_PROPOSAL_KINDS)},
+                    "project": {"type": "string"},
+                    "target_id": _NULLABLE_STRING,
+                    "content": _NULLABLE_STRING,
+                    # Null for the kinds that act on an existing id; the
+                    # per-kind rules live in finalize_proposal(), which a
+                    # single enum cannot express.
+                    "type": {
+                        "anyOf": [
+                            {"type": "string", "enum": sorted(learnings_store.VALID_TYPES)},
+                            {"type": "null"},
+                        ]
+                    },
+                    "confidence": {"type": "integer"},
+                    "prevalence": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "sessions": {"type": "integer"},
+                            "agents": {"type": "integer"},
+                        },
+                        "required": ["sessions", "agents"],
+                    },
+                    "evidence": {"type": "array", "items": _EVIDENCE_ITEM_SCHEMA},
+                    "justification": {"type": "string"},
+                },
+                "required": [
+                    "kind", "project", "target_id", "content", "type",
+                    "confidence", "prevalence", "evidence", "justification",
+                ],
+            },
+        },
+    },
+    "required": ["proposals"],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -582,11 +712,11 @@ def record_canary_incident(slug: str, date: str, detail: str) -> None:
 
 
 def record_reduce_failure_incident(slug: str, date: str, detail: str) -> None:
-    """Durable marker for a reduce-phase parse failure (#769 Stage-2 P1
-    #1): when the reduce model never returns parseable JSON even after the
-    retry nudge, main() aborts WITHOUT writing proposals or advancing
-    watermarks for the planned slugs -- an abort that would otherwise only
-    be visible as a stderr line an unattended launchd job never surfaces.
+    """Durable marker for a reduce-phase failure (#769 Stage-2 P1 #1):
+    when the reduce call never returns a usable proposal array, main()
+    aborts WITHOUT writing proposals or advancing watermarks for the
+    planned slugs -- an abort that would otherwise only be visible as a
+    stderr line an unattended launchd job never surfaces.
     Recorded in the SAME durable-incident file dream-digest.sh already
     renders as a loud banner (mirrors record_canary_incident's shape and
     per-slug, latest-incident-wins keying)."""
@@ -709,17 +839,22 @@ def plan_run(
     """Preflight cost planning (arch-4): decide, BEFORE any API call, which
     due slugs this run can afford. Walks slugs least-recently-dreamed
     first, adding one at a time, recomputing the FULL plan's estimated cost
-    (every included slug's map call, worst-case at max_output_tokens, plus
-    ONE reduce call whose input is the sum of those worst-case map outputs
-    plus the store projection for the slugs included so far). Stops before
+    (every included slug's map call at PLANNING_OUTPUT_TOKENS, plus ONE
+    reduce call whose input is the sum of those planned map outputs plus
+    the store projection for the slugs included so far). Stops before
     adding a slug that would push the total over budget. Returns
-    (planned_slugs, cost_breakdown)."""
+    (planned_slugs, cost_breakdown).
+
+    The estimate deliberately reads PLANNING_OUTPUT_TOKENS rather than the
+    configured `max_output_tokens` (#1026): the cap is a backstop sized so
+    a real answer never hits it, and pricing every call at the backstop
+    would shrink the plan to a fraction of what the budget actually
+    affords."""
     watermark = tm.read_watermark()
     ordered = order_due_slugs_by_watermark(list(bundles.keys()), watermark)
 
     map_model = cfg.get("map_model", DEFAULT_MAP_MODEL)
     reduce_model = cfg.get("reduce_model", DEFAULT_REDUCE_MODEL)
-    max_output_tokens = int(cfg.get("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS))
     map_pricing = resolve_pricing(cfg, map_model)
     reduce_pricing = resolve_pricing(cfg, reduce_model)
 
@@ -729,11 +864,11 @@ def plan_run(
     for slug in ordered:
         bundle = bundles[slug]
         this_map_input = _bundle_map_input_tokens(bundle, map_system_prompt)
-        this_map_cost = estimate_call_cost_usd(this_map_input, max_output_tokens, map_pricing)
+        this_map_cost = estimate_call_cost_usd(this_map_input, PLANNING_OUTPUT_TOKENS, map_pricing)
 
         trial_planned = planned + [slug]
         trial_map_cost_total = map_cost_total + this_map_cost
-        trial_reduce_cost = _reduce_cost_estimate_for(trial_planned, max_output_tokens, store_projection_token_estimate_fn, reduce_pricing, reduce_system_prompt)
+        trial_reduce_cost = _reduce_cost_estimate_for(trial_planned, PLANNING_OUTPUT_TOKENS, store_projection_token_estimate_fn, reduce_pricing, reduce_system_prompt)
         trial_total = trial_map_cost_total + trial_reduce_cost
 
         if trial_total > remaining_budget_usd:
@@ -742,7 +877,7 @@ def plan_run(
         planned = trial_planned
         map_cost_total = trial_map_cost_total
 
-    final_reduce_cost = _reduce_cost_estimate_for(planned, max_output_tokens, store_projection_token_estimate_fn, reduce_pricing, reduce_system_prompt)
+    final_reduce_cost = _reduce_cost_estimate_for(planned, PLANNING_OUTPUT_TOKENS, store_projection_token_estimate_fn, reduce_pricing, reduce_system_prompt)
     breakdown = {
         "ordered_candidates": ordered,
         "planned_slugs": planned,
@@ -754,10 +889,10 @@ def plan_run(
     return planned, breakdown
 
 
-def _reduce_cost_estimate_for(planned, max_output_tokens, store_projection_token_estimate_fn, reduce_pricing, reduce_system_prompt) -> float:
-    reduce_input = len(planned) * max_output_tokens + store_projection_token_estimate_fn(planned)
+def _reduce_cost_estimate_for(planned, planning_output_tokens, store_projection_token_estimate_fn, reduce_pricing, reduce_system_prompt) -> float:
+    reduce_input = len(planned) * planning_output_tokens + store_projection_token_estimate_fn(planned)
     reduce_input += len(reduce_system_prompt) // 4
-    return estimate_call_cost_usd(reduce_input, max_output_tokens, reduce_pricing)
+    return estimate_call_cost_usd(reduce_input, planning_output_tokens, reduce_pricing)
 
 
 # ---------------------------------------------------------------------------
@@ -833,16 +968,17 @@ def _extract_assistant_text(response: dict[str, Any]) -> str:
 
 
 def _parse_json_object(text: str) -> dict[str, Any] | None:
+    """Parse one JSON object out of an assistant text block.
+
+    Structured outputs (#1028) make the response schema-valid on any 200,
+    so there is no code fence to strip and no prose to skip past. What is
+    left is the honest failure surface: an empty body, or a caller that
+    is not on the structured-outputs path at all. The eval harness reuses
+    this helper, which is why it keeps its plain (text) -> dict|None
+    shape rather than growing schema arguments."""
     text = (text or "").strip()
     if not text:
         return None
-    if text.startswith("```"):
-        first_nl = text.find("\n")
-        if first_nl != -1:
-            text = text[first_nl + 1:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
     try:
         obj = json.loads(text)
     except json.JSONDecodeError:
@@ -852,15 +988,28 @@ def _parse_json_object(text: str) -> dict[str, Any] | None:
 
 def _call_curl_with_retry(
     *, api_url: str, api_key: str, model: str, system_prompt: str, user_content: str, max_output_tokens: int,
+    schema: dict[str, Any] | None = None, thinking: dict[str, Any] | None = None, effort: str | None = None,
 ) -> dict[str, Any]:
     """POST to the Messages API via curl, with bounded 429 retry-with-backoff
-    (bizlogic-009). Raises ApiCallError on any non-recoverable failure."""
-    request_body = {
+    (bizlogic-009). Raises ApiCallError on any non-recoverable failure.
+
+    `schema`, `thinking`, and `effort` all travel in the request body --
+    the API takes none of them as a header."""
+    request_body: dict[str, Any] = {
         "model": model,
         "max_tokens": max_output_tokens,
         "system": system_prompt,
         "messages": [{"role": "user", "content": user_content}],
     }
+    if thinking is not None:
+        request_body["thinking"] = thinking
+    output_config: dict[str, Any] = {}
+    if effort is not None:
+        output_config["effort"] = effort
+    if schema is not None:
+        output_config["format"] = {"type": "json_schema", "schema": schema}
+    if output_config:
+        request_body["output_config"] = output_config
     payload = json.dumps(request_body)
 
     for attempt in range(MAX_429_RETRIES + 1):
@@ -927,9 +1076,14 @@ def get_model_response(
     api_url: str,
     offline_dir: Path | None,
     offline_candidates: tuple[str, ...],
-) -> tuple[dict[str, Any] | None, dict[str, int]]:
-    """Returns (parsed_json_object_or_None, usage). Shared by map and
-    reduce -- identical transport, different prompt/payload/parse target."""
+    schema: dict[str, Any] | None = None,
+    thinking: dict[str, Any] | None = None,
+    effort: str | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, int], str | None]:
+    """Returns (parsed_json_object_or_None, usage, stop_reason). Shared by
+    map and reduce -- identical transport, different prompt, payload,
+    schema, and parse target. `stop_reason` is the response's own field so
+    the caller can tell a truncated call from a short answer (#1026)."""
     user_content = json.dumps(user_obj, ensure_ascii=False)
     if offline_dir is not None:
         response = _read_offline_response(offline_dir, *offline_candidates)
@@ -937,6 +1091,7 @@ def get_model_response(
         response = _call_curl_with_retry(
             api_url=api_url, api_key=api_key or "", model=model, system_prompt=system_prompt,
             user_content=user_content, max_output_tokens=max_output_tokens,
+            schema=schema, thinking=thinking, effort=effort,
         )
     usage = response.get("usage") if isinstance(response, dict) else None
     usage = usage if isinstance(usage, dict) else {}
@@ -944,9 +1099,11 @@ def get_model_response(
         "input_tokens": int(usage.get("input_tokens", 0) or 0),
         "output_tokens": int(usage.get("output_tokens", 0) or 0),
     }
+    stop_reason = response.get("stop_reason") if isinstance(response, dict) else None
+    stop_reason = stop_reason if isinstance(stop_reason, str) else None
     text = _extract_assistant_text(response)
     parsed = _parse_json_object(text)
-    return parsed, usage_out
+    return parsed, usage_out, stop_reason
 
 
 # ---------------------------------------------------------------------------
@@ -991,9 +1148,13 @@ def run_map(
     api_key: str | None,
     api_url: str,
     offline_dir: Path | None,
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    day: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int], bool]:
+    """Returns (candidates, usage, truncated). `truncated` is True when the
+    response stopped at the output cap (#1026) -- a failed extraction for
+    this slug, reported rather than quietly accepted as a short answer."""
     max_output_tokens = int(cfg.get("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS))
-    parsed, usage = get_model_response(
+    parsed, usage, stop_reason = get_model_response(
         model=cfg.get("map_model", DEFAULT_MAP_MODEL),
         system_prompt=map_system_prompt,
         user_obj=bundle,
@@ -1002,15 +1163,26 @@ def run_map(
         api_url=api_url,
         offline_dir=offline_dir,
         offline_candidates=(f"map-{slug}.json", "map-default.json"),
+        schema=CANDIDATES_ENVELOPE_SCHEMA,
+        thinking=THINKING_DISABLED,
+        effort=MAP_EFFORT,
     )
+    truncated = stop_reason == "max_tokens"
+    if truncated:
+        print(
+            f"dream_analyze: map call for slug {slug!r} on {day or '?'} stopped at the "
+            f"{max_output_tokens}-token output cap (stop_reason=max_tokens); treating it as a "
+            "failed extraction, not a short answer",
+            file=sys.stderr,
+        )
     if parsed is None:
         print(f"dream_analyze: map response for slug {slug!r} was not parseable JSON; treating as empty", file=sys.stderr)
-        return [], usage
+        return [], usage, truncated
     raw_candidates = parsed.get("candidates")
     if not isinstance(raw_candidates, list):
-        return [], usage
+        return [], usage, truncated
     candidates = [c for c in (_validate_map_candidate(r) for r in raw_candidates) if c is not None]
-    return candidates, usage
+    return candidates, usage, truncated
 
 
 # ---------------------------------------------------------------------------
@@ -1028,14 +1200,17 @@ def run_reduce(
     api_url: str,
     offline_dir: Path | None,
     instructions: str | None,
-) -> tuple[list[dict[str, Any]], dict[str, int], bool]:
-    """Returns (raw_proposals, usage, ok). `ok` is False ONLY when the
-    reduce phase never obtained a parseable {"proposals": [...]} object,
-    even after the one JSON-only retry nudge (#769 Stage-2 P1 #1) -- the
-    caller MUST treat that as a failed run (no watermark advance, no
-    proposals write) rather than a legitimate zero-proposal night, since
-    both attempts fail identically and deterministically when the model's
-    output truncates against max_output_tokens."""
+    day: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int], bool, bool]:
+    """Returns (raw_proposals, usage, ok, truncated). `ok` is False ONLY
+    when the reduce phase never obtained a parseable {"proposals": [...]}
+    object -- the caller MUST treat that as a failed run (no watermark
+    advance, no proposals write) rather than a legitimate zero-proposal
+    night, since the mined evidence would otherwise be discarded unread.
+
+    Structured outputs (#1028) make a 200 schema-valid by construction, so
+    the remaining way to land here is a response that never finished: a
+    call that stopped at the output cap, which `truncated` reports."""
     max_output_tokens = int(cfg.get("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS))
     user_obj: dict[str, Any] = {
         "map_candidates": [{"slug": slug, "candidates": cands} for slug, cands in map_results.items()],
@@ -1044,7 +1219,7 @@ def run_reduce(
     if instructions:
         user_obj["instructions"] = instructions
 
-    parsed, usage = get_model_response(
+    parsed, usage, stop_reason = get_model_response(
         model=cfg.get("reduce_model", DEFAULT_REDUCE_MODEL),
         system_prompt=reduce_system_prompt,
         user_obj=user_obj,
@@ -1053,40 +1228,28 @@ def run_reduce(
         api_url=api_url,
         offline_dir=offline_dir,
         offline_candidates=("reduce.json",),
+        schema=PROPOSALS_ENVELOPE_SCHEMA,
+        thinking=THINKING_DISABLED,
     )
     total_usage = dict(usage)
+    truncated = stop_reason == "max_tokens"
+    if truncated:
+        print(
+            f"dream_analyze: reduce call on {day or '?'} stopped at the {max_output_tokens}-token "
+            "output cap (stop_reason=max_tokens); treating it as a failed extraction, not a short answer",
+            file=sys.stderr,
+        )
 
     if parsed is None or not isinstance(parsed.get("proposals"), list):
-        # Retry once with a "return only JSON" nudge (spec: reduce phase
-        # only -- map failures are treated as empty, no retry).
-        print("dream_analyze: reduce response was not parseable JSON; retrying once with a JSON-only nudge", file=sys.stderr)
-        nudge_obj = dict(user_obj)
-        nudge_obj["_retry_note"] = (
-            "Your previous response could not be parsed as JSON. Return ONLY the JSON "
-            "object described in the system prompt -- no commentary, no code fences."
+        print(
+            "dream_analyze: reduce response carried no proposal array; the mined+mapped "
+            "evidence for this run is NOT consumed (see the reduce-failure handling in main())",
+            file=sys.stderr,
         )
-        parsed, usage2 = get_model_response(
-            model=cfg.get("reduce_model", DEFAULT_REDUCE_MODEL),
-            system_prompt=reduce_system_prompt,
-            user_obj=nudge_obj,
-            max_output_tokens=max_output_tokens,
-            api_key=api_key,
-            api_url=api_url,
-            offline_dir=offline_dir,
-            offline_candidates=("reduce-retry.json", "reduce.json"),
-        )
-        total_usage["input_tokens"] += usage2.get("input_tokens", 0)
-        total_usage["output_tokens"] += usage2.get("output_tokens", 0)
-        if parsed is None or not isinstance(parsed.get("proposals"), list):
-            print(
-                "dream_analyze: reduce response still unparseable after retry; the mined+mapped "
-                "evidence for this run is NOT consumed (see the reduce-failure handling in main())",
-                file=sys.stderr,
-            )
-            return [], total_usage, False
+        return [], total_usage, False, truncated
 
     raw_proposals = [p for p in parsed["proposals"] if isinstance(p, dict)]
-    return raw_proposals, total_usage, True
+    return raw_proposals, total_usage, True, truncated
 
 
 # ---------------------------------------------------------------------------
@@ -1653,13 +1816,16 @@ def main(argv: list[str] | None = None) -> int:
     total_input_tokens = 0
     total_output_tokens = 0
     map_calls = 0
+    truncated_calls = 0
     for slug in planned_slugs:
-        candidates, usage = run_map(
+        candidates, usage, truncated = run_map(
             slug, bundles[slug], cfg=cfg, map_system_prompt=map_system_prompt,
-            api_key=api_key, api_url=api_url, offline_dir=offline_dir,
+            api_key=api_key, api_url=api_url, offline_dir=offline_dir, day=today,
         )
         map_results[slug] = candidates
         map_calls += 1
+        if truncated:
+            truncated_calls += 1
         total_input_tokens += usage["input_tokens"]
         total_output_tokens += usage["output_tokens"]
         if offline_dir is None:
@@ -1670,6 +1836,7 @@ def main(argv: list[str] | None = None) -> int:
     raw_proposals: list[dict[str, Any]] = []
     reduce_calls = 0
     reduce_ok = True
+    reduce_truncated = False
     store_payload: dict[str, list[dict[str, Any]]] = {}
     store_by_id: dict[str, dict[str, dict[str, Any]]] = {}
 
@@ -1682,11 +1849,14 @@ def main(argv: list[str] | None = None) -> int:
             except OSError:
                 instructions = None
 
-        raw_proposals, usage, reduce_ok = run_reduce(
+        raw_proposals, usage, reduce_ok, reduce_truncated = run_reduce(
             map_results, store_payload, cfg=cfg, reduce_system_prompt=reduce_system_prompt,
             api_key=api_key, api_url=api_url, offline_dir=offline_dir, instructions=instructions,
+            day=today,
         )
         reduce_calls = 1
+        if reduce_truncated:
+            truncated_calls += 1
         total_input_tokens += usage["input_tokens"]
         total_output_tokens += usage["output_tokens"]
         if offline_dir is None:
@@ -1699,12 +1869,12 @@ def main(argv: list[str] | None = None) -> int:
         store_by_id = {}
 
     if not reduce_ok:
-        # Reduce phase never produced parseable output, even after the
-        # retry nudge (#769 Stage-2 P1 #1: both attempts fail identically
-        # and deterministically when the model's output truncates against
-        # max_output_tokens). The mined + mapped evidence for every
-        # planned slug is real, already-paid-for work; consuming it
-        # requires a parseable reduce response, so on failure:
+        # Reduce phase never produced a usable proposal array (#769
+        # Stage-2 P1 #1). With structured outputs enforcing the shape on
+        # any 200, the live cause is a response that stopped at the
+        # output cap. The mined + mapped evidence for every planned slug
+        # is real, already-paid-for work; consuming it requires a
+        # complete reduce response, so on failure:
         #   - do NOT advance any watermark (the mined evidence would be
         #     permanently lost -- it would never be re-mined);
         #   - do NOT write or overwrite the target day's proposals file
@@ -1714,7 +1884,9 @@ def main(argv: list[str] | None = None) -> int:
         #     visible instead of a stderr line an unattended launchd job
         #     will not surface;
         #   - exit non-zero.
-        detail = "reduce phase produced no parseable proposal array, even after the retry nudge"
+        detail = "reduce phase produced no usable proposal array"
+        if reduce_truncated:
+            detail += " (the call stopped at the output cap)"
         for slug in planned_slugs:
             record_reduce_failure_incident(slug, today, detail)
         run_summary = {
@@ -1727,6 +1899,7 @@ def main(argv: list[str] | None = None) -> int:
             "skip_reasons": skip_reasons,
             "map_calls": map_calls,
             "reduce_calls": reduce_calls,
+            "truncated_calls": truncated_calls,
             "proposals_written": 0,
             "proposals_rejected": 0,
             "proposals_deduped": 0,
@@ -1797,6 +1970,7 @@ def main(argv: list[str] | None = None) -> int:
         "skip_reasons": skip_reasons,
         "map_calls": map_calls,
         "reduce_calls": reduce_calls,
+        "truncated_calls": truncated_calls,
         "proposals_written": len(written_rows),
         "proposals_rejected": rejected,
         "proposals_deduped": deduped,
