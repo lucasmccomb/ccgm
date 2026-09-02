@@ -36,6 +36,16 @@ Acceptance sentence: a pipeline that manufactures memories from noise must
 not open the gate even when its signal-side output looks healthy).
 Fails closed -- same reason shape for "stale" as for "missing".
 
+Fail-loud contract (#1027): a single arm run that fails to execute is
+non-fatal -- it is recorded as a format error and the eval carries on. A
+run where EVERY arm failed is not a measurement at all, so the harness
+aborts with the first failure's raw output on stderr and a non-zero exit
+instead of writing a results file `--gate` would read as a memory
+regression. The `claude` binary is resolved to an absolute path before any
+task runs (see resolve_claude_bin), so the PATH the caller happens to
+export -- a LaunchAgent's is not a login shell's -- cannot decide whether
+the harness works.
+
 Isolation (adrev-003a, CRITICAL): every `claude -p` arm runs under a
 purpose-built, ephemeral `CLAUDE_CONFIG_DIR` + `HOME` containing ONLY a
 `settings.json` that registers the learnings-inject SessionStart hook --
@@ -101,7 +111,31 @@ DEFAULT_RUNS = 5
 DEFAULT_MAX_BUDGET_USD_PER_RUN = 0.50
 DEFAULT_RUN_TIMEOUT_S = 300
 DEFAULT_EVAL_FRESHNESS_DAYS = 14
-DEFAULT_JUDGE_MAX_OUTPUT_TOKENS = 200
+# A verdict is two fields; 1024 is a backstop against a truncated response,
+# not a tuning knob (#1026). The judge request pins `thinking: disabled`, so
+# this cap covers the JSON answer alone even on a model that thinks by
+# default -- a bump to such a model cannot silently eat the budget.
+DEFAULT_JUDGE_MAX_OUTPUT_TOKENS = 1024
+
+# The judge's response schema, sent as `output_config.format` so the verdict
+# is JSON-valid by construction, and re-checked after parsing (#1029). The
+# harness has always validated this shape; the schema states it once for both
+# the API and _parse_judge_verdict().
+#
+# No `minimum`/`maximum` on `score`: the structured-outputs schema subset
+# rejects numeric range keywords outright ("For 'number' type, properties
+# maximum, minimum are not supported", HTTP 400). The 0-10 range is stated in
+# judge-prompt.md and clamped in judge_output(); the schema's job here is the
+# field set and their types.
+JUDGE_VERDICT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["pass", "score"],
+    "properties": {
+        "pass": {"type": "boolean"},
+        "score": {"type": "number"},
+    },
+}
 
 # Four-bucket classifier thresholds (plan.md §5 Epic 7, decisions.md #8).
 HIGH_VALUE_DELTA_THRESHOLD = 1.5
@@ -130,6 +164,21 @@ ARMS = ("baseline", "treatment", "full_context")
 # forwarded from the ambient environment regardless of what is in it.
 SUBPROCESS_ENV_ALLOWLIST = ("PATH", "SHELL", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "TMPDIR")
 
+# Where Claude Code's own installers put the `claude` CLI, searched (in this
+# order) when the ambient PATH does not resolve it (#1027). The LaunchAgent
+# that runs the nightly chain exports a fixed, login-shell-free PATH
+# (/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin), and the native installer
+# puts the binary in ~/.local/bin -- so from 2026-07-15 every arm subprocess
+# died with FileNotFoundError before it ran, and every row scored a silent
+# format error. resolve_claude_bin() below hands run_claude_p an ABSOLUTE
+# path so the child's PATH stops deciding whether the harness works.
+CLAUDE_BIN_FALLBACK_DIRS = (
+    "~/.local/bin",
+    "~/.claude/local",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+)
+
 # Content-shaping op-events (adrev-403): the gate's freshness bound is
 # scoped to these. Pure `verify` counter-ops -- the only thing auto-apply
 # itself can write -- are deliberately excluded, or the gate would
@@ -141,6 +190,19 @@ class IsolatedConfigError(RuntimeError):
     """Raised by assert_isolated_config_registers_only_injection_hook() when
     the eval's isolated CLAUDE_CONFIG_DIR would register anything other
     than the learnings-inject SessionStart hook (adrev-003a)."""
+
+
+class ClaudeBinaryNotFoundError(RuntimeError):
+    """Raised by resolve_claude_bin() when the `claude` CLI is on neither the
+    ambient PATH nor any known install directory (#1027). Raised BEFORE any
+    task runs, so a broken harness costs nothing and says why."""
+
+
+class HarnessBrokenError(RuntimeError):
+    """Raised by main() when every agent run of the whole eval failed to
+    execute (#1027). A single failed run is a flaky run; every run failing
+    is the harness, and writing that out as a red results file would tell
+    `--gate` that memory regressed when nothing was ever measured."""
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +533,77 @@ def seed_temp_store(seed_learnings: list[dict[str, Any]], *, learnings_dir: Path
 # ---------------------------------------------------------------------------
 
 
+def resolve_claude_bin(claude_bin: str) -> str:
+    """Turn `claude_bin` into an ABSOLUTE path, so the arm subprocess launches
+    regardless of what PATH the caller's environment happens to carry (#1027).
+
+    A name with no separator is looked up on the ambient PATH first, then in
+    CLAUDE_BIN_FALLBACK_DIRS. A caller who already passed a path (absolute,
+    or relative with a separator) is taken at its word and only checked for
+    executability. Raises ClaudeBinaryNotFoundError, naming everything it
+    searched, rather than letting every run degrade into a format error."""
+    candidate = Path(claude_bin).expanduser()
+    if candidate.is_absolute() or len(candidate.parts) > 1:
+        resolved = candidate.resolve()
+        if os.access(resolved, os.X_OK) and resolved.is_file():
+            return str(resolved)
+        raise ClaudeBinaryNotFoundError(f"{claude_bin!r} is not an executable file (resolved to {resolved})")
+
+    searched: list[str] = []
+    on_path = shutil.which(claude_bin)
+    if on_path:
+        return str(Path(on_path).resolve())
+    searched.append(f"PATH={os.environ.get('PATH', '')!r}")
+
+    for raw_dir in CLAUDE_BIN_FALLBACK_DIRS:
+        install_dir = Path(raw_dir).expanduser()
+        searched.append(str(install_dir))
+        found = install_dir / claude_bin
+        if found.is_file() and os.access(found, os.X_OK):
+            return str(found.resolve())
+
+    raise ClaudeBinaryNotFoundError(
+        f"{claude_bin!r} not found. Searched: " + "; ".join(searched)
+        + ". Set CCGM_EVAL_CLAUDE_BIN (or --claude-bin) to its absolute path."
+    )
+
+
+# The raw output of the FIRST agent run that failed to execute this process
+# (#1027). Kept out of the result rows on purpose -- it is a diagnostic for
+# the whole-run abort below, printed to stderr, never persisted into the
+# JSONL the gate reads. reset_agent_error_samples() exists for tests.
+_AGENT_ERROR_SAMPLES: list[str] = []
+
+
+def reset_agent_error_samples() -> None:
+    _AGENT_ERROR_SAMPLES.clear()
+
+
+def _record_agent_error(detail: str) -> None:
+    if not _AGENT_ERROR_SAMPLES:
+        _AGENT_ERROR_SAMPLES.append(detail)
+
+
+def whole_run_format_error_rate(rows: list[dict[str, Any]]) -> float | None:
+    """Fraction of agent runs, across every arm of every row so far, that
+    failed to execute. None when no arm actually ran (an all-`error`-row run,
+    or a set of rows with runs == 0) -- "nothing ran" is not "everything
+    failed", and only the caller knows which of the two it is looking at."""
+    total = 0
+    errors = 0.0
+    for row in rows:
+        for arm in ARMS:
+            stats = row.get(arm) or {}
+            count = int(stats.get("runs", 0) or 0)
+            if count <= 0:
+                continue
+            total += count
+            errors += float(stats.get("format_error_rate", 0.0) or 0.0) * count
+    if total == 0:
+        return None
+    return errors / total
+
+
 def full_context_facts(task: dict[str, Any]) -> list[str]:
     """The Δ_sat arm's prompt supplement: defaults to every seed_learnings
     entry's content (both sides of a contradiction chain included by
@@ -509,7 +642,12 @@ def run_claude_p(
     synthetic is_error result instead, so one flaky live run does not
     crash the whole eval (it is simply judged on whatever the workdir
     ended up looking like, which is the correct signal for a run that
-    failed to execute)."""
+    failed to execute).
+
+    `claude_bin` should already be an absolute path (main() runs it through
+    resolve_claude_bin first, #1027). A bare name still works when the
+    ambient PATH resolves it, but relying on that is what let a launchd
+    PATH turn every run into a silent format error for seven weeks."""
     home_dir.mkdir(parents=True, exist_ok=True)
     env = {key: os.environ[key] for key in SUBPROCESS_ENV_ALLOWLIST if key in os.environ}
     env.update(
@@ -575,41 +713,66 @@ def build_judge_payload(
     }
 
 
-# Judge models that returned HTTP 400 on `temperature` this run. Newer Claude
-# models (e.g. claude-opus-4-8) deprecated the parameter; once a model 400s on
-# it we stop sending it for the rest of the process (#779).
-_MODELS_WITHOUT_TEMPERATURE: set[str] = set()
+def _parse_judge_verdict(text: str) -> dict[str, Any] | None:
+    """Parse and validate one judge verdict (#1029). `output_config.format`
+    already makes the response JSON-valid against JUDGE_VERDICT_SCHEMA, so
+    this is a plain json.loads plus the shape check the harness has always
+    applied -- no fence stripping, no scanning for the first `{`. The judge
+    owns its own parse: it deliberately does NOT reuse dream_analyze.py's
+    `_parse_json_object`, whose leniency exists for the map/reduce prompts'
+    unconstrained output, not for a schema-enforced two-field verdict.
+    Returns None on anything that is not a well-formed verdict."""
+    try:
+        obj = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    score = obj.get("score")
+    # bool is a subclass of int; `{"score": true}` is not a score.
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return None
+    if "pass" in obj and not isinstance(obj["pass"], bool):
+        return None
+    return obj
 
 
 def _call_judge_api(
     *, model: str, system_prompt: str, user_obj: dict[str, Any], max_output_tokens: int, api_key: str, api_url: str,
 ) -> tuple[dict[str, Any] | None, dict[str, int]]:
-    """A judge-specific Messages API call with `temperature: 0` when the model
-    accepts it -- newer models (e.g. claude-opus-4-8) deprecated the parameter
-    and 400 on it, so such a model is recorded and retried without it (#779);
-    deterministic grading is preserved where the model still supports temp 0.
-    `da.get_model_response()` / `_call_curl_with_retry()`
-    have no temperature dial and dream_analyze.py is never modified to add
-    one (Epic 3's own map/reduce calls never needed it) -- this is a small,
+    """A judge-specific Messages API call. `da.get_model_response()` /
+    `_call_curl_with_retry()` carry the map/reduce request shape and
+    dream_analyze.py is never modified from here -- this is a small,
     judge-specific sibling that mirrors da's retry/transport shape while
-    reusing da's own (unmodified) response-parsing helpers, rather than an
+    reusing da's own (unmodified) assistant-text extractor, rather than an
     edit to that shared file. Never raises -- returns (None, zeroed usage)
-    on any transport/parse failure."""
+    on any transport/parse failure.
+
+    The request pins three things (#1029, #1026, #1028):
+
+    * NO `temperature`. Every judge model from Opus 4.7 / Sonnet 5 onward
+      rejects sampling parameters with a 400, and the default judge is
+      `claude-opus-4-8`, so the old probe-and-retry made one guaranteed-
+      failing request per run. Grading determinism now comes from the
+      schema and the rubric, not a sampling dial.
+    * `thinking: {"type": "disabled"}`, explicitly. Effort is left at the
+      model default (`high`), where disabling thinking is accepted; only
+      `xhigh`/`max` reject the pairing. Without this, a bump to a model
+      that thinks by default would spend the output cap on thinking.
+    * `output_config.format`, so the verdict is schema-valid by
+      construction and _parse_judge_verdict() is a plain json.loads."""
     zero_usage = {"input_tokens": 0, "output_tokens": 0}
+    request_body = {
+        "model": model,
+        "max_tokens": max_output_tokens,
+        "system": system_prompt,
+        "thinking": {"type": "disabled"},
+        "output_config": {"format": {"type": "json_schema", "schema": JUDGE_VERDICT_SCHEMA}},
+        "messages": [{"role": "user", "content": json.dumps(user_obj, ensure_ascii=False)}],
+    }
+    payload = json.dumps(request_body)
 
     for attempt in range(da.MAX_429_RETRIES + 1):
-        # Rebuild each attempt so a model discovered mid-loop to reject
-        # `temperature` (newer models deprecated it) is retried without it,
-        # while models that accept it still get the spec's temperature:0 (#779).
-        request_body = {
-            "model": model,
-            "max_tokens": max_output_tokens,
-            "system": system_prompt,
-            "messages": [{"role": "user", "content": json.dumps(user_obj, ensure_ascii=False)}],
-        }
-        if model not in _MODELS_WITHOUT_TEMPERATURE:
-            request_body["temperature"] = 0
-        payload = json.dumps(request_body)
         try:
             proc = subprocess.run(
                 [
@@ -637,20 +800,8 @@ def _call_judge_api(
                 time.sleep(delay)
                 continue
             return None, zero_usage
-        if (
-            code == "400"
-            and model not in _MODELS_WITHOUT_TEMPERATURE
-            and "temperature" in body.lower()
-        ):
-            # Model rejects `temperature` (deprecated). Record + retry without
-            # it; this does not consume the transport failure budget (#779).
-            _MODELS_WITHOUT_TEMPERATURE.add(model)
-            print(
-                f"memory_eval: judge model {model} rejects temperature; retrying without it (#779)",
-                file=sys.stderr,
-            )
-            continue
         if code != "200":
+            print(f"memory_eval: judge Messages API returned HTTP {code}: {body[:400]}", file=sys.stderr)
             return None, zero_usage
 
         try:
@@ -664,8 +815,7 @@ def _call_judge_api(
             "output_tokens": int(usage.get("output_tokens", 0) or 0),
         }
         text = da._extract_assistant_text(response)  # noqa: SLF001 -- reusing Epic 3's own parsing helper, unmodified
-        parsed = da._parse_json_object(text)  # noqa: SLF001
-        return parsed, usage_out
+        return _parse_judge_verdict(text), usage_out
 
     return None, zero_usage  # pragma: no cover - unreachable (loop always returns or continues)
 
@@ -798,6 +948,10 @@ def _run_one(
             model=backbone, inject=inject, api_key=api_key, learnings_dir=learnings_dir,
             claude_bin=claude_bin, max_budget_usd=max_budget_usd, timeout_s=timeout_s,
         )
+        if result.get("is_error"):
+            # Keep the first failure's raw detail for the whole-run abort in
+            # main() (#1027); per-row failures stay non-fatal.
+            _record_agent_error(f"{task_id} / {arm} / run {run_index}: {result.get('result')}")
 
     final_files = {} if offline_score is not None else snapshot_workdir(workdir)
     payload = build_judge_payload(
@@ -1687,6 +1841,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"memory_eval: no tasks matched {args.tasks!r}", file=sys.stderr)
         return 1
 
+    # Resolve the CLI to an absolute path ONCE, before anything is spent
+    # (#1027). Doing it here means the arm subprocess never depends on the
+    # PATH it inherits -- the LaunchAgent's PATH does not carry the native
+    # installer's ~/.local/bin, which is what silently turned every nightly
+    # run since 2026-07-15 into 100% format errors.
+    claude_bin = args.claude_bin
+    if offline_dir is None:
+        try:
+            claude_bin = resolve_claude_bin(args.claude_bin)
+        except ClaudeBinaryNotFoundError as exc:
+            print(f"memory_eval: {exc}", file=sys.stderr)
+            return 1
+        print(f"memory_eval: using claude binary {claude_bin}", file=sys.stderr)
+
+    reset_agent_error_samples()
     sandbox_root = Path(tempfile.mkdtemp(prefix="ccgm-eval-sandbox-"))
     all_rows: list[dict[str, Any]] = []
     try:
@@ -1701,14 +1870,14 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 if task["kind"] == "dreamed":
                     rows = run_dreamed_task(
-                        task, backbones=backbones, runs=args.runs, api_key=api_key or "", claude_bin=args.claude_bin,
+                        task, backbones=backbones, runs=args.runs, api_key=api_key or "", claude_bin=claude_bin,
                         max_budget_usd=args.max_budget_usd, timeout_s=args.timeout_s, judge_model=judge_model,
                         judge_system_prompt=judge_system_prompt, api_url=api_url, offline=offline_dir is not None,
                         offline_dir=offline_dir, offline_all_scores=offline_all_scores, sandbox_root=sandbox_root,
                     )
                 else:
                     rows = run_task(
-                        task, backbones=backbones, runs=args.runs, api_key=api_key or "", claude_bin=args.claude_bin,
+                        task, backbones=backbones, runs=args.runs, api_key=api_key or "", claude_bin=claude_bin,
                         max_budget_usd=args.max_budget_usd, timeout_s=args.timeout_s, judge_model=judge_model,
                         judge_system_prompt=judge_system_prompt, api_url=api_url, offline_all_scores=offline_all_scores,
                         sandbox_root=sandbox_root,
@@ -1717,12 +1886,30 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"memory_eval: task {task['id']!r} raised {exc!r}; recording an error row and continuing", file=sys.stderr)
                 rows = [_synthetic_error_row(task, backbones=backbones, runs=args.runs, offline=offline_dir is not None, exc=exc)]
             all_rows.extend(rows)
+            # #1027: check BEFORE writing. Once every agent run of the eval
+            # so far has failed to execute, nothing measurable is left to
+            # write -- and a red results file is worse than none, because
+            # gate_check() reads it as "memory regressed" rather than "the
+            # harness never ran". The rate can only be 1.0 while no arm has
+            # ever succeeded, so a single flaky task later in the run (the
+            # non-fatal per-row case) never trips this.
+            error_rate = whole_run_format_error_rate(all_rows)
+            if error_rate is not None and error_rate >= 1.0:
+                first_failure = _AGENT_ERROR_SAMPLES[0] if _AGENT_ERROR_SAMPLES else "(no raw output captured)"
+                raise HarnessBrokenError(
+                    f"every agent run failed to execute ({len(all_rows)} row(s), format_error_rate 1.0). "
+                    "Aborting instead of writing a results file the gate would read as a memory regression. "
+                    f"First failure -- {first_failure}"
+                )
             # Written after EVERY task, not only at the end -- a later
             # task's failure (or an uncaught BaseException the `except
             # Exception` above deliberately does not swallow, e.g.
             # KeyboardInterrupt) must not discard already-completed tasks'
             # results either.
             write_results(all_rows, date=date)
+    except HarnessBrokenError as exc:
+        print(f"memory_eval: {exc}", file=sys.stderr)
+        return 1
     finally:
         shutil.rmtree(sandbox_root, ignore_errors=True)
 

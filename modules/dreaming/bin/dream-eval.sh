@@ -20,8 +20,11 @@
 # Exit codes:
 #   0  success (including "no API key configured, skipped" and, in --gate
 #      mode, "gate open")
-#   1  no tasks matched the glob, or (in --gate mode) "gate closed" --
-#      see the printed JSON `reason` field either way
+#   1  no tasks matched the glob; the `claude` binary could not be resolved;
+#      every agent run of the eval failed to execute (the harness is broken,
+#      so no results file is written -- the first failure's raw output is on
+#      stderr, #1027); or (in --gate mode) "gate closed" -- see the printed
+#      JSON `reason` field
 
 set -u
 set -o pipefail

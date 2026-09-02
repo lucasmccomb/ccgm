@@ -47,6 +47,10 @@ import learnings_store  # noqa: E402
 TASKS_DIR = HERE.parent / "eval" / "tasks"
 OFFLINE_FIXTURES = HERE / "fixtures" / "offline-responses"
 OFFLINE_DREAMED_FIXTURES = HERE / "fixtures" / "offline-responses-dreamed"
+# Real `claude -p --output-format json` stdout, captured from CLI 2.1.258 and
+# redacted (session_id/uuid replaced with fixed placeholders). Pins the shape
+# run_claude_p() parses (#1027).
+CLAUDE_P_RESULT_FIXTURE = HERE / "fixtures" / "claude-p-result-2.1.258.json"
 
 
 def _isolate_env(test: unittest.TestCase) -> Path:
@@ -486,6 +490,154 @@ class RunClaudePEnvIsolationTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# run_claude_p(): the parse step, pinned against REAL captured CLI output
+# (#1027). The eval recorded 100% format errors for seven weeks; this class
+# separates "the CLI's output shape changed" from "the CLI never launched",
+# which is what the regression actually was.
+# ---------------------------------------------------------------------------
+
+class RunClaudePParseTests(unittest.TestCase):
+    def test_real_cli_json_output_parses_into_the_fields_the_harness_reads(self):
+        raw = CLAUDE_P_RESULT_FIXTURE.read_text(encoding="utf-8")
+
+        def fake_run(cmd, *, cwd, env, capture_output, text, timeout):
+            return types.SimpleNamespace(returncode=0, stdout=raw, stderr="")
+
+        tmp = Path(tempfile.mkdtemp(prefix="ccgm-eval-test-parse-"))
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
+            result = me.run_claude_p(
+                prompt="p", workdir=tmp / "work", config_dir=tmp / "cfg", home_dir=tmp / "home",
+                model="claude-sonnet-5", inject=False, api_key="sk-test-fixture",
+                learnings_dir=tmp / "learnings", claude_bin="/usr/bin/true", max_budget_usd=0.5, timeout_s=5,
+            )
+
+        # Every field _run_one() reads off the result must survive the parse.
+        self.assertFalse(result["is_error"])
+        self.assertEqual(result["result"], "ok")
+        self.assertEqual(result["num_turns"], 1)
+        self.assertGreater(result["total_cost_usd"], 0.0)
+        usage = result["usage"]
+        self.assertEqual(usage["input_tokens"], 2)
+        self.assertEqual(usage["output_tokens"], 4)
+        # #789's total-input accounting depends on both cache fields being
+        # present in the CLI's own usage block.
+        self.assertIn("cache_read_input_tokens", usage)
+        self.assertIn("cache_creation_input_tokens", usage)
+
+    def test_unparseable_stdout_degrades_to_a_non_fatal_format_error(self):
+        def fake_run(cmd, *, cwd, env, capture_output, text, timeout):
+            return types.SimpleNamespace(returncode=1, stdout="", stderr="boom: not json")
+
+        tmp = Path(tempfile.mkdtemp(prefix="ccgm-eval-test-parse-bad-"))
+        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
+            result = me.run_claude_p(
+                prompt="p", workdir=tmp / "work", config_dir=tmp / "cfg", home_dir=tmp / "home",
+                model="m", inject=False, api_key="k", learnings_dir=tmp / "learnings",
+                claude_bin="/usr/bin/true", max_budget_usd=0.5, timeout_s=5,
+            )
+
+        self.assertTrue(result["is_error"])
+        self.assertIn("boom: not json", result["result"])
+
+
+# ---------------------------------------------------------------------------
+# resolve_claude_bin(): the root cause of #1027. The dreaming LaunchAgent
+# exports a fixed PATH that does not include ~/.local/bin, where Claude
+# Code's native installer puts the CLI -- so every arm subprocess died with
+# FileNotFoundError and scored a silent format error.
+# ---------------------------------------------------------------------------
+
+class ResolveClaudeBinTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="ccgm-eval-test-bin-"))
+        self._prev_path = os.environ.get("PATH")
+        self.addCleanup(self._restore_path)
+
+    def _restore_path(self):
+        if self._prev_path is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = self._prev_path
+
+    def _make_executable(self, directory: Path, name: str = "claude") -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / name
+        target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        target.chmod(0o755)
+        return target
+
+    def test_resolves_from_path_to_an_absolute_path(self):
+        bin_dir = self.tmp / "onpath"
+        self._make_executable(bin_dir)
+        os.environ["PATH"] = str(bin_dir)
+        resolved = me.resolve_claude_bin("claude")
+        self.assertTrue(Path(resolved).is_absolute())
+        self.assertEqual(Path(resolved).name, "claude")
+
+    def test_falls_back_to_a_known_install_dir_when_path_misses_it(self):
+        """The launchd case: PATH resolves nothing, but the native
+        installer's directory has the binary."""
+        install_dir = self.tmp / "home" / ".local" / "bin"
+        self._make_executable(install_dir)
+        os.environ["PATH"] = "/nonexistent-dir-for-test"
+        with mock.patch.object(me, "CLAUDE_BIN_FALLBACK_DIRS", (str(install_dir),)):
+            resolved = me.resolve_claude_bin("claude")
+        self.assertEqual(Path(resolved), (install_dir / "claude").resolve())
+
+    def test_raises_naming_what_it_searched_when_nowhere(self):
+        os.environ["PATH"] = "/nonexistent-dir-for-test"
+        with mock.patch.object(me, "CLAUDE_BIN_FALLBACK_DIRS", (str(self.tmp / "absent"),)):
+            with self.assertRaises(me.ClaudeBinaryNotFoundError) as ctx:
+                me.resolve_claude_bin("claude")
+        message = str(ctx.exception)
+        self.assertIn("PATH=", message)
+        self.assertIn(str(self.tmp / "absent"), message)
+        self.assertIn("CCGM_EVAL_CLAUDE_BIN", message)
+
+    def test_an_explicit_path_is_taken_at_its_word(self):
+        explicit = self._make_executable(self.tmp / "explicit")
+        os.environ["PATH"] = "/nonexistent-dir-for-test"
+        self.assertEqual(Path(me.resolve_claude_bin(str(explicit))), explicit.resolve())
+
+    def test_an_explicit_path_that_is_not_executable_raises(self):
+        not_exec = self.tmp / "explicit" / "claude"
+        not_exec.parent.mkdir(parents=True, exist_ok=True)
+        not_exec.write_text("", encoding="utf-8")
+        not_exec.chmod(0o644)
+        with self.assertRaises(me.ClaudeBinaryNotFoundError):
+            me.resolve_claude_bin(str(not_exec))
+
+
+# ---------------------------------------------------------------------------
+# whole_run_format_error_rate(): the pure half of the fail-loud contract
+# (#1027).
+# ---------------------------------------------------------------------------
+
+class WholeRunFormatErrorRateTests(unittest.TestCase):
+    @staticmethod
+    def _row(rates: tuple[float, float, float], *, runs: int = 5) -> dict:
+        return {arm: {"runs": runs, "format_error_rate": rate} for arm, rate in zip(me.ARMS, rates)}
+
+    def test_all_arms_failing_is_one(self):
+        self.assertEqual(me.whole_run_format_error_rate([self._row((1.0, 1.0, 1.0))]), 1.0)
+
+    def test_one_healthy_row_keeps_it_below_one(self):
+        rows = [self._row((0.0, 0.0, 0.0)), self._row((1.0, 1.0, 1.0))]
+        self.assertLess(me.whole_run_format_error_rate(rows), 1.0)
+
+    def test_a_single_failed_arm_is_not_a_broken_harness(self):
+        self.assertLess(me.whole_run_format_error_rate([self._row((0.0, 1.0, 0.0))]), 1.0)
+
+    def test_rows_with_no_runs_return_none_rather_than_a_fabricated_rate(self):
+        """An all-`error`-row run means nothing ran; "nothing ran" must not
+        be reported as "everything failed"."""
+        self.assertIsNone(me.whole_run_format_error_rate([self._row((0.0, 0.0, 0.0), runs=0)]))
+
+    def test_no_rows_at_all_return_none(self):
+        self.assertIsNone(me.whole_run_format_error_rate([]))
+
+
+# ---------------------------------------------------------------------------
 # Judge-prompt blindness: no condition strings anywhere in the payload sent
 # to the judge (adrev-003a test contract).
 # ---------------------------------------------------------------------------
@@ -532,82 +684,45 @@ class CallJudgeApiTransportTests(unittest.TestCase):
             "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
         })
 
-    def tearDown(self):
-        # The module-global temperature-support cache must not leak between
-        # tests (#779).
-        me._MODELS_WITHOUT_TEMPERATURE.clear()  # noqa: SLF001
-
-    def test_temperature_deprecated_400_retries_without_it_and_caches(self):
-        calls = []
-
-        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002
-            calls.append(json.loads(input))
-            if len(calls) == 1:
-                return self._fake_proc(
-                    body='{"type":"error","error":{"type":"invalid_request_error",'
-                         '"message":"`temperature` is deprecated for this model."}}',
-                    http_code="400",
-                )
-            return self._fake_proc(body=self._messages_api_body({"pass": True, "score": 9.0}))
-
-        model = "claude-temp-deprecated-fixture"
-        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
-            parsed, usage = me._call_judge_api(  # noqa: SLF001
-                model=model, system_prompt="sys", user_obj={"a": 1},
-                max_output_tokens=100, api_key="sk-test-fixture",
-                api_url="https://api.anthropic.com/v1/messages",
-            )
-
-        # First attempt carries temperature; the 400 triggers a retry WITHOUT
-        # it; the model is remembered as temperature-unsupported.
-        self.assertEqual(len(calls), 2)
-        self.assertIn("temperature", calls[0])
-        self.assertNotIn("temperature", calls[1])
-        self.assertEqual(parsed, {"pass": True, "score": 9.0})
-        self.assertEqual(usage, {"input_tokens": 42, "output_tokens": 7})
-        self.assertIn(model, me._MODELS_WITHOUT_TEMPERATURE)  # noqa: SLF001
-
-    def test_known_temperature_unsupported_model_omits_it_from_the_first_call(self):
-        me._MODELS_WITHOUT_TEMPERATURE.add("claude-known-bad-fixture")  # noqa: SLF001
-        captured = {}
-
-        def fake_run(cmd, *, input, capture_output, text):  # noqa: A002
-            captured["body"] = json.loads(input)
-            return self._fake_proc(body=self._messages_api_body({"pass": True, "score": 7.0}))
-
-        with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
-            parsed, _ = me._call_judge_api(  # noqa: SLF001
-                model="claude-known-bad-fixture", system_prompt="sys", user_obj={"a": 1},
-                max_output_tokens=100, api_key="sk-test-fixture",
-                api_url="https://api.anthropic.com/v1/messages",
-            )
-
-        self.assertNotIn("temperature", captured["body"])
-        self.assertEqual(parsed, {"pass": True, "score": 7.0})
-
-    def test_request_carries_temperature_zero_model_system_and_messages(self):
-        captured = {}
+    def test_request_never_carries_temperature_and_pins_thinking_and_schema(self):
+        """#1029: the judge request carries NO sampling parameter (every
+        judge model from Opus 4.7 / Sonnet 5 on returns 400 for one, and the
+        default judge is claude-opus-4-8), pins `thinking: disabled` so a
+        model bump cannot spend the output cap on thinking (#1026), and
+        pins the verdict schema via output_config.format (#1028). Exactly
+        one request is made -- the old probe-and-retry made two."""
+        captured = []
 
         def fake_run(cmd, *, input, capture_output, text):  # noqa: A002 - matches subprocess.run's own kwarg name
-            captured["cmd"] = cmd
-            captured["input"] = input
+            captured.append({"cmd": cmd, "input": input})
             return self._fake_proc(body=self._messages_api_body({"pass": True, "score": 8.5}))
 
         with mock.patch("memory_eval.subprocess.run", side_effect=fake_run):
             parsed, usage = me._call_judge_api(  # noqa: SLF001
                 model="claude-judge-fixture", system_prompt="You are a blind judge.",
                 user_obj={"task_prompt": "Do X.", "criteria": ["done"], "final_files": {}, "agent_summary": "done"},
-                max_output_tokens=200, api_key="sk-test-fixture", api_url="https://api.anthropic.com/v1/messages",
+                max_output_tokens=1024, api_key="sk-test-fixture", api_url="https://api.anthropic.com/v1/messages",
             )
 
+        self.assertEqual(len(captured), 1)
         self.assertEqual(parsed, {"pass": True, "score": 8.5})
         self.assertEqual(usage, {"input_tokens": 42, "output_tokens": 7})
 
-        request_body = json.loads(captured["input"])
-        self.assertEqual(request_body["temperature"], 0)
+        request_body = json.loads(captured[0]["input"])
+        self.assertNotIn("temperature", request_body)
+        self.assertNotIn("top_p", request_body)
+        self.assertNotIn("top_k", request_body)
+        self.assertEqual(request_body["thinking"], {"type": "disabled"})
+        self.assertEqual(
+            request_body["output_config"],
+            {"format": {"type": "json_schema", "schema": me.JUDGE_VERDICT_SCHEMA}},
+        )
+        # Effort is left at the model default: disabling thinking is
+        # rejected only at `xhigh`/`max`, which nothing here sets.
+        self.assertNotIn("effort", request_body["output_config"])
         self.assertEqual(request_body["model"], "claude-judge-fixture")
         self.assertEqual(request_body["system"], "You are a blind judge.")
-        self.assertEqual(request_body["max_tokens"], 200)
+        self.assertEqual(request_body["max_tokens"], 1024)
         self.assertEqual(len(request_body["messages"]), 1)
         self.assertEqual(request_body["messages"][0]["role"], "user")
         # The user_obj is JSON-encoded into the message content, not
@@ -615,7 +730,24 @@ class CallJudgeApiTransportTests(unittest.TestCase):
         self.assertEqual(json.loads(request_body["messages"][0]["content"]), {
             "task_prompt": "Do X.", "criteria": ["done"], "final_files": {}, "agent_summary": "done",
         })
-        self.assertIn("sk-test-fixture", " ".join(captured["cmd"]))
+        self.assertIn("sk-test-fixture", " ".join(captured[0]["cmd"]))
+
+    def test_verdict_schema_avoids_keywords_structured_outputs_rejects(self):
+        """The structured-outputs schema subset 400s on numeric range
+        keywords ("For 'number' type, properties maximum, minimum are not
+        supported"), which a first cut of this schema hit against
+        claude-opus-4-8. The 0-10 range lives in judge-prompt.md and is
+        clamped in judge_output(); the schema pins the field set and types."""
+        score_schema = me.JUDGE_VERDICT_SCHEMA["properties"]["score"]
+        self.assertEqual(score_schema, {"type": "number"})
+        self.assertFalse(me.JUDGE_VERDICT_SCHEMA["additionalProperties"])
+        self.assertEqual(sorted(me.JUDGE_VERDICT_SCHEMA["required"]), ["pass", "score"])
+
+    def test_default_judge_output_cap_is_a_backstop_not_a_tuning_knob(self):
+        """#1026: a two-field verdict never needs 1024 tokens; the point is
+        that a truncated verdict cannot happen, including on a model that
+        thinks by default before the `thinking: disabled` pin takes effect."""
+        self.assertEqual(me.DEFAULT_JUDGE_MAX_OUTPUT_TOKENS, 1024)
 
     def test_429_retries_then_succeeds_on_the_next_attempt(self):
         calls = []
@@ -681,6 +813,47 @@ class CallJudgeApiTransportTests(unittest.TestCase):
 
         self.assertIsNone(parsed)
         self.assertEqual(usage, {"input_tokens": 0, "output_tokens": 0})
+
+
+# ---------------------------------------------------------------------------
+# _parse_judge_verdict(): the judge's OWN parse (#1029). The response is
+# schema-valid by construction, so this is json.loads plus the shape check
+# the harness has always applied -- deliberately NOT dream_analyze.py's
+# lenient `_parse_json_object`, whose fence-stripping and first-`{` scan
+# exist for the unconstrained map/reduce prompts.
+# ---------------------------------------------------------------------------
+
+class ParseJudgeVerdictTests(unittest.TestCase):
+    def test_plain_schema_valid_verdict_round_trips(self):
+        self.assertEqual(me._parse_judge_verdict('{"pass": true, "score": 8}'), {"pass": True, "score": 8})  # noqa: SLF001
+
+    def test_float_score_is_accepted(self):
+        self.assertEqual(me._parse_judge_verdict('{"pass": false, "score": 3.5}'), {"pass": False, "score": 3.5})  # noqa: SLF001
+
+    def test_non_json_returns_none(self):
+        self.assertIsNone(me._parse_judge_verdict("not json at all"))  # noqa: SLF001
+
+    def test_non_object_json_returns_none(self):
+        self.assertIsNone(me._parse_judge_verdict("[1, 2, 3]"))  # noqa: SLF001
+
+    def test_missing_score_returns_none(self):
+        self.assertIsNone(me._parse_judge_verdict('{"pass": true}'))  # noqa: SLF001
+
+    def test_non_numeric_score_returns_none(self):
+        self.assertIsNone(me._parse_judge_verdict('{"pass": true, "score": "eight"}'))  # noqa: SLF001
+
+    def test_boolean_score_is_not_a_number(self):
+        self.assertIsNone(me._parse_judge_verdict('{"pass": true, "score": true}'))  # noqa: SLF001
+
+    def test_non_boolean_pass_returns_none(self):
+        self.assertIsNone(me._parse_judge_verdict('{"pass": "yes", "score": 8}'))  # noqa: SLF001
+
+    def test_fenced_output_is_rejected_rather_than_stripped(self):
+        """The lenient fence-stripper is gone on purpose: with
+        output_config.format in place, a fenced response means the schema
+        was not honoured, and that should surface as a judge error rather
+        than be quietly repaired."""
+        self.assertIsNone(me._parse_judge_verdict('```json\n{"pass": true, "score": 8}\n```'))  # noqa: SLF001
 
 
 # ---------------------------------------------------------------------------
@@ -1568,6 +1741,136 @@ class TaskLevelIsolationTests(unittest.TestCase):
         # write_results() call) -- only the within-loop incremental write
         # can explain this.
         self.assertEqual({r["task_id"] for r in results}, {"iso-ok-2"})
+
+
+# ---------------------------------------------------------------------------
+# #1027: a run where EVERY agent run failed to execute is the harness, not a
+# memory result. It must abort loudly (raw first failure on stderr, non-zero
+# exit) rather than write a red results file that gate_check() then reads as
+# a regression -- while a run with SOME failures stays non-fatal.
+# ---------------------------------------------------------------------------
+
+class WholeRunAbortTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+        me.reset_agent_error_samples()
+        self.addCleanup(me.reset_agent_error_samples)
+        self.tasks_dir = self.tmp / "tasks"
+        self.tasks_dir.mkdir()
+
+    def _write_task(self, filename: str, task_id: str) -> None:
+        task = {
+            "id": task_id, "kind": "canary", "prompt": f"prompt for {task_id}",
+            "fixture": {"files": {"a.txt": "x\n"}}, "criteria": ["c"],
+        }
+        (self.tasks_dir / filename).write_text(json.dumps(task), encoding="utf-8")
+
+    @staticmethod
+    def _launch_failure() -> dict:
+        return {
+            "is_error": True,
+            "result": "claude -p failed to launch: [Errno 2] No such file or directory: 'claude'",
+            "usage": {}, "num_turns": 0, "total_cost_usd": 0.0,
+        }
+
+    @staticmethod
+    def _healthy_result() -> dict:
+        return {
+            "is_error": False, "result": "done", "num_turns": 2, "total_cost_usd": 0.01,
+            "usage": {"input_tokens": 100, "output_tokens": 20},
+        }
+
+    def _run_main(self, run_claude_p_side_effect):
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test-fixture"}), \
+                mock.patch("memory_eval.run_claude_p", side_effect=run_claude_p_side_effect), \
+                mock.patch(
+                    "memory_eval._call_judge_api",
+                    return_value=({"pass": True, "score": 7.0}, {"input_tokens": 10, "output_tokens": 5}),
+                ), \
+                contextlib.redirect_stderr(stderr):
+            exit_code = me.main([
+                "--tasks", str(self.tasks_dir / "*.json"),
+                "--runs", "1",
+                "--backbone", "fixture-model",
+                "--claude-bin", "/usr/bin/true",
+            ])
+        return exit_code, stderr.getvalue()
+
+    def test_every_run_failing_aborts_with_the_raw_output_and_writes_nothing(self):
+        self._write_task("01-a.json", "abort-a")
+        self._write_task("02-b.json", "abort-b")
+
+        exit_code, stderr = self._run_main(lambda **kwargs: self._launch_failure())
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("every agent run failed to execute", stderr)
+        # The RAW subprocess detail is attached, not just a rate.
+        self.assertIn("No such file or directory", stderr)
+        # Nothing was written, so --gate reports "no results" (harness
+        # broken) rather than a fabricated memory regression.
+        self.assertIsNone(me._find_latest_results_file())  # noqa: SLF001
+        is_open, reason = me.gate_check()
+        self.assertFalse(is_open)
+        self.assertEqual(reason, "no results")
+
+    def test_a_partially_failing_run_stays_non_fatal_and_writes_results(self):
+        self._write_task("01-ok.json", "partial-ok")
+        self._write_task("02-bad.json", "partial-bad")
+
+        def side_effect(**kwargs):
+            return self._launch_failure() if "partial-bad" in kwargs["prompt"] else self._healthy_result()
+
+        exit_code, stderr = self._run_main(side_effect)
+
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("every agent run failed to execute", stderr)
+        results_path = me._find_latest_results_file()  # noqa: SLF001
+        self.assertIsNotNone(results_path)
+        rows = {r["task_id"]: r for r in me._read_results_file(results_path)}  # noqa: SLF001
+        self.assertEqual(rows["partial-ok"]["baseline"]["format_error_rate"], 0.0)
+        self.assertEqual(rows["partial-bad"]["baseline"]["format_error_rate"], 1.0)
+
+    def test_an_unresolvable_claude_binary_fails_before_any_task_runs(self):
+        self._write_task("01-a.json", "unresolvable")
+        ran = []
+
+        def side_effect(**kwargs):
+            ran.append(kwargs["prompt"])
+            return self._healthy_result()
+
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test-fixture"}), \
+                mock.patch("memory_eval.run_claude_p", side_effect=side_effect), \
+                mock.patch(
+                    "memory_eval.resolve_claude_bin",
+                    side_effect=me.ClaudeBinaryNotFoundError("'claude' not found. Searched: PATH=''"),
+                ), \
+                contextlib.redirect_stderr(stderr):
+            exit_code = me.main([
+                "--tasks", str(self.tasks_dir / "*.json"),
+                "--runs", "1", "--backbone", "fixture-model",
+            ])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("not found", stderr.getvalue())
+        self.assertEqual(ran, [], "no task may run once the binary cannot be resolved")
+        self.assertIsNone(me._find_latest_results_file())  # noqa: SLF001
+
+    def test_offline_mode_skips_binary_resolution_entirely(self):
+        """--offline never spawns `claude`, so a machine with no CLI at all
+        must still be able to run the plumbing check."""
+        stderr = io.StringIO()
+        with mock.patch(
+            "memory_eval.resolve_claude_bin",
+            side_effect=AssertionError("resolve_claude_bin must not run in --offline mode"),
+        ), contextlib.redirect_stderr(stderr):
+            exit_code = me.main([
+                "--tasks", str(TASKS_DIR / "06-canary-unrelated-rename.json"),
+                "--offline", str(OFFLINE_FIXTURES),
+                "--runs", "1", "--backbone", "fixture-model",
+            ])
+        self.assertEqual(exit_code, 0)
 
 
 # ---------------------------------------------------------------------------
