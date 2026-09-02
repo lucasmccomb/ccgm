@@ -541,18 +541,23 @@ def resolve_claude_bin(claude_bin: str) -> str:
     CLAUDE_BIN_FALLBACK_DIRS. A caller who already passed a path (absolute,
     or relative with a separator) is taken at its word and only checked for
     executability. Raises ClaudeBinaryNotFoundError, naming everything it
-    searched, rather than letting every run degrade into a format error."""
+    searched, rather than letting every run degrade into a format error.
+
+    Absolute, but NOT symlink-resolved: `~/.local/bin/claude` is a symlink
+    into a versioned binary, and a CLI update mid-run swings that link and
+    can delete the version it pointed at. Keeping the installer's stable
+    entry point means a long eval survives an update under it."""
     candidate = Path(claude_bin).expanduser()
     if candidate.is_absolute() or len(candidate.parts) > 1:
-        resolved = candidate.resolve()
-        if os.access(resolved, os.X_OK) and resolved.is_file():
-            return str(resolved)
-        raise ClaudeBinaryNotFoundError(f"{claude_bin!r} is not an executable file (resolved to {resolved})")
+        absolute = Path(os.path.abspath(candidate))
+        if absolute.is_file() and os.access(absolute, os.X_OK):
+            return str(absolute)
+        raise ClaudeBinaryNotFoundError(f"{claude_bin!r} is not an executable file (resolved to {absolute})")
 
     searched: list[str] = []
     on_path = shutil.which(claude_bin)
     if on_path:
-        return str(Path(on_path).resolve())
+        return os.path.abspath(on_path)
     searched.append(f"PATH={os.environ.get('PATH', '')!r}")
 
     for raw_dir in CLAUDE_BIN_FALLBACK_DIRS:
@@ -560,7 +565,7 @@ def resolve_claude_bin(claude_bin: str) -> str:
         searched.append(str(install_dir))
         found = install_dir / claude_bin
         if found.is_file() and os.access(found, os.X_OK):
-            return str(found.resolve())
+            return os.path.abspath(found)
 
     raise ClaudeBinaryNotFoundError(
         f"{claude_bin!r} not found. Searched: " + "; ".join(searched)

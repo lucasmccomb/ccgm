@@ -574,6 +574,19 @@ class ResolveClaudeBinTests(unittest.TestCase):
         self.assertTrue(Path(resolved).is_absolute())
         self.assertEqual(Path(resolved).name, "claude")
 
+    def test_a_symlinked_entry_point_is_not_followed(self):
+        """~/.local/bin/claude is a symlink into a versioned binary. A CLI
+        update mid-run swings that link and can delete the version behind
+        it, so the harness keeps the stable entry point."""
+        real_dir = self.tmp / "versions"
+        real = self._make_executable(real_dir, name="2.1.258")
+        link_dir = self.tmp / "linked"
+        link_dir.mkdir(parents=True, exist_ok=True)
+        link = link_dir / "claude"
+        link.symlink_to(real)
+        os.environ["PATH"] = str(link_dir)
+        self.assertEqual(Path(me.resolve_claude_bin("claude")), link)
+
     def test_falls_back_to_a_known_install_dir_when_path_misses_it(self):
         """The launchd case: PATH resolves nothing, but the native
         installer's directory has the binary."""
@@ -582,7 +595,7 @@ class ResolveClaudeBinTests(unittest.TestCase):
         os.environ["PATH"] = "/nonexistent-dir-for-test"
         with mock.patch.object(me, "CLAUDE_BIN_FALLBACK_DIRS", (str(install_dir),)):
             resolved = me.resolve_claude_bin("claude")
-        self.assertEqual(Path(resolved), (install_dir / "claude").resolve())
+        self.assertEqual(Path(resolved), install_dir / "claude")
 
     def test_raises_naming_what_it_searched_when_nowhere(self):
         os.environ["PATH"] = "/nonexistent-dir-for-test"
@@ -597,7 +610,7 @@ class ResolveClaudeBinTests(unittest.TestCase):
     def test_an_explicit_path_is_taken_at_its_word(self):
         explicit = self._make_executable(self.tmp / "explicit")
         os.environ["PATH"] = "/nonexistent-dir-for-test"
-        self.assertEqual(Path(me.resolve_claude_bin(str(explicit))), explicit.resolve())
+        self.assertEqual(Path(me.resolve_claude_bin(str(explicit))), explicit)
 
     def test_an_explicit_path_that_is_not_executable_raises(self):
         not_exec = self.tmp / "explicit" / "claude"
