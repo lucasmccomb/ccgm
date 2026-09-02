@@ -479,6 +479,148 @@ echo hi > $A')"
 guard_no_sid_env "$(bash_json "echo hi > ${HOME}/code/repo/\$CLAUDE_CODE_SESSION_ID")"
 [ "$?" = "2" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: seeded sid into a repo path still denied"; }
 
+# Issue #1017: every argument check reads the word bash will actually pass,
+# so a flag or a path assembled by quoting, ANSI-C quoting, or an expansion
+# the guard cannot resolve no longer walks past the literal scans. Each line
+# below was proven on origin/main to exit 0 while real bash performed the
+# write.
+
+# The symptom table from the issue.
+assert_exit 2 "ansi-c find predicate denied" "$(bash_json "find . -name victim.txt \$'-delete'")"
+assert_exit 2 "single-quoted sed -i denied" "$(bash_json "sed '-i' s/a/b/ f")"
+assert_exit 2 "double-quoted sed -i denied" "$(bash_json 'sed "-i" s/a/b/ f')"
+assert_exit 2 "split-quoted sed -i denied" "$(bash_json "sed -''i s/a/b/ f")"
+assert_exit 2 "single-quoted find -delete denied" "$(bash_json "find . '-delete'")"
+assert_exit 2 "single-quoted attached sort -o denied" "$(bash_json "sort '-o/tmp/x' f")"
+assert_exit 2 "ansi-c sed -i denied" "$(bash_json "sed \$'-i' s/a/b/ f")"
+assert_exit 2 "ansi-c bare find -delete denied" "$(bash_json "find . \$'-delete'")"
+assert_exit 2 "indirect expansion as sed flag denied" "$(bash_json 'A=B
+B=-i
+sed ${!A} s/a/b/ f')"
+
+# The same carriers on the other checks, plus the escape spellings.
+assert_exit 2 "backslash-escaped sed -i denied" "$(bash_json 'sed \-i s/a/b/ f')"
+assert_exit 2 "ansi-c hex sed -i denied" "$(bash_json "sed \$'\\x2di' s/a/b/ f")"
+assert_exit 2 "ansi-c octal sed -i denied" "$(bash_json "sed \$'\\055i' s/a/b/ f")"
+assert_exit 2 "ansi-c unicode sed -i denied" "$(bash_json "sed \$'\\u002di' s/a/b/ f")"
+assert_exit 2 "double-quoted flag letter denied" "$(bash_json 'sed -"i" s/a/b/ f')"
+assert_exit 2 "flag-shaped \$A denied" "$(bash_json 'A=i
+sed -$A s/a/b/ f')"
+assert_exit 2 "flag-shaped long \$A denied" "$(bash_json 'A=lace
+sed --in-p$A s/a/b/ f')"
+assert_exit 2 "split-quoted find predicate denied" "$(bash_json "find . -dele''te")"
+assert_exit 2 "ansi-c repo path as rm target denied" "$(bash_json "rm -rf \$'${HOME}/code/repo/src'")"
+assert_exit 2 "ansi-c repo path as redirect target denied" "$(bash_json "echo hi > \$'${HOME}/code/repo/pwn'")"
+assert_exit 2 "single-quoted checkout pathspec denied" "$(bash_json "git checkout '--' f")"
+assert_exit 2 "single-quoted git branch -D denied" "$(bash_json "git branch '-D' x")"
+assert_exit 2 "single-quoted gh api -X denied" "$(bash_json "gh api '-X' POST /x")"
+
+# The unresolvable-expansion family beyond `$NAME`: indirect, length,
+# default-value, positional and special parameters.
+assert_exit 2 "indirect expansion as find predicate denied" "$(bash_json 'find . ${!A}')"
+assert_exit 2 "length expansion as sed flag denied" "$(bash_json 'sed ${#A} s/a/b/ f')"
+assert_exit 2 "default-value expansion as sed flag denied" "$(bash_json 'sed ${A:--i} s/a/b/ f')"
+assert_exit 2 "positional parameter as sed flag denied" "$(bash_json 'sed $1 s/a/b/ f')"
+assert_exit 2 "positional parameter as find predicate denied" "$(bash_json 'find . $1')"
+assert_exit 2 "all-args parameter as rm path denied" "$(bash_json 'rm $@')"
+# Mid-word in a path is the one place an expansion still decides where a write
+# lands: a prefix inside an allowed root says nothing about what the rest
+# resolves to (`/tmp/x/${!A}` with B=../../code/repo/f leaves /tmp entirely).
+assert_exit 2 "mid-word indirect expansion in a scratch path denied" "$(bash_json 'rm -rf /tmp/x/${!A}')"
+assert_exit 2 "mid-word positional parameter in a scratch path denied" "$(bash_json "cp ${HOME}/code/plans/a.md ${HOME}/code/plans/b\$1.md")"
+assert_exit 2 "pid parameter as redirect target denied" "$(bash_json 'echo hi > /tmp/f.$$')"
+assert_exit 2 "unterminated brace expansion denied" "$(bash_json 'sed ${ f')"
+
+# An ANSI-C body the decoder cannot finish is denied rather than guessed at.
+assert_exit 2 "undecodable ansi-c escape as sed arg denied" "$(bash_json "sed \$'\\q' s/a/b/ f")"
+assert_exit 2 "undecodable ansi-c escape as rm path denied" "$(bash_json "rm \$'\\q'")"
+ansi_err=$(printf '%s' "$(bash_json "sed \$'\\q' s/a/b/ f")" | python3 "${GUARD}" 2>&1 >/dev/null)
+ansi_rc=$?
+if [ "${ansi_rc}" = "2" ] && printf '%s' "${ansi_err}" | grep -q "cannot decode"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: undecodable ansi-c denial names the decode failure"
+    echo "  exit: ${ansi_rc}"
+    echo "  got:  ${ansi_err}"
+fi
+
+# Sibling literal-check gaps of the same class, both verified against the real
+# binary: gh accepts the attached flag forms, and git clusters short flags
+# (`git branch -dr <name>` attempted the delete).
+assert_exit 2 "gh api attached --method= denied" "$(bash_json 'gh api --method=POST /repos/o/r/labels')"
+assert_exit 2 "gh api attached -XPOST denied" "$(bash_json 'gh api -XPOST /repos/o/r/labels')"
+assert_exit 2 "gh api attached --field= denied" "$(bash_json 'gh api --field=name=x /repos/o/r/labels')"
+assert_exit 2 "gh api attached -fk=v denied" "$(bash_json 'gh api -fname=x /repos/o/r/labels')"
+assert_exit 2 "gh api attached -Fk=v denied" "$(bash_json 'gh api -Fname=x /repos/o/r/labels')"
+assert_exit 2 "gh api attached --raw-field= denied" "$(bash_json 'gh api --raw-field=name=x /repos/o/r/labels')"
+assert_exit 2 "gh api attached --input= denied" "$(bash_json 'gh api --input=/tmp/x /repos/o/r/labels')"
+assert_exit 2 "git branch clustered -Df denied" "$(bash_json 'git branch -Df feat')"
+assert_exit 2 "git branch clustered -fD denied" "$(bash_json 'git branch -fD feat')"
+assert_exit 2 "git branch clustered -dr denied" "$(bash_json 'git branch -dr feat')"
+
+# The allow side: quoting a legitimate argument must not start denying it,
+# and an expansion after a flag's `=` is a value, not the flag.
+assert_exit 0 "gh pr edit attached --title= allowed" "$(bash_json 'gh pr edit 1 --title="x y"')"
+assert_exit 0 "gh issue comment ansi-c body allowed" "$(bash_json "gh issue comment 7 --body=\$'multi\\nline'")"
+assert_exit 0 "gh api paginate allowed" "$(bash_json 'gh api --paginate /repos/o/r/issues')"
+assert_exit 0 "gh pr edit --body with \$T value allowed" "$(bash_json 'gh pr edit 1 --body=$T')"
+assert_exit 0 "mkdir under a quoted \$HOME path allowed" "$(bash_json 'mkdir -p "$HOME/.claude/x"')"
+assert_exit 0 "mkdir into a quoted tmp path with a space allowed" "$(bash_json "mkdir -p '/tmp/a b'")"
+assert_exit 0 "quoted sed -n script allowed" "$(bash_json "sed -n '1,10p' f")"
+assert_exit 0 "quoted find -name allowed" "$(bash_json "find . -name '*.py'")"
+assert_exit 0 "ansi-c escape as an echo argument allowed" "$(bash_json "echo \$'\\e[0m'")"
+assert_exit 0 "printf with a quoted expansion allowed" "$(bash_json 'printf "%s\\n" "$A"')"
+assert_exit 0 "git log quoted --format allowed" "$(bash_json "git log --format='%h %s'")"
+assert_exit 0 "git -C with a quoted path allowed" "$(bash_json 'git -C "$HOME/code/repo" status')"
+assert_exit 0 "git branch read-only clusters allowed" "$(bash_json 'git branch -vv')"
+assert_exit 0 "git branch --list allowed" "$(bash_json "git branch --list 'feat/*'")"
+assert_exit 0 "sed script ending in a dollar allowed" "$(bash_json "sed -n '\$p' f")"
+# The first word is read after quote removal too, because that is the command
+# bash runs. It reaches the branch its name selects — which is the same
+# allowlist decision as before, so a quoted mutating command stays denied.
+assert_exit 0 "quoted first word still reads as its command" "$(bash_json "'git' status")"
+assert_exit 0 "quoted rm inside tmp still allowed" "$(bash_json "'rm' -rf /tmp/advisor-scratch")"
+assert_exit 2 "quoted sed -i denied through its own branch" "$(bash_json "'sed' -i s/a/b/ f")"
+assert_exit 2 "quoted find -delete denied through its own branch" "$(bash_json "'find' . -delete")"
+assert_exit 2 "quoted rm of a repo path denied" "$(bash_json "'rm' ${HOME}/code/repo/src/app.py")"
+assert_exit 2 "quoted git push denied" "$(bash_json "'git' push origin main")"
+assert_exit 2 "ansi-c git commit denied" "$(bash_json "\$'git' commit -m x")"
+
+# ─── Malformed input: no traceback, no hang ──────────────────────────────────
+
+assert_no_crash() {
+    # $1 label, $2 hook-json. Any exit but 0/2 — or a traceback — is a bug.
+    local label="$1"
+    local err
+    local rc
+    err=$(printf '%s' "$2" | python3 "${GUARD}" 2>&1 >/dev/null)
+    rc=$?
+    if { [ "${rc}" = "0" ] || [ "${rc}" = "2" ]; } \
+        && ! printf '%s' "${err}" | grep -q "Traceback"; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        echo "FAIL: malformed input handled — ${label}"
+        echo "  exit: ${rc}"
+        echo "  got:  ${err}"
+    fi
+}
+
+assert_no_crash "unterminated single quote" "$(bash_json "sed 'abc")"
+assert_no_crash "unterminated double quote" "$(bash_json 'sed "abc')"
+assert_no_crash "unterminated ansi-c quote" "$(bash_json "sed \$'abc")"
+assert_no_crash "unterminated brace" "$(bash_json 'sed ${abc')"
+assert_no_crash "unterminated indirect brace" "$(bash_json 'sed ${!abc')"
+assert_no_crash "lone dollar" "$(bash_json 'sed $')"
+assert_no_crash "trailing backslash" "$(bash_json 'sed abc\')"
+assert_no_crash "ansi-c hex with no digits" "$(bash_json "sed \$'\\x'")"
+assert_no_crash "ansi-c unicode past range" "$(bash_json "sed \$'\\UFFFFFFFF'")"
+assert_no_crash "ansi-c trailing backslash" "$(bash_json "sed \$'abc\\\\")"
+assert_no_crash "5000 indirect expansions" "$(bash_json "sed $(python3 -c 'print("\x24{!A}" * 5000)')")"
+assert_no_crash "5000 hex escapes" "$(bash_json "sed \$'$(python3 -c 'print("\\x41" * 5000)')'")"
+assert_no_crash "5000 quote pairs" "$(bash_json "sed $(python3 -c "print(\"''\" * 5000)")")"
+
 # ─── Posture hook ────────────────────────────────────────────────────────────
 
 posture_json="{\"session_id\":\"${SID}\"}"
