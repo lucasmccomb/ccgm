@@ -8,7 +8,7 @@ For user-facing documentation, see the [README](../README.md) and the rest of [`
 
 ## What CCGM Is
 
-CCGM is a modular configuration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Instead of hand-crafting rules, hooks, slash commands, and permissions from scratch, users pick from a catalog of 78 self-contained modules and install them with a single command. Each module packages one coherent capability — a behavioral discipline, a workflow command, an enforcement hook, an entire subsystem — with its own manifest, README, tests, and manual-install path.
+CCGM is a modular configuration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Instead of hand-crafting rules, hooks, slash commands, and permissions from scratch, users pick from a catalog of 79 self-contained modules and install them with a single command. Each module packages one coherent capability — a behavioral discipline, a workflow command, an enforcement hook, an entire subsystem — with its own manifest, README, tests, and manual-install path.
 
 At a higher level, CCGM is an answer to a question: **what does a fully-configured, safety-railed, self-improving AI coding environment look like when you treat the configuration itself as a serious software project?** It applies production engineering practice — issue-first workflow, CI, adversarial review, append-only data models, deterministic gates, incident postmortems — to the layer most people treat as dotfiles.
 
@@ -17,10 +17,10 @@ At a higher level, CCGM is an answer to a question: **what does a fully-configur
 | Fact | Value |
 |------|-------|
 | First commit | 2026-03-19 |
-| Modules | 78 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
-| Slash commands | 76 |
-| Hooks | 33 Python hooks across 11 Claude Code events |
-| Presets | 5 (minimal, standard 16 modules, team, cloud-agent 55, full 74) |
+| Modules | 79 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
+| Slash commands | 90 |
+| Hooks | 36 Python hooks across 11 Claude Code events |
+| Presets | 5 (minimal, standard 16 modules, team, cloud-agent 55, full 75) |
 | Commits / issues | 430+ commits, 870+ issues and PRs in the first 4 months |
 | Base permission policy | 800+ allow entries, curated deny list, bypass-proof destructive-command blocks |
 | Audit engine | 21 audit packs over a deterministic tool spine + LLM triage |
@@ -231,7 +231,7 @@ Highlights of the catalog:
 
 ## Command Surface
 
-77 slash commands, grouped:
+86 slash commands, grouped:
 
 | Cluster | Commands |
 |---------|----------|
@@ -294,6 +294,7 @@ Every one of these produced a durable control, not just a fix:
 | Bash's builtin `echo` flag-parses an argument of exactly `-n`/`-e` into empty output; what was filed as 7 sites became 13 once the sweep widened past piped `tr` calls | `printf '%s'` for flag-shaped values, and a regression test built on a git file literally named `-n` |
 | Distinct from the SIGPIPE class: `grep -c` exits 1 on a count of zero, so a bare `var=$(... grep -c ...)` under `set -e` killed a suite before its own fail branch could report — the regression it guarded became a silent mid-run abort that read as a pass. The audit skill's 33 bundled suites carried ~130 more sites of the piped class | `\|\| true` guards on found-nothing assignments across the top-level suites; the herestring sweep extended to all 33 audit suites with flags preserved byte-for-byte and verified by before/after multiset comparison |
 | The README install-block guard was coverage-only: it proved every declared file was copied but could not see a missing `mkdir -p` (~40 READMEs failed from scratch) or an over-install (the #951 `cp -R` that swept 40 undeclared files stayed green), and 11 of 78 modules were invisible to it — three because its heading regex was case-sensitive | The guard grew two dimensions — static directory-bootstrap checking and disk-resolved over-copy detection (gitignore-aware, fail-closed) — and the skip set fell to 3 modules, each named in the guard with the reason its install is genuinely not a flat copy |
+| The advisor-mode gate's flag and predicate checks read each argument's literal text, so a quoted, ANSI-C, or expansion-carried flag reached the command with the guard exiting 0 in silence; the fix added one word normalizer every check reads instead of the raw text. An adversarial reviewer, working under a reproduce-it-against-real-bash bar, then found 21 further bypasses across expansion stages the normalizer did not model — locale quoting, brace expansion, word splitting on an internal field separator, and globbing, plus backslash-newline line continuation — all pre-existing on the default branch. At that point the docs claimed the bypass class was closed, and the new differential test harness reported a clean pass when the guard file did not exist, because Python's own file-not-found exit code matched the guard's denial exit code | Every finding landed in the same pull request rather than a follow-up, in the gate's stated over-deny direction, and the harness gained a guard-exists check plus positive and negative controls; a denial now requires the guard's exit code and non-empty stderr together, not the exit code alone. The lesson: a confirmatory test matrix built from an implementation's own model of a problem cannot find bypasses outside that model — drive the matrix from the underlying system's real behavior instead, and make a security test fail loudly when the thing it tests cannot run |
 
 ## Iteration Case Studies
 
@@ -332,7 +333,7 @@ CCGM's most distinctive property is that it is built *by* the environment it con
 
 ## Notable Engineering Highlights
 
-- Designed and shipped a 78-module configuration platform with dependency resolution, deep JSON settings merging, template expansion, manifest-tracked install/update/uninstall, and four distribution surfaces — in pure bash + jq with no runtime dependencies.
+- Designed and shipped a 79-module configuration platform with dependency resolution, deep JSON settings merging, template expansion, manifest-tracked install/update/uninstall, and four distribution surfaces — in pure bash + jq with no runtime dependencies.
 - Built a durable cross-session memory system on an append-only op-event log with read-time projection, confidence decay, conflict-free multi-writer git sync, computed rollback, three independent anti-poisoning layers, and a published adversarial security analysis — then held its automation behind an eval gate its own results hadn't yet passed.
 - Built two autonomous observe-analyze-propose loops (permission friction; session transcripts) that run nightly under cost caps with direct API calls, layered defenses (dwell windows, blast-radius caps, anomaly checks, self-healing circuit breakers), and human-gated apply paths.
 - Rebuilt a codebase auditor as a 21-pack engine over a deterministic multi-tool spine with schema-validated, fingerprinted findings, baseline/delta classification, and suppression/provenance workflows.
