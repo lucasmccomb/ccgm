@@ -1,7 +1,7 @@
 ---
 name: launch
 description: >
-  Take a one-page spec and reach a deployed Cloudflare Pages site without further human input — except for the unavoidable Cloudflare Connect-to-Git dashboard step, which the skill stops to ask for. Ten phases - pre-flight, parse spec, create GitHub repo, scaffold project, implement deliverables, push, Pages via Connect-to-Git, provision secrets, optional custom domain, verify and report. Default scaffold is Vite + React TypeScript; the spec can override. The skill NEVER runs `wrangler pages deploy <new-name>` to create a project — direct-upload Pages projects cannot be retrofitted with Git integration. Modes - interactive (default) and dry-run.
+  Take a one-page spec and reach a deployed Cloudflare Pages site without further human input — except a one-time Cloudflare GitHub App install, which the skill stops to ask for only if it's missing. Ten phases - pre-flight, parse spec, create GitHub repo, scaffold project, implement deliverables, push, create the Pages project via the Pages API (dashboard Connect-to-Git as fallback), provision secrets, optional custom domain, verify and report. Default scaffold is Vite + React TypeScript; the spec can override. The skill NEVER runs `wrangler pages deploy <new-name>` to create a project — direct-upload Pages projects cannot be retrofitted with Git integration. Modes - interactive (default) and dry-run.
   Triggers: launch this spec, deploy this spec, ship this spec, take spec to deploy, one-prompt deploy, end-to-end launch, /launch.
 disable-model-invocation: false
 ---
@@ -18,11 +18,11 @@ The skill is the test of whether CCGM + Cloudflare infra is agent-native enough 
 
 ---
 
-## CRITICAL CONSTRAINT: Connect-to-Git only
+## CRITICAL CONSTRAINT: Git-connected only, API first
 
 **You must read this section before starting Phase 0.**
 
-Cloudflare Pages projects MUST be created via the dashboard's `Workers & Pages > Create > Pages > Connect to Git` flow at inception. You CANNOT add Git integration to an existing direct-upload Pages project later — Cloudflare does not support that conversion.
+Cloudflare Pages projects MUST be created with GitHub integration at the moment of creation — either through the Pages API's `source` field (`POST /accounts/{account_id}/pages/projects` with `source.type: "github"`) or the dashboard's `Workers & Pages > Create > Pages > Connect to Git` flow. You CANNOT add Git integration to an existing direct-upload Pages project later — Cloudflare does not support that conversion.
 
 Concretely, this skill MUST NOT run any of:
 
@@ -30,9 +30,9 @@ Concretely, this skill MUST NOT run any of:
 - `wrangler pages project create <new-project-name>` followed by `wrangler pages deploy`
 - Any other CLI command that creates a NEW Pages project as a direct-upload one
 
-If you do, the resulting project will never auto-deploy from `git push`. The user will discover this days or weeks later when the production site goes stale, and the only fix is to delete the project and recreate it via Connect-to-Git, migrating custom domains, env vars, and bindings — multi-session production work.
+If you do, the resulting project will never auto-deploy from `git push`. The user will discover this days or weeks later when the production site goes stale, and the only fix is to delete the project and recreate it, migrating custom domains, env vars, and bindings — multi-session production work.
 
-**This rule has no exceptions for v1 of `/launch`.** If `wrangler` is the only path and Connect-to-Git is unavailable, STOP and report `BLOCKED`. Do not "make progress" by direct-upload. See `~/.claude/rules/cloudflare.md`.
+**This rule has no exceptions for v1 of `/launch`.** The API path's only precondition is a one-time Cloudflare GitHub App install on the GitHub account, with the repo in its access list — a browser-only, per-account action that (once done with "All repositories" access) never has to be repeated for future repos. If that precondition is unmet, STOP and ask the user to install the app, then retry the API create (Phase 6). Do not "make progress" by direct-upload. See `~/.claude/rules/cloudflare.md`.
 
 ---
 
@@ -42,7 +42,7 @@ Parse `$ARGUMENTS` for a mode token:
 
 | Mode | Behavior |
 |------|----------|
-| `mode:interactive` (default) | Full pipeline. Skill asks targeted questions when the spec is silent. Executes commands. Stops at Phase 6 for the user to perform the Connect-to-Git step, then resumes. |
+| `mode:interactive` (default) | Full pipeline. Skill asks targeted questions when the spec is silent. Executes commands. Creates the Pages project via the API in Phase 6; stops only if the GitHub App precondition is unmet, then resumes once the user installs it. |
 | `mode:dry-run` | Prints every `gh`, `git`, `npm`, `wrangler`, and `curl` command that would run, in order, with the inputs they would receive. Executes nothing. Skips the Phase 6 hand-off but prints the exact instructions the user would receive. Use this to verify the skill is correct against a spec before burning a real CF project. |
 
 In `mode:dry-run` no files are written, no repos are created, no commits are made, no deployments occur. The output is a transcript the user can review.
@@ -122,7 +122,7 @@ Before doing anything, print a summary of what the skill is about to do:
 - Framework: <from spec, or default vite-react-ts>
 - Domain: <from spec, or none>
 - Mode: <interactive|dry-run>
-- Phases: 0 (preflight, done) -> 1 (parse) -> 2 (repo) -> 3 (scaffold) -> 4 (implement) -> 5 (push) -> 6 (Pages: USER STEP) -> 7 (secrets) -> 8 (domain) -> 9 (verify) -> 10 (report)
+- Phases: 0 (preflight, done) -> 1 (parse) -> 2 (repo) -> 3 (scaffold) -> 4 (implement) -> 5 (push) -> 6 (Pages: API, dashboard fallback) -> 7 (secrets) -> 8 (domain) -> 9 (verify) -> 10 (report)
 ```
 
 In `interactive` mode, ask the user `proceed?` once. In `dry-run`, print the plan and proceed automatically (no side effects to confirm).
@@ -324,90 +324,110 @@ git branch -M main
 git push -u origin main
 ```
 
-Do NOT push other branches in v1. The Pages Connect-to-Git flow defaults to `main` as production; preview branches are a follow-up concern.
+Do NOT push other branches in v1. Phase 6's project creation (API or dashboard) sets `main` as the production branch; preview branches are a follow-up concern.
 
 In `dry-run`, print the command.
 
 ---
 
-## Phase 6: Cloudflare Pages — USER STEP (Connect-to-Git)
+## Phase 6: Cloudflare Pages Project (API first, dashboard fallback)
 
-**This is the only phase the skill cannot complete autonomously.** The skill stops here, prints clear instructions, and waits for the user to confirm.
+**The skill creates the Pages project via the Cloudflare Pages API by default.** It stops for the user only when the one-time GitHub App precondition is unmet.
 
-### 6.1 What the skill prints
+### 6.1 Resolve the account id and auth
+
+wrangler's OAuth session (already verified in Phase 0.1 via `wrangler whoami`) carries the `pages (write)` scope this call needs — no separate Cloudflare API token has to be minted just to create a Pages project.
+
+The evidence behind this phase verified the request shape and the precondition against a real account; it does not record the exact command to pull a bearer token out of wrangler's local OAuth session for a raw `curl` call, or a wrangler subcommand that prints the account id. If the environment doesn't already expose a usable bearer (a `CLOUDFLARE_API_TOKEN` the user has set, or a connected Cloudflare MCP server) or the account id, ask the user once rather than guessing at wrangler's credential storage format.
+
+### 6.2 Preflight the GitHub App precondition
+
+No read-only endpoint exists (per the research this phase is built on) to check "is the App installed and does its repo list include mine" ahead of time. So the skill attempts the create in 6.3 and branches on the result:
+
+- **Success** (project created, and 6.4's read-back confirms `source.type == "github"`): continue to 6.5.
+- **Failure that looks precondition-related**: the research note does not record the exact error Cloudflare's Pages API returns for "repo not in the App's access list" — community reports describe an `8000007 Project not found`-style failure for a related "broken connection" case, not confirmed as the first-create error. Treat any create failure whose message references the repository, GitHub, or the connection as this case.
+
+  Print:
+
+  ```
+  ---
+  Phase 6: Cloudflare Pages — GitHub App not installed (or repo not in its access list)
+  ---
+
+  This is the one step the skill cannot do for you. The Cloudflare
+  "Workers and Pages" GitHub App installs once per GitHub account (or
+  gets a repo added to its list) through the browser -- GitHub Apps
+  cannot be installed via API.
+
+  1. Open: https://github.com/apps/cloudflare-workers-and-pages/installations/new
+  2. Authorize for your account/org.
+  3. If asked to choose "Only select repositories", include <owner>/<project_name>.
+  4. Return here and say "done".
+
+  The skill will retry the API create once you confirm.
+  ---
+  ```
+
+  Wait for "done", then retry 6.3 once. If it fails again with the same class of error, fall back to the dashboard: **Workers & Pages > Create > Pages > Connect to Git**, authorize `<owner>/<project_name>`, branch `main`, and the build settings from 6.3's table — the same flow this phase used before this change, kept as the documented escape hatch.
+
+### 6.3 Create the real project
 
 ```
----
-Phase 6: Cloudflare Pages project creation (Connect-to-Git)
----
+POST /accounts/<account_id>/pages/projects
+{
+  "name": "<project_name>",
+  "production_branch": "main",
+  "source": {
+    "type": "github",
+    "config": {
+      "owner": "<owner>",
+      "repo_name": "<project_name>",
+      "production_branch": "main",
+      "deployments_enabled": true,
+      "pr_comments_enabled": true,
+      "preview_deployment_setting": "all"
+    }
+  },
+  "build_config": {
+    "build_command": "<from the table below>",
+    "destination_dir": "<from the table below>",
+    "root_dir": "/"
+  }
+}
+```
 
-This step requires your browser. The skill cannot do it for you. The
-Cloudflare API does not expose a "create Pages project with Git
-integration" endpoint, so the dashboard flow is the only correct path.
-
-DO NOT run `wrangler pages deploy <project-name>` to "make progress".
-That creates a direct-upload project that Cloudflare cannot retrofit
-with Git integration. The only fix later is to delete and recreate.
-
-Steps:
-
-1. Open: https://dash.cloudflare.com/?to=/:account/workers-and-pages/create/pages
-2. Click "Connect to Git"
-3. Authorize the GitHub repo: <owner>/<project_name>
-4. Select branch: main
-5. Configure build settings:
-   - Framework preset: <auto-detected for vite/next/astro, or "None" for static>
-   - Build command:    <from table below>
-   - Build output dir: <from table below>
-   - Root directory:   /
-6. Click "Save and Deploy"
-7. Wait for the first deployment to finish (1-3 minutes)
-8. Copy the assigned `.pages.dev` URL
-9. Return here and paste the URL, or type "done" if there were no issues
-
-Build settings by framework:
+Build settings by framework (unchanged from before this change):
 
 | Framework      | Build command   | Output directory |
-|----------------|-----------------|------------------|
-| vite-react-ts  | npm run build   | dist             |
-| vite-react     | npm run build   | dist             |
-| vite-vanilla   | npm run build   | dist             |
-| next           | npm run build   | .next            |  (use the Next.js preset)
-| astro          | npm run build   | dist             |
-| static         | (leave empty)   | .                |
+|----------------|-----------------|-------------------|
+| vite-react-ts  | npm run build   | dist              |
+| vite-react     | npm run build   | dist              |
+| vite-vanilla   | npm run build   | dist              |
+| next           | npm run build   | .next             |  (use the Next.js preset)
+| astro          | npm run build   | dist              |
+| static         | (leave empty)   | .                 |
 
-(Project name to use in the dashboard: <project_name>)
+### 6.4 Read back and verify
 
----
+```
+GET /accounts/<account_id>/pages/projects/<project_name>
 ```
 
-### 6.2 What the skill does after the user says "done"
+Assert `result.source.type == "github"`. On a mismatch (missing `source`, or any other value): `DELETE /accounts/<account_id>/pages/projects/<project_name>` the bad project, report `BLOCKED` with the read-back body attached, and stop. **Never** fall through to `wrangler pages deploy` to "get something live" — that is exactly the mistake this phase exists to prevent.
 
-Verify the project was created correctly:
+### 6.5 First deployment
+
+`deployments_enabled: true` plus the Phase 5 push means Cloudflare triggers the first build automatically once the project's `source` resolves. The research this phase is built on documents a trigger-and-poll recipe (`GET .../builds/.../builds`, watch `status` reach `success`) for Workers Builds, not the Pages API — so this skill does not invent a Pages-specific build-polling endpoint. Phase 9's existing bounded curl retry (5 attempts, 10s apart) is what confirms the deployment landed; no separate trigger call is needed here.
+
+Capture the assigned URL:
 
 ```bash
-# 6.3 Confirm the project exists with Git integration
-npx -y wrangler pages project list 2>/dev/null | grep -E "<project_name>" || {
-  echo "BLOCKED: project <project_name> not found in `wrangler pages project list`."
-  echo "Did you complete the Connect-to-Git step in the dashboard?"
-  exit 1
-}
-
-# 6.4 Capture the assigned Pages URL
-# The user is asked to paste the URL when they confirm "done". Store it in PAGES_URL.
-# If the user said "done" without a URL, default to the conventional pattern and ask once
-# to confirm. The conventional pattern is https://<project_name>.pages.dev but Cloudflare
-# may assign a hash-suffixed alias for projects that conflict.
-PAGES_URL="https://<project_name>.pages.dev"  # default; override if user pasted a different one
+PAGES_URL="https://<project_name>.pages.dev"  # default; override with the URL from the create response (6.3) or the URL the user pasted in the 6.2 dashboard fallback
 ```
 
-If the user pasted the URL, use it. If they said "done" without a URL, ask once: "What's the assigned `.pages.dev` URL?" and store it.
+### 6.6 Dry-run behavior
 
-The skill does NOT attempt to verify Git-Provider status programmatically in v1 — `wrangler pages project list` does not expose the field reliably. The skill trusts the user's confirmation that they used Connect-to-Git, and the user is on the hook for not having taken the direct-upload path. (The instructions printed in 6.1 are explicit; the rule lives in the skill.)
-
-### 6.3 Dry-run behavior
-
-In `dry-run`, print the full instruction block from 6.1 with the actual `<project_name>` substituted, and a note: "Skill would stop here in interactive mode. Skipping in dry-run; downstream phases assume the project exists at https://<project_name>.pages.dev."
+In `dry-run`, print the exact `POST` body from 6.3 (values substituted) and the `GET` from 6.4, and a note: "No requests sent. Downstream phases assume the project exists at https://<project_name>.pages.dev."
 
 ---
 
@@ -571,7 +591,7 @@ The skill would have:
 5. Scaffolded <framework>
 6. Implemented <N> deliverables, committed each
 7. Pushed to origin/main
-8. Stopped to ask the user to perform the Connect-to-Git step
+8. Created the Pages project via the Pages API (`source.type: "github"`), verified via read-back — or stopped once to ask the user to install the GitHub App if the precondition was unmet
 9. Provisioned <N> secrets via wrangler pages secret put
 10. (if applicable) Attached <domain> via wrangler pages domain add
 11. Verified https://<project_name>.pages.dev returns 200
@@ -602,7 +622,7 @@ Never end with a free-form summary. Always end with one of the four tokens on it
 ## Anti-Patterns (Do NOT Do These)
 
 - **Running `wrangler pages deploy <new-name>` to create a project.** Forbidden in v1. Direct-upload projects cannot be retrofitted with Git integration. STOP and report `BLOCKED` instead.
-- **Skipping Phase 6 and assuming the user "knows" the dashboard step.** The skill's job is to make the procedure explicit. Print the instruction block in 6.1 verbatim, including the build command and output directory for the chosen framework.
+- **Skipping the read-back check in 6.4 and assuming the API create worked.** A `POST` that returns success without `source.type: "github"` on read-back is still a broken (or direct-upload) project. Always verify before treating Phase 6 as complete.
 - **Including AI attribution in commits or PR bodies.** No `Co-Authored-By` Claude/AI/Anthropic. No "Generated with Claude Code" footers. The human is the author.
 - **Implementing more than the spec asks for.** If the spec says "build a landing page with three sections," do not also add an admin panel. Note adjacent suggestions in the Deferred suggestions block of the final report.
 - **Logging secret values.** Use `read -rs` and pipe directly to `wrangler`. Never `echo` the value. Never include the value in a commit, branch name, or filename.
@@ -614,15 +634,15 @@ Never end with a free-form summary. Always end with one of the four tokens on it
 
 ---
 
-## Rationalizations That Mean You Are About to Violate the Connect-to-Git Rule
+## Rationalizations That Mean You Are About to Violate the Git-Integration Rule
 
 | You are about to say... | The reality is... |
 |-------------------------|-------------------|
 | "Just one direct-upload to test the pipeline" | A direct-upload project becomes the production artifact. The user will not delete and recreate it later — they will live with a stale site. |
-| "wrangler pages deploy is faster than asking the user to open the dashboard" | Faster now, multi-session migration later when the user discovers the site does not auto-deploy. |
-| "The user said they're in a hurry, let me skip Phase 6" | Phase 6 cannot be skipped. The dashboard is the only correct path for project creation. Print the instruction block and wait. |
+| "wrangler pages deploy is faster than the API call or the dashboard" | Faster now, multi-session migration later when the user discovers the site does not auto-deploy. |
+| "The user said they're in a hurry, let me skip Phase 6" | Phase 6 cannot be skipped. Creation (6.3) and the read-back verification (6.4) both have to happen before Phase 7 runs. |
 | "I'll create the project via wrangler now and convert to Git later" | Cloudflare does not support that conversion. There is no "later". |
-| "I'll deploy via wrangler and ask the user to add Git integration after" | Same problem. Connect-to-Git is inception-only. |
+| "I'll deploy via wrangler and ask the user to add Git integration after" | Same problem. Git integration — whether created via the API or the dashboard — is inception-only. |
 
 If you find yourself reaching for `wrangler pages deploy <new-name>`, STOP. Read the constraint section at the top of this file again.
 

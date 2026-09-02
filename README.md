@@ -194,7 +194,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **ccgm-doctor** | workflow | - | Audit tool for Claude Code installs: dangling hook/command refs, lexical overlap between command descriptions, and a routing eval | - |
 | **ce-review** | commands | `/ce-review` | /ce-review unified code-review orchestrator. Composes scope-drift, learnings-researcher, tier-sharpener, and review-synthesizer with structured JSON findings | compound-knowledge, pr-review-toolkit, subagent-patterns |
 | **cloud-dispatch** | workflow | `/dispatch`, `/dispatch-status`, `/dispatch-stop`, `/vm-manage` | Delegate GitHub issues to autonomous Claude Code agents on Hetzner Cloud VMs. Includes /dispatch, /dispatch-status, /dispatch-stop, /vm-manage commands | - |
-| **cloudflare** | tech-specific | - | Pages vs Workers selection, deployment methods, Git integration requirements | - |
+| **cloudflare** | tech-specific | - | Pages vs Workers selection, API-first Git integration, Email Service, token scopes | - |
 | **code-quality** | patterns | - | Code standards, testing requirements, error handling, security, build verification | - |
 | **commands-core** | commands | `/commit`, `/cpm`, `/ghi`, `/gs`, `/pr`, `/pr-description` | The everyday git loop: commit with an issue-prefixed message, open a PR that closes its issue, or run commit-PR-merge end to end. Plus repo status, issue creation, and a pure PR-body writer callable by other commands | - |
 | **commands-extra** | commands | `/audit`, `/checkpoint`, `/freeze`, `/guard`, `/promote-rule`, `/pwv`, `/unfreeze`, `/walkthrough` | Codebase audit, Playwright visual verification, step-by-step walkthrough mode, promoting a repo rule to global, and scope control: `/freeze` locks edits to one directory until `/unfreeze`, `/guard` pairs that with careful mode, `/checkpoint` saves and resumes work-in-progress state | - |
@@ -218,7 +218,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **hooks** | core | - | Python hooks: issue-first workflow, commit format, branch protection, auto-approval for safe ops | settings |
 | **ideate** | commands | `/ideate` | Structured ideation framework: Socratic interview to refine ideas to 95% clarity, then hand off to /deepresearch or /xplan | - |
 | **identity** | core | - | Two foundational context files: soul.md (AI personality and philosophy) and human-context.md (who you are, your goals, how you work) | - |
-| **launch** | workflow | `/launch` | Takes a one-page spec to a deployed Cloudflare Pages site, stopping only for the Connect-to-Git dashboard step | cloudflare, git-workflow, docs-for-agents |
+| **launch** | workflow | `/launch` | Takes a one-page spec to a deployed Cloudflare Pages site via the Pages API, stopping only if the one-time GitHub App install is missing | cloudflare, git-workflow, docs-for-agents |
 | **live-testing-guard** | core | - | Live/UI/app testing runs only on the dedicated runner machine, never the dev machine, and only under a permission grant recorded in the plan | - |
 | **make-interfaces-feel-better** | patterns | `/make-interfaces-feel-better` | Design-engineering details that compound into polished interfaces. Model-invoked skill covering design direction, typography, surfaces, animations, performance | - |
 | **mcp-development** | tech-specific | - | Building MCP servers: project structure, tool design, error handling, testing, evaluation patterns | - |
