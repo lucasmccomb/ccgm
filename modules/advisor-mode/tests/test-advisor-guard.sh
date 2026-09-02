@@ -12,6 +12,13 @@
 # Run: bash modules/advisor-mode/tests/test-advisor-guard.sh
 
 set -u
+# bash 3.2 (macOS /bin/bash) brace-expands the RESULT of a command
+# substitution inside double quotes; bash >= 4 does not. Every assertion
+# below is `"$(bash_json ...)"`, so on 3.2 a command carrying a brace
+# group was rewritten by this shell before it ever reached the guard
+# and a different command got checked. Brace expansion is never wanted
+# here.
+set +B
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -712,9 +719,12 @@ assert_exit 2 "shell-flags parameter as sed flag denied" "$(bash_json 'sed $- s/
 # `\cX` decodes the way bash does. An `X.upper() ^ 0x40` agrees for letters
 # and is wrong for everything else, so this compares against real printf.
 cx_bad=0
-# `\c@` is left out: it decodes to NUL, which command substitution strips,
-# so the comparison would test the shell rather than the decoder.
-for cx in '-' 'm' 'M' '?' '[' 'a' 'A'; do
+# Two escapes are left out of the comparison: `\c@` decodes to NUL, which
+# command substitution strips, and `\c?` is 0x7f on bash >= 4 but 0x1f on bash
+# 3.2 — comparing it would test the shell's version. Neither is a dash, which
+# is the only byte this gate turns on, and the check below pins that property
+# for every escape directly.
+for cx in '-' 'm' 'M' '[' 'a' 'A'; do
     want=$(eval "printf '%s' \$'\\c${cx}'" | od -An -tx1 | tr -d ' \n')
     got=$(python3 - "${GUARD}" "${cx}" <<'PY'
 import importlib.util, sys
@@ -732,6 +742,26 @@ if [ "${cx_bad}" = "0" ]; then
 else
     FAIL=$((FAIL + 1))
     echo "FAIL: \\cX decoding matches bash"
+fi
+
+# The property the flag checks actually rest on, and the reason the two
+# escapes above can sit out the comparison: no `\cX` decodes to a dash, so the
+# escape can never assemble `-i` or `-delete` however bash spells it.
+if python3 - "${GUARD}" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1])
+g = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(g)
+bad = [chr(c) for c in range(1, 128)
+       if g.decode_ansi_c("\\c" + chr(c))[0] == "-"]
+print("dash-producing escapes: %r" % bad)
+sys.exit(1 if bad else 0)
+PY
+then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: no \\cX escape decodes to a dash"
 fi
 
 # A relative path is resolved against the HOOK's working directory, and `cd`
