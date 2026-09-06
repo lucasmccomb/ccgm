@@ -103,6 +103,10 @@ cp hooks/advisor-session-start.py hooks/advisor-session-end.py ~/.claude/hooks/
 # merge settings.partial.json into ~/.claude/settings.json
 ```
 
+## Cross-agent pilot compatibility
+
+X-Plan, adrev and ETP use the installed `cross_agent_review_policy.py` orchestration shim. The guard permits only its enumerated operations and existing work-product run locations; it does not permit arbitrary Python, source writes, or executing recorded check argv. Pilot findings need other-provider evidence and current acknowledgments. Three fix rounds remain the checkpoint; a recorded evidence-backed extension retains the same total deadline and calls. Other callers keep the original bound.
+
 ## Tests
 
 ```bash

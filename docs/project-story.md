@@ -8,7 +8,7 @@ For user-facing documentation, see the [README](../README.md) and the rest of [`
 
 ## What CCGM Is
 
-CCGM is a modular configuration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Instead of hand-crafting rules, hooks, slash commands, and permissions from scratch, users pick from a catalog of 79 self-contained modules and install them with a single command. Each module packages one coherent capability — a behavioral discipline, a workflow command, an enforcement hook, an entire subsystem — with its own manifest, README, tests, and manual-install path.
+CCGM is a modular configuration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Instead of hand-crafting rules, hooks, slash commands, and permissions from scratch, users pick from a catalog of 80 self-contained modules and install them with a single command. Each module packages one coherent capability — a behavioral discipline, a workflow command, an enforcement hook, an entire subsystem — with its own manifest, README, tests, and manual-install path.
 
 At a higher level, CCGM is an answer to a question: **what does a fully-configured, safety-railed, self-improving AI coding environment look like when you treat the configuration itself as a serious software project?** It applies production engineering practice — issue-first workflow, CI, adversarial review, append-only data models, deterministic gates, incident postmortems — to the layer most people treat as dotfiles.
 
@@ -17,10 +17,10 @@ At a higher level, CCGM is an answer to a question: **what does a fully-configur
 | Fact | Value |
 |------|-------|
 | First commit | 2026-03-19 |
-| Modules | 79 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
-| Slash commands | 90 |
+| Modules | 80 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
+| Slash commands | 92 |
 | Hooks | 36 Python hooks across 11 Claude Code events |
-| Presets | 5 (minimal, standard 16 modules, team, cloud-agent 55, full 75) |
+| Presets | 5 (minimal, standard 16 modules, team, cloud-agent 55, full 76) |
 | Commits / issues | 430+ commits, 870+ issues and PRs in the first 4 months |
 | Base permission policy | 800+ allow entries, curated deny list, bypass-proof destructive-command blocks |
 | Audit engine | 21 audit packs over a deterministic tool spine + LLM triage |
@@ -70,7 +70,7 @@ Every module is a directory under `modules/{name}/` with:
 - `README.md` — docs including manual copy-paste installation, so the installer is never mandatory.
 - Content directories mirroring install targets: `rules/` (auto-loaded behavior), `commands/` (slash commands), `agents/` (reusable subagent prompts), `skills/` (SKILL.md packages), `hooks/` (Python event hooks), `lib/`, `scripts/`, and `settings.partial.json` fragments.
 
-Dependencies resolve via depth-first topological sort with cycle detection — selecting `xplan` automatically pulls `multi-agent`, `adversarial-review`, and their transitive deps.
+Dependencies resolve via depth-first topological sort with cycle detection — selecting `xplan` automatically pulls `multi-agent`, `adversarial-review`, `cross-agent-review`, and their transitive deps.
 
 ### The installer
 
@@ -187,13 +187,14 @@ CCGM assumes parallel agents as the normal working mode and provides the coordin
 - **Workspace/clone model (for the cases worktrees can't serve)**: `{repo}-workspaces/{repo}-wX/{repo}-wX-cY` clone groups with per-clone identity (`.env.clone`), a port registry preventing dev-server collisions, and hook-driven CSV issue tracking (claims on branch creation, updates on commit/PR/merge/close).
 - **Dispatch methodology** (`subagent-patterns`): spec-driven delegation (objective/context/constraints/deliverable), pass-paths-not-contents, a four-state completion protocol (DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT), and a two-stage review where spec-compliance gates code-quality and reviewers never see the implementer's rationale.
 - **Concurrency limits**: heavy-agent fan-out capped at 4 concurrent (waves, not bursts) after a measured incident where ~10 simultaneous max-effort agents attempted ~1.4M tokens in 27 seconds and tripped a server-side throttle that failed the entire burst.
+- **Cross-provider review** (`cross-agent-review`): a local native Claude/Codex coordinator supplies frozen evidence, validates attributable findings, and retains bounded counters. The X-Plan/adrev/ETP pilot adds provider-aware workflow gates; `REVIEWED` transport output alone never authorizes execution or merge.
 - **Cloud dispatch**: the Hetzner pipeline (Terraform + Packer golden image + lifecycle/secret/provisioning scripts) for delegating issues to VMs entirely off the local machine.
 
 ### Planning and execution
 
 A graduated stack from idea to shipped code:
 
-- `/ideate` (Socratic refinement) → `/brainstorm` (design-before-code gate) → `/xplan` (interview-driven deep research + plan + parallel-wave execution, with a source-freshness guard, a no-placeholder self-review, a web-based highlight-and-comment review UI, and a review gauntlet: constructive peer review plus a 3-pass sequential adversarial loop) → `/etp` (execute a ready plan or GitHub issues end-to-end with a bounded post-PR CI-fix loop) → `/xplana` (the fully autonomous variant, zero mid-flow prompts).
+- `/ideate` (Socratic refinement) → `/brainstorm` (design-before-code gate) → `/xplan` (interview-driven deep research + plan + parallel-wave execution, with a source-freshness guard, a no-placeholder self-review, a web-based highlight-and-comment review UI, and a review gauntlet: constructive peer review plus an upfront-selected 1–3-pass alternating-provider adversarial loop (default one)) → `/etp` (execute a ready plan or GitHub issues end-to-end with a bounded post-PR CI-fix loop) → `/xplana` (the autonomous variant after its one review-count setup choice).
 - Plans are held to four autonomous-execution tenets, enforced by the adversarial reviewer: minimal and edge-bucketed human involvement, a follow-up-completion contract, enough decision context that unplanned work doesn't need a human, and a comprehensive autonomous E2E test suite over every testable surface.
 - `/adrev` generalizes adversarial review to any entity — plan, doc, PR, directory, or a stated concept — attacking premises, hunting failure modes, and steelmanning the strongest counter-case.
 - `/document-review` fans a plan out to seven role-specific reviewers (coherence, feasibility, product, scope, design, security, adversarial) with structured JSON findings.
@@ -224,7 +225,7 @@ A single escape hatch (`ALLOW_MAIN_COMMIT=1`) opens the related gates consistent
 
 **What it is.** A per-session posture for expensive orchestrator models (Fable/Opus): `/advisor on` turns the main agent into a pure delegator — it writes specs, dispatches cheaper implementer agents, reviews their diffs through the standard two-stage separate-agent review, triages findings, delegates fixes (bounded to three rounds), and merges, but never edits source itself. `/etp` already runs this loop for plan- and issue-shaped work; advisor mode routes ad-hoc requests through the same discipline instead of letting the orchestrator implement inline.
 
-**Enforcement.** A PreToolUse hook hard-blocks the main agent's file edits outside a short list of orchestrator work-product paths (`~/.claude/`, temp/scratchpad roots, `~/code/plans/`, `~/code/docs/`, worktree checkouts, plan-mode files) and default-denies Bash to a read-only-plus-orchestration allowlist (read-only git; branch/worktree lifecycle; `gh` PR/issue/run/label management including merge). Denials use exit 2 — the same bypass-surviving convention as branch-guard, because a JSON `permissionDecision: deny` does not survive bypass mode — and a hook-input discriminator (`agent_id`/`agent_type`, present on subagent calls, absent on the main agent's) lets delegated implementers pass untouched; `/advisor off` and the one-off `ADVISOR_DIRECT=1` hatch are the only other ways through.
+**Enforcement.** A PreToolUse hook hard-blocks the main agent's file edits outside a short list of orchestrator work-product paths (`~/.claude/`, temp/scratchpad roots, `~/code/plans/`, `~/code/docs/`, worktree checkouts, plan-mode files) and default-denies Bash to a read-only-plus-orchestration allowlist (read-only git; branch/worktree lifecycle; `gh` PR/issue/run/label management including merge). Denials use exit 2 — the same bypass-surviving convention as branch-guard, because a JSON `permissionDecision: deny` does not survive bypass mode — and a hook-input discriminator (`agent_id`/`agent_type`, present on subagent calls, absent on the main agent's) lets delegated implementers pass untouched; The pilot adds one narrow orchestration exception for the installed cross-agent-review policy shim, whose allowed actions record evidence and dispatch restricted reviewers. Source edits and test execution remain delegated; `/advisor off` and the one-off `ADVISOR_DIRECT=1` hatch still control direct implementation.
 
 **Session lifecycle.** State lives at `~/.claude/advisor-mode/<session_id>`, one flag per session rather than one machine-global file — the fix for an incident where a single session's `/advisor off` had silently dropped the gate for the other nine of ten sessions running in parallel. Every session now starts in the mode (`CCGM_ADVISOR_AUTO=false` opts out); a SessionStart hook creates the flag, migrates the old single-file layout, and garbage-collects flags whose session has no transcript or has sat idle more than three days, while a SessionEnd hook removes the flag when the session ends. Only compaction is exempt from the auto-on, so a deliberate `/advisor off` survives it but a resume or `/clear` re-arms the mode.
 

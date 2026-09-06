@@ -61,18 +61,19 @@ Steps:
      - cloud-agent : large set for power users running autonomous agents
      - full     : every stable module
    Based on what you know about my workflow, recommend one preset. Ask me to confirm or pick a different one before continuing. (One question only — do not ask anything else.)
-4. Check what is already installed by looking at ~/.claude/rules/, ~/.claude/commands/, ~/.claude/hooks/. List any CCGM files already present and note you will skip overwriting them.
+4. Check what is already installed by looking at ~/.claude/rules/, ~/.claude/commands/, ~/.claude/hooks/. List existing CCGM files and inspect ~/.claude/.ccgm-manifest.json. For an existing install, add only the requested missing modules with --add; a preset install can replace selected module-owned files. Preserve unrelated files.
 5. Read ~/.claude/settings.json if it exists and note its content. The installer will merge non-destructively — it will not delete keys that are already there.
-6. Run the installer:
+6. Run from the CCGM repository root. For a new global install:
      cd ~/code/ccgm
      CCGM_NON_INTERACTIVE=1 \
        CCGM_USERNAME="$(gh api user --jq '.login' 2>/dev/null || echo '')" \
-       ./start.sh --preset <chosen-preset>
+       ./start.sh --preset <chosen-preset> --scope global
+   For an existing global install, use ./start.sh --add <missing-module> --scope global for each requested addition instead.
 7. Verify the install succeeded by checking that these paths exist:
      ~/.claude/rules/
      ~/.claude/CLAUDE.md   (if global-claude-md was in the preset)
    List the files now present in ~/.claude/rules/ and ~/.claude/commands/.
-8. Report: which preset was installed, which modules were skipped (already present), and any errors.
+8. Report: which preset was installed, which existing modules were preserved and which requested modules were added or replaced, and any errors.
 ```
 
 For blocks pre-selecting a specific preset, and for how to dry-run this safely, see [docs/install-via-agent.md](docs/install-via-agent.md).
@@ -142,7 +143,7 @@ For a quick install with a preset:
 ### Other install options
 
 ```bash
-./start.sh --scope project    # Install to .claude/ in current project instead of ~/.claude/
+/path/to/ccgm/start.sh --scope project  # Run from the project root; target is the current working directory
 ./start.sh --link             # Symlink instead of copy (for CCGM developers)
 ./start.sh --add <module>     # Add one module to an existing install (inherits scope + link mode)
 ```
@@ -177,7 +178,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 
 | Module | Category | Commands | Description | Dependencies |
 |--------|----------|----------|-------------|--------------|
-| **adversarial-review** | workflow | `/adrev` | Adversarial review of a plan or any entity (file, PR, issue, dir, concept). Separate reviewer agent attacks premises and failure modes; plan targets get findings incorporated automatically and four autonomous-execution tenets enforced (minimal human work, follow-up completion, decision context, comprehensive E2E coverage) unless told not to | subagent-patterns |
+| **adversarial-review** | workflow | `/adrev` | Adversarial review of a plan or any entity (file, PR, issue, dir, concept). Separate reviewer agent attacks premises and failure modes; a designated writer applies supported plan findings after opposite-provider review, with four autonomous-execution tenets enforced (minimal human work, follow-up completion, decision context, comprehensive E2E coverage) unless told not to | subagent-patterns, cross-agent-review |
 | **advisor-mode** | workflow | `/advisor` | Delegation-only session posture for expensive orchestrator models: the main agent specs, delegates, reviews via separate agents, and merges, while a hard PreToolUse gate blocks its own edits and non-orchestration Bash (subagent calls pass; ADVISOR_DIRECT=1 hatch). Per-session state, on by default at session start (CCGM_ADVISOR_AUTO=false opts out) | settings, subagent-patterns |
 | **agent-manager** [DEPRECATED] | workflow | `/agents` | Go-based terminal UI (/agents) for monitoring Claude Code agent processes via tmux. Unmaintained; not offered for new installs, kept in-repo for existing users | multi-agent |
 | **agent-native** | patterns | `/agent-native-audit` | Principles, audit skill, and a self-eval / red-team rubric for building applications where an agent is a first-class client | subagent-patterns |
@@ -203,7 +204,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **common-mistakes** | patterns | - | 8 battle-tested anti-patterns: shallow exploration, dependency blindness, ESLint Fast Refresh, more | - |
 | **compound-knowledge** | workflow | `/compound`, `/compound-refresh`, `/compound-reproject` | Team-shared learnings in `docs/solutions/`. After solving a non-trivial problem, capture the pattern in a versioned schema | skill-authoring |
 | **copycat** | commands | `/copycat` | Analyzes external Claude Code config repos and reports the patterns, rules, and techniques worth adopting into CCGM | - |
-| **cross-agent-review** | workflow | `/cross-agent-review` | Restricted local Claude/Codex review of frozen evidence with attributable findings, bounded calls, and a reversible Codex skill entry point | - |
+| **cross-agent-review** | workflow | `/cross-agent-review` | Restricted Claude/Codex review with frozen evidence, bounded pilot workflow gates, native acknowledgments, and reversible Codex skill setup | - |
 | **debugging** | commands | `/debug` | Structured root-cause debugging on Opus: reproduce, hypothesize, instrument, diagnose, fix, verify, instead of guessing at a fix | - |
 | **deepresearch** | commands | `/deepresearch` | Multi-query semantic research via the Exa MCP server: parallel query fan-out synthesized into a structured research.md | - |
 | **design-review** | commands | `/design-review` | 6-pass visual design review: spacing, typography, responsive, hierarchy, accessibility, consistency. Screenshots + CSS analysis with auto-fix | - |
@@ -255,7 +256,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **todos** | workflow | `/todo-create`, `/todo-resolve`, `/todo-triage` | File-based review-finding tracker. Review findings, PR nitpicks, and tech debt tracked with structured YAML | skill-authoring, subagent-patterns |
 | **verification** | patterns | - | Evidence-before-claims: fresh execution of verification commands, read full output before asserting done | - |
 | **writing-system** | patterns | `/rewrite` | Orwell's six rules as the global prose standard for docs, PR text, commits, and reports, plus /rewrite (violations list, then rewrite; mode:landing swap test) | - |
-| **xplan** | workflow | `/etp`, `/xplan`, `/xplan-resume`, `/xplan-status`, `/xplana` | Interactive planning framework: discovery interview, deep research, tech stack sign-off, constructive peer review + a 3-pass sequential adversarial review that enforces four plan-execution tenets (minimal/edge-bucketed human work, follow-up completion, autonomous decision context, comprehensive autonomous E2E test suite), parallel agent execution. Requires [/deepresearch](#companion-module-deepresearch) | multi-agent, adversarial-review |
+| **xplan** | workflow | `/etp`, `/xplan`, `/xplan-resume`, `/xplan-status`, `/xplana` | Interactive planning framework: discovery interview, deep research, tech stack sign-off, constructive peer review + 1–3 upfront-selected alternating Claude/Codex reviews (default one) that enforce four plan-execution tenets (minimal/edge-bucketed human work, follow-up completion, autonomous decision context, comprehensive autonomous E2E test suite), parallel agent execution. Requires [/deepresearch](#companion-module-deepresearch) | multi-agent, adversarial-review, cross-agent-review |
 | **youtube-transcripts** | commands | `/transcript` | Extracts a YouTube transcript via yt-dlp AND dispatches a subagent to write an opinionated implications doc against your project memory. One slug+date, two saved files | - |
 
 *\* `/research` works out of the box with no setup. For higher-quality results, install [/deepresearch](#companion-module-deepresearch) - the same fan-out backed by Exa semantic search with full page contents. Needs a free Exa API key.*
@@ -366,7 +367,7 @@ The `docs/` directory contains comprehensive documentation:
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
 | [Module Catalog](docs/modules.md) | Detailed reference for all 80 modules |
-| [Commands Reference](docs/commands.md) | All 90 slash commands with usage examples |
+| [Commands Reference](docs/commands.md) | All 92 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 36 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |

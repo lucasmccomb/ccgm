@@ -1,10 +1,10 @@
 {
   "name": "xplan",
   "displayName": "xplan Planning System",
-  "description": "Deep research + planning + execution framework. Spawns parallel research/review agents, creates comprehensive plans, and executes via parallel agent waves.",
+  "description": "Research, planning and execution with an upfront choice of 1–3 alternating Claude/Codex adversarial reviews, default one, plus opposite-provider ETP review gates.",
   "category": "workflow",
   "scope": ["global"],
-  "dependencies": ["multi-agent", "adversarial-review"],
+  "dependencies": ["multi-agent", "adversarial-review", "cross-agent-review"],
   "files": {
     "commands/xplan.md": { "target": "commands/xplan.md", "type": "command", "template": false },
     "commands/xplana.md": { "target": "commands/xplana.md", "type": "command", "template": false },

@@ -5,7 +5,7 @@ description: Request a restricted adversarial review from the opposite Claude Co
 
 # Cross-agent review
 
-Use the local coordinator in [scripts/cross_agent_review.py](scripts/cross_agent_review.py). Read [references/contract.md](references/contract.md) for the request fields, commands, and failure states. This is a review capability; the designated author applies changes under the existing task authorization.
+Use the local coordinator in [scripts/cross_agent_review.py](scripts/cross_agent_review.py). Read [references/contract.md](references/contract.md) for the request fields, commands, and failure states. For X-Plan/X-Plan A, adrev or ETP, read [references/workflow.md](references/workflow.md) and use `scripts/review_policy.py` for startup, stages, bounded resolution and completion. These pilot callers must not substitute a direct transport result for their workflow gate. This is a review capability; the designated author applies changes under the existing task authorization.
 
 Derive the initiating and producing providers from actual session/dispatch metadata. For work, review opposite the actual producer. For a planning sequence, start opposite the original planner and alternate for the selected number of passes. Mixed or unknown work requires both perspectives. A provider persona does not establish runtime identity.
 

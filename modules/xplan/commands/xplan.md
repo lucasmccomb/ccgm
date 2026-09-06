@@ -1,22 +1,24 @@
 ---
 description: Interactive deep research + planning + execution framework for new projects and features
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--light | --autonomous] [--deepen [<plan-dir>]]
+argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--light | --autonomous] [--deepen [<plan-dir>]] [--adversarial-reviews <1|2|3>] [--unattended]
 ---
 
 # xplan - Interactive Project Planning & Execution
 
-A human-in-the-loop planning framework that interviews you upfront, deeply researches your concept, builds a contextual model, proposes tech stack and architecture for your sign-off, creates a parallelized execution plan, reviews it with specialized agents (constructive peer review + a 3-pass sequential adversarial review — 6 independent reviews in the full configuration), and then autonomously executes using parallel agents.
+A human-in-the-loop planning framework that interviews you upfront, deeply researches your concept, builds a contextual model, proposes tech stack and architecture for your sign-off, creates a parallelized execution plan, reviews it with specialized agents (constructive peer review plus 1–3 alternating-provider adversarial passes, chosen upfront with one recommended), and then autonomously executes using parallel agents.
 
 **Three Modes:**
 
 | Mode | Interview | Research | Tech Stack | Scope | Reviews | Walkthrough |
 |------|-----------|----------|------------|-------|---------|-------------|
 | **Default** (interactive) | Full Q&A | Full | Approved by user | Approved by user | Configurable standard + **adversarial sequence** | Skipped (user already approved inline) |
-| **`--light`** | Skipped | Reduced (inferred) | Internal default | Internal | Optional (no adversarial sequence) | Full section-by-section at end |
+| **`--light`** | Skipped | Reduced (inferred) | Internal default | Internal | Optional constructive + selected adversarial passes | Full section-by-section at end |
 | **`--autonomous`** | Skipped | **Full** | Internal (best-fit) | Internal (best-fit) | **Full standard + adversarial sequence (always)** | Structured plan-as-artifact presentation at end |
 
-**Reviews are two-staged**: Phase 4 runs the standard *constructive* peer review (security / architecture / business-logic) against the draft; Phase 5.7 then runs an *adversarial* review sequence — **3 sequential `adrev-reviewer` passes** (the current Opus-tier model, max effort), each attacking the plan after the previous pass's fixes are incorporated, the third being the final review of the fully-hardened plan. A completed plan has had **six independent reviews in the full configuration** (3 standard + 3 adversarial).
+**Startup choice:** before planning starts, select **1 (default), 2, or 3 adversarial reviews**. An explicit `--adversarial-reviews` value or unambiguous count answers the question. Autonomous mode still makes this setup choice.
+
+**Reviews are two-staged**: Phase 4 runs constructive security / architecture / business-logic reviews of the draft. Phase 5.7 runs the selected N adversarial passes against the completed plan through the cross-agent-review pilot. The first reviewer is opposite the original planner, followed by a fresh original-provider reviewer and then the opposite provider when selected. Pass N is final; every pass checks the whole plan. Constructive review choices are independent.
 
 `--light` is the *fast* path - reduced depth, minimal interaction. `--autonomous` is the *deep* path - maximum depth, zero interruption until the final gate. Pick `--autonomous` when you know exactly what you want to plan and prefer reviewing a finished artifact to answering questions during creation.
 
@@ -42,12 +44,12 @@ Specify cheaper models when spawning sub-agents to conserve usage without sacrif
 | Phase 1 | Research agents (via /deepresearch) | sonnet |
 | Phase 2 | Naming agent | sonnet |
 | Phase 4 | Standard review agents (security, architecture, business) | sonnet |
-| Phase 5.7 | **Adversarial review passes (`adrev-reviewer` ×3, sequential)** | **opus, maximum reasoning effort** |
+| Phase 5.7 | **N sequential cross-provider adversarial passes** | **Provider-specific vetted review model** |
 | Phase 7 | Execution agents (epic implementation) | sonnet |
 
 The orchestrator (this session) stays on the current model for all synthesis, architecture, and interactive decisions. Simple background tasks (file checks, directory setup, issue creation) can use haiku if spawned as agents.
 
-**Exception — never downgrade the Phase 5.7 adversarial reviewers.** They are the deep-scrutiny pass; reviewer quality dominates token cost there. Always dispatch them on `opus` at maximum reasoning effort, even when other phases are running on cheaper models.
+**Adversarial model selection:** use the current vetted review model for each actual provider and record it in the request's `models` map. A Claude model name is not a Codex model. The original orchestrator remains the host; a same-provider middle review uses a fresh session.
 
 ---
 
@@ -55,7 +57,7 @@ The orchestrator (this session) stays on the current model for all synthesis, ar
 
 **This skill REQUIRES user interaction to function** (unless `--autonomous` is set - see below). xplan is an interactive framework - the user chose to run `/xplan` precisely because they want the guided research/plan/review experience. Skipping prompts defeats the purpose.
 
-**Exception - `--autonomous` mode**: When `--autonomous` is active, ALL mid-flow `AskUserQuestion` prompts are skipped by design. The user explicitly opted into no-interruption mode. The ONLY user interaction allowed is the Phase 6.5 Final Execution Gate. Treat any other prompt as a bug when autonomous mode is set. Autonomous mode does NOT disable the final gate - 6.5 always fires.
+**Exception - `--autonomous` mode**: When `--autonomous` is active, ALL mid-flow `AskUserQuestion` prompts are skipped by design. The user explicitly opted into no-interruption mode. The upfront adversarial-count choice and Phase 6.5 Final Execution Gate remain. After startup, unresolved goal decisions are recorded for the final gate; do not introduce mid-flow prompts. Autonomous mode does NOT disable the final gate - 6.5 always fires.
 
 ### How to Ask the User
 
@@ -118,6 +120,8 @@ Extract from `$ARGUMENTS`:
 - **`--repo <path>`**: (Optional) Path to an existing repo to analyze
 - **`--light`**: (Optional) Flag to skip interactive interview phases
 - **`--autonomous`** (alias `-a`): (Optional) Flag to skip ALL mid-flow prompts and run the full pipeline end-to-end. Mutually exclusive with `--light` - if both are set, error and stop.
+- **`--adversarial-reviews <1|2|3>`**: Number of adversarial passes, default recommendation one. Validate before any planning side effect. A clear natural-language count in the request is equivalent to an explicit value; conflicting or ambiguous counts require clarification before planning.
+- **`--unattended`**: Explicitly no interactive channel. Only this explicit unattended invocation may default to one without submission; `--autonomous` alone does not.
 - **`--deepen [<plan-dir>]`**: (Optional) Iteratively deepen an existing plan instead of creating a new one. Also triggered when the free-text argument is exactly `deepen` (intent keyword). If a plan directory path follows the flag, use it; otherwise fall back to the current working directory.
 - If no arguments provided, use AskUserQuestion to ask what the user wants to plan (skipped in autonomous mode - error out instead, since autonomous has no interaction channel to clarify).
 
@@ -126,16 +130,38 @@ Store whether `--light` is active. It affects Phases 0.5, 1.5, 2.5, 2.6, 2.7, an
 Store whether `--autonomous` is active. It affects Phases 0.5, 1.5, 2, 2.5, 2.6, 2.7, 4.0, 5.7, and 6. Autonomous mode implies:
 - All `AskUserQuestion` calls in those phases are skipped
 - Research runs at Full depth (all 7 agents) unconditionally
-- Reviews run at Full (security + architecture + business) unconditionally, AND the Phase 5.7 adversarial review sequence is locked ON (3 sequential `adrev-reviewer` passes on the current Opus-tier model, each incorporating its fixes before the next; any P0/P1 the final pass leaves unresolved are surfaced at the final gate rather than prompted mid-flow)
+- Constructive reviews run at Full (security + architecture + business). Phase 5.7 runs the selected 1–3 adversarial passes; unresolved findings are surfaced at the final gate.
 - Tech stack and scope are chosen via best-guess inference and documented in decisions.md
 - The final walkthrough (Phase 6) presents the plan as a completed artifact, not per-section sign-offs
-- The Phase 6.5 Final Gate still fires - it is the single user interaction point
+- The Phase 6.5 Final Gate still fires after the one startup choice
+
+### 0.1.1 Resolve the adversarial count before starting
+
+This step runs in default, light, autonomous, and fresh deepen modes. **Do not create directories, synchronize source, research, write planning artifacts, or dispatch any agent before the count is resolved.** Reading these command instructions and pure argument validation are permitted.
+
+Use the pure selector; it writes no files:
+
+```bash
+python3 ~/.claude/lib/cross_agent_review_policy.py select
+# An explicit valid flag or unambiguous count in the request:
+python3 ~/.claude/lib/cross_agent_review_policy.py select --count 2 --source explicit
+# After an interactive answer is actually submitted:
+python3 ~/.claude/lib/cross_agent_review_policy.py select --count 1 --source interactive
+# Only when the invocation explicitly has no interactive channel:
+python3 ~/.claude/lib/cross_agent_review_policy.py select --unattended
+```
+
+Pass the actual supplied value, not the example's number. A missing flag value, noninteger, zero, or value above three is an error: stop before side effects. Do not silently repair invalid input to one. If selection returns `NEEDS_SELECTION`, ask **"How many adversarial reviews should this plan receive?"** with options **1 (Recommended)**, **2**, **3**. Wait for submission. Preselection, a timeout, an empty reply, or permission to plan is not the answer. If the question tool is unavailable, ask the same question in plain text and yield until answered. Do not advance while it is pending.
+
+Keep the resolved count and source from the selector. X-Plana delegates to this same startup step and forwards its arguments; it does not ask a second question. An explicit choice skips the question. After directory resolution, persist the selection, original provider/session identity and policy version in `reviews/review-selection.json` before research. Record the actual host launch metadata, not a persona or Git author. This setup record is outside the reviewed artifact set. Once review starts, it points to the authoritative private policy run directory.
+
+A pure `/xplan-resume` restores saved selection and completed evidence; it does not make a fresh choice. A new `--deepen` invocation makes this startup choice before changing the existing plan. Do not infer a legacy selection from filenames.
 
 **Semantic distinction** (from CE `ce-plan` skill):
 - **"deepen the plan"** (holistic) → triggers `--deepen` mode. Run targeted deepening passes on under-specified sections of the whole plan.
 - **"strengthen section X"** (targeted edit) → NOT deepen mode. Handle as a normal free-text edit request against the existing plan; do not enter the Deepen Mode branch.
 
-If `--deepen` is active (or the argument is the bare keyword `deepen`), jump to **Deepen Mode** below after completing 0.2's directory resolution. Skip Phases 0.5, 1, 1.5, 2, 2.5, 2.6, 2.7, 3, 4, 5, and 5.5 entirely. Phase 5.6 (self-review) is re-run at the end of the deepening pass. Phases 6-8 proceed normally only if the user explicitly requests execution after deepening.
+If `--deepen` is active (or the argument is the bare keyword `deepen`), jump to **Deepen Mode** below after resolving the startup count. D.1 resolves the existing directory; skip 0.2 creation. Skip Phases 0.5, 1, 1.5, 2, 2.5, 2.6, 2.7, 3, 4, 5, and 5.5 entirely. Phases 5.6 and 5.7 run after the deepening edits. Phase 6 presents the result and retains the execution gate.
 
 ### 0.2 Create Plan Directory
 
@@ -247,10 +273,10 @@ Determine which plan to deepen:
 
 1. If `--deepen <plan-dir>` was passed, use that path.
 2. Else if the current working directory is under `~/code/plans/{concept-name}/` and contains `plan.md`, use that directory.
-3. Else list `~/code/plans/*/plan.md` modified in the last 30 days and ask via AskUserQuestion which plan to deepen.
+3. Else list `~/code/plans/*/plan.md` modified in the last 30 days. Interactive mode asks which plan to deepen. Autonomous mode may choose only a uniquely identified target; otherwise record the missing target decision and stop this path without a mid-flow prompt.
 4. Else error out with `BLOCKED`: no plan to deepen.
 
-Verify `plan.md` exists at the resolved path. If missing, stop and surface the problem - deepening requires a plan to operate on.
+Verify `plan.md` exists at the resolved path. If missing, stop and surface the problem - deepening requires a plan to operate on. Persist this fresh invocation’s resolved review selection after resolving the directory, as in 0.1.1. Preserve the prior run as audit history; fresh deepen initializes a new review run after the requested edits, while resume and web-comment updates retain their existing run.
 
 ### D.2 Load Existing Context
 
@@ -282,7 +308,9 @@ Produce a shortlist of 3-8 deepening candidates. Each candidate must cite:
 
 If zero gaps are found, report `DONE` for Deepen Mode - the plan is already tight enough to not benefit from this pass. Still run Phase 5.6 as a final check.
 
-### D.4 User Selects Which Gaps to Close
+### D.4 Select Which Gaps to Close
+
+In autonomous mode, select gaps supported by the stated goal, record that choice, and continue without a question. Only interactive mode asks below.
 
 Present the shortlist via AskUserQuestion (`multiSelect: true`) so the user picks which gaps to deepen. Include:
 - "All of the above" as a convenience option
@@ -323,7 +351,9 @@ Output:
 
 Run these agents in parallel when the targets are in different sections. Serialize them when two candidates touch the same section.
 
-### D.6 User-Controlled Integration
+### D.6 Integrate Accepted Deepening
+
+In autonomous mode, integrate supported changes through the designated writer; record an unresolved goal decision for the final gate instead of prompting mid-flow. The interactive flow below applies otherwise.
 
 For each returned deepening pass, present the user with the findings + proposed replacement via AskUserQuestion:
 
@@ -355,13 +385,12 @@ After all accepted deepening edits land, **re-run Phase 5.6 (Plan Quality Self-R
 
 Loop until 5.6 reports clean, same as a fresh planning run. Do NOT modify Phase 5.6 - it is the same self-review used by the main flow.
 
-### D.8 Exit Deepen Mode
+### D.8 Review and Present Deepened Plan
 
-After 5.6 passes:
+After 5.6 passes, run Phase 5.7 using the fresh deepen invocation's selected count. Then:
 
 1. Summarize the deepening pass for the user: which gaps were closed, which were deferred, which were discarded.
-2. Ask via AskUserQuestion whether to proceed with execution (Phase 7) or stop here. Default is to stop - deepening is a planning activity, not an execution trigger.
-3. If the user chooses to execute, resume at Phase 6 (Final Confirmation Gate). Otherwise end the command.
+2. Continue to Phase 6 for presentation and its single execution gate; recommend saving the plan. Deepening does not authorize execution. Unresolved review evidence prevents an execution-ready result.
 
 ---
 
@@ -1046,7 +1075,7 @@ Include all stack decisions from Phase 2.5 and scope decisions from Phase 2.6.
 
 **MANDATORY**: Before finalizing the plan, run review agents.
 
-This is the **first of two review stages**. Phase 4 is *constructive* peer review (security / architecture / business-logic) run against the draft, before `plan.md` is written. The *adversarial* second stage — Phase 5.7 — runs three sequential hostile reviews against the finished plan, each incorporating its fixes before the next. If "Skip Review" is selected here, Phase 5.7 is skipped as well.
+This is the **first of two review stages**. Phase 4 is *constructive* peer review (security / architecture / business-logic) run against the draft, before `plan.md` is written. The adversarial second stage, Phase 5.7, runs the startup-selected passes against the finished plan. "Skip Review" here skips constructive reviews only; it never cancels the selected adversarial passes.
 
 ### 4.0 Review Configuration
 
@@ -1283,7 +1312,7 @@ The agent decides the triage itself using §1.4 — it does not stop to ask the 
 ### 10.3 Business Logic Review Summary (if selected)
 ### 10.4 Changes Made Based on Reviews
 ### 10.5 Adversarial Review Summary (if Phase 5.7 ran)
-[The three sequential passes, the attacks the plan survived, and the P0/P1 findings incorporated with the section each one changed. Pull from the Phase 5.7 block in decisions.md. Note any P0/P1 the final pass left unresolved and accepted as known risks.]
+[The selected N passes and their providers, findings/evidence/dispositions, final artifact hash, policy result and handback. Required unresolved findings remain blockers, not accepted-as-passed risks.]
 
 ## 11. Risk Register
 | Risk | Severity | Likelihood | Mitigation | Owner |
@@ -1442,7 +1471,7 @@ These map to the four tenets the Phase 5.7 adversarial reviewer enforces (T1–T
 
 #### 5.6.4 Loop Until Clean
 
-Re-run 5.6.1, 5.6.2, and 5.6.3 after every round of fixes. Do not advance to Phase 6 until all three scans report zero findings. If three consecutive passes do not converge (new placeholders or drift keep appearing), stop and surface the specific section(s) to the user - the plan likely has a structural ambiguity that needs a human decision.
+Re-run 5.6.1, 5.6.2, and 5.6.3 after every round of fixes. Do not advance to Phase 6 until all three scans report zero findings. If three consecutive passes do not converge (new placeholders or drift keep appearing), stop the affected planning path and record the specific ambiguous sections. Interactive mode may request the needed decision; autonomous mode carries it to the final gate without a mid-flow prompt. Do not mark the self-review clean.
 
 **Self-review output**: Append a short block to `decisions.md` recording that the self-review ran and what it found:
 
@@ -1456,123 +1485,36 @@ Re-run 5.6.1, 5.6.2, and 5.6.3 after every round of fixes. Do not advance to Pha
 
 ---
 
-## Phase 5.7: Adversarial Review Sequence (MANDATORY)
+## Phase 5.7: Cross-Agent Adversarial Review (MANDATORY)
 
-**Prerequisite**: Phase 5.6 (self-review) reports clean — `plan.md` is fully written and free of placeholders and identifier drift. Adversarial review attacks the *finished* artifact; running it against a draft wastes the high-cost reviewers on problems the self-review already catches.
+Read `~/.claude/skills/cross-agent-review/references/workflow.md` for the installed policy CLI and evidence contract. Use its plan mode, preserving the startup count/source and original host identity. This phase runs in every mode, including light and fresh deepen, independently of constructive review selection.
 
-**Goal**: Subject the completed plan to **three sequential hostile reviews**, each one attacking the plan *after* the previous review's changes have already been incorporated. This is the **second of two review stages**: Phase 4 is *constructive* peer review (security / architecture / business-logic, run pre-write on the draft); Phase 5.7 is *adversarial* review (run post-write on the finished plan). Together they give the plan **six independent reviews in the full configuration** — three constructive, three adversarial — so the plan that reaches the final gate has already survived a hostile pass, not just a friendly one.
+### 5.7.1 Select and freeze the review inputs
 
-**Why sequential, not parallel**: each review must see the plan as hardened by the one before it. Review 2 should attack the plan *with Review 1's fixes already in place* (and probe whether those fixes introduced new weaknesses); Review 3 — the final review — attacks the plan with both prior passes incorporated, so it judges the fully-hardened artifact. Running them in parallel would have all three attack the same un-hardened plan and re-raise the same issues. Sequential reviews compound; parallel reviews duplicate. This also lets each reviewer use the `adrev-reviewer` agent's native **apply** mode safely — only one reviewer ever edits `plan.md` at a time, so there is no concurrent-write hazard.
+After Phase 5.6 is clean, create a narrow request containing `plan.md`, the goal/specification and the specifically relevant anchored source/test evidence. Do not include the author's persuasive self-report, prior findings, generated ledgers or mutable progress files in the initial independent review. Include every substantive plan document relied on by acceptance; input bounds must fail explicitly rather than silently truncate it. Derive provider identities from launch metadata. The coordinator snapshots immutable bytes and validates report identity/hashes.
 
-**Announce at start**: "Running the Phase 5.7 adversarial review sequence — three sequential `adrev-reviewer` passes (the current Opus-tier model, maximum reasoning effort). Each attacks the plan after the previous pass's fixes are incorporated; the third is the final review of the fully-hardened plan."
+Initialize a private policy run in plan mode, save its location in `reviews/review-selection.json`, and keep spent limits there. Pass the selected count and source in the request. Select one designated writer for accepted changes; all reviewers are read-only.
 
-### 5.7.0 When This Phase Runs
+### 5.7.2 Run exactly the selected passes
 
-| Mode | Adversarial sequence |
-|------|----------------------|
-| Default (interactive) | **Runs.** Skipped only if "Skip Review" was selected in Phase 4.0 — skipping all review skips this too; note the skip in decisions.md. |
-| `--autonomous` / `/xplana` | **Locked ON.** Always runs, no question. This is the deep path; maximum scrutiny is the entire point. |
-| `--light` | Skipped by default (fast path). Runs only if the optional Phase 4 reviews were actually run in this `--light` session. |
+For original provider O and opposite P, use the first N of **[P, O, P]**:
 
-This phase scopes to the **main planning flow (Phases 5 → 6)**. Deepen Mode re-runs Phase 5.6 only; it does not re-enter 5.7.
+| Origin | N=1 | N=2 | N=3 |
+|---|---|---|---|
+| Claude | Codex | Codex → fresh Claude | Codex → fresh Claude → Codex |
+| Codex | Claude | Claude → fresh Codex | Claude → fresh Codex → Claude |
 
-### 5.7.1 The Sequence
+Use the policy's `review` action for each fresh sequential reviewer. Every pass checks **premises, falsifiability, execution/failure modes, reversal costs, second-order effects and whole-plan coherence**, including all four execution tenets: human work minimized and at the edges (T1); in-scope follow-up completion (T2); sufficient mission/decision context (T3); actual autonomous E2E coverage and CI gates (T4). Multiple passes may emphasize different lenses; one pass must still cover all of them. An independent clean report is valid and must not invent objections. A clean early pass does not waive later selected passes.
 
-Compute the date once for the run: `date +%F`. Then run **exactly three `adrev-reviewer` passes, one at a time** (installed at `~/.claude/agents/adrev-reviewer.md`). Do NOT launch them together — pass `k` does not start until pass `k-1` has returned, its changes are incorporated, and the self-review (5.7.3) is clean:
+Resolve findings on the frozen generation using the workflow reference: critic/rebuttal evidence, stable IDs, one designated writer, bounded fixes and current-artifact verification. Run Phase 5.6 after accepted plan edits, recording its evidence before advancing. The policy's `advance` gate, not the agent's prose, decides when the next pass may start. Every reviewer session is new; a same-provider middle reviewer is not the original host grading itself.
 
-> **Concurrency — avoid the 429 throttle.** Running these one at a time is also what keeps them under the rate limit: each pass is an Opus-4.8, max-effort agent — the heaviest dispatch in CCGM — and three of them firing together would almost certainly trip the server-side throttle (`Server is temporarily limiting requests · Rate limited`). Do not parallelize the passes to "save time." If a single pass returns the throttle, wait 30–60s and retry that one pass. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+### 5.7.3 Finish and preserve evidence
 
-```
-Pass 1  →  incorporate  →  5.6 self-review clean
-   ↓
-Pass 2 (attacks the plan with Pass 1's fixes in place)  →  incorporate  →  5.6 self-review clean
-   ↓
-Pass 3 — FINAL review (attacks the fully-hardened plan)  →  incorporate  →  5.6 self-review clean
-   ↓
-proceed to Phase 6
-```
+**Pass N is the final pass**, even for N=1. Obtain both providers' evidence-backed final acknowledgment through the policy, deliver the result to the original host and record reception, then run `finish`. Require exactly N completed pass records with current artifact evidence, passed required checks and no open required findings. Earlier generation reports remain audit history; changed content invalidates prior acknowledgments and requires current validation before they can support completion.
 
-Every pass uses **`model: opus`** (the current Opus-tier model) **at maximum reasoning effort**. Do NOT downgrade these to sonnet: adversarial review is the one phase where reviewer quality dominates cost, and the user pays for the deep pass precisely here.
+A transport `REVIEWED` status or two agents saying "agree" does not mean consensus. Required findings cannot be waived by orchestrator authority or parked in a risk register to pass the gate. Limits, provider absence, unsupported evidence and missing goal decisions remain explicit unresolved states. Interactive mode may request a necessary goal decision; autonomous mode records it for Phase 6 without prompting mid-flow. A user scope revision updates the spec and invalidates affected evidence before renewed review.
 
-Each pass runs the full attack battery. Give each a **distinct lead lens** via `focus` so the three passes press hardest on different angles rather than repeating one another:
-
-| Pass | Lead lens (`focus`) |
-|------|---------------------|
-| **1 — premises** | "The plan's load-bearing *unstated* premises, the falsifiability of its claims, and the strongest opposing case including do-nothing. What does this assume about users, scale, data shape, ordering, and the behavior of other systems that nobody examined?" |
-| **2 — execution & failure modes** | "How execution breaks: which step fails first when an assumption is wrong and whether the plan notices or plows on; partial failure mid-wave; concurrency and merge conflicts across parallel agent-epics; retries and idempotency; the gap between 'PR merged' and 'app live' in the bring-up runbook. Press tenets T1, T2, and T4: is human work minimized and bucketed to the edges (plan §6 Human-Epics) rather than wedged mid-run (T1); is the follow-up-completion contract (§9.5) present, clearly defined, and gated by the Section 13 checklist (T2); and does §8 specify a comprehensive autonomous E2E suite covering every testable surface, wired into CI as a blocking merge gate, with existing-repo gaps filled — such that the user need never test manually (T4)? Attack the testing claim hardest: which surface has no real end-to-end test, which 'test' only exercises mocks, where would a green suite still let a broken build merge? Also check whether Pass 1's revisions introduced any new weakness." |
-| **3 — final / reversal cost & second-order** | "This is the FINAL adversarial pass on a plan already hardened by two prior reviews. Decisions expensive to undo (schema, public API contracts, file formats, dependency choices, naming that leaks into URLs/configs/env vars) with thin justification; second-order effects once it ships — what becomes load-bearing, what gets gamed, what maintenance burden appears in month two. Press tenet T3: does §1.4 carry enough mission + codebase + decision-principles context that an agent can direct unplanned follow-on work without the user? If it cannot, expand it. Then do a holistic final read: do the prior passes' edits hang together, or did they leave seams? Anything P0/P1 you raise here is the last chance to catch it before the gate." |
-
-### 5.7.2 Dispatch One Pass
-
-For pass `k` (1, 2, or 3), dispatch a single `adrev-reviewer` agent with `apply: true` so it incorporates its own findings directly into the plan (review-first, then edit — its Apply Protocol). Pass paths, not contents:
-
-```
-Target: ~/code/plans/{concept-name}/plan.md
-target_kind: plan
-apply: true
-review_date: {YYYY-MM-DD}
-review_artifact_path: ~/code/plans/{concept-name}/reviews/adversarial-{YYYY-MM-DD}-{k}.md
-focus: {the lead lens for pass k from the table above}
-Reference files (read as needed):
-  - ~/code/plans/{concept-name}/research.md
-  - ~/code/plans/{concept-name}/decisions.md
-  - ~/code/plans/{concept-name}/reviews/  (the Phase 4 constructive reviews AND any earlier adversarial passes — do not merely re-raise what they already covered; attack what they missed or what the prior fixes introduced)
-
-You are pass {k} of 3 sequential adversarial reviews. The plan you are reading already incorporates the fixes from passes 1..{k-1}. Reason at maximum depth. A review that returns "looks good, minor nits" is a FAILED review unless you genuinely attacked from every angle and the plan survived — and then your report must show the attacks in `survived`, not just the verdict.
-
-Apply protocol: write the full review artifact first, then incorporate. P0/P1 (confidence ≥0.80) → revise the affected plan section directly, marking any premise fork with `> **Revised {date} (adversarial review):** ...`. P1/P2 (0.60–0.79) → add a row to the plan's existing Risk Register (Section 11), citing the finding id; do NOT create a separate "Risks & Open Questions" section — this plan already has Section 11. Confidence <0.60 → artifact-only. Append one line per incorporated finding to decisions.md. Never touch progress.md or completed-work records.
-
-Plan-execution tenets (T1–T4) are requirements, not judgment calls: enforce them by editing plan.md. If human work is agent-doable or wedged mid-run, revise the plan's Human-Epics (§6) / Prerequisites (§4) to drop or edge-bucket it (T1). If the follow-up-completion contract (§9.5) is missing or vague, add it (T2). If §1.4's mission/codebase/decision-principles context is too thin for an agent to direct unplanned follow-on work, expand it (T3). If §8's autonomous E2E suite leaves a testable surface uncovered, is not wired into CI as a blocking merge gate, or (for `--repo`) leaves a touched-area coverage gap unfilled, expand §8 to close it — add the E2E-coverage epics/tasks optimistically (the user wants more coverage) rather than deferring to a question (T4). Park a tenet in the Risk Register only if it genuinely needs an author decision you cannot make — and say so.
-```
-
-**Anchor propagation (only when `--repo` was given).** Append the same `SOURCE FRESHNESS — repo facts` block used for the Phase 4 review agents (verification anchor `{DEFAULT_REF} @ {ANCHOR}`; read every repo fact from `{WORKTREE}` or `git -C {REPO} show {DEFAULT_REF}:<path>`, never the stale working tree; flag any plan claim that disagrees with the anchor as a finding).
-
-Run the agent in **foreground** and wait for it to return before doing anything else. Then verify its artifact exists and read its ledger:
-
-```bash
-f=~/code/plans/{concept-name}/reviews/adversarial-{YYYY-MM-DD}-{k}.md
-[ -f "$f" ] || echo "BLOCKED: pass $k artifact $f missing — re-dispatch pass $k"
-```
-
-If the artifact is missing, re-dispatch pass `k` before continuing. **Do not trust the agent's self-report**: read the artifact's findings JSON and confirm against `plan.md` that the P0/P1 findings it claims to have incorporated were actually applied (per the verification discipline — a `DONE` is a claim, not evidence).
-
-### 5.7.3 Self-Review Between Passes
-
-A pass's apply edits are themselves plan edits and can reintroduce placeholders or identifier drift (a rewritten epic that now trails off in "etc.", a new type name that disagrees with an old one). After each pass incorporates, **re-run Phase 5.6 (5.6.1–5.6.4) against the patched plan and loop it to clean** before dispatching the next pass. Do not modify 5.6 — it is the same self-review the main flow uses.
-
-Only after 5.6 is clean does the next pass start, so each subsequent reviewer reads a consistent, drift-free plan.
-
-### 5.7.4 The Final Pass and Residual Findings
-
-Pass 3 is the **final review**. By the time it runs, the plan has incorporated two prior rounds of hardening, so Pass 3 judges the finished, fully-hardened artifact and does a holistic read for seams left by the earlier edits.
-
-After Pass 3 incorporates and 5.6 is clean, the sequence is complete — proceed to Phase 6. The three sequential passes are the bound; there is no further round.
-
-**If Pass 3 still surfaces unresolved P0/P1 findings** (≥0.80 it could not fully resolve by editing — e.g., a finding that invalidates a core premise the plan is built on), do not silently proceed:
-
-- **Interactive (`/xplan`)**: escalate via AskUserQuestion, listing the specific unresolved findings:
-  ```
-  question: "The final adversarial pass left these P0/P1 issues unresolved: {for each: id — what — why}. How do you want to proceed?"
-  options:
-    - "Let me revise the concept/scope to address these (I'll describe)"
-    - "Accept these as known risks and proceed to the final gate"
-    - "Stop here — save the plan, don't execute"
-  ```
-  If the user revises, re-run the three-pass sequence against the revised plan. If they accept, ensure the open risks are rows in the Risk Register, then proceed to Phase 6.
-- **Autonomous (`/xplana`)**: do NOT prompt mid-flow. Record the unresolved findings in decisions.md and carry them into the Phase 6.A walkthrough and the Phase 6.5 gate, flagged as "the final adversarial pass left open P0/P1 risks: {list}."
-
-### 5.7.5 Record the Result
-
-Append an "Adversarial Review (Phase 5.7)" block to `decisions.md`:
-
-```markdown
-## Adversarial Review (Phase 5.7 — 3 sequential passes)
-- Pass 1 (premises): findings incorporated {count} / Risk Register {count} / artifact-only {count}
-- Pass 2 (execution): findings incorporated {count} / Risk Register {count} / artifact-only {count}
-- Pass 3 (final): findings incorporated {count} / Risk Register {count} / artifact-only {count}
-- Outcome: clean after Pass 3 / Pass 3 left {M} unresolved P0/P1 (see final gate)
-- Review artifacts: reviews/adversarial-{date}-1.md, -2.md, -3.md
-```
+Record in `decisions.md` a compact result: chosen N/source; original provider; each numbered provider/report and final-pass label; actual finding dispositions/evidence; current artifact hash; run directory; terminal status; handback state. Render N human-readable reports from the policy's numbered pass records under `reviews/`; do not count critics, validation reports or old generations as additional selected passes. Generated summaries are not inputs to their own hash calculation.
 
 ---
 
@@ -1651,22 +1593,22 @@ Read `~/code/plans/{concept-name}/comments.json`. It contains:
 
 **If `action == "accept"`**: Record "User accepted plan via web review" in `decisions.md` and proceed to Phase 6.5.
 
-**If `action == "deepen"`** and `comments` is non-empty: treat each comment as a pre-selected deepening gap and run Deepen Mode D.5-D.7 **without** asking D.3's gap categorization or D.4's user selection - the user already selected by commenting. For each comment:
+**If `action == "deepen"`** and `comments` is non-empty: admit the explicit user update with policy `amend` before any writer edits (see the shared workflow contract). Retain the designated writer and remaining budget; research agents return proposals for that writer. Then treat each comment as a pre-selected deepening gap and run Deepen Mode D.5-D.7 **without** asking D.3's gap categorization or D.4's user selection - the user already selected by commenting. For each comment:
 
 - The "target section" for D.5 is the comment's `section_title` in the comment's `file`.
 - The "gap description" is the comment's `text`.
 - Derive the gap bucket heuristically: ambiguity / pattern / test / tech-assumption based on the comment's wording; default to ambiguity if unclear. This feeds the D.5 agent prompt.
 - Dispatch one agent per comment (model: sonnet), in parallel when comments target different sections, serialized when they touch the same section.
 
-After the deepening agents return, integrate their results into plan.md via D.6 **without** re-prompting the user per section (the user already stated their intent in the comment - applying the proposed replacement is the direct implementation of that intent). If a deepening pass produces ambiguous or conflicting output, fall back to D.6's interactive AskUserQuestion for that single comment only.
+After the deepening agents return, integrate their results into plan.md via D.6 **without** re-prompting the user per section (the user already stated their intent in the comment - applying the proposed replacement is the direct implementation of that intent). If a deepening pass produces ambiguous or conflicting output, use D.6's interactive question only in interactive mode; autonomous mode records the unresolved goal decision for the final gate.
 
 Append a Deepen Pass block to `decisions.md` per D.6's format, noting that the source was web review.
 
-Re-run Phase 5.6 (self-review) against the updated plan, as D.7 requires.
+Re-run Phase 5.6 against the updated plan. Refresh the existing policy run and invalidate changed-artifact acknowledgments; obtain current validation and finish evidence for the saved N passes before execution readiness. Web-comment deepening belongs to this run and keeps its count, source, limits and host; do not ask X-Plana another setup question.
 
 #### 6.W.3 Second-round review
 
-After the deepening pass lands and 5.6 passes clean, **re-launch the web server once** (second round) so the user can verify the patches. Cap at one deepening round per run to avoid loops - on the second round, only **Accept as-is** meaningfully proceeds. If the user submits more comments on the second round, apply them if resource budget allows, otherwise save them to `comments.json` and surface them at the 6.5 gate as "deferred deepening - use `/xplan --deepen` to address."
+After the deepening pass lands and 5.6 passes clean, **re-launch the web server once** (second round) so the user can verify the patches. Cap at one deepening round per run to avoid loops - on the second round, only **Accept as-is** meaningfully proceeds. If the user submits more comments on the second round, admit them through `amend`, apply and refresh/revalidate all saved passes if resource budget allows; otherwise save them to `comments.json` and surface them at the 6.5 gate as "deferred deepening - use `/xplan --deepen` to address."
 
 After the second round (or after a first-round Accept), proceed to Phase 6.5.
 
@@ -1715,7 +1657,7 @@ Structure the output in this exact order, as a single message (or a small number
 - Critical findings from security review and how the plan addressed them
 - Critical findings from architecture review and how the plan addressed them
 - Critical findings from business-logic review and how the plan addressed them
-- **Adversarial review (Phase 5.7)**: the three sequential passes, what the plan survived, and the P0/P1 findings incorporated. If the final pass left unresolved P0/P1 findings, list them explicitly here and again at the gate — the user must see them before deciding to execute.
+- **Adversarial review (Phase 5.7)**: the selected N passes and actual providers, current evidence, and finding dispositions. If the final pass left unresolved P0/P1 findings, list them explicitly here and again at the gate — the user must see them before deciding to execute.
 - If no critical findings: state that explicitly
 
 **7. Assumptions that might need correction**
@@ -1753,6 +1695,8 @@ After presenting the walkthrough, proceed to 6.5.
 
 ### 6.1 Research Walkthrough (--light only)
 
+For any walkthrough feedback that changes reviewed input, admit an explicit user amendment before the designated writer edits, then refresh, rerun checks and the saved N passes, acknowledge and receive current handback before the final gate. This includes research evidence changes; approval of an old generation cannot survive edits.
+
 Walk the user through `research.md`:
 - Present the executive summary and contextual model
 - Highlight key insights
@@ -1789,15 +1733,13 @@ Before asking, re-verify:
 ```bash
 ls -la ~/code/plans/{concept-name}/reviews/{selected-reviews} \
        ~/code/plans/{concept-name}/plan.md
-# If Phase 5.7 ran, all three sequential adversarial artifacts must exist:
-ls -la ~/code/plans/{concept-name}/reviews/adversarial-*-1.md \
-       ~/code/plans/{concept-name}/reviews/adversarial-*-2.md \
-       ~/code/plans/{concept-name}/reviews/adversarial-*-3.md 2>/dev/null
+# Verify the authoritative review gate for the saved run:
+python3 ~/.claude/lib/cross_agent_review_policy.py finish --run-dir "{review-run-dir}"
 ```
 
-If any selected review file is missing, STOP. Go back to Phase 4. If Phase 5.7 was supposed to run (not skipped) but the three `adversarial-*-{1,2,3}.md` artifacts do not all exist, STOP and complete Phase 5.7 before gating.
+If a selected constructive review is missing, complete Phase 4. The adversarial gate requires exactly the selected N current pass records plus evidence-backed closure and original-host reception. If `finish` fails, present the explicit unresolved state and next action; do not call the plan reviewed or offer execution as ready. Old markdown filenames alone cannot pass this check.
 
-If the Phase 5.7 final pass left unresolved P0/P1 findings, surface them in the gate summary so the user decides to execute with eyes open — do not bury them.
+Required unresolved findings block execution readiness. Surface them and any needed goal decision; revised acceptance criteria must be reviewed before the execution gate can pass.
 
 Also re-read plan §8.6. If it lists live-testing steps whose permission line is `NOT AUTHORIZED`, name those steps in the gate summary and state that the executor will stop on each one until the user approves it and names a runner. **Proceeding through this gate approves execution; it does not grant live-testing permission** — only an explicit Q8 answer recorded in §8.6 does that.
 

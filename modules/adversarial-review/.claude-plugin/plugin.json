@@ -3,7 +3,7 @@
   "author": {
     "name": "CCGM"
   },
-  "description": "/adrev - adversarial review of a plan or any entity (file, doc, PR, issue, directory, or stated concept). Dispatches a separate adrev-reviewer agent that attacks premises, hunts failure modes, and steelmans the case against. Plan targets get findings incorporated into the plan automatically unless told not to; all other targets get a report.",
+  "description": "Adversarial review of plans and other artifacts through an opposite-provider reviewer and evidence-based resolution. A designated writer applies authorized plan fixes; report-only targets stay unchanged.",
   "displayName": "Adversarial Review",
   "keywords": [
     "adversarial",

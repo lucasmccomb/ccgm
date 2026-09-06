@@ -27,6 +27,7 @@ MAX_BUNDLE_BYTES = 512_000
 MAX_CONTEXT_BYTES = 64_000
 MAX_OUTPUT_BYTES = 2_000_000
 MAX_FILES = 64
+CONTEXT_EVIDENCE_PATH = 'ccgm-context://current'
 DISABLED_CODEX_FEATURES = (
     'shell_tool', 'unified_exec', 'shell_snapshot', 'multi_agent', 'multi_agent_v2',
     'hooks', 'apps', 'plugins', 'remote_plugin', 'browser_use', 'browser_use_external',
@@ -208,6 +209,7 @@ def validate_request(value):
 
 def safe_read(root, relative, maximum):
     """Read only explicitly selected UTF-8 ordinary files, never credential/config trees."""
+    require(not relative.startswith('ccgm-context:'), 'The ccgm-context: evidence namespace is reserved.')
     path = PurePosixPath(relative)
     require(not path.is_absolute() and '..' not in path.parts and path.parts,
             'Evidence paths must be relative without parent traversal.')
@@ -374,7 +376,7 @@ def parse_output(provider, raw, requested_model):
         raise ReviewError('INVALID_RESULT', 'Malformed native JSON result or event stream.')
 
 
-def validate_result(payload, expected, bundle):
+def validate_result(payload, expected, bundle, context_text=None):
     validate_schema(payload, RESULT_SCHEMA)
     for key, value in expected.items():
         require(payload[key] == value, 'Result identity mismatch: ' + key, 'INVALID_RESULT')
@@ -392,9 +394,18 @@ def validate_result(payload, expected, bundle):
     require(len(ids) == len(set(ids)), 'Duplicate finding IDs.', 'INVALID_RESULT')
     for item in payload['findings'] + payload['verdicts'] + payload['verification']:
         for evidence in item['evidence']:
-            entry = bundle['files'].get(evidence['path'])
-            require(entry and evidence['quote'] in entry['content'],
-                    'Evidence quote is absent from the frozen bundle.', 'INVALID_RESULT')
+            if evidence['path'].startswith('ccgm-context:'):
+                require(evidence['path'] == CONTEXT_EVIDENCE_PATH and context_text is not None
+                        and digest(context_text.encode()) == expected['context_sha256'],
+                        'Context evidence needs the exact reserved path and matching frozen context hash.', 'INVALID_RESULT')
+                content = context_text
+            else:
+                entry = bundle['files'].get(evidence['path'])
+                content = entry['content'] if entry else None
+            require(content is not None and evidence['quote'] in content,
+                    'Evidence quote is absent from the frozen bundle: path='
+                    + json.dumps(diagnostic(evidence['path'])[:240]) + ', quote='
+                    + json.dumps(diagnostic(evidence['quote'])[:400]), 'INVALID_RESULT')
         if item.get('outcome') in ('pass', 'fail'):
             require(bool(item['evidence']), 'A verification claim needs supplied evidence.', 'INVALID_RESULT')
     return payload
@@ -463,17 +474,20 @@ def run_process(command, prompt, timeout, cwd, on_start=None):
             signal.signal(signal.SIGTERM, previous)
 
 
-def invoke(run_dir, role='reviewer', pass_number=1, context=None, perspective=None):
+def invoke(run_dir, role='reviewer', pass_number=1, context=None, perspective=None, context_data=None):
     require(os.environ.get('CCGM_REVIEW_CHILD') != '1', 'Nested review dispatch is prohibited.')
     directory = Path(run_dir)
     with file_lock(global_lock_path()), run_lock(directory):
         request, state, bundle = load(directory)
         require(state['status'] in ('READY', 'REVIEWED'), 'Run needs explicit resume or investigation.')
         provider = route(request, role, pass_number, perspective)
-        context_text = safe_read(Path(request['root']), context, MAX_CONTEXT_BYTES) if context else ''
+        require(context_data is None or context is None, 'Supply one context mechanism.')
+        require(context_data is None or isinstance(context_data, str), 'Internal context must be text.')
+        context_text = context_data if context_data is not None else (safe_read(Path(request['root']), context, MAX_CONTEXT_BYTES) if context else '')
+        require(len(context_text.encode()) <= MAX_CONTEXT_BYTES, 'Dispute context exceeds 64 KB.')
         expected = {'provider': provider, 'artifact_sha256': bundle['artifact_sha256'],
                     'evidence_sha256': bundle['evidence_sha256'],
-                    'context_sha256': digest(context_text.encode()) if context else '',
+                    'context_sha256': digest(context_text.encode()) if context or context_data is not None else '',
                     'role': role, 'pass_number': pass_number}
         try:
             require(snapshot(request) == bundle, 'Evidence changed; explicitly refresh first.', 'STALE_ARTIFACT')
@@ -496,21 +510,39 @@ def invoke(run_dir, role='reviewer', pass_number=1, context=None, perspective=No
                           'Filesystem reads, execution, remote mutations and nested agents are disabled. '
                           'Do not claim to execute checks. '
                           'Return only the required JSON object. A clean review is valid; do not invent findings. '
-                          'Cite exact supplied file quotes for findings and verification. '
+                          'Copy every identity field exactly and obey the output schema; finding IDs must be unique. '
+                          'CLEAN requires no new findings, no evidence requests, and no failed verification. '
+                          'FINDINGS requires at least one new finding. NEEDS_EVIDENCE requires at least one precise '
+                          'evidence request and may include findings. '
                           'If necessary source/test evidence is missing, return NEEDS_EVIDENCE and precise requests. '
                           'As critic, audit findings with AGREE, DISAGREE_EVIDENCE, or DISAGREE_CONCERN. '
-                          'Agreement alone is not evidence. Keep stable finding IDs from context.\n' +
+                          'Any DISAGREE_CONCERN verdict requires status NEEDS_EVIDENCE and nonempty evidence_requests. '
+                          'Put verdicts about existing findings in verdicts with their stable IDs from context; '
+                          'do not repeat existing findings as new discoveries just to justify a status. '
+                          'Every finding and verdict, and every pass/fail verification, needs exact supplied evidence. '
+                          'Agreement alone is not evidence. An evidence path must be an exact bundle.files key or '
+                          'the literal context_evidence_path when non-null. For that reserved path quote the exact '
+                          'decoded context string, whose UTF-8 bytes are bound by identity.context_sha256. '
+                          'Choose short literal contiguous substrings; never combine nonadjacent fields or '
+                          'reconstruct or pretty-print JSON for a quote. '
+                          'Do not invent nested JSON paths such as context.checks.name or normalize quote formatting. '
+                          'Context citations establish what was recorded, not independent proof that a claim is true.\n' +
                           json.dumps({'identity': expected, 'goal': request['goal'],
                                       'source_anchor': request['source_anchor'], 'spec_paths': request['specs'],
                                       'artifact_paths': request['artifacts'], 'bundle': bundle,
-                                      'context': context_text, 'output_schema': RESULT_SCHEMA}, ensure_ascii=False))
+                                      'context': context_text,
+                                      'context_evidence_path': CONTEXT_EVIDENCE_PATH if expected['context_sha256'] else None,
+                                      'output_schema': RESULT_SCHEMA}, ensure_ascii=False))
                 def record_child(pid):
                     call['child_pid'] = pid
                     save(directory / 'state.json', state)
                 raw = run_process(command, prompt, min(remaining, request['limits']['invocation_seconds']),
                                   cwd, on_start=record_child)
                 payload, identity = parse_output(provider, raw, request['models'][provider])
-                validate_result(payload, expected, bundle)
+                # Native attribution/usage remains evidence of spent work even
+                # when the local schema, citation, or freshness gate rejects it.
+                call['identity'] = identity
+                validate_result(payload, expected, bundle, context_text if expected['context_sha256'] else None)
                 require(snapshot(request) == bundle, 'Evidence changed during review.', 'STALE_ARTIFACT')
                 require(not context or safe_read(Path(request['root']), context, MAX_CONTEXT_BYTES) == context_text,
                         'Dispute context changed during review.', 'STALE_ARTIFACT')

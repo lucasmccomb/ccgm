@@ -1,10 +1,12 @@
 # cross-agent-review
 
-A local, synchronous review coordinator for Claude Code and Codex. It selects the actual opposite provider, supplies a frozen evidence bundle to that provider's native agent, validates structured findings locally, and saves bounded invocation state for explicit continuation. It does not edit reviewed files or decide workflow consensus.
+A local, synchronous review coordinator for Claude Code and Codex. It selects the actual opposite provider, supplies a frozen evidence bundle to that provider's native agent, validates structured findings locally, and saves bounded invocation state for explicit continuation. The transport does not edit reviewed files or decide consensus. The pilot policy supplies separate startup, stage, evidence and final acknowledgment gates for X-Plan, adrev and ETP.
 
 ## Install
 
 Requires Python 3.9+, macOS/Linux, native Claude Code and Codex CLIs, and each provider's own authenticated login. The Codex profile was exercised with CLI 0.153.4; unsupported flags fail explicitly instead of weakening restrictions.
+
+Run the following from the CCGM repository root after an existing global CCGM installation. `--add` extends that installation. For a fresh installation, complete the normal global setup with `bash start.sh` first, or use [Manual Installation](#manual-installation) below.
 
 ```bash
 bash start.sh --add cross-agent-review
@@ -32,7 +34,7 @@ python3 ~/.claude/lib/cross_agent_review.py invoke --run-dir /path/to/private/re
 python3 ~/.claude/lib/cross_agent_review.py status --run-dir /path/to/private/review-run
 ```
 
-Read the [request/result and continuation contract](skills/cross-agent-review/references/contract.md). Work routes from the actual producer, not the orchestrator. Plans use the selected prefix of opposite/origin/opposite. Unknown or mixed work requires both explicit perspectives. This integration supplies the transport; X-Plan startup choice, ETP stages, finding disposition, and final acknowledgment gates are wired in the dependent workflow delivery.
+Read the [request/result and continuation contract](skills/cross-agent-review/references/contract.md). Work routes from the actual producer, not the orchestrator. Plans use the selected prefix of opposite/origin/opposite. Unknown or mixed work requires both explicit perspectives. The [pilot workflow policy](skills/cross-agent-review/references/workflow.md) supplies X-Plan's upfront 1–3 review choice (default one), ETP's spec-before-quality stages, bounded evidence resolution, current-artifact acknowledgments and original-host reception. It does not activate other review sites.
 
 A `REVIEWED` state means a structurally valid, attributable report. It never means `CONSENSUS`, execution readiness, or merge permission. Reports retain `HANDOFF_PENDING` until the calling workflow actually delivers them to the original host. Errors and missing evidence are never converted into clean reviews.
 
@@ -53,7 +55,7 @@ bash tests/test-no-personal-data.sh
 bash tests/test-installer.sh
 ```
 
-Deterministic tests invoke fake native envelopes in isolated temporary directories, covering routing, invalid output, immutable hashes, authentication selection, limits, interruption, and reversible installation. They run in both existing required `module-tests` CI jobs. Tiny authenticated provider tasks and mechanical capability probes are separate release evidence; fixtures do not establish actual agent behavior.
+Deterministic tests invoke fake native envelopes in isolated temporary directories, covering routing, invalid output, immutable hashes, authentication selection, limits, interruption, reversible installation, and deterministic workflow gates. They run in both existing required `module-tests` CI jobs. Tiny authenticated provider tasks and mechanical capability probes are separate release evidence; fixtures do not establish actual agent behavior.
 
 ## Manual installation
 
@@ -61,7 +63,7 @@ From the module directory, without the CCGM installer:
 
 ```bash
 mkdir -p ~/.claude/lib ~/.claude/bin ~/.claude/skills
-cp lib/cross_agent_review.py ~/.claude/lib/
+cp lib/cross_agent_review.py lib/cross_agent_review_policy.py ~/.claude/lib/
 cp bin/cross-agent-review-setup.py ~/.claude/bin/
 cp -R skills/cross-agent-review ~/.claude/skills/
 python3 ~/.claude/bin/cross-agent-review-setup.py install

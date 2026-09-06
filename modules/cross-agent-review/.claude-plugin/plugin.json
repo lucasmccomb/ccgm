@@ -3,7 +3,7 @@
   "author": {
     "name": "CCGM"
   },
-  "description": "Restricted local Claude Code and Codex adversarial review with frozen evidence, validated findings, bounded calls, and a reversible Codex skill entry point.",
+  "description": "Restricted Claude/Codex review transport and pilot workflow policy: frozen evidence, opposite-provider routing, bounded resolution, current acknowledgments and reversible Codex skill setup.",
   "displayName": "Cross-Agent Review",
   "keywords": [
     "adversarial",

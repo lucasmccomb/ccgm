@@ -50,7 +50,7 @@ Choose a preset (the menu lists every file under `presets/`, alphabetically: clo
 
 Automatically adds any modules required by your selection. Uses a depth-first topological sort with cycle detection. Reports any automatically added dependencies.
 
-For example, selecting `xplan` automatically adds its dependencies `multi-agent` and `adversarial-review`, which in turn add `startup-dashboard` and `hooks` (multi-agent's dependencies) and `subagent-patterns` (adversarial-review's dependency). `startup-dashboard` then adds `session-history`, and `hooks` adds `settings`. The full closure is 8 modules: `session-history`, `startup-dashboard`, `settings`, `hooks`, `multi-agent`, `subagent-patterns`, `adversarial-review`, `xplan`.
+For example, selecting `xplan` automatically adds its dependencies `multi-agent`, `adversarial-review`, and `cross-agent-review`, which in turn add `startup-dashboard` and `hooks` (multi-agent's dependencies) and `subagent-patterns` (adversarial-review's dependency). `startup-dashboard` then adds `session-history`, and `hooks` adds `settings`. The full closure is 9 modules: `session-history`, `startup-dashboard`, `settings`, `hooks`, `multi-agent`, `subagent-patterns`, `adversarial-review`, `cross-agent-review`, `xplan`.
 
 ### Step 7: Module config prompts
 
