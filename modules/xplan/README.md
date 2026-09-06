@@ -97,7 +97,7 @@ Both execute work, but they are not interchangeable. `/xplan-resume` resumes an 
 
 - **multi-agent**: Required for parallel agent execution during research, review, and implementation phases
 - **adversarial-review**: Provides the read-only adversarial attack criteria.
-- **cross-agent-review**: Native Claude/Codex transport and deterministic startup, stage, resolution and completion policy. Installed automatically as a module dependency; native provider login remains separately required.
+- **cross-agent-review**: Native Claude/Codex transport and deterministic startup, stage, resolution and completion policy. The CCGM installer adds this dependency automatically; native provider login remains separately required.
 - **[lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch)** (companion install): xplan's Phase 1 delegates research to the `/deepresearch` command, which is not part of CCGM - it lives in a standalone repo with its own installer
 
 ### /deepresearch - required for research phase
@@ -115,6 +115,8 @@ cd lem-deepresearch
 See the [lem-deepresearch README](https://github.com/lucasmccomb/lem-deepresearch) for manual setup, prerequisites, and troubleshooting.
 
 ## Manual Installation
+
+Install the dependencies listed above first; copying files does not run the installer's dependency resolver. In particular, complete the [cross-agent-review manual setup](../cross-agent-review/README.md#manual-installation) and its [prerequisites](../cross-agent-review/README.md#install) before copying X-Plan. Run this block from the `modules/xplan` directory:
 
 ```bash
 # Copy command files

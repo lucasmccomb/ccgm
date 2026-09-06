@@ -15,6 +15,14 @@ python3 ~/.claude/bin/cross-agent-review-setup.py install
 
 The first command installs the Claude entry point and runtime through CCGM's existing ownership manifest. The second optionally copies only the self-contained `cross-agent-review` skill into `${CODEX_HOME:-$HOME/.codex}/skills/`, with a per-file ownership/hash manifest. It does not modify Codex configuration, MCP registrations, authentication, or other skills. Restart or refresh the relevant host to discover the skill.
 
+To update, first update the CCGM checkout and reinstall the Claude-side files through the [CCGM update flow](../../docs/installer.md#updating), including `cross-agent-review` in the module selection, or repeat the manual copies from the updated source. `--add` skips modules already installed; it is for additions, not upgrades. Then update the separate owned Codex copy:
+
+```bash
+python3 ~/.claude/bin/cross-agent-review-setup.py install
+```
+
+Restart or refresh Codex after the copy succeeds. Updating the Claude files or restarting Codex alone does not update that copy.
+
 Remove the Codex entry point before removing the Claude-side setup script:
 
 ```bash
