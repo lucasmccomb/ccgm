@@ -12,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cross-agent review deterministic contracts and CLI fixtures
+        run: python3 -m unittest discover -s modules/cross-agent-review/tests -v
+
       - name: Install jq
         run: sudo apt-get install -y jq
 
@@ -181,6 +184,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cross-agent review deterministic contracts and CLI fixtures
+        run: python3 -m unittest discover -s modules/cross-agent-review/tests -v
 
       - name: Install jq
         run: brew install jq

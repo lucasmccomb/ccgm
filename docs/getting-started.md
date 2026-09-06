@@ -40,7 +40,7 @@ Five presets exist, and the interactive menu offers all of them. You can also se
 | **minimal** | Core autonomy + git workflow rules | Trying CCGM for the first time |
 | **standard** | Minimal + hooks, settings, core commands | Most individual developers |
 | **team** | Core workflow + code-quality, systematic-debugging, verification, autoheal, and PR-review/compound-knowledge tooling | Teams with shared repos |
-| **full** | 75 modules | Power users who want everything |
+| **full** | 76 modules | Power users who want everything |
 | **cloud-agent** | Full minus 19 desktop/interactive-only modules (writing-system, capability-router, ccgm-doctor, skillify, todos, orrery, etc.) | Headless cloud VMs dispatching parallel agents |
 
 See [Presets](presets.md) for detailed breakdowns.
@@ -78,7 +78,7 @@ CCGM can install to either or both of two locations:
 
 Global installation is the most common choice. Project-level installation is useful when you want different rules for a specific repo.
 
-Only 18 of the 79 modules declare `"project"` in their `scope`. A module that doesn't has nothing to install there: `start.sh` silently skips it and prints no message. If you install with `--scope project` alone, expect most of the modules you picked to install nothing - check each module's README for whether it supports project scope before relying on it.
+Only 18 of the 80 modules declare `"project"` in their `scope`. A module that doesn't has nothing to install there: `start.sh` silently skips it and prints no message. If you install with `--scope project` alone, expect most of the modules you picked to install nothing - check each module's README for whether it supports project scope before relying on it.
 
 ## Install modes
 
@@ -156,7 +156,7 @@ Removes only CCGM-installed files (tracked via a manifest). Your personal files 
 
 ## Next steps
 
-- [Module Catalog](modules.md) - explore all 79 modules in detail
+- [Module Catalog](modules.md) - explore all 80 modules in detail
 - [Commands Reference](commands.md) - learn every slash command
 - [Hooks Reference](hooks.md) - understand the workflow automation
 - [Configuration](configuration.md) - customize CCGM after installation

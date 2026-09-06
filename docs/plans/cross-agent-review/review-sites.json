@@ -1,0 +1,140 @@
+{
+  "status": "proposed pilot and later migration; no live wiring changed",
+  "updated": "2026-09-05",
+  "sites": [
+    {
+      "name": "X-Plan / X-Plana",
+      "sources": [
+        "modules/xplan/commands/xplan.md",
+        "modules/xplan/commands/xplana.md",
+        "modules/xplan/commands/xplan-resume.md",
+        "modules/xplan/commands/xplan-status.md"
+      ],
+      "change": "Ask for 1, 2, or 3 reviews before planning; default 1. Run the selected prefix of opposite/origin/opposite in fresh sessions; final pass is N; preserve choice and current-artifact evidence across resume; hand back to original host.",
+      "stage": "pilot"
+    },
+    {
+      "name": "ETP",
+      "sources": [
+        "modules/xplan/commands/etp.md"
+      ],
+      "change": "Review opposite each actual producer in both stages. Use evidence-backed mutual closure with a default three-fix-round checkpoint and explicit bounded continuation. Keep the separate CI-fix policy.",
+      "stage": "pilot"
+    },
+    {
+      "name": "Standalone adrev",
+      "sources": [
+        "modules/adversarial-review/skills/adrev/SKILL.md",
+        "modules/adversarial-review/agents/adrev-reviewer.md"
+      ],
+      "change": "Use the opposite provider, frozen-artifact evidence protocol, validated structured results, and native transport. Preserve report-only and authorized apply modes.",
+      "stage": "pilot"
+    },
+    {
+      "name": "ce-review",
+      "sources": [
+        "modules/ce-review/skills/ce-review/SKILL.md",
+        "modules/ce-review/agents/reviewers/adversarial-reviewer.md"
+      ],
+      "change": "Route the final red-team lens across providers; replace the adversarial-only human-decision rule for authorized in-scope fixes; retain specialist evidence and real authorization boundaries.",
+      "stage": "later batch"
+    },
+    {
+      "name": "Document review",
+      "sources": [
+        "modules/document-review/skills/document-review/SKILL.md",
+        "modules/document-review/agents/adversarial-document-reviewer.md"
+      ],
+      "change": "Route the adversarial lens across providers and retain unresolved findings in the document execution gate.",
+      "stage": "later batch"
+    },
+    {
+      "name": "Shared spec / quality review",
+      "sources": [
+        "modules/subagent-patterns/rules/subagent-patterns.md",
+        "modules/subagent-patterns/agents/spec-compliance-reviewer.md",
+        "modules/subagent-patterns/agents/code-quality-reviewer.md",
+        "modules/subagent-patterns/agents/implementer.md"
+      ],
+      "change": "Carry producer provenance and the pilot result contract where ETP needs them. Keep other callers unchanged until their own migration tests pass.",
+      "stage": "pilot compatibility; wider activation later"
+    },
+    {
+      "name": "Todo resolution",
+      "sources": [
+        "modules/todos/skills/todo-resolve/SKILL.md"
+      ],
+      "change": "Update the indirect two-stage review caller and preserve todo state until verified consensus.",
+      "stage": "later batch"
+    },
+    {
+      "name": "Argus",
+      "sources": [
+        "modules/argus/skills/argus/SKILL.md",
+        "modules/argus/agents/argus-judge.md",
+        "modules/argus/rules/argus.md"
+      ],
+      "change": "Use the opposite-provider visual judge; preserve output-only evidence, image capability checks, deterministic gates, and stricter per-view stopping conditions.",
+      "stage": "later batch"
+    },
+    {
+      "name": "Agent-native / launch",
+      "sources": [
+        "modules/agent-native/rules/agent-native-self-eval.md",
+        "modules/agent-native/skills/agent-native-audit/SKILL.md",
+        "modules/launch/skills/launch/SKILL.md"
+      ],
+      "change": "Route critical reviewers and red-team probing opposite the builder; update launch’s indirect rubric invocation.",
+      "stage": "later batch"
+    },
+    {
+      "name": "Rule pressure-testing",
+      "sources": [
+        "modules/rule-authoring/commands/pressure-test.md",
+        "modules/rule-authoring/rules/pressure-testing.md",
+        "modules/rule-authoring/rules/rule-authoring.md"
+      ],
+      "change": "Use an opposite-provider challenger for rules and scenarios; retain red/green test subjects on the runtime the rule is intended to govern.",
+      "stage": "later batch"
+    },
+    {
+      "name": "Routing / reporting / models",
+      "sources": [
+        "modules/capability-router/commands/capabilities.md",
+        "modules/ship-readiness/commands/ship-ready.md",
+        "modules/subagent-patterns/rules/concurrency-and-rate-limits.md"
+      ],
+      "change": "Vet provider-specific capabilities and expose pilot status, provenance, saved counts, and limits. Reconcile current advisor-mode dispatch and resolution rules; no global untested review activation.",
+      "stage": "pilot compatibility; wider activation later"
+    }
+  ],
+  "non_dispatch_classifications": [
+    "Historical adrev finding IDs",
+    "Adversarial-input safety text in Dreaming/Autoheal",
+    "Review result consumers (update status semantics without launching reviews)"
+  ],
+  "review_count": {
+    "default": 1,
+    "allowed": [
+      1,
+      2,
+      3
+    ],
+    "ask_before_planning": true,
+    "commands": [
+      "xplan",
+      "xplana"
+    ]
+  },
+  "baseline": {
+    "inventory_sha": "6e2ca8851ba94ae5f1a332e02285337d2cf75e5e",
+    "review_anchor_sha": "6255bc1ad8cab245362372d998142051a4fbda18",
+    "inventory_module_count": 78,
+    "anchor_module_count": 79
+  },
+  "anchor_dependencies": [
+    "modules/advisor-mode/rules/advisor-mode.md",
+    "modules/advisor-mode/hooks/advisor-guard.py",
+    ".github/workflows/test.yml"
+  ]
+}

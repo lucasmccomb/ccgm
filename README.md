@@ -23,7 +23,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 79 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 80 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 
@@ -137,7 +137,7 @@ For a quick install with a preset:
 | **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, ask-context, model-vetting, live-testing-guard, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline | Most users |
 | **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, ask-context, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, writing-system, ce-review, pr-feedback, pr-review-toolkit, document-review, compound-knowledge, skill-authoring, subagent-patterns (+ deps) | Teams |
 | **cloud-agent** | 55 modules | Autonomous/headless agents |
-| **full** | 75 modules | Power users |
+| **full** | 76 modules | Power users |
 
 ### Other install options
 
@@ -203,6 +203,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **common-mistakes** | patterns | - | 8 battle-tested anti-patterns: shallow exploration, dependency blindness, ESLint Fast Refresh, more | - |
 | **compound-knowledge** | workflow | `/compound`, `/compound-refresh`, `/compound-reproject` | Team-shared learnings in `docs/solutions/`. After solving a non-trivial problem, capture the pattern in a versioned schema | skill-authoring |
 | **copycat** | commands | `/copycat` | Analyzes external Claude Code config repos and reports the patterns, rules, and techniques worth adopting into CCGM | - |
+| **cross-agent-review** | workflow | `/cross-agent-review` | Restricted local Claude/Codex review of frozen evidence with attributable findings, bounded calls, and a reversible Codex skill entry point | - |
 | **debugging** | commands | `/debug` | Structured root-cause debugging on Opus: reproduce, hypothesize, instrument, diagnose, fix, verify, instead of guessing at a fix | - |
 | **deepresearch** | commands | `/deepresearch` | Multi-query semantic research via the Exa MCP server: parallel query fan-out synthesized into a structured research.md | - |
 | **design-review** | commands | `/design-review` | 6-pass visual design review: spacing, typography, responsive, hierarchy, accessibility, consistency. Screenshots + CSS analysis with auto-fix | - |
@@ -364,7 +365,7 @@ The `docs/` directory contains comprehensive documentation:
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 79 modules |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 80 modules |
 | [Commands Reference](docs/commands.md) | All 90 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 36 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |

@@ -13,3 +13,6 @@ modules/autoheal/config.json
 
 # local audit artifacts (e.g. /audit output) — must never be published
 docs/audits/
+
+# private cross-provider review requests, snapshots, and native session metadata
+.context/cross-agent-review/

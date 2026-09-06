@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 79 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 80 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -1028,6 +1028,12 @@ Opt-in, backward-compatible relevance-scoped rule injection plus a tiered always
 Selection lives in a pure, deterministic, tested library (`relevance_select.py`). Modules may add an optional `applicability` field to their `module.json` (absent or `{"always": true}` == always applicable, preserving pre-feature behavior); otherwise `{"langs": [...]}` / `{"taskTypes": [...]}` scope the module to a profile.
 
 **Dependencies**: hooks
+
+---
+
+### cross-agent-review
+
+Restricted local Claude Code/Codex review with explicit producer routing, frozen input hashes, validated findings, bounded calls, and a self-contained Codex skill. Install with `bash start.sh --add cross-agent-review`; optional Codex setup uses `python3 ~/.claude/bin/cross-agent-review-setup.py install`. See [module documentation](../modules/cross-agent-review/README.md).
 
 ---
 
