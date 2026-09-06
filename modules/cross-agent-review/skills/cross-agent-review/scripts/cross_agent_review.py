@@ -394,7 +394,9 @@ def validate_result(payload, expected, bundle):
         for evidence in item['evidence']:
             entry = bundle['files'].get(evidence['path'])
             require(entry and evidence['quote'] in entry['content'],
-                    'Evidence quote is absent from the frozen bundle.', 'INVALID_RESULT')
+                    'Evidence quote is absent from the frozen bundle: path='
+                    + json.dumps(diagnostic(evidence['path'])[:240]) + ', quote='
+                    + json.dumps(diagnostic(evidence['quote'])[:400]), 'INVALID_RESULT')
         if item.get('outcome') in ('pass', 'fail'):
             require(bool(item['evidence']), 'A verification claim needs supplied evidence.', 'INVALID_RESULT')
     return payload

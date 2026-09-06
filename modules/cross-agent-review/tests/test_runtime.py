@@ -142,6 +142,22 @@ class RuntimeTests(unittest.TestCase):
         self.scenario({'findings': [finding, finding]})
         self.failure('INVALID_RESULT', lambda: runtime.invoke(self.run))
 
+    def test_invalid_evidence_diagnostic_identifies_path_and_quote_with_redaction(self):
+        self.create()
+        for quote in ('missing code: return a + b',
+                      'missing code. Authorization: Bearer fixture-private-secret\n' + 'x' * 3000):
+            self.scenario({'findings': [{'id': 'F1', 'severity': 'high', 'requirement': 'sum',
+                                        'evidence': [{'path': 'artifact.py', 'quote': quote}],
+                                        'remedy': 'Use addition.'}]})
+            self.failure('INVALID_RESULT', lambda: runtime.invoke(self.run))
+            diagnostic = self.state()['error']
+            self.assertIn('path="artifact.py"', diagnostic)
+            self.assertIn('quote="missing code', diagnostic)
+            self.assertNotIn('fixture-private-secret', diagnostic)
+            self.assertLess(len(diagnostic), 800)
+            self.assertFalse(list(self.run.glob('report-*')))
+            runtime.resume(self.run)
+
     def test_necessary_evidence_cannot_be_clean(self):
         self.scenario({'payload': {'status': 'CLEAN', 'evidence_requests': ['Need test output.']}})
         self.create()

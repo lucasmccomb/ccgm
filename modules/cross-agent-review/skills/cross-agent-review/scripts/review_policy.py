@@ -17,7 +17,7 @@ import cross_agent_review as rt
 
 POLICY_VERSION = 1
 LENSES = {
-    'plan': 'Review premises, execution and failure modes, reversal costs, whole-plan coherence, minimal/edge-bucketed human work, follow-up completion, autonomous decision context, and comprehensive autonomous end-to-end tests. Every pass covers all lenses; additional passes reconsider the revised artifact.',
+    'plan': 'Review premises, falsifiability, the strongest opposing case, second-order effects, execution and failure modes, reversal costs, whole-plan coherence, minimal/edge-bucketed human work, follow-up completion, autonomous decision context, and comprehensive autonomous end-to-end tests. Every pass covers all lenses; additional passes reconsider the revised artifact.',
     'spec': 'Review specification compliance: actual goal, all acceptance criteria, required behavior, omissions, unintended scope, and concrete source/test evidence.',
     'quality': 'Review code quality after specification compliance: correctness, regressions, maintainability, resource handling, security boundaries, and meaningful tests.',
     'adrev': 'Adversarially review the entire stated target against the actual goal, premises, failure modes, reversibility, and evidence. Respect report-only authority.',
