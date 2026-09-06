@@ -1035,6 +1035,8 @@ Selection lives in a pure, deterministic, tested library (`relevance_select.py`)
 
 Restricted local Claude Code/Codex review with explicit producer routing, frozen input hashes, validated findings, bounded calls and a self-contained Codex skill. The pilot policy adds upfront X-Plan review counts, ordered ETP stages, supported dispositions, current checks, both native acknowledgments and original-host reception; it does not activate untested review sites. Install with `bash start.sh --add cross-agent-review`; optional Codex setup uses `python3 ~/.claude/bin/cross-agent-review-setup.py install`. See [module documentation](../modules/cross-agent-review/README.md).
 
+**Prerequisites**: Python 3.9+, macOS/Linux, authenticated native Claude Code and Codex CLIs, and an existing global CCGM installation. Run `--add` from the CCGM repository root. Fresh users should first complete global setup with `bash start.sh`, or follow the module's manual installation instructions.
+
 ---
 
 ## Category: patterns

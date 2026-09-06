@@ -426,6 +426,7 @@ def fix(run_dir, value):
 def amend(run_dir, value):
     keys(value, ['writer_provider', 'writer_session_id', 'reason', 'next_check', 'authorization'])
     request, state, bundle = rt.load(run_dir)
+    fresh(request, state, bundle)
     policy = state['policy']
     rt.require(not policy['report_only'] and not policy['pending_fix'], 'No amendment authority or an author action is outstanding.')
     rt.require(value['authorization'] == 'explicit-user-update', 'Amendments require an explicit user update.')
@@ -438,7 +439,7 @@ def amend(run_dir, value):
     state['invocations'] += 1
     ticket = {**value, 'number': state['invocations'], 'status': 'FIX_ADMITTED',
               'deadline': min(state['deadline'], time.time() + request['limits']['invocation_seconds']),
-              'accounting': 'user-change-attested' if rt.snapshot(request) != bundle else 'before-author-dispatch', **stamp(bundle)}
+              'accounting': 'before-author-dispatch', **stamp(bundle)}
     state['calls'].append(copy.deepcopy(ticket))
     policy['pending_fix'] = ticket
     policy['fix_rounds'] += 1

@@ -30,6 +30,8 @@ Modes are `plan` for X-Plan's selected sequence, `etp` for spec compliance follo
 
 Record actual origin/producer/provider/session provenance and one designated writer. Unknown or materially mixed work requires both perspectives. A reviewer-provided material fix changes the validation requirement; never relabel provenance to obtain a preferred reviewer. Choose provider-specific vetted models explicitly. A model persona, Git username or historical root session is not current dispatch identity.
 
+A planner may delegate writing to the other provider. Preserve the originating planner for plan pass order and final handback, and record the actual producer as designated writer. The scheduled reviewer can then match the writer's provider; the final gate still requires both providers' native acknowledgments of the current artifact, including the opposite actual writer.
+
 Keep run directories and their control files outside reviewed artifacts. For an advisor host, an existing allowed work-product root such as `~/.claude/cross-agent-review/<run-id>/` avoids needing broad source-write permissions. Record the run pointer beside plan/progress metadata. Do not put mutable ledgers, generated report summaries or the run's own state into its input hash set.
 
 Supply explicit, bounded artifact/spec/source/criteria files. The reviewer has no file exploration or command execution tools: a path mention alone does not load an agent template or test. Include the relevant review criteria in the frozen bundle. Initial review excludes the author's persuasive report and earlier findings. A missing-evidence request is answered by a specifically named source or independently run check, not an entire transcript.
@@ -79,6 +81,8 @@ For an explicit user update, including web comments or a deepen request, use `am
 python3 ~/.claude/lib/cross_agent_review_policy.py amend --run-dir /path/to/private/run --file amendment.json
 ```
 
+Admission requires the artifact and evidence to match the current frozen snapshot. An amendment cannot retroactively authorize untracked edits; a stale attempt fails without spending another invocation.
+
 After accepted changes, refresh the explicit inputs. The policy invalidates changed-artifact checks/acknowledgments and requires current revalidation. Old generations remain audit history and cannot establish execution readiness.
 
 ```bash
@@ -100,6 +104,8 @@ python3 ~/.claude/lib/cross_agent_review_policy.py advance --run-dir /path/to/pr
 ```
 
 Record actual argv/timestamps/output and the exact generation tested. The example values are illustrative, never evidence. `acknowledge` obtains real native provider acknowledgment of the current evidence/dispositions; a caller-written JSON signature is not accepted. A clean initial stage with current checks may `advance` without a separate stage acknowledgment. After material changes, satisfy the requested current-stage acknowledgment before advancing. `advance` gates the next plan pass or ETP stage. Recheck status after each action and follow its actual required next step.
+
+Native acknowledgment context includes these recorded checks. A provider may cite their exact context text with the reserved evidence path `ccgm-context://current`, bound to that call's `context_sha256`; guessed nested paths such as `context.checks.acceptance` are invalid. See the [transport citation contract](contract.md#reports-and-continuation). A context quote establishes the recorded evidence, not an independently executed reviewer check.
 
 ## Final evidence and host handback
 

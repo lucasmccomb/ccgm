@@ -6,6 +6,8 @@ A local, synchronous review coordinator for Claude Code and Codex. It selects th
 
 Requires Python 3.9+, macOS/Linux, native Claude Code and Codex CLIs, and each provider's own authenticated login. The Codex profile was exercised with CLI 0.153.4; unsupported flags fail explicitly instead of weakening restrictions.
 
+Run the following from the CCGM repository root after an existing global CCGM installation. `--add` extends that installation. For a fresh installation, complete the normal global setup with `bash start.sh` first, or use [Manual Installation](#manual-installation) below.
+
 ```bash
 bash start.sh --add cross-agent-review
 python3 ~/.claude/bin/cross-agent-review-setup.py install

@@ -135,10 +135,36 @@ class PolicyTests(unittest.TestCase):
             policy.acknowledge(self.run)
             self.assertEqual('CONSENSUS', self.deliver()['status'])
 
+    def test_delegated_plan_preserves_origin_schedule_actual_writer_and_opposite_ack(self):
+        self.request['origin_provider'] = 'claude'
+        self.initialize(count=3)  # Actual producer remains Codex.
+        self.assertEqual('codex', policy.rt.load(self.run)[1]['policy']['writer_provider'])
+        self.check()
+        seen = []
+        for _ in range(3):
+            seen.append(policy.do_review(self.run, 'review')['result']['provider'])
+            policy.advance(self.run)
+        self.assertEqual(['codex', 'claude', 'codex'], seen)
+        policy.acknowledge(self.run)
+        state = policy.rt.load(self.run)[1]
+        self.assertEqual({'claude', 'codex'}, set(state['policy']['acks']))
+        self.assertEqual('claude', policy.status(self.run)['handoff']['origin_provider'])
+        self.assertEqual('CONSENSUS', self.deliver()['status'])
+
     def test_light_review_is_explicit_spec_only(self):
         self.initialize(mode='etp', light=True)
         self.assertEqual(1, policy.status(self.run)['total_stages'])
         self.assertEqual('spec', policy.status(self.run)['current_stage']['key'])
+
+    def test_etp_native_ack_can_cite_exact_recorded_check_context(self):
+        self.initialize(mode='etp')
+        self.check()
+        self.review_advance()
+        self.review_advance()
+        self.scenario({'payload': {'verification': [{'check': 'unit', 'outcome': 'pass', 'evidence': [
+            {'path': policy.rt.CONTEXT_EVIDENCE_PATH, 'quote': 'Ran independent fixture assertion: pass'}]}]}})
+        policy.acknowledge(self.run)
+        self.assertEqual('CONSENSUS', self.deliver()['status'])
 
     def test_missing_or_failed_required_check_blocks_advance_and_final_ack(self):
         self.initialize()
@@ -331,6 +357,7 @@ class PolicyTests(unittest.TestCase):
                  'next_check': 'unit', 'authorization': 'explicit-user-update'}
         self.fail_policy('INVALID_REQUEST', lambda: policy.amend(self.run, dict(value, authorization='inferred')))
         ticket = policy.amend(self.run, value)
+        self.assertEqual('before-author-dispatch', ticket['accounting'])
         self.assertEqual(before['invocations'] + 1, ticket['number'])
         (self.source / 'artifact.py').write_text('def add(a,b): return a + b\n')
         policy.refresh(self.run)
@@ -339,6 +366,18 @@ class PolicyTests(unittest.TestCase):
         self.assertIsNone(after['handoff'])
         self.assertEqual(before['deadline'], after['deadline'])
         self.assertFalse(after['execution_ready'])
+
+    def test_amendment_cannot_retroactively_admit_untracked_source_drift(self):
+        self.initialize()
+        self.check()
+        self.review_advance()
+        before = policy.rt.load(self.run)[1]
+        (self.source / 'artifact.py').write_text('def add(a,b): return a + b\n')
+        value = {'writer_provider': 'codex', 'writer_session_id': 'author-session',
+                 'reason': 'User update', 'next_check': 'unit', 'authorization': 'explicit-user-update'}
+        self.fail_policy('STALE_ARTIFACT', lambda: policy.amend(self.run, value))
+        self.assertEqual(before, policy.rt.load(self.run)[1])
+        self.fail_policy('INVALID_REQUEST', lambda: policy.refresh(self.run))
 
     def test_stage_ack_reuse_requires_identical_final_check_and_ledger_evidence(self):
         self.initialize()
