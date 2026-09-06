@@ -49,7 +49,7 @@ Files installed globally to `~/.claude/`:
 5. **Reversal-cost check** - expensive-to-undo decisions with thin justification
 6. **Second-order effects** - assume it ships and works; who adapts to it, games it, or becomes load-bearing on it
 
-Findings carry severity (P0-P3) and confidence (0.0-1.0), matching the document-review conventions. The report also lists what the target **survived** - a clean verdict is only credible when the attacks are shown.
+Native pilot findings use critical/high/medium/low severity and include stable IDs, requirement references, exact evidence and remedies. The report also lists what the target **survived** - a clean verdict is only credible when the attacks are shown.
 
 ## Plan Execution Tenets (plan targets)
 
