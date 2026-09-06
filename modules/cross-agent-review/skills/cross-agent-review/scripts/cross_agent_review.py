@@ -463,17 +463,20 @@ def run_process(command, prompt, timeout, cwd, on_start=None):
             signal.signal(signal.SIGTERM, previous)
 
 
-def invoke(run_dir, role='reviewer', pass_number=1, context=None, perspective=None):
+def invoke(run_dir, role='reviewer', pass_number=1, context=None, perspective=None, context_data=None):
     require(os.environ.get('CCGM_REVIEW_CHILD') != '1', 'Nested review dispatch is prohibited.')
     directory = Path(run_dir)
     with file_lock(global_lock_path()), run_lock(directory):
         request, state, bundle = load(directory)
         require(state['status'] in ('READY', 'REVIEWED'), 'Run needs explicit resume or investigation.')
         provider = route(request, role, pass_number, perspective)
-        context_text = safe_read(Path(request['root']), context, MAX_CONTEXT_BYTES) if context else ''
+        require(context_data is None or context is None, 'Supply one context mechanism.')
+        require(context_data is None or isinstance(context_data, str), 'Internal context must be text.')
+        context_text = context_data if context_data is not None else (safe_read(Path(request['root']), context, MAX_CONTEXT_BYTES) if context else '')
+        require(len(context_text.encode()) <= MAX_CONTEXT_BYTES, 'Dispute context exceeds 64 KB.')
         expected = {'provider': provider, 'artifact_sha256': bundle['artifact_sha256'],
                     'evidence_sha256': bundle['evidence_sha256'],
-                    'context_sha256': digest(context_text.encode()) if context else '',
+                    'context_sha256': digest(context_text.encode()) if context or context_data is not None else '',
                     'role': role, 'pass_number': pass_number}
         try:
             require(snapshot(request) == bundle, 'Evidence changed; explicitly refresh first.', 'STALE_ARTIFACT')

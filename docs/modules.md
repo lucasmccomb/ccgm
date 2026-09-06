@@ -612,7 +612,7 @@ Deep research, planning, and execution framework for complex projects.
 
 **What it does**: An interactive, human-in-the-loop planning framework:
 
-- **Phase 0** - Parse input, create plan directory
+- **Phase 0** - Resolve the upfront 1–3 adversarial review choice (default one) before planning side effects, then create the plan directory
 - **Phase 0.5** - Discovery interview: confirm concept, choose research depth
 - **Phase 1** - Deep research via parallel agents (Full / Technical Only / Market & Product / Lite / Custom presets)
 - **Phase 1.5** - Research review with business viability assessment; confirm to proceed
@@ -621,7 +621,7 @@ Deep research, planning, and execution framework for complex projects.
 - **Phase 3** - Plan creation with parallelized epics and dependency waves. Every plan builds a **comprehensive autonomous E2E test suite** (Phase 3.3.5): new projects get a Wave-1 test-harness epic and per-epic E2E coverage; existing repos get a coverage-gap audit and optimistic gap-fill for touched areas. The suite is wired into CI as a blocking merge gate so it, not the user, is the ready-to-merge oracle.
 - **Phase 4** - Constructive peer review by security, architecture, and business logic agents (review stage 1 of 2)
 - **Phase 5 (+5.6)** - Write plan.md, then a self-review loop for placeholders, identifier drift, and autonomous-execution readiness
-- **Phase 5.7** - Adversarial review sequence (stage 2 of 2): 3 sequential `adrev-reviewer` passes on the current Opus-tier model (max effort), each attacking the plan after the prior pass's fixes are incorporated, and enforcing the four plan-execution tenets (minimal/edge-bucketed human work, follow-up completion, autonomous decision context, comprehensive autonomous E2E coverage)
+- **Phase 5.7** - Run the selected N fresh sequential reviews, starting opposite the original provider and alternating. Every pass covers the entire plan and its four execution tenets; pass N is final. A designated writer applies supported changes, and current evidence/acknowledgment/handback gates determine completion.
 - **Phase 6** - Web review + final confirmation gate
 - **Phase 7** - Execute via parallel agents in separate clones; waves and completion gate on a green E2E suite and completion of all in-scope follow-up work
 - **Phase 8** - Verification, audit, and retrospective
@@ -640,7 +640,7 @@ Commands installed:
 | `/xplan-resume` | Resume an interrupted plan execution |
 | `/etp` | Execute a ready plan or GitHub issue(s) end-to-end with adversarial PR review |
 
-**Dependencies**: multi-agent (which depends on startup-dashboard), adversarial-review (which depends on subagent-patterns; provides the `adrev-reviewer` agent for Phase 5.7)
+**Dependencies**: multi-agent, adversarial-review (read-only attack criteria), cross-agent-review (native transport and deterministic pilot policy)
 
 ---
 
@@ -885,9 +885,9 @@ One hostile lens against a plan or any entity, with automatic plan incorporation
 
 **Installs**: `skills/adrev/`, `agents/adrev-reviewer.md`
 
-**What it does**: `/adrev` resolves a target (plan, doc, PR, issue, code directory, or stated concept) and dispatches a fresh-context adrev-reviewer agent that attacks premises, hunts failure modes, steelmans the strongest opposing case, and checks falsifiability and reversal costs. When the target is a plan, the reviewing agent incorporates its findings into the plan automatically - high-confidence findings revise sections directly, judgment calls land in `## Risks & Open Questions`, and the full review is written to the plan's `reviews/` directory - unless invoked with `--no-apply`. Plan targets also get four **autonomous-execution tenets** enforced (not just noted - the reviewer expands the plan to satisfy them): T1 human work minimized and bucketed to the edges, T2 a follow-up-completion contract, T3 enough decision context to direct unplanned work without a human, T4 a comprehensive autonomous E2E test suite over every testable surface. Non-plan targets are never modified. The single-lens, any-entity counterpart to document-review's 7-lens doc gate.
+**What it does**: `/adrev` resolves a plan, doc, PR, issue, code directory or concept, then routes a fresh read-only reviewer opposite the actual producing provider. It attacks premises, failure modes, strongest opposing arguments, falsifiability and reversal costs, plus the four plan-execution tenets where relevant. Supported plan changes go to one designated writer after an evidence-grounded critic exchange. `--no-apply` and report-only preserve the target; headless applies only with explicit `--apply`. Report completion with open findings does not imply consensus. Unknown/mixed authorship requires both perspectives.
 
-**Dependencies**: subagent-patterns
+**Dependencies**: subagent-patterns, cross-agent-review
 
 ---
 
@@ -897,7 +897,7 @@ Delegation-only session posture for expensive orchestrator models (Fable/Opus), 
 
 **Installs**: `commands/advisor.md`, `rules/advisor-mode.md`, `hooks/advisor-guard.py`, `hooks/advisor-posture.py`, `hooks/advisor-session-start.py`, `hooks/advisor-session-end.py`, hook registrations
 
-**What it does**: State is one flag file per session, `~/.claude/advisor-mode/<session_id>`, keyed by the `session_id` every hook input carries — one session's mode never binds another's. `advisor-session-start.py` creates the flag at startup, resume, and clear, so every session begins in the mode (opt out with `CCGM_ADVISOR_AUTO=false` in the environment or `~/.claude/.ccgm.env`; compaction never re-enables a mode the session turned off), and sweeps flags whose session is gone; `advisor-session-end.py` removes the flag when the session ends. `/advisor` (bare = toggle; explicit `on|off|status` accepted) acts on the current session only, and `status` lists every session currently in the mode. The posture itself: the main agent writes four-field specs, dispatches cheaper implementer agents (worktree isolation), reviews through the standard two-stage separate-agent review, triages findings, delegates fixes (max 3 rounds), and merges — it never implements. While this session's flag exists, `advisor-guard.py` hard-blocks (exit 2, survives bypass mode) the main agent's file edits outside its work-product paths (`~/.claude/`, scratchpads, `~/code/plans/`, `~/code/docs/`, worktrees, plan-mode files) and any Bash beyond read-only inspection plus orchestration verbs (read-only git, branch/worktree/pull lifecycle, `gh` PR/issue/run/label management including merge). Subagent tool calls pass untouched (their hook input carries `agent_id`), so delegated workers are unaffected, and `advisor-posture.py` re-injects the posture each turn so the model delegates instead of fighting denials. Plan- or issue-shaped work is routed to `/etp`, which already runs this loop at full ceremony. Escape hatches: `/advisor off` and a one-off `ADVISOR_DIRECT=1`.
+**What it does**: State is one flag file per session, `~/.claude/advisor-mode/<session_id>`, keyed by the `session_id` every hook input carries — one session's mode never binds another's. `advisor-session-start.py` creates the flag at startup, resume, and clear, so every session begins in the mode (opt out with `CCGM_ADVISOR_AUTO=false` in the environment or `~/.claude/.ccgm.env`; compaction never re-enables a mode the session turned off), and sweeps flags whose session is gone; `advisor-session-end.py` removes the flag when the session ends. `/advisor` (bare = toggle; explicit `on|off|status` accepted) acts on the current session only, and `status` lists every session currently in the mode. The posture itself: the main agent writes four-field specs, dispatches cheaper implementer agents (worktree isolation), reviews through the standard two-stage separate-agent review, triages findings, delegates fixes (three-round checkpoint; pilot-only evidence-backed extensions retain total limits), and merges — it never implements. While this session's flag exists, `advisor-guard.py` hard-blocks (exit 2, survives bypass mode) the main agent's file edits outside its work-product paths (`~/.claude/`, scratchpads, `~/code/plans/`, `~/code/docs/`, worktrees, plan-mode files) and any Bash beyond read-only inspection plus orchestration verbs (read-only git, branch/worktree/pull lifecycle, `gh` PR/issue/run/label management including merge). Subagent tool calls pass untouched (their hook input carries `agent_id`), so delegated workers are unaffected, and `advisor-posture.py` re-injects the posture each turn so the model delegates instead of fighting denials. Plan- or issue-shaped work is routed to `/etp`, which already runs this loop at full ceremony. Escape hatches: `/advisor off` and a one-off `ADVISOR_DIRECT=1`.
 
 **Dependencies**: settings, subagent-patterns
 
@@ -1033,7 +1033,7 @@ Selection lives in a pure, deterministic, tested library (`relevance_select.py`)
 
 ### cross-agent-review
 
-Restricted local Claude Code/Codex review with explicit producer routing, frozen input hashes, validated findings, bounded calls, and a self-contained Codex skill. Install with `bash start.sh --add cross-agent-review`; optional Codex setup uses `python3 ~/.claude/bin/cross-agent-review-setup.py install`. See [module documentation](../modules/cross-agent-review/README.md).
+Restricted local Claude Code/Codex review with explicit producer routing, frozen input hashes, validated findings, bounded calls and a self-contained Codex skill. The pilot policy adds upfront X-Plan review counts, ordered ETP stages, supported dispositions, current checks, both native acknowledgments and original-host reception; it does not activate untested review sites. Install with `bash start.sh --add cross-agent-review`; optional Codex setup uses `python3 ~/.claude/bin/cross-agent-review-setup.py install`. See [module documentation](../modules/cross-agent-review/README.md).
 
 ---
 

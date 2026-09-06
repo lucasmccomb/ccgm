@@ -119,6 +119,7 @@ every denial names the delegation path.
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 
@@ -1173,6 +1174,82 @@ def moves_cwd(segment):
     return bool(words) and words[0].text.rsplit("/", 1)[-1] in CD_COMMANDS
 
 
+def review_policy_segment_allowed(words, after_cd=False):
+    """Permit only the installed pilot coordinator, never a Python escape hatch.
+
+    The coordinator writes its own run records and invokes restricted reviewers;
+    it does not execute check argv or modify reviewed source. Keep this grammar
+    explicit so future subcommands do not silently gain main-agent permission.
+    """
+    if len(words) < 3 or any(w.unresolved for w in words):
+        return False
+    executable = words[0].text
+    python = shutil.which("python3")
+    if executable != "python3" and (not python or not os.path.isabs(executable)
+            or os.path.realpath(executable) != os.path.realpath(python)):
+        return False
+    script = os.path.expanduser(os.path.expandvars(words[1].text))
+    expected = os.path.join(os.path.expanduser("~"), ".claude", "lib", "cross_agent_review_policy.py")
+    if not os.path.isabs(script) or os.path.normpath(script) != expected:
+        return False
+    action = words[2].text
+    if action == "--help":
+        return len(words) == 3
+    options = {
+        "select": {"--count", "--source", "--unattended", "--resume"},
+        "init": {"--request", "--run-dir", "--mode", "--checks", "--writer-session-id", "--light-review", "--report-only"},
+        **{name: {"--run-dir"} for name in
+           ("review", "critic", "rebuttal", "advance", "acknowledge", "status", "resume", "finish")},
+        **{name: {"--run-dir", "--file"} for name in
+           ("propose", "record-check", "fix", "amend", "extend", "receive")},
+    }
+    options["refresh"] = {"--run-dir", "--add-evidence"}
+    if action not in options:
+        return False
+    values = {}
+    args = [w.text for w in words[3:]]
+    index = 0
+    while index < len(args):
+        option, equal, value = args[index].partition("=")
+        if option not in options[action] or (option in values and option != "--add-evidence"):
+            return False
+        if option in ("--unattended", "--light-review", "--report-only"):
+            if equal:
+                return False
+            values[option] = True
+        else:
+            if not equal:
+                index += 1
+                if index >= len(args):
+                    return False
+                value = args[index]
+            if not value or value.startswith("-") or SUBST_PLACEHOLDER in value:
+                return False
+            if option == "--add-evidence":
+                values.setdefault(option, []).append(value)
+            else:
+                values[option] = value
+        index += 1
+    if action != "select" and "--run-dir" not in values:
+        return False
+    for key in ("--run-dir", "--resume"):
+        if key in values:
+            path = os.path.expanduser(os.path.expandvars(values[key]))
+            if not os.path.isabs(path) or not path_allowed(path):
+                return False
+    relative_paths = values.get("--add-evidence", []) + ([values["--file"]] if "--file" in values else [])
+    for path in relative_paths:
+        if os.path.isabs(path) or ".." in path.split("/") or unresolved_var_in(path):
+            return False
+    if values.get("--source", "explicit") not in ("explicit", "interactive"):
+        return False
+    if "--count" in values and values["--count"] not in ("1", "2", "3"):
+        return False
+    if "--mode" in values and values["--mode"] not in ("plan", "etp", "adrev"):
+        return False
+    return True
+
+
 def bash_segment_allowed(segment, after_cd=False):
     words = segment_words(segment)
     if not words:
@@ -1181,6 +1258,8 @@ def bash_segment_allowed(segment, after_cd=False):
     args = [w.text for w in words[1:]]
     if argument_blocker(segment) is not None:
         return False
+    if first == "python3" and review_policy_segment_allowed(words, after_cd):
+        return True
     if first == "sed":
         # -i in any form: bare, with attached suffix (-i.bak), inside a
         # single-dash flag cluster (-ni), or --in-place[=suffix].

@@ -1,12 +1,12 @@
 ---
-description: Autonomous xplan - full-depth research + planning + reviews with zero mid-flow prompts. Presents the completed plan as a single artifact at the end.
+description: Autonomous xplan - full-depth research + planning + reviews after one upfront review-count choice, with no mid-flow prompts. Presents the completed plan as a single artifact at the end.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--deepen [<plan-dir>]]
+argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--deepen [<plan-dir>]] [--adversarial-reviews <1|2|3>] [--unattended]
 ---
 
 # xplana - Autonomous xplan
 
-Thin alias for `/xplan --autonomous`. Runs the full xplan pipeline (research + naming + tech stack + scope + multi-agent setup + full plan + full standard review + self-review + **3 sequential adversarial reviews**) end-to-end without any mid-flow prompts, then presents the completed plan as a structured artifact for review at a single final gate.
+Thin alias for `/xplan --autonomous`. Runs the full xplan pipeline (research + naming + tech stack + scope + multi-agent setup + full plan + full standard review + self-review + **1–3 selected sequential adversarial reviews**) end-to-end without any mid-flow prompts, then presents the completed plan as a structured artifact for review at a single final gate.
 
 Pick `/xplana` when:
 - You know exactly what you want to plan and don't want the 7-question discovery interview
@@ -29,18 +29,19 @@ $ARGUMENTS
 
 ## Behavior
 
-Delegate immediately to the main `/xplan` command with the `--autonomous` flag set. Read `~/.claude/commands/xplan.md` and execute its full workflow, treating the following flag as set:
+Read the main `/xplan` command and execute its Phase 0.1 startup with the `--autonomous` flag set. Both commands use the same count selector: ask for 1 (default), 2, or 3 before directory creation, source synchronization, research or agent dispatch. A supplied valid `--adversarial-reviews` or unambiguous count answers the choice; preserve it and do not prompt twice. Autonomous alone is interactive at this setup step; only explicit `--unattended` permits an unsubmitted default. A pending question or plain-text fallback must wait. Read `~/.claude/commands/xplan.md` and execute its full workflow, treating the following flag as set:
 
 ```
 --autonomous
 ```
 
-Preserve every other argument the user passed (e.g., `--repo <path>`, `--deepen [<plan-dir>]`). Do NOT strip or transform the concept text.
+Preserve every other argument the user passed (e.g., `--repo <path>`, `--deepen [<plan-dir>]`, `--adversarial-reviews 2`, `--unattended`). Do NOT strip or transform the concept text.
 
 Autonomous mode affects these xplan phases:
 
 | Phase | What changes in autonomous mode |
 |-------|--------------------------------|
+| 0.1.1 (Adversarial count) | One startup choice: 1 (recommended), 2, 3. Explicit valid count skips the question. Wait for submission before all planning side effects. |
 | 0.4.0 (Source Freshness Guard) | Runs automatically with NO prompt when `--repo` is set: fetch, pin the origin default-branch anchor, expose a temp anchor worktree, and verify every repo fact against it. Never fast-forwards the user's clone. Skipped entirely for greenfield (no `--repo`). |
 | 0.5 (Discovery Interview) | Skipped. Defaults inferred per Phase 0.5 Inference Rules; recorded in `decisions.md`. **Except Q8 (live-testing authorization)**, which cannot be inferred: plan §8.6 records `NOT AUTHORIZED` and 6.A surfaces it. |
 | 1.0 (Research Config) | Locked to Full - all 7 research agents fire. |
@@ -51,13 +52,13 @@ Autonomous mode affects these xplan phases:
 | 2.7 (Multi-Agent Setup) | Inferred from scope (9+ epics = workspace, 4-8 = flat, 1-3 = single). |
 | 4.0 (Review Configuration) | Locked to Full - security + architecture + business logic. |
 | 5.6 (Plan Quality Self-Review) | Unchanged - still loops until clean. |
-| 5.7 (Adversarial Review Sequence) | **Locked ON.** Runs 3 sequential `adrev-reviewer` passes (the current Opus-tier model, max effort) against the finished plan — each pass attacks after the previous pass's fixes are incorporated; the third is the final review. No mid-flow prompt - any P0/P1 the final pass leaves unresolved are recorded and surfaced at the 6.A walkthrough + 6.5 gate instead of asking. |
+| 5.7 (Adversarial Review Sequence) | Runs the selected N fresh sequential provider sessions, starting opposite the original planner and alternating. Every pass checks the entire plan; pass N is final. The designated writer applies supported changes. Unresolved findings remain explicit and block execution readiness; present missing goal decisions at the final gate. |
 | 6 (Walkthrough) | Runs the new **Phase 6.A Autonomous Plan Walkthrough** - structured plan-as-artifact presentation with explicit assumption callouts. |
 | 6.5 (Final Execution Gate) | **Always fires**, same as any xplan run. Autonomous mode does NOT bypass this gate. |
 
 ## Built-In Execution Tenets (matter most here)
 
-Autonomous mode is where these four plan tenets matter most: there is no human in the loop during creation *or* execution, so the plan must stand entirely on its own. They apply in every xplan mode, but `/xplana` leans on them hardest. The Phase 5.7 adversarial reviewer enforces all four (T1–T4), expanding the plan when any is thin:
+Autonomous mode is where these four plan tenets matter most: after startup there are no mid-flow planning prompts, so the plan must stand entirely on its own. They apply in every xplan mode, but `/xplana` leans on them hardest. The Phase 5.7 adversarial reviewer enforces all four (T1–T4), expanding the plan when any is thin:
 
 1. **Human interaction is minimized and bucketed to the edges** (T1). No human step an agent could do via CLI/API; unavoidable human work is front-loaded before Wave 1 or deferred to the end, never wedged mid-run. Once execution starts, it runs to done without pausing for a person.
 2. **Follow-up-completion contract** (T2, plan §9.5). Any follow-on work discovered during execution is tracked, triaged, and — if in-scope — completed before execution is reported complete. Only genuinely human-blocked work may remain open, surfaced with its exact ask.
@@ -66,7 +67,7 @@ Autonomous mode is where these four plan tenets matter most: there is no human i
 
 ## What This Command Does NOT Do
 
-- It does NOT skip research, naming, the standard reviews, the self-review loop, or the Phase 5.7 adversarial review sequence. Autonomous is the *deep* mode, not the fast one — the finished plan has survived 6 reviews (3 standard + 3 sequential adversarial) before you see it.
+- It does NOT skip research, naming, the standard reviews, the self-review loop, or the Phase 5.7 adversarial review sequence. Autonomous is the *deep* mode, not the fast one — the completed plan receives three constructive reviews plus the selected one to three adversarial passes.
 - It does NOT skip the four execution tenets above. The adversarial review enforces minimal edge-bucketed human work (T1), a follow-up-completion contract (T2), enough decision context to direct unplanned work without a human (T3), and a comprehensive autonomous E2E suite over all testable surfaces (T4) — expanding the plan when any is missing.
 - It does NOT skip the final execution gate. 6.5 is non-bypassable.
 - It does NOT grant live-testing permission. Autonomous planning can infer a tech stack; it cannot approve running app launches, dictation, synthetic input, focus changes, machine-global input/audio overrides, or mic capture on the user's behalf. Plan §8.6 records `NOT AUTHORIZED`, the 6.A walkthrough shows the affected steps, and `/etp` or `/xplan-resume` holds each one and asks before running it. See `~/.claude/rules/live-testing-guard.md`.

@@ -31,15 +31,20 @@ if config.get('findings'):
     payload['findings'] = config['findings']
 if config.get('mutate'):
     Path(config['mutate']).write_text('mutated during invocation')
+context = json.loads(prompt.get('context') or '{}')
+if context.get('purpose', '').endswith('ack') or config.get('critic_verdict'):
+    for fid, row in context.get('findings', {}).items():
+        evidence = (row.get('proposal') or row['finding'])['evidence']
+        payload['verdicts'].append({'finding_id': fid, 'verdict': config.get('critic_verdict', 'AGREE'), 'evidence': evidence})
 payload.update(config.get('payload', {}))
 if provider == 'claude':
     events = [{'type': 'system', 'subtype': 'init', 'model': 'claude-fixture', 'tools': ['StructuredOutput']},
               {'type': 'result', 'subtype': 'success', 'is_error': False,
-               'session_id': 'claude-fixture-session', 'structured_output': payload,
+               'session_id': 'claude-fixture-session-' + str(os.getpid()), 'structured_output': payload,
                'usage': {'input_tokens': 10, 'output_tokens': 5}}]
     print(json.dumps(events[-1] if config.get('object') else events))
 else:
-    events = [{'type': 'thread.started', 'thread_id': 'codex-fixture-session'},
+    events = [{'type': 'thread.started', 'thread_id': 'codex-fixture-session-' + str(os.getpid())},
               {'type': 'turn.started'},
               {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': json.dumps(payload)}},
               {'type': 'turn.completed', 'usage': {'input_tokens': 10, 'output_tokens': 5}}]

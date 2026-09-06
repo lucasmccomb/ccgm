@@ -35,8 +35,8 @@ Everything below is the operational expansion of that directive. When a phase an
 | Role | Agent type | Model |
 |------|-----------|-------|
 | Implementation (one per unit) | `implementer` | sonnet |
-| Adversarial review - Stage 1 | `spec-compliance-reviewer` | sonnet |
-| Adversarial review - Stage 2 | `code-quality-reviewer` | sonnet |
+| Adversarial review - Stage 1 | Spec-compliance lens, opposite actual producer | Provider-specific vetted review model |
+| Adversarial review - Stage 2 | Code-quality lens, opposite actual producer | Provider-specific vetted review model |
 | Follow-up fixes | `implementer` | sonnet |
 | Cheap mechanical checks (status, ls) | default | haiku |
 | Orchestrator (this session) | - | current model |
@@ -245,25 +245,27 @@ Spawn one `implementer` agent per unit (model sonnet), each in its own **worktre
 
 Do not trust the self-report as proof. The diff and the review are the proof.
 
-### 4.2 Adversarial review (SEPARATE agents - this is the integrity property)
+### 4.2 Adversarial review (opposite actual implementing provider)
 
-For every PR - newly created or inherited in-flight - run the adversarial review. **The reviewer is a different agent from the implementer and is given the unit's spec plus the diff - never the implementer's rationale or self-report.** For an issue unit, the **spec is the issue** (title + body + acceptance criteria + investigation comments). For a plan unit, the spec is the plan's unit. Coupled self-grading inflates grades; an implementer asked to grade its own work will pass it. Independence is what makes the sign-off mean anything.
+Use `~/.claude/skills/cross-agent-review/references/workflow.md` and initialize its **etp** mode for every new or inherited PR and every follow-up. Record the unit's actual implementing provider/session from dispatch evidence. A Claude orchestrator using a Codex implementer gets Claude review; the inverse gets Codex review. Unknown or materially mixed contributions require both perspectives; never relabel them from Git author names or the orchestrator model.
 
-**Default - full two-stage review** (every PR, regardless of diff size):
-- **Stage 1 - `spec-compliance-reviewer`**: Did the PR deliver exactly the spec (the issue's definition of done / the plan unit's deliverables)? Everything present? Any scope creep (files, helpers, adjacent "while I'm here" changes not asked for)? It treats the implementer's DONE as a claim and re-verifies from the diff. Stage 1 gates Stage 2.
-- **Stage 2 - `code-quality-reviewer`** (only if Stage 1 passes): correctness bugs, security holes, silent failures, unhandled edge cases, project-pattern violations, over-engineering. Runs fresh checks (tests, build) rather than trusting prior output.
+Pass the spec and frozen diff/relevant source/check evidence, without the implementer's persuasive rationale. For issue units the spec includes the issue body and investigation comments; for plans it is the unit's accepted deliverables. The reviewer cannot run commands in the restricted transport, so delegate fresh deterministic checks to a verifier and record their actual outputs via the policy's `record-check`; do not claim the reviewer ran them. A missing-context request must be answered with specifically named evidence, followed by `refresh --add-evidence <source-relative-file>`.
 
-**`--light-review`** collapses this to Stage 1 only - a single separate-agent spec-compliance pass, skipping Stage 2. Use it only for trivial diffs (a typo, a constant bump). It still keeps the integrity property (a separate reviewer, the issue as spec); it only drops depth. It is never the default.
+**Stage 1: spec compliance.** Check every deliverable, constraint and scope boundary. Only its current checks, resolved findings and `advance` gate unlock Stage 2. A clean initial stage does not need a redundant stage acknowledgment; after material changes, satisfy the policy’s requested acknowledgment first.
 
-Each stage returns a verdict and a specific, itemized findings list. Quality-reviewing a spec-failing PR wastes effort on code that will change - so the order is fixed, never parallel.
+**Stage 2: code quality.** Check correctness, security, silent failures, edge cases, project conventions and needless complexity. It routes opposite the actual producer, independently of Stage 1's reviewer identity. Both stages share one work-unit run, deadline, invocation allowance and fix count. They are sequential, never parallel.
 
-### 4.3 Apply reasonable and valid fixes
+`--light-review` explicitly selects only Stage 1 for a trivial diff; record that choice using the policy's supported light-review mode. It does not alter provider independence or the evidence gate. Full spec then quality is the default.
 
-Triage the findings yourself (orchestrator judgment - latent work, not delegable):
-- **Reasonable and valid** (real bug, real scope creep, real spec gap) → fix it. Dispatch an `implementer` against the PR branch (or fix inline for a one-liner — unless this session is in advisor mode (its flag `~/.claude/advisor-mode/<session_id>` exists), where even one-liners are delegated: the inline "quick fix" is the documented drift pattern the mode's guard blocks), push, and **re-review the changed PR** (back to 4.2).
-- **Invalid, speculative, or out-of-scope** (gold-plating, hypothetical edge cases, "you could also…") → reject with a one-line reason recorded in the run record. Completeness means finishing the unit, not expanding it. Do not implement review suggestions with no caller or that the work did not ask for.
+### 4.3 Resolve findings and apply supported fixes
 
-Loop review → fix → re-review until the PR passes. Bound it: after **3 fix rounds** on the same PR without convergence, freeze that PR, record the unresolved findings as a blocker, and move on - one stuck PR does not halt the wave.
+Keep each artifact frozen while a reviewer and the other provider settle findings. Use stable IDs, concrete requirement/source/test evidence and `AGREE`, `DISAGREE_EVIDENCE`, or `DISAGREE_CONCERN`. Concern alone does not refute evidence; agreement alone does not establish correctness. The orchestrator coordinates proposals rather than overruling supported objections.
+
+Send accepted fixes to the one designated writer using policy `fix` admission before dispatch. Advisor mode still delegates every source change. Record actual writer identity and retain material mixed provenance; after changes, refresh and validate current artifacts, rerun affected checks, and re-enter the required spec-before-quality gate. A real material change cannot inherit an obsolete review or acknowledgment. Refuted/duplicate/out-of-scope dispositions require evidence and the other provider's support; a one-line unilateral rejection cannot close a required finding.
+
+Use at most five exchanges per frozen dispute; after two unchanged exchanges request a discriminating check or stop unresolved. Three artifact-fix rounds are the default checkpoint. An explicit recorded extension requires new evidence and a viable next check; the original overall deadline and invocation count remain. Exhaustion records `UNRESOLVED_BUDGET`; no useful next check records `UNRESOLVED_DISPUTE`; missing intent records `NEEDS_GOAL_DECISION`. Freeze the affected unit, notify the user, and continue independent authorized units. No same-provider fallback or unresolved state may pass review.
+
+For a clean review, do not manufacture findings. Obtain the policy's real final acknowledgments, deliver to the original host, record reception, and require `finish` success before merging. This review policy is scoped to X-Plan/adrev/ETP; other callers keep their existing rules until separately migrated.
 
 ### 4.35 Drive the PR to CI-green (bounded post-PR loop)
 
@@ -288,7 +290,7 @@ Classify the result:
 2. **Find the root cause, then fix at the source.** This is systematic-debugging, not symptom-patching: one hypothesis, the minimal change. For a code/test failure, dispatch a targeted `implementer` (model sonnet) against the PR branch scoped to *exactly* that failure - never a broad rewrite. For a merge conflict / behind-base, rebase on `origin/main` and resolve. For a suspected flaky check, re-run it once (`gh run rerun <run-id> --failed`) before treating it as real - a check that fails twice is a real bug, not flake.
 3. **Push and re-check.** Push the fix, then re-read CI fresh (back to the top of this step). A fix that introduces a new failure counts as the same loop continuing, not a fresh start.
 
-**The bound (explicit, no infinite loop).** Allow **at most 3 CI-fix rounds** on the same PR. This mirrors the three-strike rule (Phase 6) and the 4.3 review bound. After 3 rounds without reaching green:
+**The bound (explicit, no infinite loop).** Allow **at most 3 CI-fix rounds** on the same PR. This is the separate CI-repair limit; a review-fix extension does not extend or reset it. After 3 rounds without reaching green:
 - **Freeze** the PR (do not merge it).
 - **Record** the unresolved CI failure as a blocker on the run record (issue/batch: a one-line note + the failing-job link; plan: the progress file's blocker list).
 - **Escalate to the user** with a clear, specific summary: which PR, which check failed, the root-cause read so far, the fixes already attempted, and the exact failing-log link. This is the directive's "absolute blocker → notify me" path for CI.
@@ -298,7 +300,7 @@ A PR that cannot be driven green within the bound is treated exactly like a PR f
 
 ### 4.4 Merge and tear down the unit's worktree
 
-Merge a PR only when: it passed review (both stages, or Stage 1 under `--light-review`), CI is **green and mergeable** (verified fresh via 4.35, not assumed), and it does not conflict. Merge in dependency order within the wave. Squash merge (the repo default). Never merge a PR that failed adversarial review or has red/unresolved CI to "keep moving" - that defeats the entire loop.
+Merge a PR only when: its current policy `finish` gate passed (both stages, or Stage 1 under `--light-review`, with original-host reception), CI is **green and mergeable** (verified fresh via 4.35, not assumed), and it does not conflict. Merge in dependency order within the wave. Squash merge (the repo default). Never merge a PR that failed adversarial review or has red/unresolved CI to "keep moving" - that defeats the entire loop.
 
 **Then immediately remove that unit's worktree** (when the unit ran in a worktree, the default). This is mandatory, not best-effort — a built-in worktree does **not** auto-remove, so a merged unit whose worktree lingers is exactly the leak that filled 237 GB in the incident:
 
@@ -419,7 +421,7 @@ A plan run: mark the progress file `COMPLETE`, or `BLOCKED - WAITING ON HUMAN` w
 
 **No AI attribution** in commits or PR bodies (per the git-workflow rule). Use the repo's PR template if one exists.
 
-**Resumability.** A plan run checkpoints to the progress file beside the plan; an issue/batch run uses live GitHub state. Either way, re-invoking `/etp` on the same target continues rather than restarts.
+**Resumability.** Persist each unit's private policy run pointer in the progress record; issue/batch units retain a stable local pointer keyed by repository and issue/unit, in addition to live GitHub state. Restore producer provenance, stage, selected checks, evidence hashes, counters and deadlines on continuation. Never rebuild review state from an open PR alone or reset budgets when fixes change its head. A plan run checkpoints to the progress file beside the plan; an issue/batch run also reconciles live GitHub state. Either way, re-invoking `/etp` on the same target continues rather than restarts.
 
 ---
 

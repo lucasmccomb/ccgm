@@ -51,6 +51,20 @@ Read these files to reconstruct full context:
 3. **decisions.md** - Decisions made during execution
 4. **research.md** - Original research (for context on goals and constraints)
 
+### 2.5 Restore Planning Review State Before Execution State
+
+Read `reviews/review-selection.json` if present. It records the original count/source/provider/session and points to the authoritative private policy run. If planning or adversarial review was interrupted, resume that phase before interpreting execution waves:
+
+```bash
+python3 ~/.claude/lib/cross_agent_review_policy.py select --resume "{review-run-dir}"
+python3 ~/.claude/lib/cross_agent_review_policy.py status --run-dir "{review-run-dir}"
+python3 ~/.claude/lib/cross_agent_review_policy.py resume --run-dir "{review-run-dir}"
+```
+
+Use `resume` only for an interrupted/incomplete operation, following its returned next action; it never replays a child automatically. Preserve count/source, spent invocations/deadline, finding dispositions, completed passes and hashes. Reuse complete current evidence and continue from the first incomplete stage; do not re-ask or create a new run to reset limits. If review has not yet initialized, validate the saved startup choice with `select --count N --source SOURCE` (or explicit unattended selection) and resume planning from its checkpoint. A missing or ambiguous legacy record requires an upfront choice before planning effects; filenames alone do not establish whether one or three were selected.
+
+A changed plan or spec invalidates affected evidence and requires policy refresh/revalidation before completion. Run the same Phase 5.7 and final execution gate as X-Plan. Only after a current successful review gate and existing execution authorization should the wave-resume steps below run. A pure resume keeps its original selection; a new `--deepen` request makes a fresh startup choice.
+
 ### 3. Analyze Last Checkpoint
 
 From the most recent checkpoint in progress.md, determine:

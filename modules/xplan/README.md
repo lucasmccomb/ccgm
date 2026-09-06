@@ -1,12 +1,12 @@
 # xplan
 
-Interactive deep research + planning + execution framework for new projects. Interviews you upfront, researches deeply, proposes tech stack and scope for your sign-off, creates a parallelized execution plan, hardens it with constructive peer review *and* a sequence of adversarial reviews (6 independent reviews in the full configuration), and executes via parallel agents.
+Interactive deep research + planning + execution framework for new projects. Interviews you upfront, researches deeply, proposes tech stack and scope for your sign-off, creates a parallelized execution plan, hardens it with constructive peer review *and* a sequence of adversarial reviews (one to three selected adversarial passes, default one), and executes via parallel agents.
 
 ## What This Module Does
 
 xplan is a human-in-the-loop planning framework with mandatory confirmation gates throughout:
 
-- **Phase 0** - Parse input, create plan directory
+- **Phase 0** - Parse and resolve the upfront adversarial-count choice (1 recommended, 2 or 3) before any planning side effect, then create the plan directory
 - **Phase 0.4** - Existing-repo analysis (only with `--repo`): a Source Freshness Guard fetches origin, pins the default-branch anchor SHA, and plans against a temp worktree at that anchor so a stale clone never poisons the plan. Skipped for greenfield.
 - **Phase 0.5** - Discovery interview: confirm core concept, choose research depth
 - **Phase 1** - Deep research via parallel agents (configurable preset: Full / Technical Only / Market & Product / Lite / Custom)
@@ -18,7 +18,7 @@ xplan is a human-in-the-loop planning framework with mandatory confirmation gate
 - **Phase 3** - Create parallelized plan with epics and dependency waves
 - **Phase 4** - Constructive peer review by security, architecture, and business logic agents (stage 1 of 2)
 - **Phase 5** - Write comprehensive plan.md (+ 5.6 self-review loop)
-- **Phase 5.7** - Adversarial review sequence (stage 2 of 2): **3 sequential `adrev-reviewer` passes** on the current Opus-tier model (max effort). Each pass attacks the plan *after* the previous pass's fixes are incorporated (it uses the agent's native apply mode), so only one reviewer edits `plan.md` at a time and the third pass judges the fully-hardened plan. A finished plan has had **6 independent reviews in the full configuration** (3 standard + 3 adversarial).
+- **Phase 5.7** - Run the selected N fresh sequential reviews starting opposite the original provider and alternating. Every pass covers the entire plan; pass N is final. A designated writer applies supported fixes; deterministic evidence/acknowledgment/handback gates determine completion.
 - **Phase 6** - Web review (default surface) + final confirmation gate before execution
 - **Phase 7** - Create repo, issues, and spawn parallel agents per wave
 - **Phase 8** - Verification, audit, retrospective, optional template generation
@@ -28,10 +28,10 @@ xplan is a human-in-the-loop planning framework with mandatory confirmation gate
 | Mode | Interview | Research | Tech Stack | Scope | Reviews | Walkthrough |
 |------|-----------|----------|------------|-------|---------|-------------|
 | Default (interactive) | Full Q&A | Full | Approved by user | Approved by user | Standard + **adversarial sequence** | Skipped (approved inline) |
-| `--light` | Skipped | Reduced (inferred) | Internal default | Internal | Optional (no adversarial sequence) | Full section-by-section at end |
+| `--light` | Skipped | Reduced (inferred) | Internal default | Internal | Optional constructive + selected adversarial passes | Full section-by-section at end |
 | `--autonomous` (or `/xplana`) | Skipped | **Full** | Internal (best-fit) | Internal (best-fit) | **Full standard + adversarial sequence (always)** | Plan-as-artifact presentation at end |
 
-Reviews run in two stages: Phase 4 standard peer review against the draft, then the Phase 5.7 adversarial sequence (3 sequential passes) against the finished plan. A completed plan has survived **6 independent reviews in the full configuration** (3 standard + 3 adversarial).
+Reviews run in two independent stages: constructive review of the draft, then the selected adversarial passes against the completed plan. Both `/xplan` and `/xplana` ask for 1 (default), 2 or 3 upfront unless a valid `--adversarial-reviews` or clear count already answers it. An interactive default waits for submission; only explicit `--unattended` permits defaulting without an answer. Fresh deepen makes this choice and reviews again; resume restores saved choices and current evidence.
 
 ### Autonomous-Execution Tenets
 
@@ -50,7 +50,7 @@ Planning asks where it runs and whether the user approves it (Phase 0.5.2 Q8, de
 
 **`--light`**: fast path. Reduced depth, minimal interaction. Skips Phases 0.5, 1.5, 2.5, 2.6, and 2.7 (Q8 is deferred to 3.3.5, not dropped). Traditional section-by-section walkthrough at the end.
 
-**`--autonomous`**: deep path. Maximum depth, zero interruption until the final gate. Runs the full research pipeline (all 7 agents), full standard review (security + architecture + business logic), the self-review loop, and the Phase 5.7 adversarial review sequence (3 sequential `adrev-reviewer` passes on the current Opus-tier model at max effort, each incorporating its fixes before the next; the third judges the fully-hardened plan). Tech stack, scope, naming, and multi-agent setup are inferred and documented in `decisions.md`. At Phase 6 the completed plan is presented as a single structured artifact with every inferred default called out, then the (non-bypassable) Phase 6.5 final execution gate fires. Pick this when you know exactly what you want to plan and prefer reviewing a finished artifact over answering questions during creation. Correct any wrong inferences with `/xplan --deepen ~/code/plans/{concept-name}` rather than re-running from scratch.
+**`--autonomous`**: full research and constructive review, plus the startup-selected adversarial passes. After that one setup choice, run without mid-flow questions and present missing goal decisions at the final gate. The alias forwards the same count/source without prompting twice. Preserve the final execution gate; an unresolved policy result cannot be presented as execution-ready.
 
 `--light` and `--autonomous` are mutually exclusive.
 
@@ -58,7 +58,7 @@ Planning asks where it runs and whether the user approves it (Phase 0.5.2 Q8, de
 
 Phase 6's default review surface is a local browser UI served by stdlib `http.server` on 127.0.0.1. xplan renders `plan.md` with `marked.js` (CDN) and attaches a comment button to every `##` and `###` heading. The user can:
 
-- **Submit for deepening** — xplan reads the comments, runs a targeted Deepen Mode pass on each commented section, re-renders the patched plan for a second review round, then proceeds to the Phase 6.5 gate.
+- **Submit for deepening** — xplan reads the comments, runs a targeted Deepen Mode pass on each commented section, invalidates changed-artifact review evidence, obtains current validation under the saved count and limits, and presents the patched plan before the Phase 6.5 gate.
 - **Accept as-is** — proceed directly to the Phase 6.5 gate.
 
 The web UI activates when `plan.md` exists and the environment is not headless. Fallbacks to the terminal walkthrough (6.A / 6.1-6.4) when:
@@ -72,10 +72,10 @@ The Phase 6.5 final execution gate always fires afterward, web or not. The web U
 Comments are persisted to `~/code/plans/{concept-name}/comments.json` before the server shuts down — safe to close the tab or CTRL+C the script after clicking Submit.
 
 Companion commands:
-- **/xplana** - Thin alias for `/xplan --autonomous`
+- **/xplana** - Alias for `/xplan --autonomous`, with the same upfront 1–3 review choice
 - **/xplan-status** - Check progress on a running or completed plan
 - **/xplan-resume** - Resume an interrupted plan execution from its last checkpoint
-- **/etp** - Execute ready work end-to-end — a plan file (xplan-authored or hand-written) *or* one-or-more investigated GitHub issues. Parallel implementation agents, full two-stage adversarial review of every PR by a *separate* agent, reasonable-and-valid fixes, follow-up completion, run-to-completion. Stops only for absolute blockers, which it reports while continuing all non-blocked work.
+- **/etp** - Execute ready work end-to-end — a plan file (xplan-authored or hand-written) *or* one-or-more investigated GitHub issues. Parallel implementation agents, full spec-then-quality review of every PR opposite its actual implementing provider, reasonable-and-valid fixes, follow-up completion, run-to-completion. Stops only for absolute blockers, which it reports while continuing all non-blocked work.
 
 ### /etp vs /xplan-resume
 
@@ -96,7 +96,8 @@ Both execute work, but they are not interchangeable. `/xplan-resume` resumes an 
 ## Dependencies
 
 - **multi-agent**: Required for parallel agent execution during research, review, and implementation phases
-- **adversarial-review**: Provides the `adrev-reviewer` agent that Phase 5.7's adversarial review sequence dispatches (3 sequential passes on the current Opus-tier model). Installed automatically as a module dependency.
+- **adversarial-review**: Provides the read-only adversarial attack criteria.
+- **cross-agent-review**: Native Claude/Codex transport and deterministic startup, stage, resolution and completion policy. Installed automatically as a module dependency; native provider login remains separately required.
 - **[lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch)** (companion install): xplan's Phase 1 delegates research to the `/deepresearch` command, which is not part of CCGM - it lives in a standalone repo with its own installer
 
 ### /deepresearch - required for research phase
@@ -146,7 +147,8 @@ mkdir -p ~/code/plans/_templates
 ```
 
 After installation, invoke with:
-- `/xplan <concept>` - full interactive mode
+- `/xplan <concept>` - full interactive mode; choose 1–3 adversarial passes upfront (default one)
+- `/xplan <concept> --adversarial-reviews 2` - explicit count; no duplicate startup question
 - `/xplan <concept> --repo <existing-repo-path>` - plan work against an existing repo
 - `/xplan <concept> --light` - fast path, minimal interaction
 - `/xplan <concept> --autonomous` or `/xplana <concept>` - full-depth pipeline with zero mid-flow prompts; completed plan presented at the end

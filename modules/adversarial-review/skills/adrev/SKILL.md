@@ -1,7 +1,7 @@
 ---
 name: adrev
 description: >
-  Adversarial review of a plan or any entity - file, doc, PR, issue, directory, or stated concept. Dispatches a separate adrev-reviewer agent that attacks premises, hunts failure modes, and steelmans the case against. When the target is a plan, the reviewing agent incorporates its findings into the plan automatically unless told not to.
+  Adversarial review of a plan or any entity - file, doc, PR, issue, directory, or stated concept. Routes a fresh reviewer opposite the actual producing provider, then resolves concrete findings with evidence. A designated writer incorporates supported plan changes unless report-only was requested.
   Triggers: adrev, adversarial review, red-team this, attack this plan, poke holes in, tear this apart, devil's advocate review.
 disable-model-invocation: true
 ---
@@ -12,8 +12,8 @@ Run a single hostile lens against anything: a plan, a doc, a PR, an issue, a cod
 
 Two behaviors by target class:
 
-- **Plan** - the reviewing agent incorporates its findings into the plan automatically (the default), writing the full review to the plan's `reviews/` directory as the audit trail.
-- **Anything else** - findings are reported; the target is never modified.
+- **Plan** - the designated writer incorporates supported findings by default after the frozen review/critic exchange, with the coordinator preserving the full review and evidence ledger.
+- **Other targets** - findings are reported without changes, unless `--apply` explicitly authorizes a writable markdown document.
 
 Not this skill's job: the full 7-lens plan gate (`/document-review`), code-correctness review of a diff (`/code-review`, `pr-review-toolkit`), prose style (`/editorial-critique`).
 
@@ -40,39 +40,26 @@ Resolve deterministically, in order:
 
 **Plan classification** (controls auto-apply): the target is a `plan` if it is a `plan.md`/`PLAN.md`, lives under a `plans/` directory, or is unambiguously an execution plan (phased steps intended to be built). Ambiguous docs classify as `doc` (report-only) - the user can rerun with `--apply`. Never auto-apply to anything but a plan.
 
-## Phase 2: Dispatch the Reviewer
+## Phase 2: Cross-Agent Review and Evidence Resolution
 
-Compute the date deterministically: `date +%F`. Decide `apply`: target is a plan AND no opt-out present.
+Read `~/.claude/skills/cross-agent-review/references/workflow.md`. Use the policy's **adrev** mode with one pass and the `adrev-reviewer` attack battery as review criteria. Record the actual producing provider/session from dispatch metadata: reviewer selection is opposite that provider, not whichever model happens to orchestrate this command. If authorship is unknown or materially mixed, obtain both perspectives. Do not relabel user-authored or unattributed files as Claude/Codex work.
 
-Dispatch one `adrev-reviewer` agent (installed at `~/.claude/agents/adrev-reviewer.md`). Pass paths, not contents:
+Resolve `apply` explicitly: plans default to apply unless `--no-apply`, natural-language report-only, or `mode:report-only` applies. `mode:headless` is report-only unless `--apply` is present. Explicit `--apply` may authorize a writable markdown document; report-only always wins conflicting instructions. Other targets remain unchanged. Select one writer and keep reviewer tools read-only.
 
-```
-Target: {path-or-ref}
-target_kind: {plan|doc|pr|issue|code|dir|concept}
-apply: {true|false}
-review_date: {YYYY-MM-DD}
-review_artifact_path: {plan-dir}/reviews/adversarial-{review_date}.md   # plans in a directory; omit otherwise
-focus: {focus text, if any}
-Reference files (read as needed): {siblings: research.md, decisions.md, progress.md; or repo paths the target cites}
-```
+Build a narrow frozen bundle from the target, specification/goal, attack criteria and relevant source evidence. Resolve PR/issue URLs before review and snapshot the relevant content; a no-tools reviewer cannot fetch a GitHub URL. A concept becomes an explicit UTF-8 artifact containing the user's text. Do not include the author's persuasive self-report. If required context exceeds the supported bundle, request/narrow the precise evidence instead of silently truncating it.
 
-For a `concept` target, include the full concept text in the prompt (it has no path) plus any repo context the user's phrasing points at.
+Run `review`, then the other provider's `critic` on material findings. Every plan review checks premises, falsification, failure modes, opposing case, reversal costs, second-order effects and the four existing plan-execution tenets: minimal edge-bucketed human work, in-scope follow-up completion, sufficient decision context, and real autonomous E2E/CI coverage. Clean independent reviews are valid; do not invent objections.
 
-The agent runs the full attack battery (premises, falsification, failure modes, strongest opposing case, reversal cost, second-order effects) and - when `apply` - incorporates findings into the plan per its apply protocol, returning a ledger of what changed.
+Freeze the artifact during disputes; use requirement/source/test evidence and the three critic verdicts. For an apply-authorized target, use the policy's accepted disposition and `fix` admission before the designated writer edits. Then refresh, run affected checks and obtain opposite-provider material-change validation. Confidence alone never authorizes a fix, refutes evidence, or establishes agreement. The initiating host coordinates, receives the final evidence, and respects the policy's unresolved limits.
 
-**For `plan` targets, the agent additionally enforces four plan-execution tenets** (requirements, not judgment calls — it adds or expands sections when the plan is missing them):
-
-1. **Human interaction is minimized and bucketed to the edges** — no human step an agent could do via CLI/API; any unavoidable human work is front-loaded before execution or deferred to the end, never mid-run.
-2. **A follow-up-completion contract is present** — the plan requires that any follow-on work discovered during execution is completed before execution is reported complete; only genuinely human-blocked work may remain open.
-3. **Enough decision context to direct unplanned work without a human** — the plan carries the software's mission, the codebase's governing conventions, and its own decision principles, so an agent can deduce how to handle unplanned follow-on work. If that context is missing, the agent expands the plan to add it.
-4. **A comprehensive autonomous E2E test suite** — every testable surface maps to a real end-to-end test, wired into CI as a blocking merge gate, so the user never tests manually. For existing repos, coverage gaps in touched areas are filled optimistically (the user always wants more coverage). If coverage is thin, the agent expands the plan's Section 8 to close it.
+For report-only targets, return the findings and evidence without edits or a fix dispatch. Report delivery can complete while findings remain open; do not label such a report `CONSENSUS` or execution-ready. Never turn a requested audit into an implementation loop merely to achieve a green status.
 
 ## Phase 3: Verify and Report
 
-The agent's DONE is a claim, not evidence:
+The returned prose is a claim, not evidence. Read the policy result and structured reports:
 
-- **Applied (plan)**: run `git diff` on the plan (or re-read the edited sections if untracked). Confirm the review artifact exists and every `incorporated` ledger entry corresponds to a real edit. Confirm the four plan-execution tenets are satisfied in the edited plan — human work is minimized and bucketed to the edges, the follow-up-completion contract is present and clearly located, the mission / codebase-context / decision-principles content is concrete enough to direct unplanned work, and the autonomous E2E suite (Section 8) covers every testable surface with a CI-blocking merge gate. If the reviewer parked a tenet in the Risk Register instead of fixing it, verify it named a genuine reason (a decision only the author can make). Then present: findings table (id, test, severity, confidence, one-line what), the ledger (incorporated / deferred-to-risks / artifact-only), what the target survived, and the artifact path.
-- **Report-only**: present the findings table and survived list. For an `issue` or `pr` target, offer - do not auto-post - `gh issue comment` / `gh pr review --comment` with the findings.
-- **BLOCKED / NEEDS_CONTEXT**: relay the missing piece verbatim and stop. Do not invent a target or substitute your own review in the main context - that breaks the separation that makes the review trustworthy.
+- **Applied:** verify actual diff and recorded checks, current hashes, supported dispositions, both providers' final acknowledgments and original-host reception. Show the findings, changes, remaining limitations and run/report paths. Required findings that remain unresolved block an execution-ready result.
+- **Report-only:** verify target bytes are unchanged, then present the findings and survived attacks with their status/evidence. Open findings are valid report content. Do not infer consensus or merge permission. For a PR/issue, offer to post only when explicitly requested; this skill does not auto-post.
+- **Missing evidence/provider, exhausted limits or unresolved dispute:** preserve the run and explicit status/next action. Do not substitute a same-provider reviewer or invent a clean result.
 
-In `mode:headless`, skip the prose: emit the findings JSON envelope plus the ledger, then "Adversarial review complete".
+In `mode:headless`, emit the structured findings and policy status/ledger, followed by "Adversarial review complete" only when report delivery completed; otherwise return the explicit incomplete status. Auto-apply remains disabled unless explicitly requested in that mode.

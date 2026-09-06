@@ -39,7 +39,15 @@ If multiple plans exist and none was specified, ask which plan to check.
 
 ### Step 2: Read Progress File
 
-Read `~/code/plans/{plan-name}/progress.md` for execution state.
+Read `reviews/review-selection.json` for planning review state and its policy run pointer. When a run exists, read:
+
+```bash
+python3 ~/.claude/lib/cross_agent_review_policy.py status --run-dir "{review-run-dir}"
+```
+
+Present the chosen N/source, original provider, completed/current pass records, final-pass label, stale evidence, open findings, remaining limits and handback state. A planning run may have no execution `progress.md` yet; report planning/review status rather than treating its absence as a missing plan. Transport `REVIEWED` is not workflow `CONSENSUS`.
+
+Read `~/code/plans/{plan-name}/progress.md` when it exists for execution state.
 
 Extract the project name and GitHub username from progress.md or plan.md.
 
@@ -74,7 +82,8 @@ Open PRs:
 Human-Epics:
   {any blocking human tasks from progress.md}
 
-Last Checkpoint: {from progress.md}
+Review: {completed}/{selected} passes; {policy status}; {handback status}
+Last Checkpoint: {review state or progress.md}
 ```
 
 ### Step 5: Suggest Actions

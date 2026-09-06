@@ -1,7 +1,7 @@
 {
   "name": "cross-agent-review",
   "displayName": "Cross-Agent Review",
-  "description": "Restricted local Claude Code and Codex adversarial review with frozen evidence, validated findings, bounded calls, and a reversible Codex skill entry point.",
+  "description": "Restricted Claude/Codex review transport and pilot workflow policy: frozen evidence, opposite-provider routing, bounded resolution, current acknowledgments and reversible Codex skill setup.",
   "category": "workflow",
   "scope": [
     "global"
@@ -30,6 +30,21 @@
     },
     "skills/cross-agent-review/scripts/cross_agent_review.py": {
       "target": "skills/cross-agent-review/scripts/cross_agent_review.py",
+      "type": "skill",
+      "template": false
+    },
+    "lib/cross_agent_review_policy.py": {
+      "target": "lib/cross_agent_review_policy.py",
+      "type": "lib",
+      "template": false
+    },
+    "skills/cross-agent-review/scripts/review_policy.py": {
+      "target": "skills/cross-agent-review/scripts/review_policy.py",
+      "type": "skill",
+      "template": false
+    },
+    "skills/cross-agent-review/references/workflow.md": {
+      "target": "skills/cross-agent-review/references/workflow.md",
       "type": "skill",
       "template": false
     }

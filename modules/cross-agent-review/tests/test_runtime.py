@@ -116,12 +116,20 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(1, self.state()['invocations'])
 
     def test_malformed_truncated_yaml_empty_and_fenced_fail(self):
-        for raw in ('{"broken":', 'status: CLEAN', '[]', '```json\n{}\n```'):
-            with self.subTest(raw=raw):
-                self.run = self.root / str(len(list(self.root.iterdir())))
-                self.create()
-                self.scenario({'raw': raw})
-                self.failure('INVALID_RESULT', lambda: runtime.invoke(self.run))
+        for origin in runtime.PROVIDERS:
+            self.request['origin_provider'] = self.request['producer_provider'] = origin
+            self.request['provenance'][0]['provider'] = origin
+            garbage = ['{"broken":', 'status: CLEAN', '[]', '```json\n{}\n```']
+            if origin == 'claude':
+                garbage += ['{"type":"thread.started","thread_id":"fixture"}\n{"type":',
+                            '{"type":"thread.started","thread_id":"fixture"}\nstatus: CLEAN']
+            for raw in garbage:
+                with self.subTest(origin=origin, raw=raw):
+                    self.run = self.root / str(len(list(self.root.iterdir())))
+                    self.create()
+                    self.scenario({'raw': raw})
+                    self.failure('INVALID_RESULT', lambda: runtime.invoke(self.run))
+                    self.assertFalse(list(self.run.glob('report-*')))
 
     def test_fabricated_evidence_and_duplicate_ids_fail(self):
         finding = {'id': 'F1', 'severity': 'high', 'requirement': 'sum',

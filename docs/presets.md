@@ -74,7 +74,7 @@ Machine-readable one-line descriptions of these presets live in `docs/preset-des
 
 When you select a module that depends on other modules, the installer automatically includes the dependencies. For example:
 
-- Selecting `xplan` automatically adds `multi-agent` and `adversarial-review`, plus their dependencies `startup-dashboard` and `subagent-patterns`
+- Selecting `xplan` automatically adds `multi-agent`, `adversarial-review`, and `cross-agent-review`, plus their dependencies `startup-dashboard` and `subagent-patterns`
 - Selecting `hooks` automatically adds `settings`
 
 You don't need to manually track dependencies. The installer resolves them using topological sorting and reports any additions.

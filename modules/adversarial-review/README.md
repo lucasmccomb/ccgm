@@ -2,13 +2,13 @@
 
 `/adrev` - run a single hostile lens against a plan or any entity: a file, doc, PR, issue, directory, or an idea stated inline. A separate `adrev-reviewer` agent (fresh context - the author session never grades its own work) attacks premises, hunts failure modes, steelmans the strongest case against, and checks falsifiability and reversal costs.
 
-The differentiator from CCGM's other review surfaces: **when the target is a plan, the reviewing agent incorporates its findings into the plan automatically** - revising sections for high-confidence findings, deferring judgment calls to a `## Risks & Open Questions` section, and writing the full review to the plan's `reviews/` directory as the audit trail. Pass `--no-apply` (or just say "don't change the plan") to get a report instead. Non-plan targets are never modified.
+For plans, a **designated writer applies supported findings after an opposite-provider review and evidence-based critic exchange**. Reviewers stay read-only, and the coordinator preserves the report and evidence ledger. `--no-apply` or a natural-language opt-out returns findings without target changes. Headless mode applies only with explicit `--apply`; writable markdown documents can also opt in explicitly.
 
 ## How It Relates to Other Review Modules
 
 | Surface | Scope | Modifies the target? |
 |---|---|---|
-| `/adrev` | One adversarial lens, **any entity** | Plans: yes, by default. Everything else: never |
+| `/adrev` | One adversarial lens, **any entity** | Plans: designated writer by default; other markdown only with explicit --apply |
 | `/document-review` | 7 lenses, docs headed to execution | Never - findings are presented |
 | `/ce-review`, `pr-review-toolkit`, `/code-review` | Code diffs and PRs | Via review comments / fixes |
 | `/editorial-critique` | Prose style | Optional `--fix` |
@@ -22,7 +22,7 @@ Files installed globally to `~/.claude/`:
 | Source | Target | Purpose |
 |--------|--------|---------|
 | `skills/adrev/SKILL.md` | `skills/adrev/SKILL.md` | `/adrev` - target resolution + dispatch + verification |
-| `agents/adrev-reviewer.md` | `agents/adrev-reviewer.md` | The attack battery + plan apply protocol |
+| `agents/adrev-reviewer.md` | `agents/adrev-reviewer.md` | Read-only attack battery + evidence criteria |
 
 ## Usage
 
@@ -64,12 +64,9 @@ The four reinforce each other: decision context (3) lets an agent finish follow-
 
 ## The Apply Protocol (plans)
 
-- P0/P1 at confidence >= 0.80 → affected sections revised directly, integrated as if considered from the start
-- P1/P2 at confidence 0.60-0.79 → added to `## Risks & Open Questions`, citing the finding id
-- Below 0.60 → review artifact only; the plan is never edited on speculation
-- Premise-invalidating revisions are visibly marked (`> **Revised {date} (adversarial review):** ...`) - intent is never silently rewritten
-- `progress.md`, completed-work records, and decision-log history are never touched; `decisions.md` gets one appended line per incorporated finding
-- The orchestrator verifies the agent's ledger against the actual diff before reporting
+The opposite-provider reviewer is read-only. Findings are settled on a frozen artifact with an evidence-grounded critic, then one designated writer applies authorized changes. The policy checks current hashes, required checks, supported dispositions, both native provider acknowledgments and original-host reception. Confidence alone cannot close a finding. Preserve goal decisions and resource exhaustion as explicit unresolved states.
+
+Plans apply supported fixes by default. `--no-apply`, report-only mode and natural-language opt-outs keep the target unchanged; headless applies only with explicit `--apply`. Report delivery with open findings is not consensus or execution readiness. See the [pilot workflow contract](../cross-agent-review/skills/cross-agent-review/references/workflow.md).
 
 ## Manual Installation
 
@@ -82,6 +79,7 @@ cp modules/adversarial-review/agents/adrev-reviewer.md ~/.claude/agents/adrev-re
 
 ## Dependencies
 
+- `cross-agent-review` - restricted native providers and deterministic pilot workflow gates; install through the CCGM dependency resolver or follow its module README first
 - `subagent-patterns` - dispatch uses pass-paths-not-contents, the four-state status protocol, and skill invocation modes
 
 ## When To Run
