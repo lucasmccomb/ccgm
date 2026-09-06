@@ -49,6 +49,8 @@ Run the current stage sequentially. For plans, the selected schedule is the firs
 
 Keep the artifact frozen while the two providers dispute findings. Use the global finding IDs returned in the ledger, including their stage/provider namespace: independent reviewers may each emit a local `F1` for different defects. Stable IDs name concrete requirement failures. Critic verdicts are `AGREE`, `DISAGREE_EVIDENCE` and `DISAGREE_CONCERN`; they are not final dispositions. Use exact source evidence, a reproduction, or an acceptance check. Concern alone cannot refute an evidenced finding, and mutual agreement cannot replace a check. A clean independent review is valid.
 
+Every newly discovered finding receives stage/provider scope, including discoveries during revalidation, criticism, rebuttal and acknowledgment. Reusing a local ID in that scope creates a distinct discovery with a report-reference suffix when needed. To revisit an existing finding, use its exact returned ledger ID and preserve its requirement; existing IDs are never renamed. Rebuttal returns to the stage's reviewer provider and shares the same exchange and no-progress limits as criticism.
+
 Use private run-relative JSON control files; no traversal or symlinks. For example, `proposals.json` contains:
 
 ```json

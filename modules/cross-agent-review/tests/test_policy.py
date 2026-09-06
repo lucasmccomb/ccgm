@@ -59,6 +59,17 @@ class PolicyTests(unittest.TestCase):
         self.scenario({})
         return finding
 
+    def discovery(self, requirement, local_id='F1'):
+        return {'id': local_id, 'severity': 'low', 'requirement': requirement,
+                'evidence': [{'path': 'artifact.py', 'quote': 'def add'}], 'remedy': 'Check ' + requirement}
+
+    def refute_open(self):
+        findings = policy.status(self.run)['findings']
+        policy.propose(self.run, {'dispositions': [
+            {'finding_id': fid, 'disposition': 'refuted', 'rationale': 'Evidence-backed refutation fixture.',
+             'evidence': [{'path': 'spec.md', 'quote': 'two integers'}]}
+            for fid, row in findings.items() if row['state'] != 'CLOSED']})
+
     def test_selection_pending_explicit_interactive_unattended_resume_no_writes(self):
         before = set(self.root.rglob('*'))
         self.assertEqual('NEEDS_SELECTION', policy.selection()['status'])
@@ -332,6 +343,135 @@ class PolicyTests(unittest.TestCase):
                                     'evidence': [{'path': 'artifact.py', 'quote': 'def add'}], 'remedy': 'Another fix'}]})
         policy.do_review(self.run, 'review')
         self.assertEqual({'plan-1:claude:ADD-1', 'plan-2:codex:ADD-1'}, set(policy.status(self.run)['findings']))
+
+    def test_critic_and_rebuttal_discoveries_can_share_local_id_without_collision(self):
+        self.initialize()
+        policy.do_review(self.run, 'review')
+        self.scenario({'findings': [self.discovery('Requirement A')]})
+        critic = policy.do_review(self.run, 'critic')
+        self.scenario({'findings': [self.discovery('Requirement B')], 'critic_verdict': 'DISAGREE_EVIDENCE'})
+        rebuttal = policy.do_review(self.run, 'rebuttal')
+        self.assertEqual(('codex', 'claude'), (critic['result']['provider'], rebuttal['result']['provider']))
+        findings = policy.status(self.run)['findings']
+        self.assertEqual({'plan-1:codex:F1', 'plan-1:claude:F1'}, set(findings))
+        self.assertEqual('Requirement A', findings['plan-1:codex:F1']['finding']['requirement'])
+        self.assertEqual('Requirement B', findings['plan-1:claude:F1']['finding']['requirement'])
+        self.assertEqual('DISAGREE_EVIDENCE', findings['plan-1:codex:F1']['verdicts']['claude']['verdict']['verdict'])
+
+    def test_revalidation_discoveries_in_separate_stages_use_stage_scope(self):
+        self.initialize(count=2)
+        self.check()
+        self.review_advance()
+        self.review_advance()
+        policy.amend(self.run, {'writer_provider': 'codex', 'writer_session_id': 'author-session',
+                               'reason': 'Explicit user clarification', 'next_check': 'unit',
+                               'authorization': 'explicit-user-update'})
+        (self.source / 'artifact.py').write_text('def add(a,b): return a + b\n')
+        policy.refresh(self.run)
+        self.check()
+        self.scenario({'findings': [self.discovery('Requirement A')]})
+        policy.do_review(self.run, 'review')
+        self.refute_open()
+        self.scenario({})
+        policy.acknowledge(self.run)
+        policy.advance(self.run)
+        self.scenario({'findings': [self.discovery('Requirement B')]})
+        policy.do_review(self.run, 'review')
+        self.assertEqual({'plan-1:claude:F1', 'plan-2:codex:F1'}, set(policy.status(self.run)['findings']))
+        history = policy.rt.load(self.run)[1]['policy']['history']
+        self.assertEqual(['plan-1', 'plan-2'], [row['stage'] for row in history if row['purpose'] == 'revalidation'])
+
+    def test_same_provider_after_fix_discovers_distinct_local_id_with_report_suffix(self):
+        self.initialize()
+        self.scenario({'findings': [self.discovery('Requirement A')]})
+        policy.do_review(self.run, 'review')
+        self.scenario({'critic_verdict': 'AGREE'})
+        policy.do_review(self.run, 'critic')
+        policy.fix(self.run, {'writer_provider': 'codex', 'writer_session_id': 'author-session',
+                              'finding_ids': ['plan-1:claude:F1'], 'reason': 'Correct addition', 'next_check': 'unit'})
+        (self.source / 'artifact.py').write_text('def add(a,b): return a + b\n')
+        policy.refresh(self.run)
+        self.scenario({'findings': [self.discovery('Requirement B')]})
+        result = policy.do_review(self.run, 'review')
+        findings = policy.status(self.run)['findings']
+        second_id = 'plan-1:claude:F1:' + result['report']
+        self.assertEqual({'plan-1:claude:F1', second_id}, set(findings))
+        self.assertEqual('Requirement A', findings['plan-1:claude:F1']['finding']['requirement'])
+        self.assertEqual('Requirement B', findings[second_id]['finding']['requirement'])
+        self.assertEqual(1, len(findings['plan-1:claude:F1']['observations']))
+        # A new local spelling can itself equal an occupied report suffix.
+        self.scenario({'findings': [self.discovery('Requirement C', 'F1:' + result['report'])]})
+        rebuttal = policy.do_review(self.run, 'rebuttal')
+        third_id = second_id + ':' + rebuttal['report']
+        self.assertEqual({*findings, third_id}, set(policy.status(self.run)['findings']))
+
+    def test_native_ack_discoveries_are_scoped_and_remain_unresolved(self):
+        self.initialize()
+        self.check()
+        self.review_advance()
+        for requirement in ('Requirement A', 'Requirement B'):
+            if policy.status(self.run)['findings']:
+                self.refute_open()
+            self.scenario({'findings': [self.discovery(requirement)]})
+            self.fail_policy('UNRESOLVED_DISPUTE', lambda: policy.acknowledge(self.run))
+        findings = policy.status(self.run)['findings']
+        self.assertEqual({'plan-1:claude:F1', 'plan-1:claude:F1:report-003.json'}, set(findings))
+        self.assertEqual({'Requirement A', 'Requirement B'}, {row['finding']['requirement'] for row in findings.values()})
+        self.assertTrue(all(row['state'] != 'CLOSED' for row in findings.values()))
+        self.assertFalse(policy.status(self.run)['execution_ready'])
+
+    def test_discovery_suffix_cannot_overwrite_an_existing_suffix_shaped_local_id(self):
+        self.initialize()
+        self.scenario({'findings': [self.discovery('Requirement A'),
+                                    self.discovery('Requirement B', 'F1:report-002.json')]})
+        policy.do_review(self.run, 'review')
+        self.scenario({'findings': [self.discovery('Requirement C')]})
+        policy.do_review(self.run, 'rebuttal')
+        findings = policy.status(self.run)['findings']
+        self.assertEqual({'plan-1:claude:F1', 'plan-1:claude:F1:report-002.json',
+                          'plan-1:claude:F1:report-002.json:2'}, set(findings))
+        self.assertEqual({'Requirement A', 'Requirement B', 'Requirement C'},
+                         {row['finding']['requirement'] for row in findings.values()})
+
+    def test_exact_global_ids_keep_identity_but_cannot_change_requirement(self):
+        self.initialize()
+        finding = self.seed()
+        fid = 'plan-1:claude:ADD-1'
+        for action in ('critic', 'rebuttal'):
+            self.scenario({'findings': [{**finding, 'id': fid}]})
+            policy.do_review(self.run, action)
+            self.assertEqual({fid}, set(policy.status(self.run)['findings']))
+        before = policy.status(self.run)['findings']
+        self.assertEqual(3, len(before[fid]['observations']))
+        self.scenario({'findings': [{**finding, 'id': fid, 'requirement': 'An unrelated requirement'}]})
+        self.fail_policy('INVALID_RESULT', lambda: policy.do_review(self.run, 'rebuttal'))
+        self.assertEqual(before, policy.status(self.run)['findings'])
+
+    def test_rebuttal_routes_to_reviewer_and_preserves_exchange_admission_limits(self):
+        self.initialize()
+        self.fail_policy('INVALID_REQUEST', lambda: policy.do_review(self.run, 'rebuttal'))
+        self.assertEqual(0, policy.status(self.run)['invocations'])
+        self.seed()
+        self.scenario({'critic_verdict': 'DISAGREE_EVIDENCE'})
+        critic = policy.do_review(self.run, 'critic')
+        self.assertEqual('codex', critic['result']['provider'])
+        for expected in (1, 2):
+            rebuttal = policy.do_review(self.run, 'rebuttal')
+            self.assertEqual('claude', rebuttal['result']['provider'])
+            stage = policy.status(self.run)['current_stage']
+            self.assertEqual(expected, stage['no_progress'])
+            self.assertEqual(expected + 1, stage['exchanges'])
+        spent = policy.status(self.run)['invocations']
+        self.fail_policy('UNRESOLVED_DISPUTE', lambda: policy.do_review(self.run, 'rebuttal'))
+        self.assertEqual(spent, policy.status(self.run)['invocations'])
+        self.check()  # A discriminating check permits two remaining exchanges.
+        policy.do_review(self.run, 'rebuttal')
+        policy.do_review(self.run, 'rebuttal')
+        self.check(outcome=1)  # New evidence cannot reset the five-exchange cap.
+        spent = policy.status(self.run)['invocations']
+        self.fail_policy('UNRESOLVED_DISPUTE', lambda: policy.do_review(self.run, 'rebuttal'))
+        self.assertEqual(5, policy.status(self.run)['current_stage']['exchanges'])
+        self.assertEqual(spent, policy.status(self.run)['invocations'])
 
     def test_new_requested_evidence_refreshes_all_selected_pass_records(self):
         self.initialize(count=2)

@@ -200,10 +200,20 @@ def native(run_dir, purpose, role, stage, extra=None):
     return report, ref
 
 
-def ingest(policy, report, ref, bundle, stage_key=None):
+def ingest(policy, report, ref, bundle, stage_key):
     provider = report['identity']['provider']
+    known_ids = set(policy['findings'])
     for finding in report['result']['findings']:
-        fid = stage_key + ':' + provider + ':' + finding['id'] if stage_key else finding['id']
+        fid = finding['id']
+        if fid not in known_ids:
+            # Only exact ledger IDs identify previous observations. Local IDs
+            # are fresh discoveries, including after a fix or during an ack.
+            fid = stage_key + ':' + provider + ':' + fid
+            if fid in policy['findings']:
+                base = fid + ':' + ref
+                fid, suffix = base, 2
+                while fid in policy['findings']:
+                    fid, suffix = base + ':' + str(suffix), suffix + 1
         finding = {**finding, 'id': fid}
         row = policy['findings'].get(fid)
         if row:
@@ -235,7 +245,7 @@ def do_review(run_dir, action):
     report, ref = native(run_dir, purpose, role, stage)
     request, state, bundle = rt.load(run_dir)
     policy, stage = state['policy'], current_stage(state['policy'])
-    ingest(policy, report, ref, bundle, stage['key'] if purpose == 'review' else None)
+    ingest(policy, report, ref, bundle, stage['key'])
     if action == 'review':
         stage.update({'report': ref, **stamp(bundle), 'exchanges': 0, 'no_progress': 0})
     else:
@@ -338,7 +348,7 @@ def acknowledge(run_dir):
         policy = state['policy']
         result = report['result']
         if result['status'] != 'CLEAN' or result['findings']:
-            ingest(policy, report, ref, bundle)
+            ingest(policy, report, ref, bundle, stage['key'])
             policy['status'] = 'UNRESOLVED_DISPUTE'
             persist(run_dir, state)
             raise rt.ReviewError('UNRESOLVED_DISPUTE', 'Native provider did not accept final evidence/dispositions.')
