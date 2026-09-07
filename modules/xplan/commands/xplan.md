@@ -145,6 +145,8 @@ Only after explicit cross-provider opt-in, before count-selection side effects o
 python3 ~/.claude/lib/cross_agent_review_policy.py preflight
 ```
 
+If advisor mode prevents execution of a copied or unavailable policy shim, first resolve the count in the host using the fallback below. Then delegate only the opted-in readiness check before Phase 0.2 or any planning effects. No agent dispatch precedes the submitted count.
+
 `AVAILABLE` means both binaries report native login readiness, not a successful model review or proof of all capabilities. `NEEDS_PROVIDER` stops the optional path before expensive planning. Preserve the failure; do not silently substitute a provider or infer permission to retry. Lead-only planning requires neither binary nor login. The lead may separately assess and continue authorized planning in lead mode, recording that decision and retaining the failed optional-preflight status.
 
 ### 0.1.1 Resolve the adversarial count before starting
@@ -165,7 +167,9 @@ python3 ~/.claude/lib/cross_agent_review_policy.py select --unattended
 
 Pass the actual supplied value, not the example's number. A missing flag value, noninteger, zero, or value above three is an error: stop before side effects. Do not silently repair invalid input to one. If selection returns `NEEDS_SELECTION`, ask **"How many adversarial reviews should this plan receive?"** with options **1 (Recommended)**, **2**, **3**. Wait for submission. Preselection, a timeout, an empty reply, or permission to plan is not the answer. If the question tool is unavailable, ask the same question in plain text and yield until answered. Do not advance while it is pending.
 
-Keep the resolved count and source from the selector. X-Plana delegates to this same startup step and forwards its arguments; it does not ask a second question. An explicit choice skips the question. After directory resolution, persist the selection, `review_mode`, available original host identity and policy version in `reviews/review-selection.json` before research. Record the actual host launch metadata, not a persona or Git author. This setup record is outside the reviewed artifact set. Only an opted-in cross-provider run adds a pointer to `~/.claude/cross-agent-review/<run-id>/`; lead review has no native run or invented provider acknowledgment.
+When the shim is unavailable or advisor mode rejects a copied installation, perform this same pure selection in the host without executing Python or dispatching an agent: validate an explicit count as one integer from 1 through 3, otherwise ask the same question and wait. Record `explicit` or `interactive` as appropriate; only explicit unattended operation with no question channel permits `unattended-default` with one. This fallback does not authorize a native call or bypass the guard. X-Plana inherits it unchanged.
+
+Keep the resolved count and source from the selector or this equivalent host fallback. X-Plana delegates to this same startup step and forwards its arguments; it does not ask a second question. An explicit choice skips the question. After directory resolution, persist the selection, `review_mode`, available original host identity and policy version in `reviews/review-selection.json` before research. Record the actual host launch metadata, not a persona or Git author. This setup record is outside the reviewed artifact set. Only an opted-in cross-provider run adds a pointer to `~/.claude/cross-agent-review/<run-id>/`; lead review has no native run or invented provider acknowledgment.
 
 A pure `/xplan-resume` restores saved selection and completed evidence; it does not make a fresh choice. A new `--deepen` invocation makes this startup choice before changing the existing plan. Do not infer a legacy selection from filenames.
 

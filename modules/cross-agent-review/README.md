@@ -80,7 +80,7 @@ cp -R skills/cross-agent-review ~/.claude/skills/
 python3 ~/.claude/bin/cross-agent-review-setup.py install
 ```
 
-Manual copies are operator-owned; preserve any existing files before copying. Use the setup script for the optional Codex copy so removal can verify ownership. A marketplace install exposes the self-contained skill directly from its plugin root and does not install the trusted advisor policy shim. Under advisor mode, use the canonical bash installer/manual stable locations or delegate setup/execution under normal permissions; do not weaken the guard to run a marketplace path.
+Manual copies are operator-owned; preserve any existing files before copying. Use the setup script for the optional Codex copy so removal can verify ownership. A marketplace install exposes the self-contained skill directly from its plugin root and does not install the trusted advisor policy shim. Under advisor mode, main-agent policy execution requires the installed shim and local imports to resolve through symlinks into a repository outside the allowed write roots. Canonical installation in symlink mode can provide this layout; installation location alone is insufficient. Manual copies and copy-mode installations require delegated policy execution under normal permissions. Do not weaken the guard to run a copied or marketplace path.
 
 ## Stopping and Interpreting Results
 
