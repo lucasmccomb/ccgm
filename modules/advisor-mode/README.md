@@ -7,7 +7,7 @@ agent's file edits and non-orchestration Bash (exit 2, which survives bypass
 mode). Subagent tool calls pass untouched, so delegated implementers work
 normally.
 
-`/etp` already runs the delegate → separate-review → fix → follow-ups loop for
+`/etp` already runs the delegate → personal lead review → fix → follow-ups loop for
 ready work (plans, investigated issues). Advisor mode is the standing posture
 that routes **ad-hoc** work through the same loop instead of letting the
 expensive model implement inline — and hands etp-shaped work to `/etp`.
@@ -105,7 +105,9 @@ cp hooks/advisor-session-start.py hooks/advisor-session-end.py ~/.claude/hooks/
 
 ## Cross-agent pilot compatibility
 
-X-Plan, adrev and ETP use the installed `cross_agent_review_policy.py` orchestration shim. The guard permits only its enumerated operations and existing work-product run locations; it does not permit arbitrary Python, source writes, or executing recorded check argv. Pilot findings need other-provider evidence and current acknowledgments. Three fix rounds remain the checkpoint; a recorded evidence-backed extension retains the same total deadline and calls. Other callers keep the original bound.
+X-Plan, adrev and ETP use personal lead review by default. Explicit `--cross-provider` or a clear natural-language request enables the installed `cross_agent_review_policy.py` orchestration shim. Its early `preflight` checks both binaries/login status; default review needs neither. The guard permits only enumerated policy operations, with private runs under `~/.claude/cross-agent-review/<run-id>/`; it does not permit direct transport scripts, arbitrary Python, reviewed-source writes or execution of recorded check argv. Trusted policy code and its resolved source cannot be overwritten through a work-product symlink.
+
+A marketplace-only Claude install lacks the trusted shim. Use canonical CCGM installation or delegate setup/execution under normal permissions; do not broaden the guard. Optional provider errors stop that run and preserve reports/findings. The lead may separately judge delivery using evidence and normal checks, without calling the stopped run approved. Coordinator repairs require no recursive provider consensus. Three fix rounds remain the normal checkpoint; any further bounded work needs new evidence and a viable next check. Check records and host receipts are attestations, not independently proven execution/reception.
 
 ## Tests
 

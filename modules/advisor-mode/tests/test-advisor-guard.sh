@@ -936,10 +936,24 @@ assert_no_crash "5000 quote pairs" "$(bash_json "sed $(python3 -c "print(\"''\" 
 
 # ─── Cross-agent pilot: exact orchestration interface, no interpreter escape ──
 
+# An allowlisted filename alone is not an installation. Exercise the actual
+# canonical-repository symlink shape outside all main-agent write roots.
+PILOT_MODULE="${HOME}/code/repo/pilot-module"
+mkdir -p "${PILOT_MODULE}/lib" "${PILOT_MODULE}/skills/cross-agent-review/scripts" "${HOME}/.claude/lib"
+cp "${MODULE_ROOT}/../cross-agent-review/lib/cross_agent_review_policy.py" "${PILOT_MODULE}/lib/"
+cp "${MODULE_ROOT}/../cross-agent-review/skills/cross-agent-review/scripts/review_policy.py" \
+   "${MODULE_ROOT}/../cross-agent-review/skills/cross-agent-review/scripts/cross_agent_review.py" \
+   "${PILOT_MODULE}/skills/cross-agent-review/scripts/"
+ln -s "${PILOT_MODULE}/lib/cross_agent_review_policy.py" "${HOME}/.claude/lib/cross_agent_review_policy.py"
+
 assert_exit 0 "pilot pure startup selection allowed" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py select')"
+assert_exit 0 "pilot local lead-review default allowed" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py init')"
+assert_exit 0 "pilot provider preflight allowed" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py preflight')"
 assert_exit 0 "pilot submitted startup allowed" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py select --count 2 --source interactive')"
 assert_exit 0 "pilot explicit unattended allowed" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py select --unattended')"
 assert_exit 0 "pilot bounded init allowed" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py init --request /tmp/request.json --checks /tmp/checks.json --run-dir ~/.claude/cross-agent-review/run --mode etp --writer-session-id writer-1')"
+assert_exit 0 "pilot explicit cross-provider init allowed" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py init --cross-provider --request /tmp/request.json --checks /tmp/checks.json --run-dir ~/.claude/cross-agent-review/run --mode etp --writer-session-id writer-1')"
+assert_exit 0 "pilot stop with private payload allowed" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py stop --run-dir ~/.claude/cross-agent-review/run --file stop.json')"
 assert_exit 0 "pilot restricted review allowed" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py review --run-dir ~/.claude/cross-agent-review/run')"
 assert_exit 0 "pilot metadata-only check recording allowed" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py record-check --run-dir ~/.claude/cross-agent-review/run --file check.json')"
 assert_exit 0 "pilot actual reception recording allowed" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py receive --run-dir ~/.claude/cross-agent-review/run --file receipt.json')"
@@ -959,8 +973,18 @@ assert_exit 2 "pilot source run directory denied" "$(bash_json 'python3 ~/.claud
 assert_exit 2 "pilot relative run directory denied after cd" "$(bash_json 'cd /tmp && python3 ~/.claude/lib/cross_agent_review_policy.py status --run-dir relative')"
 assert_exit 2 "pilot payload traversal denied" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py receive --run-dir ~/.claude/cross-agent-review/run --file ../../other.json')"
 assert_exit 2 "pilot duplicate options denied" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py select --count 1 --count 3')"
+assert_exit 2 "pilot preflight extra arguments denied" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py preflight --run-dir ~/.claude/cross-agent-review/run')"
+assert_exit 2 "pilot valued cross-provider boolean denied" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py init --cross-provider=true --run-dir ~/.claude/cross-agent-review/run')"
+assert_exit 2 "pilot stop without payload denied" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py stop --run-dir ~/.claude/cross-agent-review/run')"
+assert_exit 2 "pilot stop payload traversal denied" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py stop --run-dir ~/.claude/cross-agent-review/run --file ../stop.json')"
 assert_exit 2 "pilot shell trailing mutation still denied" "$(bash_json 'python3 ~/.claude/lib/cross_agent_review_policy.py select; git commit -m x')"
 assert_exit 2 "pilot allowance does not allow source Edit" "$(file_json Edit "${REPO_FILE}")"
+
+if python3 "${SCRIPT_DIR}/test-policy-guard.py"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1)); echo "FAIL: policy source-trust behavioral regressions"
+fi
 
 # ─── Posture hook ────────────────────────────────────────────────────────────
 

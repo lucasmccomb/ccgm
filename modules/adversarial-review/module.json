@@ -1,7 +1,7 @@
 {
   "name": "adversarial-review",
   "displayName": "Adversarial Review",
-  "description": "Adversarial review of plans and other artifacts through an opposite-provider reviewer and evidence-based resolution. A designated writer applies authorized plan fixes; report-only targets stay unchanged.",
+  "description": "Adversarial review of plans and artifacts with personal lead review by default and bounded opposite-provider review on explicit request. A designated writer applies authorized fixes; report-only targets stay unchanged.",
   "category": "workflow",
   "scope": ["global"],
   "dependencies": ["subagent-patterns", "cross-agent-review"],

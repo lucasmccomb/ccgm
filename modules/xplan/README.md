@@ -1,6 +1,6 @@
 # xplan
 
-Interactive deep research + planning + execution framework for new projects. Interviews you upfront, researches deeply, proposes tech stack and scope for your sign-off, creates a parallelized execution plan, hardens it with constructive peer review *and* a sequence of adversarial reviews (one to three selected adversarial passes, default one), and executes via parallel agents.
+Interactive deep research + planning + execution framework for new projects. Interviews you upfront, researches deeply, proposes tech stack and scope for your sign-off, creates a parallelized execution plan, hardens it with personal lead constructive review *and* a sequence of adversarial reviews (one to three selected adversarial passes, default one), and executes via parallel agents.
 
 ## What This Module Does
 
@@ -16,9 +16,9 @@ xplan is a human-in-the-loop planning framework with mandatory confirmation gate
 - **Phase 2.6** - Scope sign-off: approve epic structure and wave breakdown
 - **Phase 2.7** - Multi-agent setup review
 - **Phase 3** - Create parallelized plan with epics and dependency waves
-- **Phase 4** - Constructive peer review by security, architecture, and business logic agents (stage 1 of 2)
+- **Phase 4** - Personal lead review of security, architecture, and business logic (stage 1 of 2)
 - **Phase 5** - Write comprehensive plan.md (+ 5.6 self-review loop)
-- **Phase 5.7** - Run the selected N fresh sequential reviews starting opposite the original provider and alternating. Every pass covers the entire plan; pass N is final. A designated writer applies supported fixes; deterministic evidence/acknowledgment/handback gates determine completion.
+- **Phase 5.7** - The lead personally performs the selected N sequential adversarial passes; every pass covers the whole plan and pass N is final. Explicit `--cross-provider` or natural-language opt-in enables opposite/origin/opposite native sessions with the optional policy’s evidence/acknowledgment gates.
 - **Phase 6** - Web review (default surface) + final confirmation gate before execution
 - **Phase 7** - Create repo, issues, and spawn parallel agents per wave
 - **Phase 8** - Verification, audit, retrospective, optional template generation
@@ -31,7 +31,9 @@ xplan is a human-in-the-loop planning framework with mandatory confirmation gate
 | `--light` | Skipped | Reduced (inferred) | Internal default | Internal | Optional constructive + selected adversarial passes | Full section-by-section at end |
 | `--autonomous` (or `/xplana`) | Skipped | **Full** | Internal (best-fit) | Internal (best-fit) | **Full standard + adversarial sequence (always)** | Plan-as-artifact presentation at end |
 
-Reviews run in two independent stages: constructive review of the draft, then the selected adversarial passes against the completed plan. Both `/xplan` and `/xplana` ask for 1 (default), 2 or 3 upfront unless a valid `--adversarial-reviews` or clear count already answers it. An interactive default waits for submission; only explicit `--unattended` permits defaulting without an answer. Fresh deepen makes this choice and reviews again; resume restores saved choices and current evidence.
+The lead performs reviews personally by default. Cross-provider review is opt-in; provider errors stop that optional run and preserve findings, while the lead can separately judge delivery using evidence and normal tests/CI/release checks. Repairs to the coordinator require no recursive consensus.
+
+Reviews run in two stages: constructive review of the draft, then the selected adversarial passes against the completed plan. Both `/xplan` and `/xplana` ask for 1 (default), 2 or 3 upfront unless a valid `--adversarial-reviews` or clear count already answers it. An interactive default waits for submission; only explicit `--unattended` permits defaulting without an answer. Fresh deepen makes this choice and reviews again; resume restores saved choices and current evidence.
 
 ### Autonomous-Execution Tenets
 
@@ -50,7 +52,7 @@ Planning asks where it runs and whether the user approves it (Phase 0.5.2 Q8, de
 
 **`--light`**: fast path. Reduced depth, minimal interaction. Skips Phases 0.5, 1.5, 2.5, 2.6, and 2.7 (Q8 is deferred to 3.3.5, not dropped). Traditional section-by-section walkthrough at the end.
 
-**`--autonomous`**: full research and constructive review, plus the startup-selected adversarial passes. After that one setup choice, run without mid-flow questions and present missing goal decisions at the final gate. The alias forwards the same count/source without prompting twice. Preserve the final execution gate; an unresolved policy result cannot be presented as execution-ready.
+**`--autonomous`**: full research and constructive review, plus the startup-selected adversarial passes. After that one setup choice, run without mid-flow questions and present missing goal decisions at the final gate. The alias forwards the same count/source without prompting twice. Preserve the final execution gate; an incomplete optional policy run must retain its actual status, separate from the lead’s evidence-backed readiness decision.
 
 `--light` and `--autonomous` are mutually exclusive.
 
@@ -95,9 +97,9 @@ Both execute work, but they are not interchangeable. `/xplan-resume` resumes an 
 
 ## Dependencies
 
-- **multi-agent**: Required for parallel agent execution during research, review, and implementation phases
+- **multi-agent**: Required for parallel research and implementation; reviews are personal lead work by default
 - **adversarial-review**: Provides the read-only adversarial attack criteria.
-- **cross-agent-review**: Native Claude/Codex transport and deterministic startup, stage, resolution and completion policy. The CCGM installer adds this dependency automatically; native provider login remains separately required.
+- **cross-agent-review**: Native Claude/Codex transport and deterministic startup, stage, resolution and completion policy. The CCGM installer adds this dependency automatically; provider binaries/login are required only for explicit cross-provider review. The count selector and default lead review need no native provider authentication.
 - **[lem-deepresearch](https://github.com/lucasmccomb/lem-deepresearch)** (companion install): xplan's Phase 1 delegates research to the `/deepresearch` command, which is not part of CCGM - it lives in a standalone repo with its own installer
 
 ### /deepresearch - required for research phase
@@ -150,8 +152,9 @@ mkdir -p ~/code/plans/_templates
 
 After installation, invoke with:
 - `/xplan <concept>` - full interactive mode; choose 1–3 adversarial passes upfront (default one)
+- `/xplan <concept> --cross-provider` - explicitly enable the optional native review path; local binary/login preflight runs before planning
 - `/xplan <concept> --adversarial-reviews 2` - explicit count; no duplicate startup question
 - `/xplan <concept> --repo <existing-repo-path>` - plan work against an existing repo
 - `/xplan <concept> --light` - fast path, minimal interaction
-- `/xplan <concept> --autonomous` or `/xplana <concept>` - full-depth pipeline with zero mid-flow prompts; completed plan presented at the end
+- `/xplan <concept> --autonomous` or `/xplana <concept>` - full-depth pipeline with zero mid-flow prompts after the upfront count choice; completed plan presented at the end
 - `/etp <plan-file-or-dir | #issue …>` - execute a plan or investigated GitHub issue(s) end-to-end; `/etp #42 #43` batches independent issues (`--dry-run` to preview, `--confirm` for a go/no-go gate, `--max-agents N` to cap parallelism, `--light-review` to opt out of Stage 2 on trivial diffs)

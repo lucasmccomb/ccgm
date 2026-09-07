@@ -1,5 +1,7 @@
 # CCGM cross-agent review: first delivery
 
+> Historical rollout specification. The mandatory cross-provider release prerequisite below is superseded: current workflows use personal lead review by default and explicit cross-provider opt-in. See the [current workflow contract](../../../modules/cross-agent-review/skills/cross-agent-review/references/workflow.md). This document preserves the original delivery requirements, not current execution instructions.
+
 Updated September 5, 2026 after external review and the user's review-count correction. Status: implementation plan; integrations and command changes are not installed by this document.
 
 ## Outcome and scope

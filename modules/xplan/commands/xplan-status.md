@@ -39,13 +39,13 @@ If multiple plans exist and none was specified, ask which plan to check.
 
 ### Step 2: Read Progress File
 
-Read `reviews/review-selection.json` for planning review state and its policy run pointer. When a run exists, read:
+Read `reviews/review-selection.json` for count/source and review mode. Default lead review has numbered personal review reports and no native run. Only when an optional cross-provider run pointer exists, read:
 
 ```bash
 python3 ~/.claude/lib/cross_agent_review_policy.py status --run-dir "{review-run-dir}"
 ```
 
-Present the chosen N/source, original provider, completed/current pass records, final-pass label, stale evidence, open findings, remaining limits and handback state. A planning run may have no execution `progress.md` yet; report planning/review status rather than treating its absence as a missing plan. Transport `REVIEWED` is not workflow `CONSENSUS`.
+Present the chosen N/source and review mode; for optional runs also show original provider, completed/current pass records, final-pass label, stale evidence, open findings, remaining limits and handback state. A planning run may have no execution `progress.md` yet; report planning/review status rather than treating its absence as a missing plan. Transport `REVIEWED` is not workflow `CONSENSUS`.
 
 Read `~/code/plans/{plan-name}/progress.md` when it exists for execution state.
 
@@ -82,7 +82,7 @@ Open PRs:
 Human-Epics:
   {any blocking human tasks from progress.md}
 
-Review: {completed}/{selected} passes; {policy status}; {handback status}
+Review: {completed}/{selected} passes; {lead result or optional policy status}; {optional handback status}
 Last Checkpoint: {review state or progress.md}
 ```
 

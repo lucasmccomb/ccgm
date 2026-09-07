@@ -1,17 +1,17 @@
 ---
 description: Autonomous xplan - full-depth research + planning + reviews after one upfront review-count choice, with no mid-flow prompts. Presents the completed plan as a single artifact at the end.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--deepen [<plan-dir>]] [--adversarial-reviews <1|2|3>] [--unattended]
+argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--deepen [<plan-dir>]] [--adversarial-reviews <1|2|3>] [--unattended] [--cross-provider]
 ---
 
 # xplana - Autonomous xplan
 
-Thin alias for `/xplan --autonomous`. Runs the full xplan pipeline (research + naming + tech stack + scope + multi-agent setup + full plan + full standard review + self-review + **1–3 selected sequential adversarial reviews**) end-to-end without any mid-flow prompts, then presents the completed plan as a structured artifact for review at a single final gate.
+Thin alias for `/xplan --autonomous`. Runs the full xplan pipeline (research + naming + tech stack + scope + multi-agent setup + full plan + full standard review + self-review + **1–3 selected sequential adversarial reviews**) end-to-end after the upfront count choice without mid-flow prompts, then presents the completed plan as a structured artifact for review at a single final gate.
 
 Pick `/xplana` when:
 - You know exactly what you want to plan and don't want the 7-question discovery interview
 - You prefer reviewing a finished plan over answering questions during its creation
-- You want maximum-depth output (full research, full review) without interruption
+- You want maximum-depth output (full research, full review) without interruption after startup
 
 Pick `/xplan` (default) when:
 - You want the guided, section-by-section interactive experience
@@ -35,7 +35,9 @@ Read the main `/xplan` command and execute its Phase 0.1 startup with the `--aut
 --autonomous
 ```
 
-Preserve every other argument the user passed (e.g., `--repo <path>`, `--deepen [<plan-dir>]`, `--adversarial-reviews 2`, `--unattended`). Do NOT strip or transform the concept text.
+Review mode defaults to personal lead review. Forward `--cross-provider` or an explicit natural-language opt-in unchanged; neither autonomous mode nor a selected count enables it. Only when opted in, run X-Plan’s local provider preflight before planning/count side effects.
+
+Preserve every other argument the user passed (e.g., `--repo <path>`, `--deepen [<plan-dir>]`, `--adversarial-reviews 2`, `--unattended`, `--cross-provider`). Do NOT strip or transform the concept text.
 
 Autonomous mode affects these xplan phases:
 
@@ -52,7 +54,7 @@ Autonomous mode affects these xplan phases:
 | 2.7 (Multi-Agent Setup) | Inferred from scope (9+ epics = workspace, 4-8 = flat, 1-3 = single). |
 | 4.0 (Review Configuration) | Locked to Full - security + architecture + business logic. |
 | 5.6 (Plan Quality Self-Review) | Unchanged - still loops until clean. |
-| 5.7 (Adversarial Review Sequence) | Runs the selected N fresh sequential provider sessions, starting opposite the original planner and alternating. Every pass checks the entire plan; pass N is final. The designated writer applies supported changes. Unresolved findings remain explicit and block execution readiness; present missing goal decisions at the final gate. |
+| 5.7 (Adversarial Review Sequence) | The lead performs the selected N sequential adversarial passes by default. Explicit cross-provider mode uses fresh sessions, starting opposite the original planner and alternating. Every pass checks the entire plan; pass N is final. The designated writer applies supported changes. Unresolved findings remain explicit and block execution readiness; present missing goal decisions at the final gate. |
 | 6 (Walkthrough) | Runs the new **Phase 6.A Autonomous Plan Walkthrough** - structured plan-as-artifact presentation with explicit assumption callouts. |
 | 6.5 (Final Execution Gate) | **Always fires**, same as any xplan run. Autonomous mode does NOT bypass this gate. |
 
@@ -67,7 +69,7 @@ Autonomous mode is where these four plan tenets matter most: after startup there
 
 ## What This Command Does NOT Do
 
-- It does NOT skip research, naming, the standard reviews, the self-review loop, or the Phase 5.7 adversarial review sequence. Autonomous is the *deep* mode, not the fast one — the completed plan receives three constructive reviews plus the selected one to three adversarial passes.
+- It does NOT skip research, naming, the standard reviews, the self-review loop, or the Phase 5.7 adversarial review sequence. Autonomous is the *deep* mode, not the fast one — the lead completes three constructive lenses plus the selected one to three adversarial passes; native provider review is optional.
 - It does NOT skip the four execution tenets above. The adversarial review enforces minimal edge-bucketed human work (T1), a follow-up-completion contract (T2), enough decision context to direct unplanned work without a human (T3), and a comprehensive autonomous E2E suite over all testable surfaces (T4) — expanding the plan when any is missing.
 - It does NOT skip the final execution gate. 6.5 is non-bypassable.
 - It does NOT grant live-testing permission. Autonomous planning can infer a tech stack; it cannot approve running app launches, dictation, synthetic input, focus changes, machine-global input/audio overrides, or mic capture on the user's behalf. Plan §8.6 records `NOT AUTHORIZED`, the 6.A walkthrough shows the affected steps, and `/etp` or `/xplan-resume` holds each one and asks before running it. See `~/.claude/rules/live-testing-guard.md`.

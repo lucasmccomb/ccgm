@@ -1,5 +1,7 @@
 # Cross-agent review protocol — pilot
 
+> Historical rollout specification. The mandatory cross-provider release prerequisite below is superseded: current workflows use personal lead review by default and explicit cross-provider opt-in. See the [current workflow contract](../../../modules/cross-agent-review/skills/cross-agent-review/references/workflow.md). This document preserves the original delivery requirements, not current execution instructions.
+
 Updated September 5, 2026. Proposed contract for CR-01 and CR-02. A documented capability is not an installed capability.
 
 ## Ownership and provider identity

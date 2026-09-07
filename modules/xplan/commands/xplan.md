@@ -1,12 +1,12 @@
 ---
 description: Interactive deep research + planning + execution framework for new projects and features
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--light | --autonomous] [--deepen [<plan-dir>]] [--adversarial-reviews <1|2|3>] [--unattended]
+argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--light | --autonomous] [--deepen [<plan-dir>]] [--adversarial-reviews <1|2|3>] [--unattended] [--cross-provider]
 ---
 
 # xplan - Interactive Project Planning & Execution
 
-A human-in-the-loop planning framework that interviews you upfront, deeply researches your concept, builds a contextual model, proposes tech stack and architecture for your sign-off, creates a parallelized execution plan, reviews it with specialized agents (constructive peer review plus 1–3 alternating-provider adversarial passes, chosen upfront with one recommended), and then autonomously executes using parallel agents.
+A human-in-the-loop planning framework that interviews you upfront, deeply researches your concept, builds a contextual model, proposes tech stack and architecture for your sign-off, creates a parallelized execution plan, reviews it personally as the lead (constructive review plus 1–3 adversarial passes, chosen upfront with one recommended; cross-provider review is opt-in), and then autonomously executes using parallel agents.
 
 **Three Modes:**
 
@@ -18,14 +18,15 @@ A human-in-the-loop planning framework that interviews you upfront, deeply resea
 
 **Startup choice:** before planning starts, select **1 (default), 2, or 3 adversarial reviews**. An explicit `--adversarial-reviews` value or unambiguous count answers the question. Autonomous mode still makes this setup choice.
 
-**Reviews are two-staged**: Phase 4 runs constructive security / architecture / business-logic reviews of the draft. Phase 5.7 runs the selected N adversarial passes against the completed plan through the cross-agent-review pilot. The first reviewer is opposite the original planner, followed by a fresh original-provider reviewer and then the opposite provider when selected. Pass N is final; every pass checks the whole plan. Constructive review choices are independent.
+**Reviews are two-staged**: Phase 4 runs constructive security / architecture / business-logic reviews of the draft. Phase 5.7 runs the selected N adversarial passes against the completed plan. The lead performs them personally by default. Only `--cross-provider` or an explicit natural-language request enables the optional provider sequence: opposite the original planner, fresh original provider, then opposite provider when selected. Pass N is final; every pass checks the whole plan. Constructive review choices are independent.
 
-`--light` is the *fast* path - reduced depth, minimal interaction. `--autonomous` is the *deep* path - maximum depth, zero interruption until the final gate. Pick `--autonomous` when you know exactly what you want to plan and prefer reviewing a finished artifact to answering questions during creation.
+`--light` is the *fast* path - reduced depth, minimal interaction. `--autonomous` is the *deep* path - maximum depth, zero interruption after the upfront count choice until the final gate. Pick `--autonomous` when you know exactly what you want to plan and prefer reviewing a finished artifact to answering questions during creation.
 
 **Flags:**
 - `--repo <path>` - Analyze and plan work for an existing repo
 - `--light` - Skip the interactive interview phases; uses minimal clarification + traditional walkthrough at the end (old xplan behavior)
 - `--autonomous` (alias: `-a`) - Skip ALL mid-flow prompts; run the full research + planning + review pipeline end-to-end using best-guess inference, then present the completed plan as a structured artifact for review at the final gate. Mutually exclusive with `--light`.
+- `--cross-provider` - Opt into native Claude/Codex adversarial review. A clear natural-language request is equivalent; a review count, autonomous mode, or execution authorization alone is not opt-in.
 - `--deepen [<plan-dir>]` - Skip fresh planning; load an existing plan and run targeted deepening passes on under-specified sections. See "Deepen Mode" below.
 
 **Companion commands:**
@@ -43,13 +44,13 @@ Specify cheaper models when spawning sub-agents to conserve usage without sacrif
 |-------|-----------|-------|
 | Phase 1 | Research agents (via /deepresearch) | sonnet |
 | Phase 2 | Naming agent | sonnet |
-| Phase 4 | Standard review agents (security, architecture, business) | sonnet |
-| Phase 5.7 | **N sequential cross-provider adversarial passes** | **Provider-specific vetted review model** |
+| Phase 4 | Lead performs selected constructive reviews | Current host model |
+| Phase 5.7 | Lead performs N adversarial passes; optional cross-provider sequence | Current host model; vetted provider models only when opted in |
 | Phase 7 | Execution agents (epic implementation) | sonnet |
 
 The orchestrator (this session) stays on the current model for all synthesis, architecture, and interactive decisions. Simple background tasks (file checks, directory setup, issue creation) can use haiku if spawned as agents.
 
-**Adversarial model selection:** use the current vetted review model for each actual provider and record it in the request's `models` map. A Claude model name is not a Codex model. The original orchestrator remains the host; a same-provider middle review uses a fresh session.
+**Optional cross-provider model selection:** when explicitly opted in, use the current vetted review model for each actual provider and record it in the request's `models` map. A Claude model name is not a Codex model. The original orchestrator remains the host; a same-provider middle review uses a fresh session.
 
 ---
 
@@ -121,6 +122,7 @@ Extract from `$ARGUMENTS`:
 - **`--light`**: (Optional) Flag to skip interactive interview phases
 - **`--autonomous`** (alias `-a`): (Optional) Flag to skip ALL mid-flow prompts and run the full pipeline end-to-end. Mutually exclusive with `--light` - if both are set, error and stop.
 - **`--adversarial-reviews <1|2|3>`**: Number of adversarial passes, default recommendation one. Validate before any planning side effect. A clear natural-language count in the request is equivalent to an explicit value; conflicting or ambiguous counts require clarification before planning.
+- **`--cross-provider`**: Explicitly enable the optional cross-provider run; also accept a clear natural-language request. Store `review_mode: cross-provider`; otherwise store `review_mode: lead`. Do not infer opt-in from a count or another skill.
 - **`--unattended`**: Explicitly no interactive channel. Only this explicit unattended invocation may default to one without submission; `--autonomous` alone does not.
 - **`--deepen [<plan-dir>]`**: (Optional) Iteratively deepen an existing plan instead of creating a new one. Also triggered when the free-text argument is exactly `deepen` (intent keyword). If a plan directory path follows the flag, use it; otherwise fall back to the current working directory.
 - If no arguments provided, use AskUserQuestion to ask what the user wants to plan (skipped in autonomous mode - error out instead, since autonomous has no interaction channel to clarify).
@@ -135,9 +137,19 @@ Store whether `--autonomous` is active. It affects Phases 0.5, 1.5, 2, 2.5, 2.6,
 - The final walkthrough (Phase 6) presents the plan as a completed artifact, not per-section sign-offs
 - The Phase 6.5 Final Gate still fires after the one startup choice
 
+### Optional provider preflight
+
+Only after explicit cross-provider opt-in, before count-selection side effects or planning, run:
+
+```bash
+python3 ~/.claude/lib/cross_agent_review_policy.py preflight
+```
+
+`AVAILABLE` means both binaries report native login readiness, not a successful model review or proof of all capabilities. `NEEDS_PROVIDER` stops the optional path before expensive planning. Preserve the failure; do not silently substitute a provider or infer permission to retry. Lead-only planning requires neither binary nor login. The lead may separately assess and continue authorized planning in lead mode, recording that decision and retaining the failed optional-preflight status.
+
 ### 0.1.1 Resolve the adversarial count before starting
 
-This step runs in default, light, autonomous, and fresh deepen modes. **Do not create directories, synchronize source, research, write planning artifacts, or dispatch any agent before the count is resolved.** Reading these command instructions and pure argument validation are permitted.
+This step runs in default, light, autonomous, and fresh deepen modes. **Do not create directories, synchronize source, research, write planning artifacts, or dispatch any agent before the count is resolved.** Reading these command instructions, pure argument validation, and the explicitly opted-in local readiness preflight are permitted.
 
 Use the pure selector; it writes no files:
 
@@ -153,7 +165,7 @@ python3 ~/.claude/lib/cross_agent_review_policy.py select --unattended
 
 Pass the actual supplied value, not the example's number. A missing flag value, noninteger, zero, or value above three is an error: stop before side effects. Do not silently repair invalid input to one. If selection returns `NEEDS_SELECTION`, ask **"How many adversarial reviews should this plan receive?"** with options **1 (Recommended)**, **2**, **3**. Wait for submission. Preselection, a timeout, an empty reply, or permission to plan is not the answer. If the question tool is unavailable, ask the same question in plain text and yield until answered. Do not advance while it is pending.
 
-Keep the resolved count and source from the selector. X-Plana delegates to this same startup step and forwards its arguments; it does not ask a second question. An explicit choice skips the question. After directory resolution, persist the selection, original provider/session identity and policy version in `reviews/review-selection.json` before research. Record the actual host launch metadata, not a persona or Git author. This setup record is outside the reviewed artifact set. Once review starts, it points to the authoritative private policy run directory.
+Keep the resolved count and source from the selector. X-Plana delegates to this same startup step and forwards its arguments; it does not ask a second question. An explicit choice skips the question. After directory resolution, persist the selection, `review_mode`, available original host identity and policy version in `reviews/review-selection.json` before research. Record the actual host launch metadata, not a persona or Git author. This setup record is outside the reviewed artifact set. Only an opted-in cross-provider run adds a pointer to `~/.claude/cross-agent-review/<run-id>/`; lead review has no native run or invented provider acknowledgment.
 
 A pure `/xplan-resume` restores saved selection and completed evidence; it does not make a fresh choice. A new `--deepen` invocation makes this startup choice before changing the existing plan. Do not infer a legacy selection from filenames.
 
@@ -224,7 +236,7 @@ else
 fi
 ```
 
-Hold `ANCHOR`, `DEFAULT_REF`, and `WORKTREE` for the rest of the run. **`WORKTREE` is the path every downstream reader (Phase 0.4.1 below, the Phase 1.1 deepresearch agent, the Phase 4 review agents) must read from — never the original `--repo` working tree.** Clean up the temp worktree at the end of the run (see Phase 8 teardown).
+Hold `ANCHOR`, `DEFAULT_REF`, and `WORKTREE` for the rest of the run. **`WORKTREE` is the path every downstream reader (Phase 0.4.1 below, the Phase 1.1 deepresearch agent, the Phase 4 lead reviewer) must read from — never the original `--repo` working tree.** Clean up the temp worktree at the end of the run (see Phase 8 teardown).
 
 **Interactive vs autonomous:**
 - **`--autonomous` / `/xplana`**: the guard runs automatically with NO prompt. Default behavior = verify every repo fact against `ANCHOR`. Never fast-forward the user's clone. Record the anchor + drift in `decisions.md`.
@@ -1073,13 +1085,13 @@ Include all stack decisions from Phase 2.5 and scope decisions from Phase 2.6.
 
 ## Phase 4: Plan Review
 
-**MANDATORY**: Before finalizing the plan, run review agents.
+Before finalizing the plan, the lead personally performs the selected constructive reviews against the draft and anchored evidence.
 
 This is the **first of two review stages**. Phase 4 is *constructive* peer review (security / architecture / business-logic) run against the draft, before `plan.md` is written. The adversarial second stage, Phase 5.7, runs the startup-selected passes against the finished plan. "Skip Review" here skips constructive reviews only; it never cancels the selected adversarial passes.
 
 ### 4.0 Review Configuration
 
-**In `--autonomous` mode**: Skip the question. Lock the review set to **Full** - Security + Architecture + Business Logic, all three agents, all in parallel. Proceed to 4.1.
+**In `--autonomous` mode**: Skip the question. Lock the review set to **Full** - Security + Architecture + Business Logic, all three lenses, reviewed by the lead. Proceed to 4.1.
 
 **In interactive / light mode**: Use AskUserQuestion:
 
@@ -1097,7 +1109,7 @@ options:
 If **Custom**, follow up with a multi-select AskUserQuestion:
 
 ```
-question: "Which review agents should I spawn? (select all that apply)"
+question: "Which review lenses should I apply? (select all that apply)"
 options:
   - "Security - auth vulnerabilities, data exposure, OWASP Top 10, RLS/access control"
   - "Architecture - scalability, tech stack optimization, data model, single points of failure"
@@ -1106,28 +1118,15 @@ options:
 
 **Note**: If "Skip Review" is selected, Phases 4.1-4.4 are skipped entirely. Proceed directly to Phase 5. "Skip Review" is NOT available in `--autonomous` mode - the whole point of autonomous is full-depth planning.
 
-### 4.1 Spawn Review Agents
+### 4.1 Perform the Selected Reviews
 
-Launch chosen review agents in parallel using the Agent tool (model: sonnet).
+The lead reviews security, architecture and business logic as selected, using the corresponding review criteria and actual source/specification. Write the selected reports under `reviews/security.md`, `reviews/architecture.md` and `reviews/business-logic.md`. Ground conclusions in the artifact and verification evidence, not the author's defense. Do not describe personal review as an independent native reviewer session.
 
-1. **Security Review Agent** - Output: `~/code/plans/{concept-name}/reviews/security.md`
-2. **Architecture Review Agent** - Output: `~/code/plans/{concept-name}/reviews/architecture.md`
-3. **Business Logic Review Agent** - Output: `~/code/plans/{concept-name}/reviews/business-logic.md`
+When `--repo` is set, verify every repository claim against `{DEFAULT_REF} @ {ANCHOR}` through `{WORKTREE}` or an anchored `git show`; never use the stale original working tree. Research and verification work may still be delegated under the existing task and advisor rules.
 
-**Anchor propagation (only when --repo was given).** Each review agent verifies plan claims against the actual codebase, so it MUST read the same anchor the planning used — not the stale working tree. Append to every review agent's prompt:
+### 4.2 Complete ALL Selected Lenses
 
-```
-SOURCE FRESHNESS — repo facts:
-- Verification anchor: {DEFAULT_REF} @ {ANCHOR} (from Phase 0.4.0). The user's original working tree may be STALE.
-- When you check a plan claim against the codebase, read/verify it against the anchor: the anchor worktree at {WORKTREE} (normal Read/Glob/Grep) or `git -C {REPO} show {DEFAULT_REF}:<path>`. Never a bare Read of the original --repo working tree.
-- Flag any plan claim that disagrees with the anchor as a finding (e.g., plan cites code that no longer exists on {DEFAULT_REF}).
-```
-
-### 4.2 Wait for ALL Selected Review Agents to Complete
-
-**HARD GATE**: All selected agents MUST be launched in **foreground** (not background). Do NOT proceed until every selected agent has returned.
-
-If "Skip Review" was selected, skip to Phase 5.
+Complete each selected report before proceeding. If "Skip Review" was selected, skip to Phase 5. Cross-provider opt-in controls Phase 5.7; it does not silently add provider calls here.
 
 ### 4.3 Verify Reviews Exist
 
@@ -1312,7 +1311,7 @@ The agent decides the triage itself using §1.4 — it does not stop to ask the 
 ### 10.3 Business Logic Review Summary (if selected)
 ### 10.4 Changes Made Based on Reviews
 ### 10.5 Adversarial Review Summary (if Phase 5.7 ran)
-[The selected N passes and their providers, findings/evidence/dispositions, final artifact hash, policy result and handback. Required unresolved findings remain blockers, not accepted-as-passed risks.]
+[The selected N passes, lead or cross-provider mode, findings/evidence/dispositions and current artifact/checks. Include optional run status and handback separately. Required unresolved findings remain blockers.]
 
 ## 11. Risk Register
 | Risk | Severity | Likelihood | Mitigation | Owner |
@@ -1485,36 +1484,36 @@ Re-run 5.6.1, 5.6.2, and 5.6.3 after every round of fixes. Do not advance to Pha
 
 ---
 
-## Phase 5.7: Cross-Agent Adversarial Review (MANDATORY)
+## Phase 5.7: Adversarial Review (Selected N Passes)
 
-Read `~/.claude/skills/cross-agent-review/references/workflow.md` for the installed policy CLI and evidence contract. Use its plan mode, preserving the startup count/source and original host identity. This phase runs in every mode, including light and fresh deepen, independently of constructive review selection.
+This phase runs in every mode, including light and fresh deepen, independently of constructive review selection. **The lead performs the selected N sequential passes personally by default.** Cross-provider dispatch requires the explicit opt-in recorded at startup.
 
-### 5.7.1 Select and freeze the review inputs
+### 5.7.1 Review the Current Plan
 
-After Phase 5.6 is clean, create a narrow request containing `plan.md`, the goal/specification and the specifically relevant anchored source/test evidence. Do not include the author's persuasive self-report, prior findings, generated ledgers or mutable progress files in the initial independent review. Include every substantive plan document relied on by acceptance; input bounds must fail explicitly rather than silently truncate it. Derive provider identities from launch metadata. The coordinator snapshots immutable bytes and validates report identity/hashes.
+After Phase 5.6 is clean, read the complete plan, goal/specification and relevant anchored source/check evidence. Every pass attacks premises, falsifiability, the strongest opposing case, execution/failure modes, reversal costs, second-order effects and whole-plan coherence. Check all four execution tenets: minimal human work at the edges (T1); in-scope follow-up completion (T2); sufficient mission/decision context (T3); actual autonomous E2E coverage and CI gates (T4). Multiple passes may emphasize different lenses; one pass must still cover all of them.
 
-Initialize a private policy run in plan mode, save its location in `reviews/review-selection.json`, and keep spent limits there. Pass the selected count and source in the request. Select one designated writer for accepted changes; all reviewers are read-only.
+For lead review, record each numbered pass, concrete findings and cited evidence under `reviews/`. Apply supported corrections through the designated writer; advisor mode still delegates source changes and check execution. Rerun Phase 5.6 and affected review/checks after material edits. The lead judges dispositions against the actual goal and evidence, including objections received from any agent. Do not invent findings or claim independent reviewer identity. A clean early pass does not waive later selected passes; **pass N is final**, including N=1.
 
-### 5.7.2 Run exactly the selected passes
+### 5.7.2 Optional Cross-Provider Sequence
 
-For original provider O and opposite P, use the first N of **[P, O, P]**:
+Only when opted in, read `~/.claude/skills/cross-agent-review/references/workflow.md`. Initialize with `init --cross-provider --mode plan` and its required request/check/writer options. Use `~/.claude/cross-agent-review/<run-id>/`, preserving count/source and actual originating host. Freeze a narrow explicit bundle of the complete plan, goal, attack criteria and relevant source/check evidence. Exclude the author's persuasive self-report and earlier findings from initial review. No-tools reviewers can only cite supplied evidence; answer missing context with specifically named files. Never silently truncate inputs.
+
+For original provider O and opposite P, the selected schedule is the first N of **[P, O, P]**:
 
 | Origin | N=1 | N=2 | N=3 |
 |---|---|---|---|
 | Claude | Codex | Codex → fresh Claude | Codex → fresh Claude → Codex |
 | Codex | Claude | Claude → fresh Codex | Claude → fresh Codex → Claude |
 
-Use the policy's `review` action for each fresh sequential reviewer. Every pass checks **premises, falsifiability, execution/failure modes, reversal costs, second-order effects and whole-plan coherence**, including all four execution tenets: human work minimized and at the edges (T1); in-scope follow-up completion (T2); sufficient mission/decision context (T3); actual autonomous E2E coverage and CI gates (T4). Multiple passes may emphasize different lenses; one pass must still cover all of them. An independent clean report is valid and must not invent objections. A clean early pass does not waive later selected passes.
+Follow the optional policy's sequential `review`, dispute, designated-writer, current-check and `advance` gates. A same-provider middle reviewer is a fresh session. Only a successfully completed optional run may claim its `CONSENSUS` state, with selected reports, current evidence, both native acknowledgments and recorded host receipt. Receipt and recorded checks remain caller attestations, not independent proof of their truth.
 
-Resolve findings on the frozen generation using the workflow reference: critic/rebuttal evidence, stable IDs, one designated writer, bounded fixes and current-artifact verification. Run Phase 5.6 after accepted plan edits, recording its evidence before advancing. The policy's `advance` gate, not the agent's prose, decides when the next pass may start. Every reviewer session is new; a same-provider middle reviewer is not the original host grading itself.
+Provider errors or exhausted limits stop this optional run. Preserve its reports, findings, counters and next action; use `stop` with a reason when abandoning it. Do not recursively require this coordinator to approve repairs to itself. The lead may separately review the current delivery and decide readiness using evidence and normal checks, while keeping the optional run explicitly stopped or incomplete. Lead approval never relabels a failed run `CONSENSUS`.
 
-### 5.7.3 Finish and preserve evidence
+### 5.7.3 Preserve the Review Basis
 
-**Pass N is the final pass**, even for N=1. Obtain both providers' evidence-backed final acknowledgment through the policy, deliver the result to the original host and record reception, then run `finish`. Require exactly N completed pass records with current artifact evidence, passed required checks and no open required findings. Earlier generation reports remain audit history; changed content invalidates prior acknowledgments and requires current validation before they can support completion.
+Record chosen N/source, review mode, each completed numbered pass, finding dispositions/evidence, current artifact and check results. For optional runs also retain the actual provider/report identities, run pointer, terminal status and handback state. Earlier generations are history, not current approval; critics/revalidations do not count as extra selected passes. If the optional sequence stopped early, record its actual completed count separately from any subsequent lead passes.
 
-A transport `REVIEWED` status or two agents saying "agree" does not mean consensus. Required findings cannot be waived by orchestrator authority or parked in a risk register to pass the gate. Limits, provider absence, unsupported evidence and missing goal decisions remain explicit unresolved states. Interactive mode may request a necessary goal decision; autonomous mode records it for Phase 6 without prompting mid-flow. A user scope revision updates the spec and invalidates affected evidence before renewed review.
-
-Record in `decisions.md` a compact result: chosen N/source; original provider; each numbered provider/report and final-pass label; actual finding dispositions/evidence; current artifact hash; run directory; terminal status; handback state. Render N human-readable reports from the policy's numbered pass records under `reviews/`; do not count critics, validation reports or old generations as additional selected passes. Generated summaries are not inputs to their own hash calculation.
+Required unresolved findings remain blockers to the lead's readiness decision. Missing intent is a goal decision: interactive mode may ask, while autonomous mode records it for Phase 6. A scope revision updates the spec and requires affected review before execution.
 
 ---
 
@@ -1593,7 +1592,7 @@ Read `~/code/plans/{concept-name}/comments.json`. It contains:
 
 **If `action == "accept"`**: Record "User accepted plan via web review" in `decisions.md` and proceed to Phase 6.5.
 
-**If `action == "deepen"`** and `comments` is non-empty: admit the explicit user update with policy `amend` before any writer edits (see the shared workflow contract). Retain the designated writer and remaining budget; research agents return proposals for that writer. Then treat each comment as a pre-selected deepening gap and run Deepen Mode D.5-D.7 **without** asking D.3's gap categorization or D.4's user selection - the user already selected by commenting. For each comment:
+**If `action == "deepen"`** and `comments` is non-empty: record the explicit user update before writer edits. For an active optional cross-provider run, use policy `amend` first and retain its writer and remaining budget; research agents return proposals for that writer. Then treat each comment as a pre-selected deepening gap and run Deepen Mode D.5-D.7 **without** asking D.3's gap categorization or D.4's user selection - the user already selected by commenting. For each comment:
 
 - The "target section" for D.5 is the comment's `section_title` in the comment's `file`.
 - The "gap description" is the comment's `text`.
@@ -1604,7 +1603,7 @@ After the deepening agents return, integrate their results into plan.md via D.6 
 
 Append a Deepen Pass block to `decisions.md` per D.6's format, noting that the source was web review.
 
-Re-run Phase 5.6 against the updated plan. Refresh the existing policy run and invalidate changed-artifact acknowledgments; obtain current validation and finish evidence for the saved N passes before execution readiness. Web-comment deepening belongs to this run and keeps its count, source, limits and host; do not ask X-Plana another setup question.
+Re-run Phase 5.6 against the updated plan. Repeat affected lead reviews and checks. If an optional run is active, refresh it and invalidate changed-artifact acknowledgments; only current validation can complete that run. Web-comment deepening belongs to this run and keeps its count, source, limits and host; do not ask X-Plana another setup question.
 
 #### 6.W.3 Second-round review
 
@@ -1677,7 +1676,7 @@ Structure the output in this exact order, as a single message (or a small number
 - Anything the plan could not confidently decide
 - Revenue model (if flagged TBD in 0.5)
 - Success criteria (always flagged for confirmation in autonomous mode)
-- Any unresolved questions from the review agents
+- Any unresolved questions from personal lead review or optional provider reports
 
 **9. Where the full detail lives**
 - `~/code/plans/{concept-name}/plan.md` (full plan)
@@ -1726,18 +1725,11 @@ If naming was done in Phase 2, confirm the chosen name. If not done, ask if they
 
 **HARD GATE - NON-BYPASSABLE - MANDATORY REGARDLESS OF PERMISSION MODE OR FLAGS**
 
-This gate fires in every mode, including `--autonomous`. Autonomous mode skips every other user prompt, but NOT this one - execution is expensive and irreversible, so the plan-as-artifact presentation in 6.A always precedes an explicit human decision to proceed.
+This gate fires in every mode, including `--autonomous`. After the upfront review-count choice, autonomous mode skips mid-flow user prompts, but NOT this final gate - execution is expensive and irreversible, so the plan-as-artifact presentation in 6.A always precedes an explicit human decision to proceed.
 
-Before asking, re-verify:
+Before asking, personally verify the current plan, all selected constructive reports, exactly N completed adversarial passes, supported finding dispositions and actual required-check evidence. Complete missing lead reviews and rerun affected checks after material changes. Old filenames or author self-reports do not establish readiness.
 
-```bash
-ls -la ~/code/plans/{concept-name}/reviews/{selected-reviews} \
-       ~/code/plans/{concept-name}/plan.md
-# Verify the authoritative review gate for the saved run:
-python3 ~/.claude/lib/cross_agent_review_policy.py finish --run-dir "{review-run-dir}"
-```
-
-If a selected constructive review is missing, complete Phase 4. The adversarial gate requires exactly the selected N current pass records plus evidence-backed closure and original-host reception. If `finish` fails, present the explicit unresolved state and next action; do not call the plan reviewed or offer execution as ready. Old markdown filenames alone cannot pass this check.
+For an optional cross-provider run, read its actual `status` and retain its reports. Call `finish` only when its own gates are satisfied; otherwise report it as stopped/incomplete. The lead may reach a separate evidence-backed readiness decision after personally reviewing the delivery, without calling the optional run approved. Normal tests, CI, release checks and the user's execution decision remain required.
 
 Required unresolved findings block execution readiness. Surface them and any needed goal decision; revised acceptance criteria must be reviewed before the execution gate can pass.
 
@@ -2072,7 +2064,8 @@ In interactive mode, the user is a partner in every major decision: concept clar
 
 Use the right model for each job:
 - Simple background tasks (file checks, directory setup): haiku
-- Research, naming, review agents: sonnet
+- Research and naming agents: sonnet
+- Reviews: personal lead by default; vetted native models only for explicit cross-provider mode
 - Execution agents: sonnet
 - Orchestrator (synthesis, architecture, interactive decisions): current session model
 
@@ -2082,7 +2075,7 @@ Keep sub-agent prompts focused and specific. Do not send more context than the a
 
 Maximize parallel agents based on the setup confirmed in Phase 2.7:
 - Research happens in parallel
-- Reviews happen in parallel
+- Lead review lenses and selected adversarial passes are completed explicitly; optional native passes and ETP spec/quality stages remain sequential
 - Agent-epics within a wave execute in parallel
 - Human-epics that can be done during agent execution should be
 

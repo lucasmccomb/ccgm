@@ -26,7 +26,7 @@ class PolicyTests(unittest.TestCase):
         self.request['workflow'] = 'plan' if mode == 'plan' else 'work'
         self.request['adversarial_review_count'] = count
         return policy.initialize(self.request, self.run, mode, {'required': [] if report_only else ['unit']},
-                                 'author-session', light_review=light, report_only=report_only)
+                                 'author-session', light_review=light, report_only=report_only, cross_provider=True)
 
     def fail_policy(self, status, function):
         with self.assertRaises(policy.rt.ReviewError) as caught:
@@ -243,6 +243,38 @@ class PolicyTests(unittest.TestCase):
         policy.acknowledge(self.run)
         self.assertEqual('CONSENSUS', self.deliver()['status'])
 
+    def test_second_provider_identity_failure_cannot_close_findings_or_advance_etp(self):
+        self.initialize(mode='etp')
+        self.seed()
+        self.check()
+        self.refute_open()
+        before = policy.rt.load(self.run)[1]
+        self.scenario({'payload_by_role': {'critic': {'context_sha256': '0' * 64}}})
+        self.fail_policy('INVALID_RESULT', lambda: policy.acknowledge(self.run))
+        _, state, _ = policy.rt.load(self.run)
+        self.assertEqual(before['invocations'] + 2, state['invocations'])
+        self.assertEqual(before['deadline'], state['deadline'])
+        self.assertEqual('REVIEWED', state['calls'][-2]['status'])
+        self.assertEqual('INVALID_RESULT', state['calls'][-1]['status'])
+        self.assertEqual('context_sha256', state['calls'][-1]['identity_mismatches'][0]['field'])
+        self.assertEqual('codex', state['calls'][-1]['identity']['provider'])
+        self.assertEqual(10, state['calls'][-1]['identity']['usage']['input_tokens'])
+        self.assertNotIn('report', state['calls'][-1])
+        self.assertEqual('PROPOSED', state['policy']['findings']['spec:claude:ADD-1']['state'])
+        self.assertEqual({}, state['policy']['acks'])
+        self.assertFalse(policy.status(self.run)['execution_ready'])
+        self.fail_policy('UNRESOLVED_DISPUTE', lambda: policy.advance(self.run))
+        self.assertEqual(0, policy.status(self.run)['completed_stages'])
+        # Ordinary explicit resume retains spent calls/deadline. No retry is automatic.
+        policy.resume(self.run)
+        _, resumed, _ = policy.rt.load(self.run)
+        self.assertEqual(state['invocations'], resumed['invocations'])
+        self.assertEqual(state['deadline'], resumed['deadline'])
+        self.scenario({})
+        policy.acknowledge(self.run)
+        self.assertEqual('CLOSED', policy.status(self.run)['findings']['spec:claude:ADD-1']['state'])
+        self.assertEqual(state['invocations'] + 1, policy.status(self.run)['invocations'])
+
     def test_no_manual_provider_ack_and_wrong_origin_receipt_rejected(self):
         self.initialize()
         self.check()
@@ -267,17 +299,14 @@ class PolicyTests(unittest.TestCase):
         self.fail_policy('INVALID_RESULT', lambda: policy.acknowledge(self.run))
         self.assertNotEqual('CLOSED', policy.status(self.run)['findings']['plan-1:claude:ADD-1']['state'])
 
-    def test_no_progress_and_five_exchange_limits_hold(self):
+    def test_no_progress_and_three_exchange_limits_hold(self):
         self.initialize()
         self.seed()
         self.scenario({'critic_verdict': 'AGREE'})
         for _ in range(3):
             policy.do_review(self.run, 'critic')
         self.fail_policy('UNRESOLVED_DISPUTE', lambda: policy.do_review(self.run, 'critic'))
-        self.check()
-        for _ in range(2):
-            policy.do_review(self.run, 'critic')
-        self.check()
+        self.check()  # New evidence cannot renew the hard per-stage allowance.
         self.fail_policy('UNRESOLVED_DISPUTE', lambda: policy.do_review(self.run, 'critic'))
 
     def test_repeated_identical_check_with_new_timestamp_is_not_new_evidence(self):
@@ -290,12 +319,12 @@ class PolicyTests(unittest.TestCase):
         self.check()
         self.fail_policy('UNRESOLVED_DISPUTE', lambda: policy.do_review(self.run, 'critic'))
 
-    def test_acknowledgment_pairs_are_subject_to_five_exchange_cap(self):
+    def test_acknowledgment_pairs_are_subject_to_three_exchange_cap(self):
         self.initialize()
         self.check()
         policy.do_review(self.run, 'review')
         _, state, _ = policy.rt.load(self.run)
-        policy.current_stage(state['policy'])['exchanges'] = 5
+        policy.current_stage(state['policy'])['exchanges'] = 3
         policy.persist(self.run, state)
         self.fail_policy('UNRESOLVED_DISPUTE', lambda: policy.acknowledge(self.run))
 
@@ -464,13 +493,10 @@ class PolicyTests(unittest.TestCase):
         spent = policy.status(self.run)['invocations']
         self.fail_policy('UNRESOLVED_DISPUTE', lambda: policy.do_review(self.run, 'rebuttal'))
         self.assertEqual(spent, policy.status(self.run)['invocations'])
-        self.check()  # A discriminating check permits two remaining exchanges.
-        policy.do_review(self.run, 'rebuttal')
-        policy.do_review(self.run, 'rebuttal')
-        self.check(outcome=1)  # New evidence cannot reset the five-exchange cap.
+        self.check(outcome=1)  # New evidence cannot reset the three-exchange cap.
         spent = policy.status(self.run)['invocations']
         self.fail_policy('UNRESOLVED_DISPUTE', lambda: policy.do_review(self.run, 'rebuttal'))
-        self.assertEqual(5, policy.status(self.run)['current_stage']['exchanges'])
+        self.assertEqual(3, policy.status(self.run)['current_stage']['exchanges'])
         self.assertEqual(spent, policy.status(self.run)['invocations'])
 
     def test_new_requested_evidence_refreshes_all_selected_pass_records(self):
@@ -532,22 +558,19 @@ class PolicyTests(unittest.TestCase):
         policy.acknowledge(self.run)
         self.assertEqual(before + 2, policy.status(self.run)['invocations'])
 
-    def test_fix_checkpoint_extensions_need_novel_evidence_and_keep_global_cap(self):
+    def test_correction_limit_cannot_be_extended_by_new_evidence(self):
         self.initialize()
         _, state, _ = policy.rt.load(self.run)
-        state['policy']['fix_rounds'] = 3
+        state['policy']['fix_rounds'] = 2
         policy.persist(self.run, state)
-        before = policy.status(self.run)
+        before = (self.run / 'state.json').read_bytes()
         extension = {'reason': 'A specific discriminating source check is now available', 'next_check': 'unit',
                      'evidence': [{'path': 'artifact.py', 'quote': 'return a - b'}]}
-        policy.extend(self.run, extension)
-        _, state, _ = policy.rt.load(self.run)
-        self.assertEqual(6, state['policy']['fix_allowance'])
-        self.assertEqual(before['deadline'], state['deadline'])
-        self.assertEqual(before['invocations'], state['invocations'])
-        state['policy']['fix_rounds'] = 6
-        policy.persist(self.run, state)
-        self.fail_policy('INVALID_REQUEST', lambda: policy.extend(self.run, extension))
+        self.fail_policy('UNRESOLVED_BUDGET', lambda: policy.extend(self.run, extension))
+        self.assertEqual(before, (self.run / 'state.json').read_bytes())
+        self.fail_policy('UNRESOLVED_BUDGET', lambda: policy.amend(self.run, {
+            'writer_provider': 'codex', 'writer_session_id': 'author-session',
+            'reason': 'One more change', 'next_check': 'unit', 'authorization': 'explicit-user-update'}))
 
     def test_payload_paths_are_private_bounded_and_cannot_traverse(self):
         self.initialize()

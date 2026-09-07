@@ -16,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cross_agent_review as rt
 
 POLICY_VERSION = 1
+MAX_EXCHANGES = 3
+MAX_FIX_ROUNDS = 2
 LENSES = {
     'plan': 'Review premises, falsifiability, the strongest opposing case, second-order effects, execution and failure modes, reversal costs, whole-plan coherence, minimal/edge-bucketed human work, follow-up completion, autonomous decision context, and comprehensive autonomous end-to-end tests. Every pass covers all lenses; additional passes reconsider the revised artifact.',
     'spec': 'Review specification compliance: actual goal, all acceptance criteria, required behavior, omissions, unintended scope, and concrete source/test evidence.',
@@ -68,7 +70,10 @@ def keys(value, required):
     rt.require(set(value) == set(required), 'Incorrect payload fields: expected ' + ', '.join(required))
 
 
-def fresh(request, state, bundle):
+def fresh(request, state, bundle, *, allow_completed=False):
+    rt.require(not state['policy'].get('stopped'), 'Optional review was stopped.', 'STOPPED')
+    rt.require(allow_completed or state['policy']['status'] not in ('CONSENSUS', 'REPORT_DELIVERED'),
+               'Completed workflows are read-only history.')
     rt.require(rt.snapshot(request) == bundle, 'Artifact/evidence changed: refresh is required.', 'STALE_ARTIFACT')
     rt.require(state['quota'] != 'exhausted', 'Known provider quota exhaustion.', 'UNRESOLVED_BUDGET')
     rt.require(time.time() < state['deadline'], 'Original deadline expired.', 'UNRESOLVED_BUDGET')
@@ -91,7 +96,35 @@ def make_stages(request, mode, light_review):
             for lens in lenses for provider in perspectives]
 
 
-def initialize(request, run_dir, mode, checks, writer_session_id, light_review=False, report_only=False):
+def lead_review():
+    return {'status': 'LEAD_REVIEW', 'review_mode': 'lead', 'execution_ready': False,
+            'next_action': 'Personally review the work and run repository tests and release checks.'}
+
+
+def preflight():
+    """Read-only native login checks; never expose auth output or launch a model."""
+    providers = {}
+    for provider in rt.PROVIDERS:
+        binary = rt.shutil.which(provider)
+        entry = {'binary_found': binary is not None, 'authenticated': False}
+        if binary:
+            argv = [binary, 'auth', 'status', '--json'] if provider == 'claude' else [binary, 'login', 'status']
+            try:
+                result = rt.subprocess.run(argv, capture_output=True, text=True, timeout=10, env=rt.native_environment())
+                auth = json.loads(result.stdout) if provider == 'claude' and result.returncode == 0 else {}
+                entry['authenticated'] = result.returncode == 0 and (
+                    provider == 'codex' or isinstance(auth, dict) and auth.get('loggedIn') is True)
+            except (OSError, ValueError, rt.subprocess.TimeoutExpired):
+                pass
+        providers[provider] = entry
+    return {'status': 'AVAILABLE' if all(p['authenticated'] for p in providers.values()) else 'NEEDS_PROVIDER',
+            'providers': providers, 'generation_tested': False}
+
+
+def initialize(request, run_dir, mode, checks, writer_session_id, light_review=False, report_only=False,
+               *, cross_provider=False):
+    if not cross_provider:
+        return lead_review()
     request = rt.validate_request(request)
     selection(request['adversarial_review_count'], request['review_count_source'])
     rt.require(mode in ('plan', 'etp', 'adrev'), 'Unknown pilot mode.')
@@ -111,7 +144,7 @@ def initialize(request, run_dir, mode, checks, writer_session_id, light_review=F
                        'writer_provider': request['producer_provider'] if request['producer_provider'] in rt.PROVIDERS else request['origin_provider'],
                        'writer_session_id': writer_session_id, 'stages': stages, 'index': 0,
                        'findings': {}, 'checks': {}, 'required_checks': required,
-                       'fix_rounds': 0, 'fix_allowance': 3, 'extensions': [], 'pending_fix': None,
+                       'fix_rounds': 0, 'fix_allowance': MAX_FIX_ROUNDS, 'extensions': [], 'pending_fix': None,
                        'acks': {}, 'receipt': None, 'history': [], 'sessions': []}
     persist(run_dir, state)
     return status(run_dir)
@@ -127,6 +160,11 @@ def status(run_dir):
     except (rt.ReviewError, OSError, ValueError):
         stale = True
     effective_status = 'STALE_ARTIFACT' if stale else policy['status']
+    if policy.get('stopped'):
+        effective_status = 'STOPPED'
+    elif not stale and policy['status'] not in ('CONSENSUS', 'REPORT_DELIVERED'):
+        if state['quota'] == 'exhausted' or time.time() >= state['deadline']:
+            effective_status = 'UNRESOLVED_BUDGET'
     return {'status': effective_status, 'transport_status': state['status'], **stamp(bundle),
             'origin_provider': request['origin_provider'], 'origin_session_id': request['origin_session_id'],
             'adversarial_review_count': request['adversarial_review_count'],
@@ -160,29 +198,36 @@ def evidence_valid(evidence, bundle):
                    and item['quote'] in entry['content'], 'Evidence must quote the current frozen bundle.')
 
 
-def native(run_dir, purpose, role, stage, extra=None):
-    request, state, bundle = rt.load(run_dir)
-    policy = state['policy']
-    fresh(request, state, bundle)
-    rt.require(not policy['pending_fix'], 'The designated writer must return the admitted fix first.')
+def native_context(request, policy, purpose, stage, extra=None):
     context = {'purpose': purpose, 'stage': stage['key'], 'criteria': LENSES[stage['lens']],
                'final_selected_pass': stage['is_final'], 'selected_pass_count': request['adversarial_review_count']}
     if purpose != 'review':
         context.update({'findings': policy['findings'], 'checks': policy['checks'],
                         'required_checks': policy['required_checks']})
+    if purpose.endswith('ack'):
+        # Derived closure/ack fields must not change the question halfway through
+        # a pair, or between final-stage acceptance and final handback.
+        context['findings'] = {
+            fid: {**{key: row[key] for key in ('finding', 'proposal', 'observations', 'verdicts')},
+                  'state': 'PROPOSED' if row['proposal'] else 'OPEN'}
+            for fid, row in policy['findings'].items()}
     if extra:
         context.update(extra)
-    if purpose.endswith('ack'):
-        context['instruction'] = ('Audit the proposed dispositions and all supplied check evidence against the final artifact. '
-                                  'Return CLEAN only if all are supported and every required check passes. '
-                                  'For every finding return an AGREE verdict on its proposed disposition with exact evidence, '
-                                  'or DISAGREE_EVIDENCE/DISAGREE_CONCERN with a supported objection. '
-                                  'Agreement without evidence is insufficient. Do not invent findings.')
+    return context
+
+
+def native(run_dir, purpose, role, stage, extra=None):
+    request, state, bundle = rt.load(run_dir)
+    policy = state['policy']
+    fresh(request, state, bundle)
+    rt.require(not policy['pending_fix'], 'The designated writer must return the admitted fix first.')
+    context = native_context(request, policy, purpose, stage, extra)
     text = json.dumps(context, ensure_ascii=False)
     rt.require(len(text.encode()) <= rt.MAX_CONTEXT_BYTES, 'Resolution context exceeds bounded transport capacity.')
     rt.save(Path(run_dir) / ('policy-context-' + str(state['invocations'] + 1) + '.json'), context)
     try:
-        report = rt.invoke(run_dir, role, stage['pass_number'], perspective=stage['perspective'], context_data=text)
+        report = rt.invoke(run_dir, role, stage['pass_number'], perspective=stage['perspective'], context_data=text,
+                           workflow_purpose=purpose)
     except rt.ReviewError as error:
         _, state, _ = rt.load(run_dir)
         state['policy']['status'] = error.status
@@ -200,7 +245,7 @@ def native(run_dir, purpose, role, stage, extra=None):
     return report, ref
 
 
-def ingest(policy, report, ref, bundle, stage_key):
+def ingest(policy, report, ref, bundle, stage_key, judgment_target='original_finding'):
     provider = report['identity']['provider']
     known_ids = set(policy['findings'])
     for finding in report['result']['findings']:
@@ -226,11 +271,13 @@ def ingest(policy, report, ref, bundle, stage_key):
                                        'verdicts': {}}
     for verdict in report['result']['verdicts']:
         rt.require(verdict['finding_id'] in policy['findings'], 'Critic referenced an unknown finding.', 'INVALID_RESULT')
-        policy['findings'][verdict['finding_id']]['verdicts'][provider] = {'verdict': verdict, 'report': ref, **stamp(bundle)}
+        policy['findings'][verdict['finding_id']]['verdicts'][provider] = {'verdict': verdict, 'report': ref,
+                                                                        'judgment_target': judgment_target, **stamp(bundle)}
 
 
 def do_review(run_dir, action):
     request, state, bundle = rt.load(run_dir)
+    fresh(request, state, bundle)
     policy = state['policy']
     stage = current_stage(policy)
     if action == 'review':
@@ -238,10 +285,14 @@ def do_review(run_dir, action):
         role = 'validation' if stage.get('previous_report') else 'reviewer'
     else:
         rt.require(stage.get('report'), 'Review the frozen artifact before a dispute.')
-        rt.require(stage.get('exchanges', 0) < 5, 'Five-exchange dispute limit reached.', 'UNRESOLVED_DISPUTE')
+        rt.require(stage.get('exchanges', 0) < MAX_EXCHANGES, 'Dispute exchange limit reached.', 'UNRESOLVED_DISPUTE')
         rt.require(stage.get('no_progress', 0) < 2, 'Two unchanged exchanges: supply a discriminating check.', 'UNRESOLVED_DISPUTE')
         role = 'critic' if action == 'critic' else 'reviewer'
     purpose = 'revalidation' if action == 'review' and stage.get('previous_report') else action
+    if action != 'review':
+        fresh(request, state, bundle)
+        stage['exchanges'] = stage.get('exchanges', 0) + 1
+        persist(run_dir, state)  # Failed provider attempts spend the exchange too.
     report, ref = native(run_dir, purpose, role, stage)
     request, state, bundle = rt.load(run_dir)
     policy, stage = state['policy'], current_stage(state['policy'])
@@ -252,7 +303,7 @@ def do_review(run_dir, action):
         signal = rt.digest({'findings': report['result']['findings'], 'verdicts': report['result']['verdicts'],
                             'requests': report['result']['evidence_requests']})
         stage['no_progress'] = stage.get('no_progress', 0) + 1 if signal == stage.get('last_signal') else 0
-        stage['last_signal'], stage['exchanges'] = signal, stage.get('exchanges', 0) + 1
+        stage['last_signal'] = signal
     stage['needs_evidence'] = report['result']['status'] == 'NEEDS_EVIDENCE'
     policy['status'] = 'ACTIVE'
     persist(run_dir, state)
@@ -317,6 +368,54 @@ def acknowledgment_basis(policy, bundle):
                                    for fid, row in policy['findings'].items()}})
 
 
+def ack_inputs(run_dir, request, policy, bundle, stage):
+    purpose = 'final-ack' if stage['is_final'] else 'stage-ack'
+    extra = {'all_selected_reports': [entry.get('report') for entry in policy['stages']],
+             'scope_constraints': request['goal']}
+    context = native_context(request, policy, purpose, stage, extra)
+    references = {entry['report'] for entry in policy['stages'] if entry.get('report')}
+    for row in policy['findings'].values():
+        references.update(item['report'] for item in row['observations'])
+        references.update(item['report'] for item in row['verdicts'].values())
+    _, state, _ = rt.load(run_dir)
+    reports = {ref: rt.digest(report_for(run_dir, state, ref)) for ref in sorted(references)}
+    basis = rt.digest({'request': request, 'snapshot': bundle, 'context': context,
+                       'reports': reports, 'stage': {key: stage[key] for key in (
+                           'key', 'lens', 'pass_number', 'perspective', 'is_final')},
+                       'coordinator': rt.coordinator_revision()})
+    return purpose, extra, rt.digest(json.dumps(context, ensure_ascii=False).encode()), basis
+
+
+def cached_ack(run_dir, state, bundle, ack, provider, role, stage, context_hash):
+    report = report_for(run_dir, state, ack['report'])
+    call = next(call for call in state['calls'] if call.get('report') == ack['report'])
+    context = rt.read_json(Path(run_dir) / ('policy-context-' + str(call['number']) + '.json'))
+    text = json.dumps(context, ensure_ascii=False)
+    rt.require(rt.digest(text.encode()) == context_hash == ack['context_sha256'],
+               'Cached acknowledgment context changed.', 'INVALID_RESULT')
+    expected = {'provider': provider, 'role': role, 'pass_number': stage['pass_number'],
+                **stamp(bundle), 'context_sha256': context_hash}
+    rt.validate_result(report['result'], expected, bundle, text)
+    rt.require(report['identity']['provider'] == provider and report['result']['status'] == 'CLEAN',
+               'Cached native acknowledgment is invalid.', 'INVALID_RESULT')
+    verdicts = {item['finding_id']: item for item in report['result']['verdicts']}
+    rt.require(all(verdicts.get(fid, {}).get('verdict') == 'AGREE' for fid in state['policy']['findings']),
+               'Cached acknowledgment lacks supported dispositions.', 'INVALID_RESULT')
+    return ack
+
+
+def validate_ack_checkpoint(run_dir, request, state, bundle, stage, acknowledgments):
+    policy = state['policy']
+    _, _, context_hash, basis = ack_inputs(run_dir, request, policy, bundle, stage)
+    checkpoint = policy.get('ack_checkpoint', {})
+    rt.require(checkpoint.get('basis') == basis and checkpoint.get('acks') == acknowledgments
+               and set(acknowledgments) == set(rt.PROVIDERS),
+               'Both acknowledgments must cover the unchanged complete evidence basis.', 'INVALID_RESULT')
+    for role in ('validation', 'critic'):
+        provider = rt.route(request, role, stage['pass_number'], stage['perspective'])
+        cached_ack(run_dir, state, bundle, acknowledgments[provider], provider, role, stage, context_hash)
+
+
 def acknowledge(run_dir):
     request, state, bundle = rt.load(run_dir)
     policy = state['policy']
@@ -328,51 +427,64 @@ def acknowledge(run_dir):
     final = policy['index'] == len(policy['stages'])
     stage = policy['stages'][-1] if final else current_stage(policy)
     rt.require(stage.get('report') and not stage.get('needs_evidence'), 'Current stage lacks a complete review.')
-    basis = acknowledgment_basis(policy, bundle)
-    if final and stage.get('ack_basis') == basis and set(stage.get('acks', {})) == set(rt.PROVIDERS):
-        policy['acks'] = copy.deepcopy(stage['acks'])
-        policy['acks_basis'] = basis
-        make_handoff(request, policy, bundle)
-        policy['status'] = 'HANDOFF_PENDING'
+    purpose, extra, context_hash, basis = ack_inputs(run_dir, request, policy, bundle, stage)
+    checkpoint = policy.get('ack_checkpoint', {})
+    if checkpoint.get('basis') != basis:
+        checkpoint = {'basis': basis, 'stage': stage['key'], 'acks': {}}
+        policy['ack_checkpoint'] = checkpoint
         persist(run_dir, state)
-        return status(run_dir)
-    rt.require(stage.get('exchanges', 0) < 5, 'Five-exchange dispute limit reached.', 'UNRESOLVED_DISPUTE')
-    stage['exchanges'] = stage.get('exchanges', 0) + 1
-    persist(run_dir, state)
     acknowledgments = {}
+    admitted = False
     for role in ('validation', 'critic'):
-        report, ref = native(run_dir, 'final-ack' if final else 'stage-ack', role, stage,
-                             {'all_selected_reports': [entry.get('report') for entry in policy['stages']],
-                              'scope_constraints': request['goal']})
+        provider = rt.route(request, role, stage['pass_number'], stage['perspective'])
+        if provider in checkpoint['acks']:
+            acknowledgments[provider] = cached_ack(run_dir, state, bundle, checkpoint['acks'][provider],
+                                                   provider, role, stage, context_hash)
+            continue
+        if not admitted:
+            rt.require(stage.get('exchanges', 0) < MAX_EXCHANGES, 'Dispute exchange limit reached.', 'UNRESOLVED_DISPUTE')
+            stage['exchanges'] = stage.get('exchanges', 0) + 1
+            persist(run_dir, state)
+            admitted = True
+        report, ref = native(run_dir, purpose, role, stage, extra)
         request, state, bundle = rt.load(run_dir)
         policy = state['policy']
+        stage = policy['stages'][-1] if final else current_stage(policy)
+        checkpoint = policy['ack_checkpoint']
+        rt.require(ack_inputs(run_dir, request, policy, bundle, stage)[3] == basis,
+                   'Acknowledgment basis changed during the call.', 'STALE_ARTIFACT')
         result = report['result']
         if result['status'] != 'CLEAN' or result['findings']:
-            ingest(policy, report, ref, bundle, stage['key'])
+            ingest(policy, report, ref, bundle, stage['key'], 'proposed_disposition')
             policy['status'] = 'UNRESOLVED_DISPUTE'
             persist(run_dir, state)
             raise rt.ReviewError('UNRESOLVED_DISPUTE', 'Native provider did not accept final evidence/dispositions.')
         verdicts = {item['finding_id']: item for item in result['verdicts']}
         if not all(fid in verdicts and verdicts[fid]['verdict'] == 'AGREE' for fid in policy['findings']):
+            # A supported objection is new review evidence, even under CLEAN.
+            # Preserve its distinct target and invalidate earlier cache reuse.
+            ingest(policy, report, ref, bundle, stage['key'], 'proposed_disposition')
             policy['status'] = 'UNRESOLVED_DISPUTE'
             persist(run_dir, state)
             raise rt.ReviewError('INVALID_RESULT', 'Native acknowledgment must support every substantive disposition.')
-        acknowledgments[report['identity']['provider']] = {'report': ref, **stamp(bundle),
-                                                          'context_sha256': result['context_sha256']}
-    request, state, bundle = rt.load(run_dir)
-    policy = state['policy']
+        ack = {'report': ref, **stamp(bundle), 'context_sha256': result['context_sha256']}
+        acknowledgments[provider] = checkpoint['acks'][provider] = ack
+        # Persist each accepted provider before attempting the other. This is not
+        # a complete pair and cannot close a finding or advance a stage.
+        persist(run_dir, state)
     rt.require(set(acknowledgments) == set(rt.PROVIDERS), 'Both actual providers must acknowledge.')
     for row in policy['findings'].values():
         row['state'] = 'CLOSED'
         row['acknowledgments'] = copy.deepcopy(acknowledgments)
     if final:
         policy['acks'] = acknowledgments
-        policy['acks_basis'] = basis
+        policy['acks_basis'] = acknowledgment_basis(policy, bundle)
         make_handoff(request, policy, bundle)
         policy['status'] = 'HANDOFF_PENDING'
     else:
-        current_stage(policy)['acks'] = acknowledgments
-        current_stage(policy)['ack_basis'] = basis
+        stage['acks'] = acknowledgments
+        stage['ack_basis'] = acknowledgment_basis(policy, bundle)
+        policy['status'] = 'ACTIVE'
     persist(run_dir, state)
     return status(run_dir)
 
@@ -396,6 +508,8 @@ def advance(run_dir):
         rt.require(all(row['state'] == 'CLOSED' for row in policy['findings'].values()), 'Resolve findings before the next pass.', 'UNRESOLVED_DISPUTE')
         rt.require(not stage.get('requires_ack') or set(stage.get('acks', {})) == set(rt.PROVIDERS),
                    'A material change requires both-provider validation before proceeding.')
+        if stage.get('requires_ack') or stage.get('acks'):
+            validate_ack_checkpoint(run_dir, request, state, bundle, stage, stage.get('acks', {}))
         checks_pass(policy, bundle)
     stage['complete'] = True
     policy['index'] += 1
@@ -420,7 +534,7 @@ def fix(run_dir, value):
         rt.require(row is not None, 'Unknown finding.')
         rt.require(any(v['verdict']['verdict'] == 'AGREE' and all(v[key] == val for key, val in stamp(bundle).items())
                        for v in row['verdicts'].values()), 'A supported critic finding is required before a fix.')
-    rt.require(policy['fix_rounds'] < policy['fix_allowance'], 'Three-fix checkpoint needs an evidence-backed extension.', 'UNRESOLVED_BUDGET')
+    rt.require(policy['fix_rounds'] < min(policy['fix_allowance'], MAX_FIX_ROUNDS), 'Two correction rounds exhausted; stop optional review.', 'UNRESOLVED_BUDGET')
     rt.require(state['invocations'] < request['limits']['max_invocations'], 'Invocation allowance exhausted.', 'UNRESOLVED_BUDGET')
     state['invocations'] += 1
     ticket = {**value, 'number': state['invocations'], 'status': 'FIX_ADMITTED',
@@ -436,7 +550,7 @@ def fix(run_dir, value):
 def amend(run_dir, value):
     keys(value, ['writer_provider', 'writer_session_id', 'reason', 'next_check', 'authorization'])
     request, state, bundle = rt.load(run_dir)
-    fresh(request, state, bundle)
+    fresh(request, state, bundle, allow_completed=True)
     policy = state['policy']
     rt.require(not policy['report_only'] and not policy['pending_fix'], 'No amendment authority or an author action is outstanding.')
     rt.require(value['authorization'] == 'explicit-user-update', 'Amendments require an explicit user update.')
@@ -445,12 +559,13 @@ def amend(run_dir, value):
     rt.require(value['reason'] and value['next_check'], 'Record the requested change and next check.')
     rt.require(state['quota'] != 'exhausted' and time.time() < state['deadline']
                and state['invocations'] < request['limits']['max_invocations']
-               and policy['fix_rounds'] < policy['fix_allowance'], 'Original author-action limits exhausted.', 'UNRESOLVED_BUDGET')
+               and policy['fix_rounds'] < min(policy['fix_allowance'], MAX_FIX_ROUNDS), 'Original author-action limits exhausted.', 'UNRESOLVED_BUDGET')
     state['invocations'] += 1
     ticket = {**value, 'number': state['invocations'], 'status': 'FIX_ADMITTED',
               'deadline': min(state['deadline'], time.time() + request['limits']['invocation_seconds']),
               'accounting': 'before-author-dispatch', **stamp(bundle)}
     state['calls'].append(copy.deepcopy(ticket))
+    policy['status'] = 'ACTIVE'  # Explicit user amendment invalidates prior readiness immediately.
     policy['pending_fix'] = ticket
     policy['fix_rounds'] += 1
     policy['acks'], policy['receipt'] = {}, None
@@ -459,25 +574,16 @@ def amend(run_dir, value):
 
 
 def extend(run_dir, value):
-    keys(value, ['reason', 'next_check', 'evidence'])
-    request, state, bundle = rt.load(run_dir)
-    fresh(request, state, bundle)
-    policy = state['policy']
-    rt.require(policy['fix_rounds'] >= policy['fix_allowance'] and not policy['pending_fix'], 'Extension applies at the fix checkpoint.')
-    rt.require(value['reason'] and value['next_check'], 'Extension needs a viable evidence-producing next action.')
-    evidence_valid(value['evidence'], bundle)
-    fingerprint = rt.digest(value['evidence'])
-    rt.require(all(item['evidence_sha256'] != fingerprint for item in policy['extensions']), 'Extension must supply new evidence.')
-    policy['extensions'].append({**value, 'evidence_sha256': fingerprint, 'at': time.time()})
-    policy['fix_allowance'] += 3
-    policy['status'] = 'ACTIVE'
-    persist(run_dir, state)
-    return status(run_dir)
+    raise rt.ReviewError('UNRESOLVED_BUDGET',
+                         'Automatic review extensions are disabled. Stop this optional run; retain its history.')
 
 
 def refresh(run_dir, add_evidence=()):
     request, state, old = rt.load(run_dir)
     policy = state['policy']
+    rt.require(not policy.get('stopped'), 'Optional review was stopped.', 'STOPPED')
+    rt.require(policy['status'] not in ('CONSENSUS', 'REPORT_DELIVERED'), 'Completed workflows are read-only history.')
+    rt.budget_available(request, state)
     candidate = copy.deepcopy(request)
     candidate['evidence'] = list(dict.fromkeys(candidate['evidence'] + list(add_evidence)))
     new = rt.snapshot(candidate)
@@ -505,6 +611,7 @@ def refresh(run_dir, add_evidence=()):
         row.pop('acknowledgments', None)
     policy.update(index=0, checks={}, acks={}, receipt=None, status='ACTIVE')
     policy.pop('handoff', None)
+    policy.pop('ack_checkpoint', None)
     persist(run_dir, state)
     return status(run_dir)
 
@@ -527,6 +634,7 @@ def receive(run_dir, value):
 def finish(run_dir):
     request, state, bundle = rt.load(run_dir)
     policy = state['policy']
+    rt.require(not policy.get('stopped'), 'Optional review was stopped.', 'STOPPED')
     if policy['status'] in ('CONSENSUS', 'REPORT_DELIVERED'):
         rt.require(rt.snapshot(request) == bundle, 'Completed review artifact changed.', 'STALE_ARTIFACT')
     else:
@@ -545,6 +653,10 @@ def finish(run_dir):
         rt.require(all(row['state'] == 'CLOSED' for row in policy['findings'].values()), 'Required findings remain unresolved.', 'UNRESOLVED_DISPUTE')
         rt.require(set(policy['acks']) == set(rt.PROVIDERS) and policy.get('acks_basis') == acknowledgment_basis(policy, bundle),
                    'Both native providers must acknowledge the exact final evidence and ledger.')
+        # Completed legacy reports remain history; new completion must validate
+        # the exact current context and every cached report again.
+        if policy['status'] != 'CONSENSUS' or 'ack_checkpoint' in policy:
+            validate_ack_checkpoint(run_dir, request, state, bundle, policy['stages'][-1], policy['acks'])
         for provider, ack in policy['acks'].items():
             report = report_for(run_dir, state, ack['report'])
             rt.require(report['identity']['provider'] == provider and report['result']['status'] == 'CLEAN'
@@ -554,8 +666,34 @@ def finish(run_dir):
     return status(run_dir)
 
 
-def resume(run_dir):
+def stop(run_dir, value):
+    keys(value, ['reason'])
+    rt.require(isinstance(value['reason'], str) and value['reason'].strip(), 'A stopping reason is required.')
     _, state, _ = rt.load(run_dir)
+    policy = state['policy']
+    rt.require(policy['status'] not in ('CONSENSUS', 'REPORT_DELIVERED'), 'Completed reviews remain history.')
+    if state['status'] == 'RUNNING':
+        pid = state['calls'][-1].get('child_pid') if state['calls'] else None
+        rt.require(type(pid) is int and pid > 1, 'Child identity is unknown; investigate before stopping.', 'BUSY')
+        try:
+            rt.os.killpg(pid, 0)
+        except ProcessLookupError:
+            pass  # Dead interrupted child: stopping needs no renewed deadline.
+        except PermissionError:
+            raise rt.ReviewError('BUSY', 'Cannot verify child exit; investigate before stopping.')
+        else:
+            raise rt.ReviewError('BUSY', 'Cancel the live child before stopping.')
+    policy.setdefault('stopped', {**value, 'at': time.time(), 'previous_status': policy['status']})
+    policy['status'] = 'STOPPED'
+    persist(run_dir, state)
+    return status(run_dir)
+
+
+def resume(run_dir):
+    request, state, bundle = rt.load(run_dir)
+    if state['policy']['status'] in ('CONSENSUS', 'REPORT_DELIVERED'):
+        return status(run_dir)
+    fresh(request, state, bundle)
     if state['status'] not in ('READY', 'REVIEWED'):
         rt.resume(run_dir)
     _, state, _ = rt.load(run_dir)
@@ -572,20 +710,22 @@ def main(argv=None):
     select.add_argument('--source', choices=('explicit', 'interactive'), default='explicit')
     select.add_argument('--unattended', action='store_true')
     select.add_argument('--resume')
+    sub.add_parser('preflight')
     init = sub.add_parser('init')
-    init.add_argument('--request', required=True)
-    init.add_argument('--checks', required=True)
-    init.add_argument('--run-dir', required=True)
-    init.add_argument('--mode', required=True, choices=('plan', 'etp', 'adrev'))
-    init.add_argument('--writer-session-id', required=True)
+    init.add_argument('--cross-provider', action='store_true')
+    init.add_argument('--request')
+    init.add_argument('--checks')
+    init.add_argument('--run-dir')
+    init.add_argument('--mode', choices=('plan', 'etp', 'adrev'))
+    init.add_argument('--writer-session-id')
     init.add_argument('--light-review', action='store_true')
     init.add_argument('--report-only', action='store_true')
     commands = ('review', 'critic', 'rebuttal', 'advance', 'acknowledge', 'propose', 'record-check',
-                'fix', 'amend', 'extend', 'refresh', 'receive', 'finish', 'status', 'resume')
+                'fix', 'amend', 'extend', 'refresh', 'receive', 'finish', 'status', 'resume', 'stop')
     for name in commands:
         command = sub.add_parser(name)
         command.add_argument('--run-dir', required=True)
-        if name in ('propose', 'record-check', 'fix', 'amend', 'extend', 'receive'):
+        if name in ('propose', 'record-check', 'fix', 'amend', 'extend', 'receive', 'stop'):
             command.add_argument('--file', required=True)
         if name == 'refresh':
             command.add_argument('--add-evidence', action='append', default=[])
@@ -594,15 +734,21 @@ def main(argv=None):
         if args.command == 'select':
             rt.require(not args.count or len(set(args.count)) == 1, 'Contradictory review counts require one explicit selection.')
             result = selection(args.count[0] if args.count else None, args.source, args.unattended, args.resume)
+        elif args.command == 'preflight':
+            result = preflight()
+        elif args.command == 'init' and not args.cross_provider:
+            result = lead_review()
         elif args.command == 'init':
+            rt.require(all((args.request, args.checks, args.run_dir, args.mode, args.writer_session_id)),
+                       'Cross-provider init requires request, checks, run-dir, mode and writer-session-id.')
             result = initialize(rt.read_json(args.request), args.run_dir, args.mode, rt.read_json(args.checks),
-                                args.writer_session_id, args.light_review, args.report_only)
+                                args.writer_session_id, args.light_review, args.report_only, cross_provider=True)
         else:
             rt.require((Path(args.run_dir) / 'state.json').is_file(), 'Run does not exist.')
             with rt.file_lock(Path(args.run_dir) / '.policy.lock'):
                 if args.command in ('review', 'critic', 'rebuttal'):
                     result = do_review(args.run_dir, args.command)
-                elif args.command in ('propose', 'record-check', 'fix', 'amend', 'extend', 'receive'):
+                elif args.command in ('propose', 'record-check', 'fix', 'amend', 'extend', 'receive', 'stop'):
                     function = record_check if args.command == 'record-check' else globals()[args.command]
                     result = function(args.run_dir, payload(args.run_dir, args.file))
                 elif args.command == 'refresh':

@@ -60,7 +60,7 @@ Then parse the argument:
 
   (the guard allowlists writes under `~/.claude/`, so this passes even while
   the mode is on). Confirm in two lines: the mode is on for this session, and
-  the one-line posture — "I orchestrate: specs, delegation, separate review,
+  the one-line posture — "I orchestrate: specs, delegation, personal spec/quality review,
   triage, merge. Implementation goes to subagents; `/advisor off` ends the
   mode."
 - **`off`** — `rm -f ~/.claude/advisor-mode/$CLAUDE_CODE_SESSION_ID`. Confirm:

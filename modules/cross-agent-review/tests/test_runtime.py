@@ -296,6 +296,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual('1', runtime.native_environment()['CCGM_REVIEW_CHILD'])
 
     def test_capability_profile_removes_execution_remote_tools_and_recursion(self):
+        runtime.save(self.root / 'schema.json', runtime.RESULT_SCHEMA)
         claude = runtime.provider_command('claude', 'sonnet', self.root, self.root / 'schema.json')
         self.assertEqual('', claude[claude.index('--tools') + 1])
         self.assertIn('--restricted', claude)
@@ -407,7 +408,9 @@ class RuntimeTests(unittest.TestCase):
         self.request['limits']['max_invocations'] = 1
         self.create()
         runtime.invoke(self.run)
-        runtime.refresh(self.run)
+        before = (self.run / 'state.json').read_bytes()
+        self.failure('UNRESOLVED_BUDGET', lambda: runtime.refresh(self.run))
+        self.assertEqual(before, (self.run / 'state.json').read_bytes())
         self.failure('UNRESOLVED_BUDGET', lambda: runtime.invoke(self.run))
         self.assertEqual(1, self.state()['invocations'])
         self.failure('UNRESOLVED_BUDGET', lambda: runtime.resume(self.run))
@@ -448,7 +451,7 @@ class RuntimeTests(unittest.TestCase):
         self.scenario({'exit': 1, 'stderr': 'rate limit reached'})
         self.failure('QUOTA_EXHAUSTED', lambda: runtime.invoke(self.run))
         self.assertEqual('exhausted', self.state()['quota'])
-        self.failure('INVALID_REQUEST', lambda: runtime.resume(self.run))
+        self.failure('UNRESOLVED_BUDGET', lambda: runtime.resume(self.run))
 
     def test_permission_denial_is_not_a_clean_review(self):
         self.create()

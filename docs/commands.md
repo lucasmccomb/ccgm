@@ -921,11 +921,11 @@ Installed by the **xplan**, **multi-agent**, and **startup-dashboard** modules.
 
 ### /xplan
 
-Both `/xplan` and `/xplana` request **1 (default), 2 or 3 adversarial reviews before planning side effects**. Supply `--adversarial-reviews 2` or an unambiguous count to skip the setup question. An interactive default waits for submission; autonomous mode still asks, while explicit `--unattended` may record default one. Light/constructive-skip modes retain the adversarial choice. Fresh deepen selects again and reviews the changed plan; resume preserves count, counters and current evidence. Passes alternate from the original host's opposite provider; pass N is final.
+Both `/xplan` and `/xplana` request **1 (default), 2 or 3 adversarial reviews before planning side effects**. Supply `--adversarial-reviews 2` or an unambiguous count to skip the setup question. An interactive default waits for submission; autonomous mode still asks, while explicit `--unattended` may record default one. Light/constructive-skip modes retain the adversarial choice. Fresh deepen selects again and reviews the changed plan; resume preserves count, counters and current evidence. The lead performs these passes personally by default; pass N is final. Explicit `--cross-provider` or natural-language opt-in enables native alternation from the original host’s opposite provider, with early local binary/login preflight. A count or autonomous mode alone does not enable it.
 
 **Interactive deep research, planning, and execution framework.**
 
-A human-in-the-loop planning framework that interviews you upfront, researches your concept deeply, proposes tech stack and architecture for your sign-off, creates a parallelized execution plan, reviews it with specialized agents, and executes via parallel agents.
+A human-in-the-loop planning framework that interviews you upfront, researches your concept deeply, proposes tech stack and architecture for your sign-off, creates a parallelized execution plan, reviews it personally as the lead, and executes via parallel agents.
 
 **Phases** (interactive mode):
 - **Phase 0** - Parse input, create plan directory
@@ -937,8 +937,8 @@ A human-in-the-loop planning framework that interviews you upfront, researches y
 - **Phase 2.6** - Scope sign-off: approve epic structure
 - **Phase 2.7** - Multi-agent setup review
 - **Phase 3** - Plan creation with parallelized epics and dependency waves, including a comprehensive **autonomous E2E test suite** (built in from the ground up for new projects; optimistic coverage gap-fill for touched areas of existing repos)
-- **Phase 4** - Constructive peer review by security, architecture, and business logic agents (stage 1 of 2)
-- **Phase 5** - Write plan.md, then a self-review loop (5.6) and the upfront-selected 1–3 alternating-provider adversarial passes (5.7), default one that enforces the four plan-execution tenets: minimal/edge-bucketed human work, follow-up completion, autonomous decision context, and comprehensive autonomous E2E coverage
+- **Phase 4** - Personal lead review of security, architecture, and business logic (stage 1 of 2)
+- **Phase 5** - Write plan.md, then a self-review loop (5.6) and the upfront-selected 1–3 lead adversarial passes (native provider alternation only when opted in) (5.7), default one that enforces the four plan-execution tenets: minimal/edge-bucketed human work, follow-up completion, autonomous decision context, and comprehensive autonomous E2E coverage
 - **Phase 6** - Web review + final confirmation gate before execution
 - **Phase 7** - Execute via parallel agents in separate clones; waves and completion gate on a green E2E suite and completion of all in-scope follow-up work
 - **Phase 8** - Verification, audit, and retrospective
@@ -949,6 +949,7 @@ Every plan is engineered to execute with minimal human involvement (human work b
 - `--repo <path>` - Analyze and plan work for an existing repo
 - `--light` - Skip interactive interview phases (Phases 0.5, 1.5, 2.5, 2.6, 2.7); uses minimal clarification + traditional walkthrough instead
 - `--autonomous` (alias `-a`, or `/xplana`) - Skip all mid-flow prompts; run the full-depth research + planning + review pipeline end-to-end, then present the completed plan at a single final gate
+- `--cross-provider` - Explicitly enable optional native Claude/Codex review; default review is personal lead review
 - `--adversarial-reviews <1|2|3>` - Supply the upfront adversarial count (default recommendation one)
 - `--unattended` - Explicitly run without a question channel; an omitted count records `unattended-default`
 - `--deepen [<plan-dir>]` - Load an existing plan and run targeted deepening passes on under-specified sections instead of planning fresh
@@ -969,12 +970,13 @@ Every plan is engineered to execute with minimal human involvement (human work b
 
 **Autonomous xplan - the same pipeline with no mid-flow prompts.**
 
-Thin alias for `/xplan --autonomous`. Runs research, naming, tech stack, scope, multi-agent setup, plan creation, the full standard review, the self-review loop, and the selected 1–3 alternating-provider adversarial passes end to end after the one startup choice, then presents the finished plan as a structured artifact at a single final gate.
+Thin alias for `/xplan --autonomous`. Runs research, naming, tech stack, scope, multi-agent setup, plan creation, the full standard review, the self-review loop, and the selected 1–3 lead adversarial passes (native provider alternation only when opted in) end to end after the one startup choice, then presents the finished plan as a structured artifact at a single final gate.
 
 Depth is identical to `/xplan`. The difference is where you spend your attention: `/xplan` asks at each phase boundary, `/xplana` resolves the review-count choice up front and asks for execution approval at the end. Use it when you would have approved every gate anyway, or when you want to start a plan and walk away. Use `/xplan` when you expect to redirect it mid-flight - once `/xplana` is running, the next decision point is the final artifact.
 
 **Flags**:
 - `--repo <path>` - Analyze and plan work for an existing repo
+- `--cross-provider` - Explicitly enable optional native Claude/Codex review; default review is personal lead review
 - `--adversarial-reviews <1|2|3>` - Supply the upfront adversarial count (default recommendation one)
 - `--unattended` - Explicitly run without a question channel; an omitted count records `unattended-default`
 - `--deepen [<plan-dir>]` - Load an existing plan and run targeted deepening passes instead of planning fresh
@@ -1024,7 +1026,7 @@ Reconstructs context from plan files (`progress.md`, `plan.md`, `decisions.md`, 
 
 **Execute ready work — a plan or one-or-more GitHub issues — end-to-end with parallel agents, adversarial PR review, and follow-up completion.**
 
-Resolves a target (a plan file/dir, a single issue, a batch of issues, or the in-progress plan) into units, then runs each through the same hardened loop. A plan fans out across dependency-ordered waves; a single issue is one unit; a batch runs independent issues in parallel. For an issue, the body **and comments** (the investigation) become the spec. Every PR gets a two-stage adversarial review opposite its actual implementing provider (spec compliance then code quality) that never sees the implementer's rationale — full two-stage by default regardless of diff size; supported findings are resolved with the other provider and one designated writer; uncertain disputes remain explicit. Current checks, both native acknowledgments and original-host reception gate completion; three review-fix rounds are a checkpoint with only evidence-backed bounded extensions. The separate three-round CI-repair limit stays unchanged. Follow-up work that arises is tracked, triaged against the plan's decision context, and the in-scope items get the same review — completed before the run is reported done. The **autonomous E2E suite is the completion oracle** (green ⇒ clean/mergeable), not a bare smoke test, and a changed surface without coverage gets an E2E test before completion; test infrastructure (testing agents, RunPod, cloud Mac, real devices) is provisioned as needed. Ceremony scales to the work (a single issue skips the wave/clone/bring-up machinery). Reconciles against live git/GitHub state so finished work is skipped — resumable; re-running a batch continues the unfinished issues. Runs to completion, stopping only for absolute blockers, which it reports while continuing all non-blocked work.
+Resolves a target (a plan file/dir, a single issue, a batch of issues, or the in-progress plan) into units, then runs each through the same hardened loop. A plan fans out across dependency-ordered waves; a single issue is one unit; a batch runs independent issues in parallel. For an issue, the body **and comments** (the investigation) become the spec. Every PR gets personal lead spec-compliance review followed by code-quality review against the actual artifact and fresh checks; explicit `--light-review` selects spec only. `--cross-provider` or natural-language opt-in adds a restricted native run opposite the actual producer, after early binary/login preflight. Provider errors stop that optional run and preserve reports/findings; the lead can separately decide delivery readiness without labeling it approved. Coordinator repairs require no recursive consensus. Optional limits are bounded separately; the ordinary three-round CI-repair limit stays unchanged. Follow-up work that arises is tracked, triaged against the plan's decision context, and the in-scope items get the same review — completed before the run is reported done. The **autonomous E2E suite is the completion oracle** (green ⇒ clean/mergeable), not a bare smoke test, and a changed surface without coverage gets an E2E test before completion; test infrastructure (testing agents, RunPod, cloud Mac, real devices) is provisioned as needed. Ceremony scales to the work (a single issue skips the wave/clone/bring-up machinery). Reconciles against live git/GitHub state so finished work is skipped — resumable; re-running a batch continues the unfinished issues. Runs to completion, stopping only for absolute blockers, which it reports while continuing all non-blocked work.
 
 **Usage**:
 ```
@@ -1035,7 +1037,8 @@ Resolves a target (a plan file/dir, a single issue, a batch of issues, or the in
 /etp <target> --dry-run      # preview the execution model, don't execute
 /etp <target> --confirm      # one go/no-go gate before executing
 /etp <target> --max-agents 3 # cap parallel agents
-/etp #42 --light-review      # trivial diff: single spec-compliance pass (opt-out of Stage 2)
+/etp #42 --light-review      # trivial diff: single lead spec-compliance pass
+/etp #42 --cross-provider    # explicitly enable optional native review
 ```
 
 **Installed by**: xplan module
@@ -1551,7 +1554,7 @@ Unlike commands, skills may carry supporting assets (sub-docs, scripts, referenc
 
 ### /cross-agent-review
 
-**Restricted adversarial review from the other Claude Code or Codex runtime.** The coordinator supplies a narrow frozen artifact/spec bundle, validates attributable findings, and saves bounded counters for explicit continuation. Work routes opposite its actual producer; plan passes alternate from the original host. `REVIEWED` is transport success, not consensus, execution readiness, or merge authorization. The pilot workflow policy supplies the separate evidence/acknowledgment gate.
+**Opt-in restricted adversarial review from the other Claude Code or Codex runtime.** The coordinator supplies a narrow frozen artifact/spec bundle, validates attributable findings, and saves bounded counters for explicit continuation. Work routes opposite its actual producer; plan passes alternate from the original host. `REVIEWED` is transport success, not consensus, execution readiness, or merge authorization. Only opted-in runs use the separate evidence/acknowledgment gate. Default lead review retains normal checks and release authorization.
 
 Invoke the `cross-agent-review` skill from either host. The optional Codex skill is installed with `python3 ~/.claude/bin/cross-agent-review-setup.py install` after installing the module. See [module usage and effective restrictions](../modules/cross-agent-review/README.md) for request schemas, commands, and native authentication requirements.
 
@@ -1561,7 +1564,7 @@ Invoke the `cross-agent-review` skill from either host. The optional Codex skill
 
 ### /advisor
 
-**Toggle delegation posture for the current Claude Code session.** `/advisor on`, `/advisor off`, and `/advisor status` are explicit variants; the bare command toggles. While enabled, the main agent writes specifications and coordinates separate implementers/reviewers; its source writes and non-orchestration Bash are mechanically blocked. State is per session, with SessionStart enabled by default unless `CCGM_ADVISOR_AUTO=false`. The cross-agent pilot permits only its specific orchestration helper, not arbitrary scripts or inline fixes. See [advisor-mode](../modules/advisor-mode/README.md).
+**Toggle delegation posture for the current Claude Code session.** `/advisor on`, `/advisor off`, and `/advisor status` are explicit variants; the bare command toggles. While enabled, the main agent writes specifications, coordinates implementers and personally reviews spec compliance then quality; its source writes and non-orchestration Bash are mechanically blocked. State is per session, with SessionStart enabled by default unless `CCGM_ADVISOR_AUTO=false`. The cross-agent pilot permits only its specific orchestration helper, not arbitrary scripts or inline fixes. See [advisor-mode](../modules/advisor-mode/README.md).
 
 **Installed by**: advisor-mode module
 
@@ -1571,7 +1574,7 @@ Invoke the `cross-agent-review` skill from either host. The optional Codex skill
 
 **Adversarial review of a plan or any entity.**
 
-Resolves a plan, document, PR, issue, code directory or concept and sends its frozen evidence to a fresh reviewer opposite the actual producing provider. The reviewer attacks premises, failure modes, falsifiability, opposing arguments and reversal costs. A designated writer applies supported plan findings by default after evidence-based resolution; `--no-apply`, report-only and natural-language opt-outs preserve the target, and headless only applies with explicit `--apply`. Plan reviews cover the four autonomous-execution tenets. Unknown/mixed authorship gets both perspectives. Report completion with open findings is not consensus or execution readiness.
+Resolves a plan, document, PR, issue, code directory or concept for personal lead review by default. Explicit `--cross-provider` or a clear natural-language request sends frozen evidence to a restricted opposite-provider reviewer after local binary/login preflight. The reviewer attacks premises, failure modes, falsifiability, opposing arguments and reversal costs. A designated writer applies supported plan findings by default after evidence-based resolution; `--no-apply`, report-only and natural-language opt-outs preserve the target, and headless only applies with explicit `--apply`. Plan reviews cover the four autonomous-execution tenets. Optional native review of unknown/mixed authorship gets both perspectives. Report completion with open findings is not consensus or execution readiness.
 
 **Usage**:
 ```

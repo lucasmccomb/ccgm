@@ -15,9 +15,18 @@ if config.get('exit'):
 if config.get('raw'):
     print(config['raw'])
     sys.exit(0)
-prompt = json.loads(sys.stdin.read().split('\n', 1)[1])
+preamble, body = sys.stdin.read().split('\n', 1)
+prompt = json.loads(body)
+if config.get('capture_prompt'):
+    with Path(config['capture_prompt']).open('a') as capture:
+        capture.write(json.dumps({'preamble': preamble, 'data': prompt}) + '\n')
 identity = prompt['identity']
 provider = identity['provider']
+if config.get('capture_schema'):
+    native_schema = (json.loads(sys.argv[sys.argv.index('--json-schema') + 1]) if provider == 'claude'
+                     else json.loads(Path(sys.argv[sys.argv.index('--output-schema') + 1]).read_text()))
+    Path(config['capture_schema']).write_text(json.dumps({
+        'native_schema': native_schema, 'prompt_schema': prompt['output_schema'], 'identity': identity}))
 payload = {'schema_version': 1, **identity, 'status': 'CLEAN', 'summary': 'No defect found.',
            'findings': [], 'verdicts': [], 'evidence_requests': [], 'verification': []}
 if config.get('leak_check'):
@@ -37,6 +46,9 @@ if context.get('purpose', '').endswith('ack') or config.get('critic_verdict'):
         evidence = (row.get('proposal') or row['finding'])['evidence']
         payload['verdicts'].append({'finding_id': fid, 'verdict': config.get('critic_verdict', 'AGREE'), 'evidence': evidence})
 payload.update(config.get('payload', {}))
+payload.update(config.get('payload_by_role', {}).get(identity['role'], {}))
+for field in config.get('omit_fields', []):
+    payload.pop(field, None)
 if provider == 'claude':
     events = [{'type': 'system', 'subtype': 'init', 'model': 'claude-fixture', 'tools': ['StructuredOutput']},
               {'type': 'result', 'subtype': 'success', 'is_error': False,

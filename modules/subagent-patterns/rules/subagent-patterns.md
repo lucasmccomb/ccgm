@@ -97,11 +97,11 @@ The only exception: inline a small excerpt (10-30 lines) when the subagent needs
 
 ## Two-Stage Review
 
-After subagent results come back, review in two passes. **Order matters: Stage 1 gates Stage 2.** Running code-quality review on a scope-creeping or deliverable-incomplete implementation wastes effort polishing code that will be reverted or re-dispatched.
+After subagent results come back, the lead personally reviews in two passes by default. Native cross-provider review requires `--cross-provider` in a supported workflow or an explicit natural-language request; it is not implied by delegation. **Order matters: Stage 1 gates Stage 2.** Running code-quality review on a scope-creeping or deliverable-incomplete implementation wastes effort polishing code that will be reverted or re-dispatched.
 
 ### Fresh Context: Reviewers Do Not Inherit the Implementer's Rationale
 
-Both review stages run in **fresh context**. A reviewer judges the change against the spec and the artifact, not against the implementer's explanation of why they did it that way. A reviewer who reads "I chose X over Y because…" grades the *defense* of the change, not the change - and that inflates sign-off. This is the same integrity property Argus enforces by never showing its judge the diff-author's reasoning.
+For explicitly dispatched reviewers, run each stage in **fresh context**. Personal lead review cannot claim a fresh independent session; it still judges the actual spec, artifact and check evidence. A reviewer judges the change against the spec and the artifact, not against the implementer's explanation of why they did it that way. A reviewer who reads "I chose X over Y because…" grades the *defense* of the change, not the change - and that inflates sign-off. This is the same integrity property Argus enforces by never showing its judge the diff-author's reasoning.
 
 Pass each reviewer ONLY:
 
@@ -113,7 +113,7 @@ Do NOT pass the implementer's conversation, working notes, or chain-of-thought a
 
 ### Results Stay in Files, Not in the Reply
 
-Each reviewer writes its structured findings (the four-state status plus its itemized checks) to a file the caller named, and replies with only that path plus a terminal line. The caller routes on the artifact it reads from disk, not on a prose summary in the chat. This mirrors Argus: the dispatcher trusts the written result, never a narrative that cannot be re-read. If the artifact is missing or unparseable, treat the reviewer as failed - do not reconstruct its verdict from the reply.
+Record personal lead findings and verification evidence in the work record. When a reviewer is explicitly dispatched, it writes its structured findings (the four-state status plus its itemized checks) to a file the caller named, and replies with only that path plus a terminal line. The caller routes on the artifact it reads from disk, not on a prose summary in the chat. This mirrors Argus: the dispatcher trusts the written result, never a narrative that cannot be re-read. If the artifact is missing or unparseable, treat the reviewer as failed - do not reconstruct its verdict from the reply.
 
 ### Stage 1: Spec Compliance
 

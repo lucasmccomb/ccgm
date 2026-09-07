@@ -53,7 +53,7 @@ Read these files to reconstruct full context:
 
 ### 2.5 Restore Planning Review State Before Execution State
 
-Read `reviews/review-selection.json` if present. It records the original count/source/provider/session and points to the authoritative private policy run. If planning or adversarial review was interrupted, resume that phase before interpreting execution waves:
+Read `reviews/review-selection.json` if present. Restore the count/source, recorded review mode and completed current evidence. Lead mode has no native run: resume its personal review/planning checkpoint without provider checks or acknowledgments. A missing mode must not be treated as implicit opt-in. For a saved explicitly opted-in cross-provider run, read its private run pointer and inspect state before considering continuation:
 
 ```bash
 python3 ~/.claude/lib/cross_agent_review_policy.py select --resume "{review-run-dir}"
@@ -61,9 +61,9 @@ python3 ~/.claude/lib/cross_agent_review_policy.py status --run-dir "{review-run
 python3 ~/.claude/lib/cross_agent_review_policy.py resume --run-dir "{review-run-dir}"
 ```
 
-Use `resume` only for an interrupted/incomplete operation, following its returned next action; it never replays a child automatically. Preserve count/source, spent invocations/deadline, finding dispositions, completed passes and hashes. Reuse complete current evidence and continue from the first incomplete stage; do not re-ask or create a new run to reset limits. If review has not yet initialized, validate the saved startup choice with `select --count N --source SOURCE` (or explicit unattended selection) and resume planning from its checkpoint. A missing or ambiguous legacy record requires an upfront choice before planning effects; filenames alone do not establish whether one or three were selected.
+For the optional run, perform local `preflight` before any new native dispatch. Use `resume` only for an interrupted/incomplete operation, following its returned next action; it never replays a child automatically. Preserve count/source, spent invocations/deadline, finding dispositions, completed passes and hashes. Reuse complete current evidence and continue from the first incomplete stage; do not re-ask or create a new run to reset limits. If review has not yet initialized, validate the saved startup choice with `select --count N --source SOURCE` (or explicit unattended selection) and resume planning from its checkpoint. A missing or ambiguous legacy record requires an upfront choice before planning effects; filenames alone do not establish whether one or three were selected.
 
-A changed plan or spec invalidates affected evidence and requires policy refresh/revalidation before completion. Run the same Phase 5.7 and final execution gate as X-Plan. Only after a current successful review gate and existing execution authorization should the wave-resume steps below run. A pure resume keeps its original selection; a new `--deepen` request makes a fresh startup choice.
+A changed plan or spec invalidates affected evidence and requires renewed lead review/checks; an active optional run also requires policy refresh/revalidation. A `STOPPED` run cannot resume to approval: keep its status separate if the lead evaluates delivery independently. Run the same Phase 5.7 and final execution gate as X-Plan. Only after a current successful review gate and existing execution authorization should the wave-resume steps below run. A pure resume keeps its original selection; a new `--deepen` request makes a fresh startup choice.
 
 ### 3. Analyze Last Checkpoint
 

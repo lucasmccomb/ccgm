@@ -1174,6 +1174,57 @@ def moves_cwd(segment):
     return bool(words) and words[0].text.rsplit("/", 1)[-1] in CD_COMMANDS
 
 
+def review_policy_source_error(script):
+    """Trust the installed entry point only when its local code is not writable.
+
+    These are the exact paths resolved by the shipped shim and policy import.
+    Checking the shim alone misses a protected shim pointing at a writable
+    policy or runtime. Reuse the file gate, including its HOME/temp precedence
+    and worktree exceptions, rather than inventing another write-root list.
+    """
+    shim = os.path.realpath(script)
+    policy = os.path.realpath(os.path.join(os.path.dirname(os.path.dirname(shim)),
+                                         "skills", "cross-agent-review", "scripts", "review_policy.py"))
+    runtime = os.path.realpath(os.path.join(os.path.dirname(policy), "cross_agent_review.py"))
+    sources = (shim, policy, runtime)
+    if any(not os.path.isfile(path) for path in sources):
+        return "the installed review policy or one of its local imports is missing"
+    if any(path_allowed(path) for path in sources):
+        return ("the installed review policy resolves to main-agent-writable code; "
+                "delegate this policy command to a subagent for copy installs, "
+                "or use an installed symlink into a repository outside the allowed write roots")
+    # Python also searches these directories for sibling modules, packages and
+    # bytecode. A symlinked package/cache must not reintroduce writable imports.
+    pending = list({os.path.dirname(path) for path in sources})
+    visited = set()
+    entries_seen = 0
+    try:
+        while pending:
+            directory = os.path.realpath(pending.pop())
+            if path_allowed(directory):
+                return "a review policy import directory is main-agent-writable; delegate this policy command"
+            if directory in visited:
+                continue
+            visited.add(directory)
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    entries_seen += 1
+                    if entries_seen > 256:
+                        return "the review policy import tree exceeds the bounded trust check; delegate this policy command"
+                    # A currently dangling package link can become importable
+                    # through an earlier allowed mkdir/cp in this same shell
+                    # command. Judge its destination before checking its type.
+                    if entry.is_symlink() and path_allowed(entry.path):
+                        return "a review policy import symlink targets main-agent-writable code; delegate this policy command"
+                    if entry.is_dir():
+                        pending.append(entry.path)
+                    elif entry.name.endswith((".py", ".pyc", ".so", ".pyd")) and path_allowed(entry.path):
+                        return "a review policy import or bytecode file is main-agent-writable; delegate this policy command"
+    except OSError:
+        return "the review policy import tree could not be checked; delegate this policy command"
+    return None
+
+
 def review_policy_segment_allowed(words, after_cd=False):
     """Permit only the installed pilot coordinator, never a Python escape hatch.
 
@@ -1185,23 +1236,30 @@ def review_policy_segment_allowed(words, after_cd=False):
         return False
     executable = words[0].text
     python = shutil.which("python3")
+    if not python or path_allowed(os.path.realpath(python)):
+        return False
     if executable != "python3" and (not python or not os.path.isabs(executable)
             or os.path.realpath(executable) != os.path.realpath(python)):
         return False
     script = os.path.expanduser(os.path.expandvars(words[1].text))
     expected = os.path.join(os.path.expanduser("~"), ".claude", "lib", "cross_agent_review_policy.py")
-    if not os.path.isabs(script) or os.path.normpath(script) != expected:
+    if not os.path.isabs(script) or script != expected or review_policy_source_error(script):
+        return False
+    if any(os.environ.get(name) for name in
+           ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE", "PYTHONINSPECT", "PYTHONSTARTUP")):
         return False
     action = words[2].text
-    if action == "--help":
+    if action in ("--help", "preflight"):
         return len(words) == 3
+    if action == "init" and len(words) == 3:
+        return True  # Local lead review is the no-write default.
     options = {
         "select": {"--count", "--source", "--unattended", "--resume"},
-        "init": {"--request", "--run-dir", "--mode", "--checks", "--writer-session-id", "--light-review", "--report-only"},
+        "init": {"--request", "--run-dir", "--mode", "--checks", "--writer-session-id", "--light-review", "--report-only", "--cross-provider"},
         **{name: {"--run-dir"} for name in
            ("review", "critic", "rebuttal", "advance", "acknowledge", "status", "resume", "finish")},
         **{name: {"--run-dir", "--file"} for name in
-           ("propose", "record-check", "fix", "amend", "extend", "receive")},
+           ("propose", "record-check", "fix", "amend", "extend", "receive", "stop")},
     }
     options["refresh"] = {"--run-dir", "--add-evidence"}
     if action not in options:
@@ -1213,7 +1271,7 @@ def review_policy_segment_allowed(words, after_cd=False):
         option, equal, value = args[index].partition("=")
         if option not in options[action] or (option in values and option != "--add-evidence"):
             return False
-        if option in ("--unattended", "--light-review", "--report-only"):
+        if option in ("--unattended", "--light-review", "--report-only", "--cross-provider"):
             if equal:
                 return False
             values[option] = True
@@ -1231,6 +1289,8 @@ def review_policy_segment_allowed(words, after_cd=False):
                 values[option] = value
         index += 1
     if action != "select" and "--run-dir" not in values:
+        return False
+    if action == "stop" and "--file" not in values:
         return False
     for key in ("--run-dir", "--resume"):
         if key in values:
@@ -1258,8 +1318,13 @@ def bash_segment_allowed(segment, after_cd=False):
     args = [w.text for w in words[1:]]
     if argument_blocker(segment) is not None:
         return False
-    if first == "python3" and review_policy_segment_allowed(words, after_cd):
-        return True
+    if first == "python3":
+        # Do not erase command-local PATH/HOME/PYTHONPATH assignments before
+        # trusting the interpreter and imports. Other command grammars retain
+        # their existing prefix handling.
+        policy_words = [normalize_word(w) for w in split_words(strip_grouping(segment))]
+        if review_policy_segment_allowed(policy_words, after_cd):
+            return True
     if first == "sed":
         # -i in any form: bare, with attached suffix (-i.bak), inside a
         # single-dash flag cluster (-ni), or --in-place[=suffix].
@@ -1432,6 +1497,12 @@ def check_command(command, depth=0):
             reason = argument_blocker(segment)
             if reason is not None:
                 return reason
+            words = segment_words(segment)
+            if len(words) > 1 and words[0].text.rsplit("/", 1)[-1] == "python3" and words[1].text.endswith("/cross_agent_review_policy.py"):
+                script = os.path.expanduser(os.path.expandvars(words[1].text))
+                reason = review_policy_source_error(script)
+                if reason is not None:
+                    return reason
             paths = [w.text for w in segment_words(segment)[1:]
                      if not w.text.startswith("-")]
             if any(TILDE_CWD_RE.match(p) for p in paths) or (
