@@ -11,7 +11,7 @@
   "plugins": [
     {
       "category": "workflow",
-      "description": "Adversarial review of plans and other artifacts through an opposite-provider reviewer and evidence-based resolution. A designated writer applies authorized plan fixes; report-only targets stay unchanged.",
+      "description": "Adversarial review of plans and artifacts with personal lead review by default and bounded opposite-provider review on explicit request. A designated writer applies authorized fixes; report-only targets stay unchanged.",
       "name": "adversarial-review",
       "source": "./adversarial-review",
       "tags": [
@@ -367,7 +367,7 @@
     },
     {
       "category": "workflow",
-      "description": "Restricted Claude/Codex review transport and pilot workflow policy: frozen evidence, opposite-provider routing, bounded resolution, current acknowledgments and reversible Codex skill setup.",
+      "description": "Opt-in restricted Claude/Codex review with frozen evidence, bounded exchanges, reusable evidence-bound acknowledgments and reversible Codex skill setup. Personal lead review and repository checks are the default.",
       "name": "cross-agent-review",
       "source": "./cross-agent-review",
       "tags": [
@@ -1055,7 +1055,7 @@
     },
     {
       "category": "workflow",
-      "description": "Research, planning and execution with an upfront choice of 1–3 alternating Claude/Codex adversarial reviews, default one, plus opposite-provider ETP review gates.",
+      "description": "Research, planning and execution with an upfront choice of 1–3 adversarial reviews, default one. Personal lead review and repository checks are the default; alternating Claude/Codex review is opt-in.",
       "name": "xplan",
       "source": "./xplan",
       "tags": [

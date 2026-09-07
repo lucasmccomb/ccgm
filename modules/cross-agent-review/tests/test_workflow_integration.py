@@ -35,7 +35,7 @@ class InstalledWorkflowTests(unittest.TestCase):
         checks = self.root / 'checks.json'
         request.write_text(json.dumps(self.request))
         checks.write_text(json.dumps({'required': [] if report_only else ['addition']}))
-        return self.cli('init', '--request', str(request), '--checks', str(checks),
+        return self.cli('init', '--cross-provider', '--request', str(request), '--checks', str(checks),
                         '--run-dir', str(self.run), '--mode', mode, '--writer-session-id',
                         'author-session', *(['--report-only'] if report_only else []))
 
@@ -125,6 +125,8 @@ class InstalledWorkflowTests(unittest.TestCase):
         self.control('amend', {'writer_provider': 'codex', 'writer_session_id': 'author-session',
                               'reason': 'User requested an explicit type contract.', 'next_check': 'addition',
                               'authorization': 'explicit-user-update'})
+        self.assertFalse(self.cli('status')['execution_ready'])
+        self.assertEqual('ACTIVE', self.cli('status')['status'])
         (self.source / 'artifact.py').write_text('def add(a: int, b: int): return a + b\n')
         (self.source / 'evidence.txt').write_text('Acceptance still requires add(2, 3) == 5.\n')
         refreshed = self.cli('refresh', '--add-evidence', 'evidence.txt')

@@ -1,8 +1,8 @@
 # Adversarial Review
 
-`/adrev` - run a single hostile lens against a plan or any entity: a file, doc, PR, issue, directory, or an idea stated inline. A separate `adrev-reviewer` agent (fresh context - the author session never grades its own work) attacks premises, hunts failure modes, steelmans the strongest case against, and checks falsifiability and reversal costs.
+`/adrev` - run a single hostile lens against a plan or any entity: a file, doc, PR, issue, directory, or an idea stated inline. The lead personally applies the `adrev-reviewer` attack criteria by default: it attacks premises, hunts failure modes, steelmans the strongest case against, and checks falsifiability and reversal costs.
 
-For plans, a **designated writer applies supported findings after an opposite-provider review and evidence-based critic exchange**. Reviewers stay read-only, and the coordinator preserves the report and evidence ledger. `--no-apply` or a natural-language opt-out returns findings without target changes. Headless mode applies only with explicit `--apply`; writable markdown documents can also opt in explicitly.
+For plans, a **designated writer applies supported findings after evidence-backed lead review**. Explicit cross-provider mode adds a restricted reviewer and bounded critic exchange; preserve its report and evidence ledger. `--no-apply` or a natural-language opt-out returns findings without target changes. Headless mode applies only with explicit `--apply`; writable markdown documents can also opt in explicitly.
 
 ## How It Relates to Other Review Modules
 
@@ -36,6 +36,7 @@ Files installed globally to `~/.claude/`:
 /adrev src/auth/                             # attack a codebase area
 /adrev "switching the store from JSONL to SQLite"   # attack a stated concept
 /adrev docs/rfc.md --apply                   # force incorporation for a non-plan doc
+/adrev plan.md --cross-provider           # optional native review after local readiness preflight
 /adrev plan.md --focus "the rollout sequencing"
 /adrev plan.md mode:headless                 # skill-to-skill: JSON envelope, no prompts
 ```
@@ -64,7 +65,9 @@ The four reinforce each other: decision context (3) lets an agent finish follow-
 
 ## The Apply Protocol (plans)
 
-The opposite-provider reviewer is read-only. Findings are settled on a frozen artifact with an evidence-grounded critic, then one designated writer applies authorized changes. The policy checks current hashes, required checks, supported dispositions, both native provider acknowledgments and original-host reception. Confidence alone cannot close a finding. Preserve goal decisions and resource exhaustion as explicit unresolved states.
+The lead judges findings against the actual artifact, goal and evidence; one designated writer applies supported authorized changes, followed by affected checks and personal review. `--cross-provider` or explicit natural-language opt-in enables an optional restricted opposite-provider run. Its early `preflight` checks both native binaries/login status; default lead review needs no provider authentication. The optional policy validates frozen evidence, dispositions, native acknowledgments and a caller-attested host receipt. `record-check` records supplied output; it does not execute checks or prove they ran.
+
+Provider errors stop that optional run and preserve reports/findings. The lead may separately evaluate delivery with normal checks without claiming the stopped run approved; coordinator repairs need no recursive consensus. Use the common private directory `~/.claude/cross-agent-review/<run-id>/` and, under advisor mode, only the installed policy shim. Marketplace-only Claude installs lack that shim; use canonical CCGM installation or delegated execution. See the workflow reference for the bounded native contract.
 
 Plans apply supported fixes by default. `--no-apply`, report-only mode and natural-language opt-outs keep the target unchanged; headless applies only with explicit `--apply`. Report delivery with open findings is not consensus or execution readiness. See the [pilot workflow contract](../cross-agent-review/skills/cross-agent-review/references/workflow.md).
 
@@ -79,7 +82,7 @@ cp modules/adversarial-review/agents/adrev-reviewer.md ~/.claude/agents/adrev-re
 
 ## Dependencies
 
-- `cross-agent-review` - restricted native providers and deterministic pilot workflow gates; install through the CCGM dependency resolver or follow its module README first
+- `cross-agent-review` - local helpers and opt-in restricted native provider workflow gates; install through the CCGM dependency resolver or follow its module README first
 - `subagent-patterns` - dispatch uses pass-paths-not-contents, the four-state status protocol, and skill invocation modes
 
 ## When To Run

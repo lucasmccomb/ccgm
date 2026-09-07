@@ -101,7 +101,7 @@ Steps:
 6. Verify: confirm ~/.claude/rules/ and ~/.claude/commands/ exist and list their contents.
 7. Report: the actual preset or additions installed, existing modules preserved, requested modules added or replaced, and any errors.
 
-Modules in this preset: global-claude-md, autonomy, identity, git-workflow, hooks, settings, commands-core, commands-utility.
+Modules in this preset: global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, ask-context, model-vetting, live-testing-guard, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline.
 ```
 
 ### team
@@ -127,7 +127,7 @@ Steps:
 6. Verify: confirm ~/.claude/rules/, ~/.claude/commands/, and ~/.claude/hooks/ exist and list their contents.
 7. Report: the actual preset or additions installed, existing modules preserved, requested modules added or replaced, and any errors.
 
-Modules in this preset: global-claude-md, autonomy, git-workflow, hooks, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification.
+Modules in this preset: global-claude-md, autonomy, git-workflow, hooks, branch-guard, ask-context, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, writing-system, ce-review, pr-feedback, document-review, compound-knowledge, pr-review-toolkit, skill-authoring, subagent-patterns.
 ```
 
 ### cloud-agent

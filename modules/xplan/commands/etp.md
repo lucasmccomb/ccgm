@@ -1,12 +1,12 @@
 ---
 description: Execute a ready plan OR GitHub issue(s) end-to-end with parallel agents, adversarial PR review, and follow-up completion. Runs to completion, stopping only for absolute blockers.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <plan-file-or-dir | #issue [#issue ...] | issue-url> [--dry-run] [--confirm] [--max-agents N] [--light-review]
+argument-hint: <plan-file-or-dir | #issue [#issue ...] | issue-url> [--dry-run] [--confirm] [--max-agents N] [--light-review] [--cross-provider]
 ---
 
 # etp - Execute the Plan or Issue(s)
 
-Take work that is ready to build - a plan an agent has been developing, any plan file you point at, or one-or-more GitHub issues that have been investigated and are ready to complete - and drive it to done. `etp` does not research, name, or write the work; it **executes** it. It resolves the target into units, runs them with parallel agents, adversarially reviews every PR with a *separate* agent, fixes what is reasonable and valid, completes the follow-up work that surfaces along the way (reviewing those PRs too), and does not stop until everything that can be done is done.
+Take work that is ready to build - a plan an agent has been developing, any plan file you point at, or one-or-more GitHub issues that have been investigated and are ready to complete - and drive it to done. `etp` does not research, name, or write the work; it **executes** it. It resolves the target into units, runs them with parallel agents, personally performs lead spec-compliance and code-quality review of every PR, fixes what is reasonable and valid, completes the follow-up work that surfaces along the way (reviewing those PRs too), and does not stop until everything that can be done is done.
 
 A plan and an issue are two **sources** of work that both resolve into the same thing - **units** - and everything downstream (review → fix → merge → follow-ups → audit) is shared. **Ceremony scales to the work**: a single issue skips the multi-clone / wave / bring-up machinery a multi-epic plan needs and collapses to implement → adversarial review → fix → merge → follow-ups → done.
 
@@ -35,13 +35,14 @@ Everything below is the operational expansion of that directive. When a phase an
 | Role | Agent type | Model |
 |------|-----------|-------|
 | Implementation (one per unit) | `implementer` | sonnet |
-| Adversarial review - Stage 1 | Spec-compliance lens, opposite actual producer | Provider-specific vetted review model |
-| Adversarial review - Stage 2 | Code-quality lens, opposite actual producer | Provider-specific vetted review model |
+| Review - Stage 1 | Lead spec-compliance review | Current host model |
+| Review - Stage 2 | Lead code-quality review | Current host model |
+| Optional cross-provider review | Opposite actual producer, only when explicitly requested | Provider-specific vetted review model |
 | Follow-up fixes | `implementer` | sonnet |
 | Cheap mechanical checks (status, ls) | default | haiku |
 | Orchestrator (this session) | - | current model |
 
-The orchestrator stays on the current model for synthesis, triage, and routing. It never grades a PR itself - grading is delegated to a separate agent (see Integrity, below).
+The orchestrator stays on the current model for synthesis, triage, and routing. It personally grades the actual PR against the spec and fresh evidence by default; cross-provider review is opt-in (see Integrity, below).
 
 ---
 
@@ -56,11 +57,16 @@ Parse from `$ARGUMENTS`:
 - **`--dry-run`**: resolve and analyze the target, print the execution model, then STOP. No branches, PRs, or merges.
 - **`--confirm`**: pause for one explicit go/no-go gate after the pre-flight analysis (Phase 3). Off by default - the directive says don't stop, so the default is to proceed once the target is resolved unambiguously.
 - **`--max-agents N`**: cap concurrent implementation agents (default: the width of the widest wave, clamped to the available isolation slots).
-- **`--light-review`**: downgrade the adversarial review to a single separate-agent spec-compliance pass (skip the Stage-2 code-quality pass). For trivial diffs only. **The default is the full two-stage review regardless of diff size** - this flag is an explicit opt-out, never the default.
+- **`--cross-provider`**: opt into the optional native Claude/Codex review run. An explicit natural-language request is equivalent; execution authorization or `--light-review` alone is not opt-in.
+- **`--light-review`**: downgrade the adversarial review to a single spec-compliance pass (skip the Stage-2 code-quality pass). For trivial diffs only. **The default is the full two-stage review regardless of diff size** - this flag is an explicit opt-out, never the default.
 
 ---
 
 ## Phase 0: Resolve & Load the Work Source
+
+### Optional provider preflight
+
+For explicit `--cross-provider` only, run `python3 ~/.claude/lib/cross_agent_review_policy.py preflight` before dispatching work. `AVAILABLE` confirms both binaries report native login readiness; it does not prove a model review succeeded. `NEEDS_PROVIDER` stops the optional path before expensive work. Default lead review requires no second-provider binary or login. The lead may separately continue the authorized delivery with personal review; record that decision and preserve the optional failure.
 
 ### 0.1 Classify the target
 
@@ -245,27 +251,27 @@ Spawn one `implementer` agent per unit (model sonnet), each in its own **worktre
 
 Do not trust the self-report as proof. The diff and the review are the proof.
 
-### 4.2 Adversarial review (opposite actual implementing provider)
+### 4.2 Lead Review (Spec Before Quality)
 
-Use `~/.claude/skills/cross-agent-review/references/workflow.md` and initialize its **etp** mode for every new or inherited PR and every follow-up. Record the unit's actual implementing provider/session from dispatch evidence. A Claude orchestrator using a Codex implementer gets Claude review; the inverse gets Codex review. Unknown or materially mixed contributions require both perspectives; never relabel them from Git author names or the orchestrator model.
+The lead personally reviews every new or inherited PR and follow-up against its actual diff and source, the unit's accepted deliverables and fresh check evidence. For issues, include the issue body and investigation comments. Treat the implementer's rationale and completion report as claims to verify, never proof.
 
-Pass the spec and frozen diff/relevant source/check evidence, without the implementer's persuasive rationale. For issue units the spec includes the issue body and investigation comments; for plans it is the unit's accepted deliverables. The reviewer cannot run commands in the restricted transport, so delegate fresh deterministic checks to a verifier and record their actual outputs via the policy's `record-check`; do not claim the reviewer ran them. A missing-context request must be answered with specifically named evidence, followed by `refresh --add-evidence <source-relative-file>`.
+**Stage 1: spec compliance.** Check every deliverable, constraint and scope boundary. Resolve failures and verify the updated artifact before Stage 2.
 
-**Stage 1: spec compliance.** Check every deliverable, constraint and scope boundary. Only its current checks, resolved findings and `advance` gate unlock Stage 2. A clean initial stage does not need a redundant stage acknowledgment; after material changes, satisfy the policy’s requested acknowledgment first.
+**Stage 2: code quality.** Check correctness, security, silent failures, edge cases, project conventions and needless complexity. These stages are sequential. `--light-review` explicitly selects only Stage 1 for a trivial diff; full spec then quality is the default. Record the lead's evidence-backed result for each required stage. Advisor mode delegates builds/tests and all source changes; the lead reads their actual outputs.
 
-**Stage 2: code quality.** Check correctness, security, silent failures, edge cases, project conventions and needless complexity. It routes opposite the actual producer, independently of Stage 1's reviewer identity. Both stages share one work-unit run, deadline, invocation allowance and fix count. They are sequential, never parallel.
+**Optional cross-provider mode:** only with explicit opt-in, follow `~/.claude/skills/cross-agent-review/references/workflow.md`. Initialize one private unit run with `init --cross-provider --mode etp` and its required request/check/writer options; add `--light-review` only when selected. Use `~/.claude/cross-agent-review/<run-id>/`. Record the actual implementing provider/session from dispatch evidence; each reviewer routes opposite that producer. Unknown or materially mixed contributions require both perspectives, never guessed Git authorship.
 
-`--light-review` explicitly selects only Stage 1 for a trivial diff; record that choice using the policy's supported light-review mode. It does not alter provider independence or the evidence gate. Full spec then quality is the default.
+Supply the spec, complete stage criteria, frozen diff and relevant source/check evidence. Restricted reviewers cannot explore files or run commands. A missing-context request needs specifically named evidence and `refresh --add-evidence`; `record-check` records independently executed output, not reviewer execution. The optional policy gates spec before quality and shares the unit's limits across its native operations.
 
-### 4.3 Resolve findings and apply supported fixes
+### 4.3 Resolve Findings and Apply Supported Fixes
 
-Keep each artifact frozen while a reviewer and the other provider settle findings. Use stable IDs, concrete requirement/source/test evidence and `AGREE`, `DISAGREE_EVIDENCE`, or `DISAGREE_CONCERN`. Concern alone does not refute evidence; agreement alone does not establish correctness. The orchestrator coordinates proposals rather than overruling supported objections.
+The lead assesses every supported objection against the actual goal, source and deterministic evidence, regardless of which agent raised it. Record concrete dispositions and reasons; do not waive a hard requirement with an unsupported scope label. Dispatch fixes to the designated writer, inspect the resulting diff, rerun affected checks and repeat the affected spec/quality review. A material change cannot inherit obsolete approval. Do not manufacture findings when the evidence supports a clean review.
 
-Send accepted fixes to the one designated writer using policy `fix` admission before dispatch. Advisor mode still delegates every source change. Record actual writer identity and retain material mixed provenance; after changes, refresh and validate current artifacts, rerun affected checks, and re-enter the required spec-before-quality gate. A real material change cannot inherit an obsolete review or acknowledgment. Refuted/duplicate/out-of-scope dispositions require evidence and the other provider's support; a one-line unilateral rejection cannot close a required finding.
+Use three focused fix rounds as the normal checkpoint; if work still cannot converge, record the concrete blocker and next check, notify the user and continue independent authorized units. A further bounded batch needs new evidence and a viable next check. The separate CI-repair bound below remains unchanged.
 
-Use at most five exchanges per frozen dispute; after two unchanged exchanges request a discriminating check or stop unresolved. Three artifact-fix rounds are the default checkpoint. An explicit recorded extension requires new evidence and a viable next check; the original overall deadline and invocation count remain. Exhaustion records `UNRESOLVED_BUDGET`; no useful next check records `UNRESOLVED_DISPUTE`; missing intent records `NEEDS_GOAL_DECISION`. Freeze the affected unit, notify the user, and continue independent authorized units. No same-provider fallback or unresolved state may pass review.
+For an active optional cross-provider run, keep artifacts frozen during its critic/rebuttal exchanges and follow its stable finding IDs, writer admission, evidence, acknowledgment and limits contract. Provider errors, no progress or exhausted limits stop that optional run. Preserve its reports/findings/counters, and use `stop` with a reason when abandoning it. Never reset the run to evade limits, silently substitute a reviewer, or call an incomplete run `CONSENSUS`.
 
-For a clean review, do not manufacture findings. Obtain the policy's real final acknowledgments, deliver to the original host, record reception, and require `finish` success before merging. This review policy is scoped to X-Plan/adrev/ETP; other callers keep their existing rules until separately migrated.
+The lead may separately evaluate delivery with personal review and normal checks after an optional run stops. Record that decision and its evidence separately from the failed run. **Repairs to the coordinator itself do not require recursive provider consensus.** Supported unresolved product/code findings still need resolution; a provider/tool failure alone is not a veto over otherwise reviewed, verified work.
 
 ### 4.35 Drive the PR to CI-green (bounded post-PR loop)
 
@@ -300,7 +306,7 @@ A PR that cannot be driven green within the bound is treated exactly like a PR f
 
 ### 4.4 Merge and tear down the unit's worktree
 
-Merge a PR only when: its current policy `finish` gate passed (both stages, or Stage 1 under `--light-review`, with original-host reception), CI is **green and mergeable** (verified fresh via 4.35, not assumed), and it does not conflict. Merge in dependency order within the wave. Squash merge (the repo default). Never merge a PR that failed adversarial review or has red/unresolved CI to "keep moving" - that defeats the entire loop.
+Merge a PR only when: the lead has passed the current required review stages (spec then quality, or spec only under explicit `--light-review`) with supported finding dispositions and fresh verification evidence, CI is **green and mergeable** (verified fresh via 4.35, not assumed), and it does not conflict. Merge in dependency order within the wave. Squash merge (the repo default). Never merge a PR that failed adversarial review or has red/unresolved CI to "keep moving" - that defeats the entire loop.
 
 **Then immediately remove that unit's worktree** (when the unit ran in a worktree, the default). This is mandatory, not best-effort — a built-in worktree does **not** auto-remove, so a merged unit whose worktree lingers is exactly the leak that filled 237 GB in the incident:
 
@@ -399,7 +405,7 @@ A plan run: mark the progress file `COMPLETE`, or `BLOCKED - WAITING ON HUMAN` w
 
 ## Guardrails
 
-**Integrity - the separate judge.** The agent that reviews a PR is never the agent that wrote it, and the reviewer never sees the implementer's rationale or self-report - only the unit's spec (the issue, or the plan unit) and the diff. The orchestrator does not grade PRs in its own context either. This separation is the whole reason a self-signed-off execution can be trusted; collapsing it turns review into rubber-stamping.
+**Integrity - evidence-backed lead judgment.** Personal lead review is the default, including when the lead also authored planning or coordinator work. Read the actual artifact/spec/checks critically and record concrete evidence; do not present self-review as an independent agent's judgment. Explicit cross-provider review adds attributable native reports, but its stopped/incomplete state stays separate from any lead release decision. No review mode replaces tests, CI or ordinary release authorization.
 
 **Two-stage order is fixed.** Spec-compliance gates code-quality. Never run them in parallel, never quality-review a spec-failing PR. `--light-review` drops Stage 2; it never reorders or parallelizes the stages.
 

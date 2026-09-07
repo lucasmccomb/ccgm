@@ -3,7 +3,7 @@
   "author": {
     "name": "CCGM"
   },
-  "description": "Research, planning and execution with an upfront choice of 1–3 alternating Claude/Codex adversarial reviews, default one, plus opposite-provider ETP review gates.",
+  "description": "Research, planning and execution with an upfront choice of 1–3 adversarial reviews, default one. Personal lead review and repository checks are the default; alternating Claude/Codex review is opt-in.",
   "displayName": "xplan Planning System",
   "keywords": [
     "execution",

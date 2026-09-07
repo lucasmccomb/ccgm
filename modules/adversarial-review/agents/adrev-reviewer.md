@@ -24,6 +24,8 @@ The caller passes:
 
 ## Gathering the Target
 
+**Restricted cross-provider invocation:** use only the exact frozen bundle and context supplied by the coordinator. You have no filesystem exploration or test-execution tools. The table below describes normal filesystem-enabled review; in restricted mode request specifically missing files/check evidence instead of following paths, grepping, fetching URLs, or claiming those actions ran. The native result schema and exact citation rules override the standalone output example.
+
 | Kind | How to read it |
 |------|----------------|
 | `plan` / `doc` | Read the file in full. Read siblings the caller names (research.md, decisions.md). Follow references to code paths it relies on. |

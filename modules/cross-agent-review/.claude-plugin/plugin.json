@@ -3,7 +3,7 @@
   "author": {
     "name": "CCGM"
   },
-  "description": "Restricted Claude/Codex review transport and pilot workflow policy: frozen evidence, opposite-provider routing, bounded resolution, current acknowledgments and reversible Codex skill setup.",
+  "description": "Opt-in restricted Claude/Codex review with frozen evidence, bounded exchanges, reusable evidence-bound acknowledgments and reversible Codex skill setup. Personal lead review and repository checks are the default.",
   "displayName": "Cross-Agent Review",
   "keywords": [
     "adversarial",
