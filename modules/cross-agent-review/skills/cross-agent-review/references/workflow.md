@@ -4,9 +4,11 @@ X-Plan/X-Plan A, standalone adrev and ETP use personal lead review by default, w
 
 ## Startup selection
 
-Under advisor mode use only the installed `~/.claude/lib/cross_agent_review_policy.py` shim and private control files under `~/.claude/cross-agent-review/<run-id>/`. Direct transport scripts are not allowed. A marketplace-only Claude installation lacks that trusted shim: use canonical CCGM installation or delegate setup/execution under normal permissions. Outside advisor mode, a self-contained skill may use `scripts/review_policy.py`.
+Under advisor mode use only the installed `~/.claude/lib/cross_agent_review_policy.py` shim and private control files under `~/.claude/cross-agent-review/<run-id>/`. Direct transport scripts are not allowed. The shim and its local imports must resolve outside advisor write roots, typically through canonical repository symlinks; manual/copy-mode installations require delegation. A marketplace-only Claude installation lacks the shim: use canonical CCGM installation in symlink mode or delegate setup/execution under normal permissions. Outside advisor mode, a self-contained skill may use `scripts/review_policy.py`.
 
-The count selector applies in both review modes and writes no files:
+The count selector applies in both review modes and writes no files. If the shim is unavailable or rejected under advisor mode (including copied installations), the host may resolve the same pure 1–3 selection contract directly: validate an explicit count or ask and wait for submission, preserving its source. No agent dispatch or planning effect precedes that choice. Only after it resolves may the host delegate an opted-in provider preflight, before planning effects; this does not grant permission to execute rejected code directly.
+
+For installations where the selector is permitted:
 
 ```bash
 python3 ~/.claude/lib/cross_agent_review_policy.py select
@@ -22,7 +24,7 @@ The alias uses the same startup step, preserving the resolved value/source witho
 
 ## Optional provider preflight
 
-Only after explicit opt-in, before planning or count-selection side effects, run:
+Only after explicit opt-in, before planning/work side effects, run the permitted shim or delegate this check after the host count fallback:
 
 ```bash
 python3 ~/.claude/lib/cross_agent_review_policy.py preflight
