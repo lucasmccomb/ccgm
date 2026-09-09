@@ -11,14 +11,21 @@ nothing else. When the user replies "you didn't give me any context" via the
 Other field, the agent re-presents the identical question, because nothing
 forces the context onto a visible surface. An advisory rule cannot fix this:
 the agent genuinely believes the context was shown. Only a deterministic gate
-that measures the visible surfaces can.
+that measures the surfaces that reach the user can.
 
-At question time the user is guaranteed to see exactly two surfaces:
+At question time exactly one surface is guaranteed to reach the user verbatim:
   (a) the AskUserQuestion payload itself — question text, option labels,
-      option descriptions, previews; and
-  (b) plain assistant text emitted since the user's last real message.
-Thinking is invisible. Raw tool output is collapsed noise. This hook enforces
-that at least one of those surfaces actually carries the context.
+      option descriptions, previews.
+Plain assistant text is a second surface, but only where it is delivered
+verbatim:
+  (b) text that opens the turn (before the first tool call) or ends it.
+Text written BETWEEN tool calls is not reliable. On Claude Fable 5.1 the API
+returns it as a progress-update `thinking` block — empty under the default
+display, a one-line summary under `display: "updates"` (which Claude Code
+requests for first-party sessions and renders as a status line). The
+transcript records that block as `thinking`, not `text`. Thinking is
+invisible. Raw tool output is collapsed noise. This hook enforces that at
+least one surface that actually reaches the user carries the context.
 
 Classification: bypass-retained. Denials use exit 2 (the semantics of
 hook_utils.hard_block(), inlined here so the hook is dependency-free and works
@@ -40,13 +47,17 @@ THREE GATES, in order:
     stays allowed — recurring approval questions in loop workflows are
     legitimate.
 
-  G3 — INVISIBLE CONTEXT (transcript-based)
+  G3 — INVISIBLE CONTEXT (payload + transcript)
     Blocks when the agent is mid-workstream (>= 1 tool call since the user's
-    last real message) but has emitted fewer than MIN_VISIBLE_CHARS of visible
-    assistant text this turn. Whatever analysis exists is in thinking or tool
-    results the user cannot read; a visible context brief must be written
-    first. A question asked as the first action after a user message is exempt
-    — the user's own message is the context.
+    last real message) AND neither surface carries MIN_VISIBLE_CHARS of
+    context: the payload (question text + option descriptions + previews) is
+    thin, and fewer than MIN_VISIBLE_CHARS of assistant text reached the
+    transcript this turn. The payload check is the reliable one — it is the
+    only surface delivered verbatim mid-turn; the transcript count is a
+    second way to pass for a brief that opened the turn, or for models that
+    still return between-tool-call text as `text` blocks. A question asked as
+    the first action after a user message is exempt — the user's own message
+    is the context.
 
 ALLOWS:
   - Any tool other than AskUserQuestion (defensive; the matcher already scopes)
@@ -56,16 +67,21 @@ ALLOWS:
     not brick it. G1 needs only the payload, so it always runs.
 
 The block messages are the real mechanism: each one tells the model exactly
-how to recover (emit a visible context brief as plain text, then re-call with
-a self-contained question), so the retry lands correctly without the user
-having to prompt for context ever again.
+how to recover (put the context in the payload — question text that names the
+thing and restates the evidence, option descriptions that state consequences,
+previews for bulky evidence — then re-call), so the retry lands correctly
+without the user having to prompt for context ever again.
 
-Every content block in a Claude Code transcript is its own JSONL entry
-(assistant text, thinking, and tool_use flush as separate lines, before the
-tool executes), which is what makes the transcript gates possible at
-PreToolUse time. The current call's own tool_use entry is usually already
-flushed; both transcript gates exclude the final entry matching the current
-tool_input so the hook never trips on its own call.
+Transcript shape this hook relies on: every content block of an assistant
+response is its own JSONL entry, flushed before the tool executes. The current
+call's own tool_use entry is usually already flushed; both transcript gates
+exclude the final entry matching the current tool_input so the hook never
+trips on its own call. What the transcript does NOT reliably hold is assistant
+text written between tool calls (see above): only first-of-turn and turn-final
+text is guaranteed to appear as a `text` block. The harness also appends
+user-role entries the human never typed — skill expansions and image
+companions (`isMeta: true`), `<system-reminder>` wrappers, `<local-command-*>`
+output — and a turn starts at the human's message, not at one of those.
 """
 
 from __future__ import annotations
@@ -97,6 +113,17 @@ DEICTIC_RE = re.compile("|".join(DEICTIC_PATTERNS), re.IGNORECASE)
 
 ANSWERED_MARKER = "Your questions have been answered"
 REJECTED_MARKER = "doesn't want to proceed"
+
+# Spans the harness injects into user-role entries. A user entry whose text is
+# nothing but these was not typed by the human. <command-name> is deliberately
+# absent: a typed slash command is a human action and therefore a turn
+# boundary, even though the harness wraps it.
+INJECTED_SPAN_RE = re.compile(
+    r"<(system-reminder|local-command-caveat|local-command-stdout|local-command-stderr)\b[^>]*>"
+    r"[\s\S]*?</\1\s*>"
+    r"|\[Image: source: [^\]]*\]",
+    re.IGNORECASE,
+)
 
 
 def hard_block(message: str) -> None:
@@ -152,6 +179,31 @@ def option_labels(tool_input):
     return labels
 
 
+def payload_context_chars(tool_input):
+    """Characters of decision context the payload itself carries.
+
+    Counts question text, option descriptions, and option previews — the
+    fields that explain a choice. Labels and headers name a choice, they do
+    not explain it, so they are excluded.
+    """
+    total = 0
+    questions = tool_input.get("questions")
+    if not isinstance(questions, list):
+        return 0
+    for q in questions:
+        if not isinstance(q, dict):
+            continue
+        if isinstance(q.get("question"), str):
+            total += len(q["question"].strip())
+        for opt in q.get("options") or []:
+            if not isinstance(opt, dict):
+                continue
+            for key in ("description", "preview"):
+                if isinstance(opt.get(key), str):
+                    total += len(opt[key].strip())
+    return total
+
+
 # ─── Transcript parsing ──────────────────────────────────────────────────────
 
 
@@ -194,18 +246,34 @@ def content_blocks(entry):
     return []
 
 
+def human_authored_text(text):
+    """True if anything remains once harness-injected wrappers are stripped."""
+    return bool(INJECTED_SPAN_RE.sub("", text).strip())
+
+
 def is_real_user_message(entry):
-    """True for a message the USER authored — not a tool_result envelope."""
+    """True for a message the USER authored.
+
+    False for tool_result envelopes and for entries the harness appends as
+    user messages: skill expansions and image companions (`isMeta: true`),
+    `<system-reminder>` wrappers, and local-command output. A real message
+    that merely carries an appended reminder block is still real.
+    """
     if entry.get("type") != "user":
+        return False
+    if entry.get("isMeta") is True:
         return False
     content = (entry.get("message") or {}).get("content")
     if isinstance(content, str):
-        return bool(content.strip())
+        return human_authored_text(content)
     if isinstance(content, list):
-        return any(
-            isinstance(b, dict) and b.get("type") in ("text", "image")
-            for b in content
-        )
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "image":
+                return True
+            if block.get("type") == "text" and human_authored_text(block.get("text") or ""):
+                return True
     return False
 
 
@@ -288,7 +356,7 @@ def answered_with_offered_option(result_text, prev_input):
 
 
 def current_turn(entries):
-    """Entries after the user's last real message (the whole list if none)."""
+    """Entries after the human's last real message (the whole list if none)."""
     for i in range(len(entries) - 1, -1, -1):
         if is_real_user_message(entries[i]):
             return entries[i + 1:]
@@ -298,8 +366,10 @@ def current_turn(entries):
 def turn_visibility(turn_entries, tool_input):
     """(visible_text_chars, prior_tool_use_count) for the current turn.
 
-    The in-flight AskUserQuestion is usually already flushed as the turn's
-    final tool_use; it is excluded from the prior-tool count.
+    Only `text` blocks count; a progress-update block stored as `thinking`
+    is a summary the user may have seen as a status line, never the brief
+    itself. The in-flight AskUserQuestion is usually already flushed as the
+    turn's final tool_use; it is excluded from the prior-tool count.
     """
     visible_chars = 0
     tool_uses = []
@@ -333,18 +403,16 @@ def gate_deictic(tool_input):
             hard_block(
                 "ASK-CONTEXT GATE: this {where} references context the user "
                 "cannot see (matched: \"{phrase}\").\n\n"
-                "The user's screen shows ONLY (a) this question payload and "
-                "(b) plain text you emitted since their last message. Your "
-                "thinking is invisible and raw tool output is collapsed — "
-                "\"I analyzed it\" is not \"they saw it\".\n\n"
-                "Fix, in order:\n"
-                "1. Emit a visible context brief as normal response text: what "
-                "is being decided, why it surfaced now, and the key evidence "
-                "restated in 2-6 short bullets.\n"
-                "2. Re-call AskUserQuestion with the question text rewritten "
-                "to stand alone — name the thing (repo, PR number, symptom), "
-                "no \"above\", no \"that context\" — and put each option's "
-                "consequences in its description.".format(
+                "The user's screen shows this question payload verbatim; text "
+                "you wrote between tool calls may reach them only as a one-line "
+                "progress update, your thinking never does, and raw tool output "
+                "is collapsed — \"I analyzed it\" is not \"they saw it\".\n\n"
+                "Fix: re-call AskUserQuestion with the context IN THE PAYLOAD — "
+                "question text that stands alone (name the thing: repo, PR "
+                "number, symptom; say why it surfaced now; restate the key "
+                "evidence as 2-6 short facts — no \"above\", no \"that "
+                "context\"), option descriptions that state what each choice "
+                "implies, and a preview for bulky evidence.".format(
                     where=where, phrase=match.group(0)
                 )
             )
@@ -374,32 +442,46 @@ def gate_repeat(entries, tool_input):
             "ASK-CONTEXT GATE: you already asked this exact question and "
             "{reason}. Re-presenting the identical question ignores their "
             "reply.\n\n"
-            "Fix: first emit a visible context brief as normal response text "
-            "(what is being decided, key evidence in 2-6 bullets, what each "
-            "option implies), then re-call AskUserQuestion with a REWRITTEN "
-            "question that embeds that context and addresses what the user "
-            "actually said. Never re-send an unchanged payload after the user "
-            "pushed back on it.".format(reason=reason)
+            "Fix: re-call AskUserQuestion with a REWRITTEN payload that embeds "
+            "the context — what is being decided, the key evidence as 2-6 "
+            "short facts, and what each option implies, in the question text, "
+            "option descriptions, or a preview — and that answers what the "
+            "user actually said. Never re-send an unchanged payload after the "
+            "user pushed back on it.".format(reason=reason)
         )
 
 
 def gate_invisible_context(entries, tool_input, min_visible):
     turn = current_turn(entries)
     visible_chars, prior_tools = turn_visibility(turn, tool_input)
-    if prior_tools >= 1 and visible_chars < min_visible:
-        hard_block(
-            "ASK-CONTEXT GATE: you are mid-workstream ({tools} tool call(s) "
-            "since the user's last message) but have emitted only {chars} "
-            "characters of visible text this turn. The context for this "
-            "question exists only in your thinking and collapsed tool output "
-            "— the user cannot see any of it.\n\n"
-            "Fix: emit a visible context brief as normal response text FIRST "
-            "— what is being decided, why it surfaced now, the key evidence "
-            "restated in 2-6 short bullets, and what each option implies — "
-            "then re-call AskUserQuestion. The question text itself must also "
-            "stand alone (name the thing; assume the brief may have scrolled)."
-            .format(tools=prior_tools, chars=visible_chars)
+    if prior_tools < 1:
+        return  # first action after the user's message: their message is the context
+    payload_chars = payload_context_chars(tool_input)
+    if visible_chars >= min_visible or payload_chars >= min_visible:
+        return
+    hard_block(
+        "ASK-CONTEXT GATE: you are mid-workstream ({tools} tool call(s) since "
+        "the user's last message), this question payload carries only "
+        "{pchars} characters of context (question text + option descriptions "
+        "+ previews), and only {chars} characters of your text reached the "
+        "transcript this turn. Whatever analysis exists is in your thinking "
+        "and collapsed tool output — the user cannot see any of it.\n\n"
+        "Text written between tool calls is not a reliable surface: the API "
+        "may deliver it as a one-line progress update and the transcript "
+        "records it as thinking, so writing a brief and re-calling will not "
+        "pass this gate. Put the context IN THE PAYLOAD, then re-call "
+        "AskUserQuestion:\n"
+        "- question text names the thing (repo, PR number, file, symptom) and "
+        "says why the decision surfaced now;\n"
+        "- each option's description states what choosing it implies;\n"
+        "- the key evidence, restated as 2-6 short facts, goes in the question "
+        "text or an option preview.\n"
+        "At least {min} characters across those fields passes "
+        "(ASK_CONTEXT_MIN_CHARS overrides).".format(
+            tools=prior_tools, pchars=payload_chars, chars=visible_chars,
+            min=min_visible,
         )
+    )
 
 
 # ─── Entry point ─────────────────────────────────────────────────────────────
