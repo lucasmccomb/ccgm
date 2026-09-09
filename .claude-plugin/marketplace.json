@@ -89,7 +89,7 @@
     },
     {
       "category": "core",
-      "description": "Hard PreToolUse gate on AskUserQuestion that blocks questions whose decision context is invisible to the user. Three deterministic gates: deictic references to unseen context ('with that context', 'see above'), identical re-asks after the user pushed back in free text, and mid-workstream questions asked with no visible text emitted this turn. Block messages teach the exact recovery (visible context brief, then a self-contained question). Fail-open on transcript errors; CCGM_ASK_CONTEXT_OFF=1 escape hatch.",
+      "description": "Hard PreToolUse gate on AskUserQuestion that blocks questions whose decision context is invisible to the user. Three deterministic gates: deictic references to unseen context ('with that context', 'see above'), identical re-asks after the user pushed back in free text, and mid-workstream questions whose payload (question text, option descriptions, previews) and turn text both carry too little context. Block messages teach the exact recovery (put the context in the payload, then re-call). Fail-open on transcript errors; CCGM_ASK_CONTEXT_OFF=1 escape hatch.",
       "name": "ask-context",
       "source": "./ask-context",
       "tags": [
