@@ -3,6 +3,7 @@ name: learnings-researcher
 description: >
   Retrieves relevant prior learnings from docs/solutions/ in the current repo and returns them as structured context for the caller. Invoked at the start of /xplan and /review so planning and review can stand on codified team knowledge. Grep-first - never reads the full directory.
 tools: Glob, Grep, Read
+effort: low
 ---
 
 # learnings-researcher

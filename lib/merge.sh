@@ -54,6 +54,25 @@ merge_settings() {
     def dedup_ordered:
       reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end);
 
+    # Identity of one hook entry within its event: matcher + command (or the
+    # whole entry when it has no command, e.g. prompt hooks or bare strings).
+    def hook_key($m):
+      (if type == "object" then (.command // tojson) else tostring end)
+      | $m + "\u0001" + .;
+
+    # Drop any hook entry whose (matcher, command) already appeared in an
+    # earlier group or earlier in the same group; drop groups left empty.
+    def dedup_hook_groups:
+      reduce .[] as $g ({seen: {}, out: []};
+        . as $st
+        | ($g.matcher // "") as $m
+        | (($g.hooks // []) | reduce .[] as $h ({s: $st.seen, l: []};
+            ($h | hook_key($m)) as $k
+            | if .s[$k] then . else {s: (.s + {($k): true}), l: (.l + [$h])} end)) as $r
+        | {seen: $r.s,
+           out: (if ($r.l | length) > 0 then $st.out + [($g | .hooks = $r.l)] else $st.out end)})
+      | .out;
+
     # Custom deep merge function
     def deep_merge(a; b):
       a as $a | b as $b |
@@ -77,9 +96,17 @@ merge_settings() {
             { ($key): deep_merge($a[$key]; $b[$key]) }
           elif (($a[$key] | type) == "array") and
                (($b[$key] | type) == "array") then
-            # For hook event arrays (PreToolUse, etc.), concatenate and
-            # deduplicate while preserving first-seen order.
-            { ($key): ([$a[$key] + $b[$key] | .[] | tojson] | dedup_ordered | [.[] | fromjson]) }
+            # Arrays: concatenate and deduplicate, preserving first-seen order.
+            # Hook event arrays (PreToolUse, etc.) are deduplicated per
+            # (matcher, command), not per group: re-running the installer
+            # used to append a group whose membership differed slightly and
+            # every command in it then ran twice per event (#1059).
+            (($a[$key] + $b[$key]) as $arr
+             | if ($arr | length) > 0 and ($arr | all(type == "object" and (.hooks | type) == "array")) then
+                 { ($key): ($arr | dedup_hook_groups) }
+               else
+                 { ($key): ([$arr | .[] | tojson] | dedup_ordered | [.[] | fromjson]) }
+               end)
           elif $b | has($key) then
             { ($key): $b[$key] }
           else

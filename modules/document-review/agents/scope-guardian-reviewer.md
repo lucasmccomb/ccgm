@@ -3,6 +3,7 @@ name: scope-guardian-reviewer
 description: >
   Reviews a plan, spec, or design doc for unjustified complexity, premature abstractions, and scope bloat. Enforces YAGNI at plan time - before any code is written. Flags speculative generality, configuration for hypothetical needs, abstractions without second users, "while we're here" expansions, and new surfaces that duplicate existing ones. Returns structured JSON findings with severity and confidence.
 tools: Read, Glob, Grep
+effort: medium
 ---
 
 # scope-guardian-reviewer

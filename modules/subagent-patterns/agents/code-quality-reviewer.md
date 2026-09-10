@@ -3,6 +3,7 @@ name: code-quality-reviewer
 description: >
   Stage 2 of the two-stage review. Given an implementation that has already passed `spec-compliance-reviewer`, reviews for code quality - project patterns, unhandled edge cases, over-engineering, naming, and simplicity. Runs ONLY after Stage 1 returns DONE. Reviewing quality on a spec-failing implementation is effort spent on code that will be reverted.
 tools: Read, Grep, Glob, Bash
+effort: medium
 ---
 
 # code-quality-reviewer

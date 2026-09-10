@@ -3,6 +3,7 @@ name: product-lens-reviewer
 description: >
   Reviews a plan, spec, or design doc from a product perspective. Flags missing user stories, unclear success criteria, undefined metrics, UX gaps, and misalignment between stated goals and proposed implementation. Returns structured JSON findings with severity and confidence. Does not judge feasibility, scope, or security - only whether the plan serves a user and knows when it has succeeded.
 tools: Read, Glob, Grep
+effort: medium
 ---
 
 # product-lens-reviewer

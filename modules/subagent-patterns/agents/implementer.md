@@ -3,6 +3,7 @@ name: implementer
 description: >
   Reusable prompt template for subagents dispatched to implement a spec. Enforces the four-state status protocol (DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT) and instructs the agent to stay inside the spec's scope, not to "while I'm here" adjacent code. Designed to be reviewed by the `spec-compliance-reviewer` and then the `code-quality-reviewer` in that order.
 tools: Read, Write, Edit, Glob, Grep, Bash
+effort: medium
 ---
 
 # implementer

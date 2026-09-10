@@ -11,6 +11,8 @@ This module provides a `settings.base.json` that gets merged into `~/.claude/set
 - **Deny list**: 13 entries for dangerous operations (rm -rf, force push to main, docker rm, DROP/TRUNCATE/DELETE SQL). Several legacy entries were pruned in #474 once the `hooks` module gained bypass-proof `hard_block()` enforcement — see "Deny list rationale" below.
 - **Tool permissions**: WebFetch, WebSearch, Skill, Glob, Grep, and Supabase MCP tools pre-approved
 - **Plugin configuration**: Common Claude Code plugins enabled
+- **Attribution off**: `attribution.commit` and `attribution.pr` are empty strings and `attribution.sessionUrl` is false, so Claude Code adds no Co-Authored-By trailer, PR footer, or session link (#1059). Claude Code then tells the model not to add attribution instead of asking it to.
+- **One-hour prompt cache**: `promptCacheTtl` and `subagentPromptCacheTtl` are `1h`. Subagents otherwise get a five-minute cache, and CCGM fan-outs and CI waits regularly exceed that, so each wave re-wrote its ~90k-token prefix.
 
 ### Deny list rationale (13 entries)
 

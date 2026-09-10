@@ -1,4 +1,11 @@
 {
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "promptCacheTtl": "1h",
+  "subagentPromptCacheTtl": "1h",
   "permissions": {
     "allow": [
       "Read(__CODE_DIR__/**)",

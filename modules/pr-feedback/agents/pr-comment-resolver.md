@@ -3,6 +3,7 @@ name: pr-comment-resolver
 description: >
   Implements the fix hypothesis for a single PR review cluster (or a single thread when clustering was skipped), posts inline replies on each covered thread, and resolves threads where the reply represents a code change. Dispatched in parallel by /resolve-pr-feedback. Scope is strictly limited to the paths listed in the cluster brief.
 tools: Read, Edit, Write, Glob, Grep, Bash
+effort: medium
 ---
 
 # pr-comment-resolver

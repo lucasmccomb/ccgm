@@ -3,6 +3,7 @@ name: feasibility-reviewer
 description: >
   Reviews a plan, spec, or design doc for whether it can actually be built as described. Flags missing prerequisites, technology misuse, unrealistic timelines, unavailable dependencies, and unbuildable steps. Returns structured JSON findings with severity and confidence. Does not judge whether the plan is a good idea - only whether it is executable.
 tools: Read, Glob, Grep, Bash
+effort: medium
 ---
 
 # feasibility-reviewer

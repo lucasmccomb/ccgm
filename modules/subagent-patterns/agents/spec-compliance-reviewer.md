@@ -3,6 +3,7 @@ name: spec-compliance-reviewer
 description: >
   Stage 1 of the two-stage review. Given an implementer's output and the original spec, verifies that every deliverable is present, every constraint was respected, and no scope creep occurred. Adversarial stance - the implementer's DONE self-report is a claim, not evidence. Runs BEFORE `code-quality-reviewer`. Reviewing quality on a scope-creeping implementation wastes effort on the wrong code.
 tools: Read, Grep, Glob, Bash
+effort: high
 ---
 
 # spec-compliance-reviewer

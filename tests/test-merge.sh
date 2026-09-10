@@ -233,6 +233,74 @@ else
 fi
 echo ""
 
+# --- Test 3b: Hook commands are deduplicated per (matcher, command) ---
+echo "--- Test 3b: Hook command deduplication ---"
+
+cat > "$TMPDIR/target3b.json" << 'JSON'
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 $HOME/.claude/hooks/a.py", "timeout": 5000},
+          {"type": "command", "command": "python3 $HOME/.claude/hooks/b.py", "timeout": 5000}
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "python3 hook-x.py"}]
+      }
+    ]
+  }
+}
+JSON
+
+cat > "$TMPDIR/partial3b.json" << 'JSON'
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 $HOME/.claude/hooks/a.py", "timeout": 5000},
+          {"type": "command", "command": "python3 $HOME/.claude/hooks/c.py", "timeout": 3000}
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "python3 hook-x.py"}]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [{"type": "command", "command": "python3 hook-x.py"}]
+      }
+    ]
+  }
+}
+JSON
+
+merge_settings "$TMPDIR/target3b.json" "$TMPDIR/partial3b.json"
+result3b=$(cat "$TMPDIR/target3b.json")
+
+ups_cmds=$(echo "$result3b" | jq -r '[.hooks.UserPromptSubmit[].hooks[].command] | join(",")')
+if [ "$ups_cmds" = 'python3 $HOME/.claude/hooks/a.py,python3 $HOME/.claude/hooks/b.py,python3 $HOME/.claude/hooks/c.py' ]; then
+  pass "UserPromptSubmit keeps a.py once and appends only the new c.py"
+else
+  fail "UserPromptSubmit commands wrong: $ups_cmds"
+fi
+
+pre_groups=$(echo "$result3b" | jq '.hooks.PreToolUse | length')
+pre_matchers=$(echo "$result3b" | jq -r '[.hooks.PreToolUse[].matcher] | join(",")')
+if [ "$pre_groups" -eq 2 ] && [ "$pre_matchers" = "Bash,Edit" ]; then
+  pass "PreToolUse drops the duplicate Bash group and keeps the new Edit group"
+else
+  fail "PreToolUse groups wrong: count=$pre_groups matchers=$pre_matchers"
+fi
+echo ""
+
 # --- Test 4: Missing target file (should copy) ---
 echo "--- Test 4: Missing target file ---"
 

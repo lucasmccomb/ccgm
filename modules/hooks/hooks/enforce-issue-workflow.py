@@ -64,56 +64,23 @@ def is_in_code_dir() -> bool:
 
 
 def build_reminder() -> str:
-    """Build the workflow reminder, with optional coordination section."""
+    """Build the workflow reminder, with optional coordination line."""
+    coordination = ""
     if has_logs_directory():
-        return """
-<workflow-reminder>
-STOP - Before making ANY code or file changes, you MUST:
-
-1. CHECK: Does a GitHub issue exist for this work?
-   - If NO: Create one first with `gh issue create`
-   - If YES: Note the issue number
-
-2. CREATE BRANCH: `git checkout -b {issue#}-{description} origin/main`
-
-3. CHECK COORDINATION: Read `.claude/logs/` for other active sessions
-   - Look for today's date directory: `.claude/logs/YYYYMMDD/`
-   - Read other agents' logs to check for file conflicts
-   - If overlap detected, note it but proceed (advisory, not blocking)
-
-4. LOG YOUR SESSION: Create/update `.claude/logs/YYYYMMDD/agent-N.md`
-
-5. IMPLEMENT: Make your changes
-
-6. COMMIT & PR:
-   - `git commit -m "#{issue_number}: {description}"`
-   - `gh pr create --title "#{issue_number}: ..." --body "Closes #{issue_number}"`
-
-This applies to ALL changes including documentation, config, and "trivial" fixes.
-Do NOT skip this workflow. The user has explicitly requested strict adherence.
-</workflow-reminder>
-"""
-    else:
-        return """
-<workflow-reminder>
-STOP - Before making ANY code or file changes, you MUST:
-
-1. CHECK: Does a GitHub issue exist for this work?
-   - If NO: Create one first with `gh issue create`
-   - If YES: Note the issue number
-
-2. CREATE BRANCH: `git checkout -b {issue#}-{description} origin/main`
-
-3. IMPLEMENT: Make your changes
-
-4. COMMIT & PR:
-   - `git commit -m "#{issue_number}: {description}"`
-   - `gh pr create --title "#{issue_number}: ..." --body "Closes #{issue_number}"`
-
-This applies to ALL changes including documentation, config, and "trivial" fixes.
-Do NOT skip this workflow. The user has explicitly requested strict adherence.
-</workflow-reminder>
-"""
+        coordination = (
+            "Coordination: read today's `.claude/logs/YYYYMMDD/` for other active "
+            "sessions' file overlap (advisory), and log this session at "
+            "`.claude/logs/YYYYMMDD/agent-N.md`.\n"
+        )
+    return (
+        "\n<workflow-reminder>\n"
+        "Work request in ~/code: use the issue-first workflow. Find or create the "
+        "GitHub issue (`gh issue create`), branch `{issue#}-{description}` from "
+        "origin/main, commit as `#{issue#}: {description}`, and open the PR with "
+        "`Closes #{issue#}`. This covers docs and config changes too.\n"
+        + coordination +
+        "</workflow-reminder>\n"
+    )
 
 
 def main() -> None:

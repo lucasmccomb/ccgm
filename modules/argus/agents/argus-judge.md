@@ -8,6 +8,7 @@ description: >
   the implementer's rationale, or the conversation that produced the change. This separation
   is the core anti-reward-hacking property; coupled self-grading structurally inflates grades.
 tools: Read, Bash, Grep, Glob
+effort: high
 ---
 
 # argus-judge
