@@ -2,6 +2,8 @@
 
 Evidence-before-claims methodology for task completion.
 
+`rules/config-change-detection.md` is path-scoped (#1061): it carries `paths:` frontmatter and loads only after Claude reads a file matching one of `.github/workflows/**`, `**/.github/workflows/**`, `**/wrangler.toml`, `**/wrangler.json`, `**/wrangler.jsonc`, `**/.env*`, `**/supabase/migrations/**`, `**/vercel.json`, `**/fly.toml`, `**/Dockerfile*`, `**/docker-compose*`. It costs no context at session start otherwise.
+
 ## What It Does
 
 Installs a rules file that requires fresh proof before asserting anything works:

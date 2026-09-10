@@ -1,3 +1,9 @@
+---
+paths:
+  - "**/supabase/**"
+  - "**/*.sql"
+  - "**/.env*"
+---
 # Supabase Rules
 
 ## API Key Terminology (IMPORTANT)

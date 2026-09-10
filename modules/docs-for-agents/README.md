@@ -2,6 +2,8 @@
 
 Rule and template for shipping machine-readable docs alongside human docs. Any project an agent will install, build, test, deploy, or debug should have an `AGENTS.md` with copy-pasteable command blocks.
 
+`rules/docs-for-agents.md` is path-scoped (#1061): it carries `paths:` frontmatter and loads only after Claude reads a file matching one of `**/AGENTS.md`, `**/CLAUDE.md`, `**/CLAUDE.local.md`. It costs no context at session start otherwise.
+
 The rule enforces what Karpathy called out in the Sequoia vibe-coding interview: docs written for humans tell an agent what to do in prose. Docs written for agents give the agent one command to run. `AGENTS.md` is the agent-readable contract.
 
 ## What This Module Provides

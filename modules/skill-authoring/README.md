@@ -2,6 +2,8 @@
 
 Discipline for writing skills and slash commands that stay efficient, portable, and context-safe.
 
+`rules/skill-authoring.md` is path-scoped (#1061): it carries `paths:` frontmatter and loads only after Claude reads a file matching one of `**/SKILL.md`, `**/commands/*.md`, `**/agents/*.md`, `**/.claude/skills/**`. It costs no context at session start otherwise.
+
 ## What It Does
 
 Installs a rule file that governs how new skills and commands are authored:

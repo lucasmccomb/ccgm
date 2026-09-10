@@ -2,6 +2,8 @@
 
 Supabase-specific rules for API key terminology, environment variable naming, and database workflow.
 
+`rules/supabase.md` is path-scoped (#1061): it carries `paths:` frontmatter and loads only after Claude reads a file matching one of `**/supabase/**`, `**/*.sql`, `**/.env*`. It costs no context at session start otherwise.
+
 ## What It Does
 
 This module installs a rules file that instructs Claude to:

@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -108,11 +109,31 @@ def _plugin_name(root: Path) -> str:
     return root.name
 
 
+_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+
+
+def _is_path_scoped(path: Path) -> bool:
+    """True when the rule carries `paths:` frontmatter.
+
+    Claude Code loads such a rule only after a matching file is read. Injecting
+    it at session start would defeat that (#1061), so the hook skips it; the
+    native install path already handles it correctly.
+    """
+    try:
+        head = path.read_text(encoding="utf-8")[:4096]
+    except OSError:
+        return False
+    m = _FRONTMATTER_RE.match(head)
+    return bool(m and re.search(r"^paths:", m.group(1), re.M))
+
+
 def _rule_files(root: Path) -> "list[Path]":
     rules_dir = root / "rules"
     if not rules_dir.is_dir():
         return []
-    return sorted(p for p in rules_dir.glob("*.md") if p.is_file())
+    return sorted(
+        p for p in rules_dir.glob("*.md") if p.is_file() and not _is_path_scoped(p)
+    )
 
 
 def build_context(root: "Path | None") -> "str | None":

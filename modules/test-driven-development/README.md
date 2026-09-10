@@ -2,6 +2,8 @@
 
 Strict red-green-refactor TDD discipline for all new features and bug fixes.
 
+`rules/testing-anti-patterns.md` is path-scoped (#1061): it carries `paths:` frontmatter and loads only after Claude reads a file matching one of `**/*.test.*`, `**/*.spec.*`, `**/tests/**`, `**/test/**`, `**/__tests__/**`, `**/e2e/**`. It costs no context at session start otherwise.
+
 ## What It Does
 
 Installs a rules file that enforces test-first development:

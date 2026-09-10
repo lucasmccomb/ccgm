@@ -1,3 +1,9 @@
+---
+paths:
+  - "**/*.css"
+  - "**/tailwind.config.*"
+  - "**/postcss.config.*"
+---
 # Frontend CSS Gotchas
 
 ## Tailwind v4: cursor: pointer Missing on Interactive Elements

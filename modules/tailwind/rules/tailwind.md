@@ -1,3 +1,14 @@
+---
+paths:
+  - "**/*.css"
+  - "**/tailwind.config.*"
+  - "**/postcss.config.*"
+  - "**/*.tsx"
+  - "**/*.jsx"
+  - "**/*.vue"
+  - "**/*.svelte"
+  - "**/*.astro"
+---
 # Tailwind CSS Design System
 
 Patterns for building design systems with Tailwind CSS v4. Emphasizes CSS-first configuration and token-based architecture.

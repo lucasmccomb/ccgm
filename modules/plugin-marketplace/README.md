@@ -2,6 +2,8 @@
 
 Maintainer tooling that makes CCGM installable as a **native Claude Code plugin marketplace** — additively. The bash installer (`start.sh`) remains the canonical, full-fidelity path.
 
+`rules/plugin-marketplace.md` is path-scoped (#1061): it carries `paths:` frontmatter and loads only after Claude reads a file matching one of `**/module.json`, `**/.claude-plugin/**`, `**/marketplace.json`. It costs no context at session start otherwise.
+
 ## What it ships
 
 | File | Purpose |

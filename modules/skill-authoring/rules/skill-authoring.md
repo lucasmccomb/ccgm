@@ -1,3 +1,10 @@
+---
+paths:
+  - "**/SKILL.md"
+  - "**/commands/*.md"
+  - "**/agents/*.md"
+  - "**/.claude/skills/**"
+---
 # Skill Authoring
 
 **Iron Law:** EVERY BYTE A SKILL LOADS AT TRIGGER TIME IS CARRIED IN EVERY SUBSEQUENT MESSAGE.
