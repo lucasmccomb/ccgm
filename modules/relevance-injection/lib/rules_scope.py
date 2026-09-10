@@ -101,8 +101,8 @@ TECH_SPECIFIC_CATEGORY = "tech-specific"
 # set of specific module-relative rule targets (propose only that subset).
 #
 # Deliberately narrow and NOT repo-profile-gated: these are rules about a
-# specific CCGM meta-workflow (a nightly pipeline, a visual-convergence
-# loop, SSH to a configured remote box, ...) that is rarely in play
+# specific CCGM meta-workflow (agent-native's audit principles, the multi-clone
+# parallel-work preference, the reflection loop, ...) that is rarely in play
 # regardless of the target repo's tech stack, so detecting relevance from
 # repo files does not apply the way it does for the tech-specific category.
 #

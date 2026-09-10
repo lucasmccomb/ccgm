@@ -186,7 +186,7 @@ The `type` values below are descriptive labels (advisory — see above). The "in
 
 | Type | Extension | Description |
 |------|-----------|-------------|
-| `rule` | `.md` | Markdown rules loaded by Claude Code at session start. Shapes behavior and decision-making. |
+| `rule` | `.md` | Markdown rules loaded by Claude Code at session start, or only when a matching file is read if the rule carries `paths:` frontmatter. Shapes behavior and decision-making. |
 | `command` | `.md` | Markdown files that become slash commands in Claude Code. File name becomes the command name. |
 | `agent` | `.md` | Reusable subagent prompts invoked by commands or skills via the Task tool. Installed to `~/.claude/agents/`. Use for prompts shared across two or more callers; keep one-off prompts inline. |
 | `skill` | `.md` | Skill definitions (`SKILL.md`) that provide a packaged capability invocable by name (e.g., `/brainstorm`, `/ce-review`). Installed to `~/.claude/skills/{name}/SKILL.md`. |
@@ -241,6 +241,8 @@ Rule files (`rules/*.md`) are the most common file type. Follow these convention
 4. **Keep scope narrow.** Each rule file should cover one coherent topic. If a rule file grows beyond a few hundred lines, consider splitting it into a separate module.
 
 5. **No personal data.** Never include specific usernames, paths, repo names, or API endpoints. Run `tests/test-no-personal-data.sh` to verify.
+
+6. **Scope stack-specific rules with `paths:` frontmatter.** A rule that only matters for one stack (Tailwind, Supabase, Cloudflare, test files) should start with a `paths:` block listing the globs it applies to; Claude Code then loads it only after a matching file is read, and it costs nothing at session start. Every rule without `paths:` loads into every session and every subagent, so keep those to one plain-sentence rule, the mechanism, and the facts (see `modules/rule-authoring/rules/rule-authoring.md`).
 
 ## Testing Your Module
 

@@ -6,7 +6,7 @@ Discipline for writing rules that hold up when an agent is under pressure to cut
 
 Treats rule authoring as TDD. A rule is not finished because it reads well; it is finished when an agent under stress still follows it. This module installs:
 
-- **`rules/rule-authoring.md`** - the iron-law framing for rule authoring itself, the required structural elements (Iron Law, rationalization table, Red Flags list, Announce-at-start), and the four-state subagent protocol used when dispatching pressure tests.
+- **`rules/rule-authoring.md`** - what a rule contains (one plain-sentence rule, the mechanism that enforces it, the facts), when a short rationalizations table or red-flags list is justified (only after pressure-testing shows the rule fails without it), voice conventions, the contradiction check, and the authoring workflow.
 - **`rules/pressure-testing.md`** - the concrete methodology: pick a candidate rule, generate 5-10 adversarial scenarios, run them in subagents with and without the rule loaded, capture the rationalizations verbatim, rewrite the rule to close those loopholes, and repeat.
 - **`commands/pressure-test.md`** - an interactive slash command that walks through the pressure-testing loop against a candidate rule file.
 
@@ -46,6 +46,6 @@ cp commands/pressure-test.md .claude/commands/pressure-test.md
 
 | File | Description |
 |------|-------------|
-| `rules/rule-authoring.md` | Authoring discipline for rules: Iron Law framing, required structural elements, four-state subagent protocol |
+| `rules/rule-authoring.md` | Authoring discipline for rules: plain-sentence rule plus mechanism and facts, optional rationalizations table, contradiction check |
 | `rules/pressure-testing.md` | Concrete methodology for pressure-testing a candidate rule with adversarial scenarios |
 | `commands/pressure-test.md` | Interactive slash command for running the pressure-testing loop |
