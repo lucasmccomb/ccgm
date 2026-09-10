@@ -173,7 +173,7 @@ def main() -> None:
     except (json.JSONDecodeError, ValueError, EOFError):
         hook_input = {}
 
-    # Only fire on fresh sessions, matching session-start-enforce.py.
+    # Only fire on fresh sessions, matching the other CCGM session-start hooks.
     if hook_input.get("source", "") != "startup":
         return
 

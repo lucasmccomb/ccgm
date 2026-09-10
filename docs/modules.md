@@ -132,7 +132,6 @@ This module installs the most hooks of any module. See [Hooks Reference](hooks.m
 | `check-careful.py` | PreToolUse:Bash | Force-push-to-main hard block + careful-mode destructive-command prompts |
 | `check-freeze.py` | PreToolUse | Scope-locks Edit/Write to the `/freeze` directory |
 | `orphan-process-check.py` | SessionStart | Warns about orphaned test worker processes (vitest/jest) |
-| `session-start-enforce.py` | SessionStart | Opt-in rule-enforcement meta-instruction injection |
 | `sync-ccgm-canonical.py` | PostToolUse:Bash | Auto-pulls the canonical CCGM clone after PR merges |
 
 **Config prompts**: Protected branches (custom list), auto update check (yes/no)

@@ -1,8 +1,6 @@
 # Branch Guard: No Work on the Default Branch
 
-**Iron Law:** NO EDITS, NO STAGING, NO COMMITS WHILE HEAD IS ON THE DEFAULT BRANCH. BRANCH FIRST, THEN WORK.
-
-This is not advisory. A deterministic PreToolUse hook (`branch-guard.py`) hard-blocks (exit 2, bypass-proof) any attempt to produce work on a repo's default branch (main/master, or whatever `origin/HEAD` names). The gate fires **before the first edit** — not at commit time — because uncommitted work on main is destroyed the next time main is synced to origin. That loss has actually happened; this hook exists so it cannot happen again.
+No edits, staging, or commits while HEAD is on a repo's default branch (main/master, or whatever `origin/HEAD` names). Branch first, then work. A PreToolUse hook (`branch-guard.py`) hard-blocks (exit 2, bypass-proof) these operations, before the first edit rather than at commit time, because uncommitted work on main is destroyed the next time main is synced to origin.
 
 ## What Is Blocked on the Default Branch
 
@@ -11,55 +9,43 @@ This is not advisory. A deterministic PreToolUse hook (`branch-guard.py`) hard-b
 | File edits | Edit, MultiEdit, Write, NotebookEdit, filesystem-MCP write/edit/move |
 | Staging and committing | Bash: `git add`, `git stage`, `git commit`, `git apply` (every `&&`/`;`/`\|` segment is scanned; `git -C <path>` is resolved and checked against the target repo) |
 
-The file gate keys on the **target file's** repo, not the session cwd: editing a scratchpad, memory file, or any non-repo path is never blocked, and editing a file inside a main-checked-out repo is blocked even when the session cwd is elsewhere. Symlinks are resolved first, so editing an installed `~/.claude/...` symlink that points into a repo checked out on main is also caught.
+The file gate keys on the target file's repo, not the session cwd: editing a scratchpad, memory file, or non-repo path is never blocked, and editing a file inside a main-checked-out repo is blocked from any cwd. Symlinks are resolved first, so an installed `~/.claude/...` symlink into a repo on main is caught too.
 
-## The Required Response to a Denial
+## When the Guard Denies
 
-When the guard blocks you, do exactly this — do not retry the blocked call, do not reach for the escape hatch:
+Do not retry the blocked call and do not reach for the escape hatch. Branch, then retry:
 
 ```bash
 git fetch origin && git checkout -b <type>/<short-desc> origin/<default-branch>
 ```
 
-where `<type>` is one of `feature | fix | chore | docs` (e.g. `feature/add-login-form`, `fix/null-session-crash`). Then retry the original operation on the new branch.
+where `<type>` is `feature | fix | chore | docs`.
 
-## What Is Deliberately NOT Blocked
+## What Is Not Blocked
 
-- **Any non-default branch**, including detached HEAD — work there freely.
-- **In-progress rebase / merge / cherry-pick / revert / bisect** — conflict resolution requires editing files and running `git add` while the repo may report the default branch. The guard detects these states via `$GIT_DIR` markers and stands down.
-- **Unborn HEAD** (fresh `git init` before the first commit) — a new repo's first commit legitimately lands on the default branch; bootstrap must work.
-- **Repos with no `origin` remote** — the loss scenario this guard exists for is work destroyed when the default branch is hard-reset to origin. A local-only repo has nothing to sync from, so scratch `git init` repos and local journals stay frictionless. (An origin that exists but was never fetched is still guarded, via the local main/master fallback.)
-- **Direct-to-main allowlisted repos** (`~/.claude/git-flow-direct-to-main-repos.json`, matched as substrings of the origin URL) — the same allowlist `enforce-git-workflow.py` honors, e.g. agent-log repos that commit tracking data straight to main.
-- **Gitignored target paths** (file tools only) — a gitignored file can never be committed to the default branch, so it sits outside the loss scenario entirely (e.g. `.audit/` coordination state written by `/audit` workers, `.env` files, local caches). Verified with `git check-ignore`, which never reports **tracked** files as ignored — so a tracked file that happens to match an ignore pattern is still blocked. **This check fails CLOSED** (git error → treated as not-ignored → block stands), a deliberate exception to the guard's usual fail-open convention: the exemption widens the gate, and a broken git state must never be what opens it. Added after a 2026-07-10 `/audit` run, where blocked workers routed around the guard with shell writes — the exact red-flag pattern this rule forbids.
-- **Read-only git** (`status`, `log`, `diff`, `fetch`, `pull`, `checkout`, `switch`, branch creation) — the escape route must never be blocked.
-- **`git push`** — already owned by `enforce-git-workflow.py`; the guard does not double-handle it.
+- Any non-default branch, including detached HEAD.
+- An in-progress rebase, merge, cherry-pick, revert, or bisect (detected via `$GIT_DIR` markers), since conflict resolution needs edits and `git add`.
+- Unborn HEAD (a fresh `git init` before the first commit).
+- Repos with no `origin` remote: nothing to sync from, so nothing to lose. An origin that exists but was never fetched is still guarded via the local main/master fallback.
+- Direct-to-main allowlisted repos (`~/.claude/git-flow-direct-to-main-repos.json`, substring-matched against the origin URL), the same allowlist `enforce-git-workflow.py` honors.
+- Gitignored target paths (file tools only), checked with `git check-ignore`, which never reports tracked files as ignored. This check fails closed: a git error means not-ignored and the block stands, because a broken git state must never widen the gate.
+- Read-only git (`status`, `log`, `diff`, `fetch`, `pull`, `checkout`, `switch`, branch creation): the escape route is never blocked.
+- `git push`, which `enforce-git-workflow.py` owns.
 
 ## Escape Hatch
 
-`ALLOW_MAIN_COMMIT=1` — as a session env var, or inline on a Bash command (`ALLOW_MAIN_COMMIT=1 git commit ...`). Use it ONLY for main-only operations the user explicitly requested (e.g. `appcast:` version bumps, release tagging). Reaching for the hatch because branching feels like friction is a violation of the workflow, not a workaround. The same variable already gates `enforce-git-workflow.py` and the force-push guard, so one hatch opens all three consistently — never leave it exported after the intentional operation completes.
+`ALLOW_MAIN_COMMIT=1`, as a session env var or inline on one command, only for main-only operations the user explicitly requested (`appcast:` version bumps, release tagging). The same variable gates `enforce-git-workflow.py` and the force-push guard. Never leave it exported after the intentional operation.
 
 ## Relationship to the Other Layers
 
 | Layer | Mechanism | When it fires |
 |-------|-----------|---------------|
 | `<workflow-reminder>` (enforce-issue-workflow.py) | Advisory context injection | On work-request prompts |
-| **branch-guard.py (this rule)** | **Hard block, exit 2** | **Before the first edit / stage / apply on the default branch** |
-| enforce-git-workflow.py | Hard block, exit 2 | `git commit` / `git push` on any protected branch (incl. dev/staging/etc.), commit-message format |
-
-The advisory reminder stays — it teaches the workflow. This hook enforces it. `enforce-git-workflow.py` remains the wider net at commit/push time (it also covers non-default protected branches like `staging`); branch-guard is the earlier, narrower gate that keeps the default branch pristine.
+| branch-guard.py | Hard block, exit 2 | Before the first edit, stage, or apply on the default branch |
+| enforce-git-workflow.py | Hard block, exit 2 | `git commit` and `git push` on any protected branch (including dev/staging), commit-message format |
 
 ## Known Gaps
 
 - Raw shell writes (`echo > file`, `sed -i`, `tee`) are not detectable from the command string, so edits to tracked repo files go through Edit/Write/NotebookEdit, where this guard (and the freeze and advisor gates) can see them. Read-only work may use any tool.
-- `cd <other-repo> && git add .` is checked against the session cwd, not the `cd` target. Use `git -C <path>` (which IS resolved) when operating on another repo.
-- The guard fails OPEN on git errors (cannot determine the branch → allow) so a broken git state never bricks the session. The one exception is the gitignored-path check, which fails CLOSED (see above) — failing open there would widen the gate exactly when git can't be trusted.
-
-## Red Flags
-
-Stop if you catch yourself:
-
-- Retrying a blocked Edit hoping the second attempt lands differently
-- Prepending `ALLOW_MAIN_COMMIT=1` to get past the gate for ordinary feature work
-- Doing "just one quick fix" on main because a branch feels heavyweight
-- Writing files via shell redirection to route around the file-tool gate
-- Exporting `ALLOW_MAIN_COMMIT=1` for a whole session
+- `cd <other-repo> && git add .` is checked against the session cwd, not the `cd` target; use `git -C <path>` for another repo.
+- The guard fails open on git errors (cannot determine the branch, so allow) so a broken git state never bricks the session. The gitignored-path check is the one deliberate exception and fails closed.

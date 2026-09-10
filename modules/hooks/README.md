@@ -20,7 +20,6 @@ This module installs fifteen Python hooks, several Python libraries, and a setti
 | `orphan-process-check.py` | Not a hook | Detects and warns about orphaned background processes (stale dev servers, zombie workers). Registered under no event; run as a plain script by `/startup` via `startup-dashboard`'s `startup-gather.sh` |
 | `check-careful.py` | PreToolUse (Bash) | Prompts before destructive Bash commands (rm -rf, SQL DROP/TRUNCATE, force push, hard reset, kubectl delete, docker prune). Build-artifact directories (node_modules, dist, .next, build, __pycache__, .cache, .turbo, coverage) are whitelisted for `rm -rf` |
 | `check-freeze.py` | PreToolUse (Edit/Write) | Denies Edit/Write outside the frozen directory when `~/.claude/freeze-dir.txt` is set. Pair with `/freeze`, `/unfreeze`, `/guard` from `commands-extra` |
-| `session-start-enforce.py` | SessionStart (startup) | Experimental. Injects an Iron-Law rule-enforcement meta-instruction at fresh session start so discipline rules activate under pressure. OFF by default; opt in via `CCGM_RULE_ENFORCEMENT=true` in `~/.claude/.ccgm.env` |
 | `sync-ccgm-canonical.py` | PostToolUse (Bash) | After `gh pr merge` succeeds in the CCGM repo, fast-forwards the canonical CCGM clone (the symlink source for `~/.claude/`) so it never drifts. Default canonical dir: `~/code/ccgm`; override with `CCGM_CANONICAL_DIR` env var. No-op if the dir doesn't exist or the merge wasn't in a CCGM clone |
 
 The `settings.partial.json` wires these hooks into your `~/.claude/settings.json`.
@@ -67,7 +66,6 @@ cp hooks/check-migration-timestamps.py ~/.claude/hooks/check-migration-timestamp
 cp hooks/orphan-process-check.py ~/.claude/hooks/orphan-process-check.py
 cp hooks/check-careful.py ~/.claude/hooks/check-careful.py
 cp hooks/check-freeze.py ~/.claude/hooks/check-freeze.py
-cp hooks/session-start-enforce.py ~/.claude/hooks/session-start-enforce.py
 cp hooks/sync-ccgm-canonical.py ~/.claude/hooks/sync-ccgm-canonical.py
 cp hooks/pretooluse-bash-dispatch.py ~/.claude/hooks/pretooluse-bash-dispatch.py
 
@@ -99,16 +97,6 @@ You can add additional protected branches by creating `~/.claude/git-flow-protec
 ```
 
 The default protected branches are: main, master, production, prod, staging, stag, develop, dev, release, trunk.
-
-### Experimental: rule-enforcement meta-instruction
-
-`session-start-enforce.py` is OFF by default. To pilot it, add this to `~/.claude/.ccgm.env`:
-
-```
-CCGM_RULE_ENFORCEMENT=true
-```
-
-On fresh session start, the hook injects a short reminder that routes tasks through loaded Iron-Law rules (TDD, systematic-debugging, verification, subagent-patterns, confusion-protocol). Remove or set to `false` to disable.
 
 ## Hook Composition Dispatcher (default)
 
@@ -182,7 +170,6 @@ six standalone hook entries (`enforce-git-workflow`, `auto-approve-bash`,
 | `hooks/orphan-process-check.py` | Orphaned background process detection before conflicting Bash commands |
 | `hooks/check-careful.py` | Destructive-command warning (careful safety hook) |
 | `hooks/check-freeze.py` | Scope-lock Edit/Write to `~/.claude/freeze-dir.txt` (freeze safety hook) |
-| `hooks/session-start-enforce.py` | Experimental Iron-Law rule-enforcement meta-instruction at session start (opt in via `CCGM_RULE_ENFORCEMENT=true`) |
 | `hooks/sync-ccgm-canonical.py` | Auto-pull `~/code/ccgm` after CCGM PR merges so symlinked runtime never drifts (override path via `CCGM_CANONICAL_DIR`) |
 | `hooks/pretooluse-bash-dispatch.py` | Default single-process composition dispatcher for the PreToolUse:Bash chain (declarative precedence; equivalence-proven against the six-process chain) |
 | `lib/hook_dispatcher.py` | Composition engine: declarative `Manifest`/`Check`/`Result` model + `dispatch()` precedence resolution (hard_block > deny > allow > ask) |

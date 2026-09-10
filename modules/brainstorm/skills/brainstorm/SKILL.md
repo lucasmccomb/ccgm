@@ -14,13 +14,7 @@ disable-model-invocation: true
 
 # /brainstorm - Design Spec Before Any Implementation
 
-**Iron Law: NO CODE, SCAFFOLDING, OR IMPLEMENTATION UNTIL A DESIGN SPEC IS WRITTEN AND USER-APPROVED.**
-
-Violating the letter of this rule is violating the spirit. If you produce any file
-outside of the spec itself, or sketch any implementation in prose, you have skipped
-the gate.
-
-**Announce at start:** "I'm using the /brainstorm discipline. Writing the design spec first. No code until you approve it."
+No code, scaffolding, or implementation until a design spec is written and user-approved. Producing any file outside the spec, or sketching an implementation in prose, skips the gate.
 
 <HARD-GATE>
 The following actions are FORBIDDEN until Phase 4 approval:

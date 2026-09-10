@@ -1,226 +1,64 @@
 # Subagent Patterns
 
-Methodology for decomposing work and delegating to subagents (Agent tool) effectively.
+How to decompose work and delegate it to subagents (the Agent tool).
 
 ## When to Use Subagents
 
-Use subagents when:
-- A task has 3+ independent subtasks that can run in parallel
-- Research needs to happen across multiple files or systems simultaneously
-- The main context window would be polluted by verbose intermediate results
-- Multiple issues or PRs need to be completed independently
-
-Do NOT use subagents for:
-- Simple file reads or searches (use Glob/Grep/Read directly)
-- Sequential tasks where each step depends on the previous result
-- Tasks that require maintaining conversation context with the user
+Use them when a task has three or more independent subtasks that can run in parallel, when research spans several files or systems at once, when verbose intermediate results would pollute the main context, or when several issues or PRs need independent completion. Do not use them for simple reads or searches (use Glob, Grep, Read), for sequential steps where each depends on the previous result, or for work that needs the conversation with the user.
 
 ## Task Decomposition
 
-### Write a Spec for Each Subtask
+Before dispatching, write a spec with four fields:
 
-Before dispatching a subagent, define:
+1. **Objective**: one sentence describing the expected outcome.
+2. **Context**: file paths, function names, background the agent needs.
+3. **Constraints**: patterns to follow, files not to modify, libraries not to add.
+4. **Deliverable**: what to return (code changes, research summary, test results).
 
-1. **Objective** - one clear sentence describing the expected outcome
-2. **Context** - relevant file paths, function names, or background the agent needs
-3. **Constraints** - patterns to follow, files not to modify, libraries not to add
-4. **Deliverable** - what the agent should return (code changes, research summary, test results)
+Bad: "Fix the auth bug." Good: "In `/src/auth/session.ts`, `refreshToken` silently swallows errors on line 47. Add error propagation and a test in `/tests/auth/session.test.ts` that verifies refresh failures surface."
 
-Bad: "Fix the auth bug"
-Good: "In /src/auth/session.ts, the refreshToken function silently swallows errors on line 47. Add proper error propagation and a test in /tests/auth/session.test.ts that verifies refresh failures are surfaced."
+Each task should be completable in one pass without clarifying questions, independently verifiable, and scoped to one concern. Pass file paths, not file contents: the subagent reads what it needs, the prompt stays small, and adding a tenth reference costs one line. Inline an excerpt only when the agent must match a specific passage that a search would not find unambiguously.
 
-### Right-Size the Work
+## Dispatch
 
-Each subagent task should be:
-- **Completable in one pass** - the agent should not need to ask clarifying questions
-- **Independently verifiable** - the result can be checked without running other tasks first
-- **Scoped to one concern** - one bug fix, one feature, one research question
-
-## Dispatch Patterns
-
-### Parallel Research
-
-When exploring a question that spans multiple areas:
-
-```
-Agent 1: "Search for all usages of TokenManager in src/ and list the call sites"
-Agent 2: "Read the auth middleware in src/middleware/auth.ts and summarize the token validation flow"
-Agent 3: "Check the test coverage for src/auth/ - list tested and untested functions"
-```
-
-### Parallel Implementation
-
-When implementing changes across independent files:
-
-```
-Agent 1: "Add input validation to the /api/users endpoint in src/routes/users.ts"
-Agent 2: "Add input validation to the /api/posts endpoint in src/routes/posts.ts"
-Agent 3: "Write shared validation helpers in src/utils/validate.ts"
-```
-
-Note: If agents share dependencies (Agent 3's output is needed by 1 and 2), run the dependency first, then the dependents in parallel.
-
-### Isolate Parallel Implementers in Worktrees
-
-When parallel implementers modify files, give each its own **git worktree** (`isolation: "worktree"`) — the default isolation for parallel sub-agent delegation on one machine. Each worktree has its own index and HEAD, so agents editing, building, and committing at the same time never collide; this is the structural enforcement of the "no shared state" coordination rule below. Worktrees are ephemeral — created per unit, removed when the unit's PR merges, with `/worktree-sweep` as the orphan backstop. Do **not** spin up extra permanent clones just for parallelism; reserve clones for long-lived independent agents, per-branch dev-server ports, hook-driven per-branch `tracking.csv`, or cross-machine dispatch. **Teardown is mandatory**: a worktree an agent built in does not auto-remove, and forgetting to remove merged worktrees is what filled 237 GB on one repo (2026-07-13). See the `git-worktrees` skill and `multi-agent.md`.
-
-**Throttle heavy fan-outs.** Launching too many heavy agents at once (whether via the Workflow tool's `parallel()`/`pipeline()` or multiple Agent calls in one message) trips a server-side 429 throttle that fails the entire burst. Cap simultaneous heavy agents to 4 (never exceed 5), launch in waves, and default fan-out agents to cheaper models / lower effort unless thoroughness is explicitly requested. See Concurrency and Rate Limits below for the defaults, the exact error, and the recovery procedure.
-
-## Pass Paths, Not Contents
-
-When a subagent needs access to reference material, pass **file paths**, not file contents. The orchestrator should not pre-read files and splice their text into the prompt. It should tell the subagent where the files are and let the subagent read what it actually needs.
-
-Why this matters:
-- **No wasted reads** - the orchestrator does not spend tokens loading files that the subagent may skim or skip
-- **Prompt does not balloon** - adding a tenth reference path costs one line, not a thousand tokens of file content
-- **Subagent keeps agency** - it decides which files are relevant, in what order, and can search within them; pasted content is a snapshot, not a live reference
-- **Works at scale** - ten reference files do not grow the dispatch prompt linearly
-
-Bad: "Here is the content of src/auth/session.ts: [2000 lines pasted]. Here is tests/auth.test.ts: [800 lines pasted]. Find the bug."
-
-Good: "The relevant files are src/auth/session.ts and tests/auth.test.ts. Also check any other file matching src/auth/**. Find the bug."
-
-Template:
-
-```
-Task: {one-sentence objective}
-
-Reference files (read as needed):
-- {path 1}
-- {path 2}
-- Search pattern: {glob or grep query if the set is open-ended}
-
-Deliverable: {what to return}
-```
-
-The only exception: inline a small excerpt (10-30 lines) when the subagent needs to match a specific passage and searching for it would be ambiguous. Paste the snippet with its file path as a locator, not as a replacement for the file.
+For parallel research, one agent per area. For parallel implementation, one agent per independent file set, with any shared dependency built first and the dependents launched after. Parallel implementers get `isolation: "worktree"` so their builds and commits never collide; the worktree is created per unit and removed when the unit's PR merges, with `/worktree-sweep` as the backstop, because a worktree an agent built in does not auto-remove and forgotten ones fill the disk. The `git-worktrees` skill has the lifecycle and the safe-removal rules.
 
 ## Two-Stage Review
 
-After subagent results come back, the lead personally reviews in two passes by default. Native cross-provider review requires `--cross-provider` in a supported workflow or an explicit natural-language request; it is not implied by delegation. **Order matters: Stage 1 gates Stage 2.** Running code-quality review on a scope-creeping or deliverable-incomplete implementation wastes effort polishing code that will be reverted or re-dispatched.
+The lead reviews subagent results in two passes, Stage 1 gating Stage 2. Explicitly dispatched reviewers run in fresh context and receive only the spec, the diff or changed-file paths, and fresh build and test output, never the implementer's rationale; a reviewer who reads "I chose X because" grades the defense instead of the change. The implementer's `DONE` report is an audit target for Stage 1, not grounding, and Stage 2 does not need it. Dispatched reviewers write their findings to a file the caller named and reply with the path; the caller routes on the artifact, and a missing or unparseable artifact means the reviewer failed.
 
-### Fresh Context: Reviewers Do Not Inherit the Implementer's Rationale
+- **Stage 1, spec compliance**: every deliverable present, every constraint respected, no creep into files or helpers the spec did not name. On failure, re-dispatch the implementer with specific feedback; do not proceed.
+- **Stage 2, code quality**: project patterns, unhandled edge cases, appropriate simplicity. Runs only after Stage 1 returns DONE, or DONE_WITH_CONCERNS the caller accepted.
 
-For explicitly dispatched reviewers, run each stage in **fresh context**. Personal lead review cannot claim a fresh independent session; it still judges the actual spec, artifact and check evidence. A reviewer judges the change against the spec and the artifact, not against the implementer's explanation of why they did it that way. A reviewer who reads "I chose X over Y because…" grades the *defense* of the change, not the change - and that inflates sign-off. This is the same integrity property Argus enforces by never showing its judge the diff-author's reasoning.
+Three templates live under `~/.claude/agents/`: `implementer` (does the work inside the spec), `spec-compliance-reviewer` (Stage 1, treats DONE as a claim and re-reads the diff), `code-quality-reviewer` (Stage 2, refuses to run if Stage 1 did not pass). Cross-provider review needs `--cross-provider` or an explicit request.
 
-Pass each reviewer ONLY:
+## Coordination
 
-- the **spec** (objective, context, constraints, deliverable) - the target
-- the **diff or changed-file paths** - the artifact
-- fresh **build/test output** - the deterministic evidence
+Subagents do not modify the same files; serialize or merge the tasks when two need the same file. Synthesize results into a coherent whole before presenting. Report subagent failures rather than working around them silently. Verify the artifact (read the diff, run the test) before accepting a `DONE`.
 
-Do NOT pass the implementer's conversation, working notes, or chain-of-thought as grounding. The one nuance for Stage 1: the implementer's `DONE` report is an **audit target**, not grounding - the reviewer reads it to check the claims against the diff, never to be persuaded by it. Stage 2 does not need the report at all.
+## Completion Status Protocol
 
-### Results Stay in Files, Not in the Reply
+Subagents end with one of four statuses instead of a free-form summary:
 
-Record personal lead findings and verification evidence in the work record. When a reviewer is explicitly dispatched, it writes its structured findings (the four-state status plus its itemized checks) to a file the caller named, and replies with only that path plus a terminal line. The caller routes on the artifact it reads from disk, not on a prose summary in the chat. This mirrors Argus: the dispatcher trusts the written result, never a narrative that cannot be re-read. If the artifact is missing or unparseable, treat the reviewer as failed - do not reconstruct its verdict from the reply.
-
-### Stage 1: Spec Compliance
-
-- Did the agent do what was asked?
-- Are all deliverables present?
-- Were constraints respected?
-- Did the agent creep beyond the spec (touching files, helpers, or adjacent bugs it was not asked to)?
-
-If Stage 1 fails, re-dispatch the implementer with specific feedback. Do NOT proceed to Stage 2.
-
-### Stage 2: Code Quality
-
-- Does the code follow project patterns?
-- Are there edge cases not handled?
-- Is the solution appropriately simple (not over-engineered)?
-
-Stage 2 runs only after Stage 1 returns DONE (or DONE_WITH_CONCERNS that the caller chose to accept).
-
-If either stage fails, provide specific feedback and re-dispatch. Do not manually patch subagent output without understanding why it diverged.
-
-### Reusable Prompt Templates
-
-Three agent prompt templates live under `~/.claude/agents/` once this module is installed. Reference them by name when dispatching:
-
-| Template | Role | Returns |
-|----------|------|---------|
-| `implementer` | Does the work inside a spec without creeping | Four-state status |
-| `spec-compliance-reviewer` | Stage 1 reviewer - adversarial stance, does not trust implementer self-reports | Four-state status |
-| `code-quality-reviewer` | Stage 2 reviewer - refuses to run if Stage 1 did not pass | Four-state status |
-
-The `spec-compliance-reviewer` is specifically hardened to treat the implementer's `DONE` as a claim, not evidence - it re-reads the diff, itemizes deliverables, and runs fresh verification before concurring.
-
-### Red Flags
-
-Stop and re-sequence if you catch yourself:
-
-- Starting Stage 2 before Stage 1 has returned DONE
-- Merging a subagent's output without running either stage because "the code looks fine"
-- Accepting the implementer's self-report as evidence of spec compliance
-- Forwarding the implementer's rationale ("why I did it this way") to a reviewer as grounding - it inflates sign-off; pass spec + diff + verification output only
-- Routing on a reviewer's chat summary instead of the findings artifact it wrote to disk
-- Running Stage 1 and Stage 2 in parallel (they are deliberately serial - Stage 1 gates Stage 2)
-
-## Coordination Rules
-
-- **No shared state**: Subagents should not modify the same files. If two tasks need to touch the same file, either serialize them or make one task handle both changes.
-- **Aggregate results**: After all subagents return, synthesize their outputs into a coherent whole before presenting to the user.
-- **Report failures**: If a subagent fails or produces unexpected results, report it clearly rather than silently working around it.
-
-## Subagent Completion Status Protocol
-
-Every subagent must return one of four structured status values, not a free-form summary. This is the vocabulary that lets the dispatcher make an immediate routing decision without re-reading the whole result.
-
-Instruct subagents to end their reports with one of:
-
-| Status | Meaning | Dispatcher Action |
+| Status | Meaning | Dispatcher action |
 |--------|---------|-------------------|
-| **DONE** | Task completed as specified; all deliverables present; no unresolved concerns. | Verify the artifact (read the diff, run the test) and move on. |
-| **DONE_WITH_CONCERNS** | Task completed but the agent has doubts about the approach, missing context, or edge cases it could not resolve. | Read the concerns section. Decide to accept, fix, or re-dispatch with guidance. |
-| **BLOCKED** | The task cannot be completed as specified. Specify what is blocking (missing file, conflicting constraint, environmental issue). | Resolve the blocker and re-dispatch, or revise the spec. |
-| **NEEDS_CONTEXT** | The task is under-specified. Specify what information would unblock it. | Supply the missing context and re-dispatch. |
-
-Free-form summaries force the dispatcher to re-read everything to decide what to do. DONE_WITH_CONCERNS in particular captures "I completed it but I have doubts" - a state that silent success would otherwise hide.
-
-**Do not trust the self-report.** A subagent reporting DONE is a claim, not evidence. Before accepting the result, verify the artifact (read the diff, check the file exists, run the test). See the `verification` rule for the full evidence table.
+| DONE | Completed as specified, all deliverables present, no unresolved concerns | Verify the artifact and move on |
+| DONE_WITH_CONCERNS | Completed, but the agent has doubts about approach, missing context, or edge cases | Read the concerns; accept, fix, or re-dispatch |
+| BLOCKED | Cannot be completed as specified; names the blocker | Resolve the blocker or revise the spec |
+| NEEDS_CONTEXT | Under-specified; names what would unblock it | Supply the context and re-dispatch |
 
 ## Skill Invocation Modes
 
-When a skill is invoked - whether by the user directly or by another skill via subagent dispatch - the caller and callee need a shared contract about what the skill will do: will it prompt, will it write files, will it produce parseable output. Skills with side effects should expose explicit modes, parsed from `$ARGUMENTS` via `mode:{name}` tokens.
+Skills with side effects expose modes parsed from `$ARGUMENTS` as `mode:{name}`:
 
-Four standard modes:
+| Mode | Behavior |
+|------|----------|
+| interactive (default) | May prompt, apply fixes interactively, write artifacts |
+| autofix | No prompts; apply safe fixes; write a structured run artifact |
+| report-only | Read-only; findings to stdout or a report file; safe to run concurrently |
+| headless | For skill-to-skill calls; no prompts; structured output envelope ending with a terminal line such as "Review complete" |
 
-| Mode | Behavior | Use Case |
-|------|----------|----------|
-| **interactive** (default) | May prompt the user, may apply fixes interactively, may write artifacts. Safe to assume when no mode token is present. | Direct user invocation. The skill can ask clarifying questions, confirm destructive actions, and stream progress. |
-| **autofix** | No user questions. Apply safe fixes automatically. Write a structured run artifact (e.g., a summary file) describing what changed. | Batch cleanup runs. The user trusts the skill to act without confirmation for well-bounded fix classes. |
-| **report-only** | Strictly read-only. Write findings to stdout or a report file; never modify source files. Safe for concurrent runs. | Audits, parallel reviews, CI checks. Multiple instances can run simultaneously without stepping on each other. |
-| **headless** | For skill-to-skill invocation. No prompts. Emit a structured output envelope (JSON or delimited block). End with a terminal signal like "Review complete" so the caller knows the skill has finished. | One skill dispatches another. The caller parses the envelope and routes based on status. |
-
-### Invocation Examples
-
-```
-# Default interactive mode
-/ce:review
-
-# Apply safe fixes, no prompts, write run artifact
-/ce:review mode:autofix
-
-# Read-only audit - safe to run in parallel with other reviewers
-/ce:review mode:report-only
-
-# Called by another skill - structured output, no prompts
-/ce:review mode:headless
-```
-
-### Authoring Rules
-
-When authoring a skill that may be called by another skill, declare which modes it supports. Each mode should specify:
-
-- **Stop conditions** - when does the skill return control (after fixes applied, after report written, after N iterations)?
-- **Write policy** - what files, if any, may be created or modified in this mode?
-- **Output contract** - what does the caller receive (freeform text, structured envelope, status code)?
-- **Prompt policy** - may the skill ask the user anything? In `autofix`, `report-only`, and `headless`: no.
-
-### Caller Rules
-
-When one skill invokes another via subagent dispatch, **pass `mode:headless` unless there is a specific reason to choose a different mode.** Headless is the contract that makes composition safe: the caller knows the callee will not prompt, will not write unexpected files, and will return parseable output. Any other mode requires the caller to reason about side effects.
+A skill that may be called by another skill declares which modes it supports, with stop conditions, write policy, output contract, and prompt policy. A skill invoking another passes `mode:headless` unless there is a specific reason not to.
 
 ## Concurrency and Rate Limits
 
@@ -237,6 +75,6 @@ A **heavy** agent is any of: Opus or Fable, reasoning effort at or above high, o
 | Effort for fan-out agents | medium or low; escalate only the stages that need it |
 | Retry on a 429 | 3 attempts, backoff 30s, 60s, 120s |
 
-Reduce agent count before throttling launches: one agent handling five items beats five agents. In a Workflow script, prefer `pipeline()` over `parallel()` for heavy stages, or chunk the array into sequential waves of 4. With direct Agent-tool dispatch, send at most 4 heavy calls per message and read the results before sending the next batch. Same-prefix agents launched within a few seconds of each other share the first agent's cached prefix, which is one more reason to keep a wave on one model.
+Reduce agent count before throttling launches: one agent handling five items beats five agents. In a Workflow script, prefer `pipeline()` over `parallel()` for heavy stages, or chunk the array into sequential waves of 4. With direct Agent-tool dispatch, send at most 4 heavy calls per message and read the results before the next batch. Same-prefix agents launched within a few seconds of each other share the first agent's cached prefix, one more reason to keep a wave on one model.
 
 When throttled mid-run: stop launching, wait 30 to 60 seconds, re-dispatch only the failed agents in waves of 3 or 4 (or on Sonnet at medium), halve the wave and double the cooldown if it trips again, and for Workflow runs resume from the journal with `resumeFromRunId` so completed agents return cached results.

@@ -27,7 +27,7 @@ another's. This hook owns three jobs, in order:
   3. Auto-on — create this session's flag, so every session starts in advisor
      mode. Opt out with CCGM_ADVISOR_AUTO=false in the environment or in
      `~/.claude/.ccgm.env` (environment wins; unset means on), matching
-     CCGM_AUTO_UPDATE_CHECK / CCGM_RULE_ENFORCEMENT. GC still runs when the
+     CCGM_AUTO_UPDATE_CHECK. GC still runs when the
      auto-on is opted out.
 
 `source == "compact"` skips the auto-on: compaction is mid-session continuity,

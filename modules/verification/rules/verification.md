@@ -1,93 +1,37 @@
 # Verification Before Completion
 
-**Iron Law:** NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE.
+No completion claim without verification evidence. Never assert that something works, passes, or is fixed without proof captured this session.
 
-Violating the letter of this rule is violating the spirit of this rule. Never assert that something works, passes, or is fixed without fresh proof.
+## The Process
 
-**Announce at start:** "I'm using the verification discipline. Running fresh checks before claiming completion."
+Before claiming a task is complete:
 
-## The 5-Step Verification Process
-
-Before claiming any task is complete:
-
-1. **Identify** the specific command or action that proves the claim
-2. **Execute** the command at claim time and capture its output
-3. **Read** the full output, including exit codes and failure counts
-4. **Verify** the output actually supports the claim you are making
-5. **Report** with evidence attached (not just "tests pass")
+1. Identify the specific command or action that proves the claim.
+2. Execute it at claim time and capture its output.
+3. Read the full output, including exit codes and failure counts, not just the summary line.
+4. Confirm the output supports the exact claim.
+5. Report with the evidence attached, not "tests pass."
 
 ## What Counts as Evidence
 
-| Claim | Required Evidence |
+| Claim | Required evidence |
 |-------|-------------------|
-| "Tests pass" | Fresh test run output showing pass count and 0 failures |
-| "Lint is clean" | Fresh linter output showing 0 errors, 0 warnings |
-| "Build succeeds" | Build command output with exit code 0 |
-| "Bug is fixed" | Reproduction steps that previously failed now succeed |
-| "No regressions" | Full test suite output, not just the new tests |
+| "Tests pass" | Test run output showing pass count and 0 failures |
+| "Lint is clean" | Linter output showing 0 errors, 0 warnings |
+| "Build succeeds" | Build output with exit code 0 |
 | "Types check" | Type checker output showing 0 errors |
-| "Deployed successfully" | Deployment URL responding with expected content |
-| "Agent completed" | The actual diff, test run, or artifact the subagent claims to have produced - never the subagent's self-report alone |
+| "Bug is fixed" | The reproduction that previously failed now succeeding |
+| "No regressions" | Full suite output, not just the new tests |
+| "Deployed" | The deployment URL responding with the expected content |
+| "UI renders correctly" | A screenshot captured this session |
+| "Agent completed" | The subagent's actual diff, test run, or artifact, never its self-report |
 
-## Rules
+Evidence is an artifact the machine produced this session. A reasoned argument ("the diff is small," "the types line up") is a hypothesis, and a bare assertion ("it works," "fixed") is the failure this rule exists to catch. Paste the artifact next to the claim; an artifact you ran but did not show reads as an assertion, and a claim with no artifact is downgraded to "changed X, not yet verified."
 
-### One Check Is Not Another
+## One Check Is Not Another
 
-- Do NOT assume passing one check means another also passes (lint passing does not mean types check)
-- Do NOT trust partial output (10/12 tests passing means 2 are failing)
-
-### Read Fully
-
-- Check the exit code, not just the visible output
-- Scroll through the full output, not just the summary line
-- Look for warnings that might indicate problems even if the overall status is "pass"
-
-### Report Honestly
-
-- If 1 out of 100 tests fails, do not say "tests pass"
-- If the build succeeds with warnings, mention the warnings
-- If you could not run a verification step, say so explicitly
-
-## Common Verification Failures
-
-- **Proxy claims**: "Lint passed so the code must be correct" - wrong, they check different things
-- **Stale results**: "Tests passed earlier" - they might not pass now after your changes
-- **Partial verification**: Running a subset of tests instead of the full suite
-- **Assumed verification**: "This change is trivial, it can't break anything" - run the checks anyway
-- **Trusting subagent self-reports**: A subagent saying "DONE" is not evidence. Read the diff, run the tests yourself, or inspect the artifact
-
-## Rationalizations That Mean You Are About to Claim Completion Without Evidence
-
-| You are about to say... | The reality is... |
-|-------------------------|-------------------|
-| "Type check passed, that's good enough" | Type check is not a test run. It is not a lint run. They catch different classes of problems. |
-| "The subagent said it succeeded" | A subagent's summary describes what it intended. Read the diff. |
-| "CI will catch anything I miss" | CI is a last-resort. Local checks are faster and cheaper. Do not ship the blame. |
-| "I can see from the code it will work" | Reading is not running. If you did not see exit code 0, you did not verify. |
-
-## Red Flags
-
-Stop and run the check if you catch yourself:
-
-- Saying "tests pass" without having just run them
-- Claiming a fix works before seeing fresh output
-- Reporting a subagent's result as your own without verifying the artifact
-- Summarizing what you did instead of showing the output
-- "I'll just do one more thing before I run the full suite"
+Lint passing does not mean types check; a type check is not a test run; 10 of 12 tests passing means 2 are failing. Check the exit code, scroll the full output, and read warnings even when the overall status is pass. Report honestly: one failure out of a hundred is not "tests pass," a build with warnings mentions the warnings, and a verification step you could not run is stated as not run.
 
 ## When to Verify
 
-- Before claiming a bug is fixed
-- Before reporting a task as complete
-- Before pushing, with the full pre-push suite (see code-quality.md)
-- After resolving merge conflicts
-
-## Evidence Tiers
-
-| Tier | What it is | Counts as proof? |
-|------|-----------|------------------|
-| L1 | A fresh artifact captured this session: command output with exit code, test summary, screenshot, log line, HTTP response | Yes, the only tier that satisfies a claim |
-| L2 | A reasoned argument: "the diff is small", "the types line up" | No, a hypothesis |
-| L3 | A bare assertion: "tests pass", "it works", "fixed" | No, this is the failure the gate catches |
-
-Before saying done, complete, fixed, passing, or deployed, paste the L1 artifact next to the claim. An artifact you ran but did not show reads as L3; a claim with no L1 artifact is downgraded to "changed X, not yet verified".
+Before claiming a bug is fixed, before reporting a task complete, before pushing with the full pre-push suite (see `code-quality.md`), and after resolving merge conflicts.

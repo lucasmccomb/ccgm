@@ -1,6 +1,6 @@
 # Writing System
 
-**Iron Law:** PROSE FOLLOWS THE SIX RULES. FIX THE SYSTEM, NOT ONE WORD AT A TIME.
+Prose follows the six rules. Fix the system, not one word at a time.
 
 These rules govern prose: docs, READMEs, PR descriptions, commit messages, issue comments, session reports, chat responses, marketing copy. They never touch code, identifiers, API names, error strings someone will grep for, or a technical term whose plain-word swap would change the meaning ("idempotent" stays "idempotent").
 
