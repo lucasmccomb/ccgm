@@ -171,7 +171,7 @@ Hard PreToolUse gate ensuring every AskUserQuestion the agent asks carries visib
 
 Security vetting gate for integrating any new AI model — open-weights or hosted — into the Claude Code harness or the local development system.
 
-**Installs**: `rules/model-vetting.md`
+**Installs**: `skills/model-vetting/SKILL.md`
 
 **What it does**: Blocks "just wire it up" model integrations behind a verification checklist: weights provenance (the artifact must exist, come from the vendor's verified org, and be pinned to a revision hash — announced ≠ released ≠ verified), file-format safety (safetensors/GGUF only, no pickle loads, no `trust_remote_code`), license and hosted-API data terms (retention, training-on-inputs, jurisdiction), the serving path as supply chain (aggregators, upstream providers, and translation proxies all see plaintext traffic), and staged agentic access — a new backend model inherits every tool and credential the harness can reach, so access advances chat-only → sandboxed worktree → implementer-behind-two-stage-review → expanded roles, on tracked evidence only. Requires a written verification record next to the integration config, re-verified whenever that config changes.
 
@@ -697,7 +697,7 @@ Commands installed:
 
 SSH access to a configured remote server.
 
-**Installs**: `commands/onremote.md`, `rules/remote-server.md`, settings.json fragment
+**Installs**: `commands/onremote.md`, settings.json fragment
 
 **What it does**: Enables Claude to run commands and health checks on a remote server over SSH:
 
@@ -719,7 +719,7 @@ SSH access to a configured remote server.
 
 Meta-learning system with automated reflection triggers, commands, and hooks, backed by a schema-validated JSONL learnings store.
 
-**Installs**: `rules/self-improving.md`, `rules/learnings-store.md`, `commands/reflect.md`, `commands/consolidate.md`, `commands/retro.md`, `hooks/reflection-trigger.py`, `hooks/precompact-reflection.py`, `hooks/learnings-inject.py`, `lib/learnings_store.py`, `bin/ccgm-learnings-log`, `bin/ccgm-learnings-search`, `bin/ccgm-learnings-sync`, `bin/memory-setup.sh`, `settings.partial.json`
+**Installs**: `rules/self-improving.md`, `skills/learnings-store/SKILL.md`, `commands/reflect.md`, `commands/consolidate.md`, `commands/retro.md`, `hooks/reflection-trigger.py`, `hooks/precompact-reflection.py`, `hooks/learnings-inject.py`, `lib/learnings_store.py`, `bin/ccgm-learnings-log`, `bin/ccgm-learnings-search`, `bin/ccgm-learnings-sync`, `bin/memory-setup.sh`, `settings.partial.json`
 
 **What it does**: Combines rules, commands, hooks, and a durable store to create an active self-improvement loop:
 
@@ -738,7 +738,7 @@ Meta-learning system with automated reflection triggers, commands, and hooks, ba
 
 Methodology for decomposing tasks and delegating to subagents.
 
-**Installs**: `rules/subagent-patterns.md`, `rules/concurrency-and-rate-limits.md`
+**Installs**: `rules/subagent-patterns.md`
 
 **What it does**: Provides a structured approach to using Claude Code's Agent tool:
 
@@ -835,7 +835,7 @@ Experimental UserPromptSubmit hook that injects iron-law principles before slash
 
 Continuous self-improvement loop: capture hook events, daily transcript analysis via direct Anthropic API, local digest plus optional Resend email, opt-in real-time security alerts, opt-in confidence-gated auto-apply, cross-clone file locking, per-repo overrides, retention sweep, and a webhook publisher seam pre-built for future dev.lem.work integration.
 
-**Installs**: 6 hooks (`permission-event-logger.py`, `failure-logger.py`, `user-correction-detector.py`, `permission-request-suppress.py`, `post-prompt-introspect.py`, `realtime-security-scanner.py`), 7 commands (`/autoheal`, `/autoheal-apply`, `/autoheal-digest`, `/autoheal-snooze`, `/autoheal-toggle`, `/permission-audit`, `/permission-fix`), 10 bin scripts under `~/.claude/autoheal/`, `rules/autoheal.md`, JSONL schemas, redaction patterns, and a LaunchAgent installer.
+**Installs**: 6 hooks (`permission-event-logger.py`, `failure-logger.py`, `user-correction-detector.py`, `permission-request-suppress.py`, `post-prompt-introspect.py`, `realtime-security-scanner.py`), 7 commands (`/autoheal`, `/autoheal-apply`, `/autoheal-digest`, `/autoheal-snooze`, `/autoheal-toggle`, `/permission-audit`, `/permission-fix`), 10 bin scripts under `~/.claude/autoheal/`, `skills/autoheal-reference/SKILL.md`, JSONL schemas, redaction patterns, and a LaunchAgent installer.
 
 **What it does**: Four event-capture hooks (`PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `UserPromptSubmit`) record permission requests, tool failures, and user-correction phrases to `~/.claude/autoheal/events/{date}.jsonl` (cross-clone fcntl-locked). A daily `launchd` LaunchAgent runs `autoheal-analyze.sh` (direct `curl` to Anthropic — no claude -p, no exec-escape surface), which proposes small hook/settings fixes filtered by a privilege-escalation gate. Proposals render to a local markdown digest, optionally email via Resend (multi-recipient with per-recipient idempotency keys), and feed into `/permission-fix` (in-session) and `/autoheal-apply` (manual or auto-applied via the strict confidence-9 / breadth-1 / settings-only gate). Default OFF for the three opt-in surfaces (real-time alerts, auto-apply, email/webhook).
 
@@ -847,7 +847,7 @@ Continuous self-improvement loop: capture hook events, daily transcript analysis
 
 Nightly, cost-capped service that mines session transcripts for cross-session failure patterns and optimistically auto-integrates evidence-tagged memory-store changes — write-then-review, made safe by per-op-kind postures, a 24h dwell window, per-run blast caps, batch-anomaly detection, a windowed circuit breaker, an eval gate, a daily report, and git-backed rollback. `autoheal`'s capture-analyze-propose pipeline, retargeted at transcripts instead of permission events.
 
-**Installs**: `rules/dreaming.md`; 7 bin scripts (`dream-analyze.sh`, `dream-digest.sh`, `dream-daily.sh`, `dream-reconcile.sh`, `dream-eval.sh`, `dream-install.sh`, `dream-scorecard.sh`); 5 commands (`/dream`, `/dream-digest`, `/dream-review`, `/dream-apply`, `/dream-scorecard`); lib files for the transcript miner, map/reduce analyzer, optimistic integration engine, apply path, auto-memory reconciliation, weekly observability scorecard, evidence-bundle and proposal JSON schemas, prompt templates, and LaunchAgent/cron templates; 9 eval seed tasks plus fixtures under `eval/tasks/`.
+**Installs**: `skills/dreaming/SKILL.md`; 7 bin scripts (`dream-analyze.sh`, `dream-digest.sh`, `dream-daily.sh`, `dream-reconcile.sh`, `dream-eval.sh`, `dream-install.sh`, `dream-scorecard.sh`); 5 commands (`/dream`, `/dream-digest`, `/dream-review`, `/dream-apply`, `/dream-scorecard`); lib files for the transcript miner, map/reduce analyzer, optimistic integration engine, apply path, auto-memory reconciliation, weekly observability scorecard, evidence-bundle and proposal JSON schemas, prompt templates, and LaunchAgent/cron templates; 9 eval seed tasks plus fixtures under `eval/tasks/`.
 
 **What it does**: The deterministic transcript miner (`discover()`/`mine()`/`cluster()`/`budget()` plus a schema-drift canary) turns session transcripts into a bounded, redacted (secrets + PII) evidence bundle, re-deriving each transcript's owning learnings-store slug from its own `cwd` field rather than a directory-name heuristic. The map-reduce analyzer (`dream_analyze.py`, direct Anthropic API over `curl` -- no nested agent runtime) turns that evidence into per-change proposals against the `self-improving` learnings store, written to `~/.claude/dreaming/proposals/{date}.jsonl` and rendered as a digest (`/dream-digest`). The optimistic integration engine (`run_optimistic_integrate`) is the primary write path: it auto-integrates eligible proposals with per-op-kind postures (verify integrates immediately; add/supersede land under a 24h dwell window before injection; evictions quarantine), bounded by per-run blast caps, batch-anomaly detection, and a windowed self-healing circuit breaker. An opt-in composite eligibility gate (`lib/eligibility.py`, default off, `add`/`supersede` only) can decide those two op-kinds' admission by a deterministic no-LLM waterfall -- static floor, non-compensatory origin gate, then a four-signal composite score (`confidence`/`prevalence`/`recency`/`novelty`) re-derived from the transcripts and live store at apply time -- with a read-only `eligibility-dry-run` CLI to preview a day before opting in; evictions and `verify` are untouched. `/dream-review` inspects auto-integrated + dwelling rows and vetoes/reverts them post-hoc; `/dream-apply` remains the back-compat human-gated path (and the only path a `_global` proposal is promoted through). A nightly `launchd` LaunchAgent (`dream-install.sh`) chains analyze -> eval-refresh -> optimistic-integrate -> digest -> reconcile -> retention; optimistic integration is default OFF (`optimistic_integration.enabled`) and eval-gated. A read-only reconciliation report (`reconcile_automemory.py`) compares Claude Code's own harness auto-memory (`~/.claude/projects/*/memory/`) against the learnings store and appends import-candidate/contradiction findings to the digest, never writing to auto-memory itself. The memory eval harness (`eval/`) runs a with/without-memory A/B (plus a full-context-dump third arm) across 9 seed tasks -- uplift, canary, contradiction, and one end-to-end task exercising the analyzer's own mined output -- with four-bucket outcome classification; `dream-eval.sh --gate` is the regression gate the optimistic engine must pass. A read-only weekly observability scorecard (`/dream-scorecard`, `lib/scorecard.py`) aggregates captured / injected / reused / applied counts plus store health from the on-disk signals (learnings store, injection telemetry, proposals), so the read path's value is reviewable at a glance without touching the store.
 
@@ -907,7 +907,7 @@ Delegation-only session posture for expensive orchestrator models (Fable/Opus), 
 
 Git worktrees as the default isolation for parallel sub-agent delegation on one machine, with a safe janitor that enforces teardown so worktrees never silently fill the disk.
 
-**Installs**: `rules/git-worktrees.md`, `commands/worktree-start.md`, `commands/worktree-finish.md`, `commands/worktree-sweep.md`, `lib/worktree-sweep.sh`
+**Installs**: `skills/git-worktrees/SKILL.md`, `commands/worktree-start.md`, `commands/worktree-finish.md`, `commands/worktree-sweep.md`, `lib/worktree-sweep.sh`
 
 **What it does**: Makes git worktrees the default isolation for parallel sub-agent delegation on a single machine (replacing extra permanent clones for that purpose) and makes teardown load-bearing. `/worktree-start` creates a worktree for a feature branch; `/worktree-finish` finishes one via a four-option gate; `/worktree-sweep` is the safe repo-wide janitor that removes clean worktrees, preserves any with unsaved work, and prunes stale metadata. Motivated by a 2026-07-13 incident where built-in worktrees the harness could not auto-reclaim consumed ~237 GB. Reserve permanent clones for per-branch dev-server ports, per-branch `tracking.csv`, long-lived independent agents, or cross-machine dispatch.
 
@@ -991,7 +991,7 @@ File-based review-finding tracker for things that don't merit a GitHub issue.
 
 Visual-ATDD convergence loop: develop UI against a design spec and self-sign-off via deterministic gates plus a separate judge agent.
 
-**Installs**: `skills/argus/SKILL.md` (`/argus`), `agents/argus-judge.md`, `rules/argus.md`, plus spec/verdict/gate/rubric schemas and six dependency-free deterministic gate scripts under `skills/argus/`
+**Installs**: `skills/argus/SKILL.md` (`/argus`), `agents/argus-judge.md`, plus spec/verdict/gate/rubric schemas and six dependency-free deterministic gate scripts under `skills/argus/`
 
 **What it does**: Runs an implement → render → externally-judge → converge loop for a feature's UI. An `implementer` subagent edits code, deterministic gates (build/lint/type/WCAG-contrast/a11y/snapshot/flows) form an ungameable floor, and a *separate* `argus-judge` subagent scores the render against the spec, a reference image, and the design system — never seeing the diff. The loop signs off after two consecutive rubric passes (3-attempt-per-dimension cap, then freeze + document), then commits a snapshot baseline. Platform-agnostic via a pluggable sensor+gates adapter: a web adapter is built in (Chrome capture); iOS/macOS plug in via a project adapter. Minimal human input — ≤1 reference image per screen plus one spot-check.
 
@@ -1072,7 +1072,7 @@ The `change-philosophy.md` rule establishes an elegant integration design philos
 
 Browser tool selection hierarchy and verification workflows.
 
-**Installs**: `rules/browser-automation.md`
+**Installs**: `skills/browser-automation/SKILL.md`
 
 **What it does**: Establishes rules for when and how to use browser automation:
 
@@ -1154,7 +1154,7 @@ Complements `design-review` (automated review) with both aesthetic direction and
 
 Structured 4-phase root cause investigation methodology.
 
-**Installs**: `rules/systematic-debugging.md`, `rules/debugging.md`
+**Installs**: `rules/systematic-debugging.md`
 
 **What it does**: Prevents scattered debugging by enforcing a systematic process:
 

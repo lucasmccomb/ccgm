@@ -181,7 +181,7 @@ plainly.
 - `/dream` — status overview, including pending count and optimistic state.
 - `/dream-review [veto|revert]` — review/undo what optimistic
   auto-integration already applied (the proposals this command never sees).
-- Rule: `modules/self-improving/rules/learnings-store.md` (store write
+- Rule: `modules/self-improving/skills/learnings-store/SKILL.md` (store write
   rules, `_global` promotion guard, sanitizer scope).
 - Plan: `~/code/plans/ccgm-durable-memory-system/plan.md` §3.3 (adrev-405
   net contract for `_global`), §5 Epic 6; `~/code/plans/ccgm-optimistic-memory/plan.md`

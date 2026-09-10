@@ -116,7 +116,7 @@ When the **branch-guard** module is installed, this is not advisory: a PreToolUs
 
 # Worktrees: Ephemeral Isolation With Mandatory Teardown
 
-For **parallel sub-agent delegation on one machine**, the default isolation is a git worktree (`isolation: "worktree"`), not an extra permanent clone. A worktree is a second working tree from the same `.git` with its own index and HEAD, so parallel agents build, test, and commit without colliding. Reserve permanent clones for the cases a worktree cannot serve: per-branch dev-server ports (worktrees share `.env`), hook-driven per-branch `tracking.csv`, multiple long-lived independent agents, or cross-machine dispatch. Full contract in `git-worktrees.md`.
+For **parallel sub-agent delegation on one machine**, the default isolation is a git worktree (`isolation: "worktree"`), not an extra permanent clone. A worktree is a second working tree from the same `.git` with its own index and HEAD, so parallel agents build, test, and commit without colliding. Reserve permanent clones for the cases a worktree cannot serve: per-branch dev-server ports (worktrees share `.env`), hook-driven per-branch `tracking.csv`, multiple long-lived independent agents, or cross-machine dispatch. Full contract in the `git-worktrees` skill.
 
 **Branch-guard compatibility.** A worktree is always created on a feature branch off `origin/main`, never the default branch — so the branch-guard hook never fires inside it, and all the git rules above (rebase by default, no stash, no AI attribution, sync before history changes) apply unchanged. Worktrees change *where* the working tree lives, not how branches, commits, or PRs are managed.
 

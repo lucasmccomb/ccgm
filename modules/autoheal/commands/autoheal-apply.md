@@ -134,6 +134,6 @@ The CLI exits 0 on success, 1 on apply failure, 2 on usage error.
   daemon (gated apply, never pushes).
 - `/autoheal-snooze <id> [days]` — suppress a proposal without
   applying it.
-- Rule: `~/.claude/rules/autoheal.md` (apply path summary)
+- Rule: `~/.claude/skills/autoheal-reference/SKILL.md` (apply path summary)
 - Plan: `~/code/plans/ccgm-autoheal/plan.md` §3.7 (gate predicate),
   §3.9 (apply path), §5 Epic 11.

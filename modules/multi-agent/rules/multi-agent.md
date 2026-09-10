@@ -1,6 +1,6 @@
 # Parallel Work Preference
 
-When a task involves multiple independent issues or work items, prefer spawning parallel agents to complete them simultaneously. **On a single machine, isolate each agent in its own git worktree by default** (`isolation: "worktree"`): created per unit of work, torn down when that unit merges. Do **not** provision extra permanent clones just to get parallelism. Worktrees share the parent `.git` (no re-fetch), reclaim disk on teardown, and each has its own index and HEAD, so parallel builds and commits never collide. This is the default isolation for parallel sub-agent delegation — see `git-worktrees.md` and `subagent-patterns.md`.
+When a task involves multiple independent issues or work items, prefer spawning parallel agents to complete them simultaneously. **On a single machine, isolate each agent in its own git worktree by default** (`isolation: "worktree"`): created per unit of work, torn down when that unit merges. Do **not** provision extra permanent clones just to get parallelism. Worktrees share the parent `.git` (no re-fetch), reclaim disk on teardown, and each has its own index and HEAD, so parallel builds and commits never collide. This is the default isolation for parallel sub-agent delegation — see the `git-worktrees` skill and `subagent-patterns.md`.
 
 **Reserve separate clones** for the cases a worktree cannot serve:
 - Multiple long-lived independent agents each owning the repo for days
@@ -16,13 +16,13 @@ When a task involves multiple independent issues or work items, prefer spawning 
 
 **How (clones):** When one of the reserved cases applies and a multi-clone setup exists (workspace model: `~/code/{repo}-workspaces/`, or flat model: `~/code/{repo}-repos/`), launch agents pointed at different clone directories. Each agent claims its own issue via the tracking CSV (auto-registered by hooks on branch creation) and works independently. See `~/.claude/multi-agent-system.md` for the full coordination guide.
 
-**Teardown is mandatory, not best-effort.** A worktree an agent built in does **not** auto-remove — remove each unit's worktree the moment its PR merges, and run `/worktree-sweep` to reclaim any orphans (including built-in `isolation:"worktree"` worktrees the harness could not auto-reclaim). Leaving built worktrees behind is exactly what filled 237 GB on one repo on 2026-07-13. See `git-worktrees.md`.
+**Teardown is mandatory, not best-effort.** A worktree an agent built in does **not** auto-remove — remove each unit's worktree the moment its PR merges, and run `/worktree-sweep` to reclaim any orphans (including built-in `isolation:"worktree"` worktrees the harness could not auto-reclaim). Leaving built worktrees behind is exactly what filled 237 GB on one repo on 2026-07-13. See the `git-worktrees` skill.
 
 **Issue tracking**: Uses `~/code/{log-repo-name}/{repo}/tracking.csv`. Hooks auto-update tracking on branch creation, commits, PR creation, merge, and issue close. See `~/.claude/multi-agent-system.md` for details.
 
 **Workspace model** (the heavier clone-based alternative, for the reserved cases above): Use `/workspace-setup {repo}` to create isolated workspace groups. Each workspace has 4 clones. Point a coordinator agent at a workspace directory - it discovers its clones and delegates. Prefer worktrees for ordinary single-machine parallel delegation; reach for the workspace model when you genuinely need persistent per-clone ports, per-branch `tracking.csv`, or long-lived independent agents.
 
-**Cap peak concurrency.** Preferring parallelism does NOT mean launching everything at once. Too many heavy agents firing simultaneously - whether via the Workflow tool's `parallel()`/`pipeline()` or many Agent calls in one message - trips a server-side 429 throttle (`Server is temporarily limiting requests · Rate limited`) that fails the *entire* burst, not just the marginal agent. Keep simultaneous **heavy** agents (Opus, high/max effort, or large-context) to **4** (never exceed 5), launch in waves, and default fan-out agents to cheaper models / lower effort unless thoroughness is explicitly requested. If you have `subagent-patterns` installed, `concurrency-and-rate-limits.md` carries the full defaults table and the throttled-mid-run recovery procedure.
+**Cap peak concurrency.** Keep simultaneous heavy agents to 4 and launch in waves; the defaults, the 429 error, and the recovery procedure are in `subagent-patterns.md` under Concurrency and Rate Limits.
 
 ---
 

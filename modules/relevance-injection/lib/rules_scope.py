@@ -89,8 +89,6 @@ import relevance_select  # noqa: E402 -- reuse the existing pure helpers
 PINNED_FLOOR: "tuple[str, ...]" = tuple(relevance_select.safety_core_modules()) + (
     "identity",
     "live-testing-guard",
-    "git-worktrees",
-    "model-vetting",
     "branch-guard",
 )
 
@@ -108,23 +106,15 @@ TECH_SPECIFIC_CATEGORY = "tech-specific"
 # regardless of the target repo's tech stack, so detecting relevance from
 # repo files does not apply the way it does for the tech-specific category.
 #
-# `self-improving` ships TWO rule files and only one is listed: its other
-# file, `rules/learnings-store.md`, is explicitly `high` stakes in the
-# plan's own tier-assignment work (a destructive-git-operation risk), so it
-# is never proposed here even though its sibling file in the same module
-# is a safe, ordinary "index"-shaped rule. Modules omitted from this dict
+# `self-improving` ships one rule file today (its learnings-store reference
+# moved to a skill in #1062); listing the target explicitly keeps that
+# boundary if another rule is added later. Modules omitted from this dict
 # entirely are simply never proposed by this category -- always the safe
 # direction, since it can only under-propose, never over-propose.
 NICHE_MODULE_RULE_TARGETS: "dict[str, set[str] | None]" = {
     "agent-native": None,
-    "argus": None,
-    "autoheal": None,
-    "browser-automation": None,
-    "dreaming": None,
     "multi-agent": None,
-    "remote-server": None,
     "self-improving": {"rules/self-improving.md"},
-    "youtube-transcripts": None,
 }
 
 # Directories a repo-profile walk should never descend into: build output,

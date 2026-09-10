@@ -6,7 +6,7 @@
   "scope": ["global"],
   "dependencies": [],
   "files": {
-    "rules/model-vetting.md": { "target": "rules/model-vetting.md", "type": "rule", "template": false }
+    "skills/model-vetting/SKILL.md": { "target": "skills/model-vetting/SKILL.md", "type": "skill", "template": false }
   },
   "tags": ["security", "models", "provenance", "supply-chain", "vetting"],
   "configPrompts": []

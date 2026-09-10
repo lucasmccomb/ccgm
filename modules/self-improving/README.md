@@ -27,7 +27,7 @@ Includes a reflection checklist, mandatory trigger points, type vocabulary, and 
 - **Injection filter**: search results are ranked and capped by token budget (default ~2000 tokens) before going into a preamble.
 - **Cross-project search**: opt-in via `ccgm-learnings-log config cross-project on`.
 
-Full schema and model: `rules/learnings-store.md`.
+Full schema and model: `skills/learnings-store/SKILL.md`.
 
 ### Commands
 
@@ -76,7 +76,8 @@ These are soft references, not hard dependencies. The self-improving module work
 # Rules
 mkdir -p ~/.claude/rules
 cp rules/self-improving.md ~/.claude/rules/self-improving.md
-cp rules/learnings-store.md ~/.claude/rules/learnings-store.md
+mkdir -p ~/.claude/skills
+cp -R skills/learnings-store ~/.claude/skills/learnings-store
 
 # Commands
 mkdir -p ~/.claude/commands
@@ -117,7 +118,7 @@ export PATH="$HOME/.claude/bin:$PATH"
 | File | Type | Description |
 |------|------|-------------|
 | `rules/self-improving.md` | rule | Reflection loop, trigger points, checklist, learnings store usage, confidence tracking |
-| `rules/learnings-store.md` | rule | Full schema, type vocabulary, decay formula, sanitizer, migration notes |
+| `skills/learnings-store/SKILL.md` | skill | Full schema, type vocabulary, decay formula, sanitizer, migration notes |
 | `commands/reflect.md` | command | Inline structured reflection workflow; dual-writes JSONL + MEMORY.md |
 | `commands/consolidate.md` | command | Learnings maintenance via subagent (dedup, deprecate, reconcile) |
 | `commands/retro.md` | command | Windowed git-history retrospective; surfaces candidates for /reflect |

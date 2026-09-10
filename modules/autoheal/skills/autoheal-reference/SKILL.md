@@ -1,3 +1,9 @@
+---
+name: autoheal-reference
+description: >
+  Reference for CCGM's autoheal loop: event-capture hooks, the daily analyzer, digest, apply path, config keys, and the opt-in alerts and auto-apply. Load when working on modules/autoheal, ~/.claude/autoheal, or the /autoheal commands.
+---
+
 # Autoheal: Self-Healing Observability Loop
 
 Autoheal is a CCGM module that observes how you and your agents interact with Claude Code, then proposes concrete configuration improvements once a day. It captures permission events, tool failures, and user-correction signals as a local JSONL log, runs a daily analyzer against the log via a direct Anthropic API call, and surfaces a digest of proposed changes. Real-time security alerts and confidence-gated auto-apply are opt-in.

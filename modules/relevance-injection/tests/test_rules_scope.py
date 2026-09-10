@@ -50,8 +50,7 @@ class PinnedFloorTests(unittest.TestCase):
         expected = {
             "git-workflow", "hooks", "autonomy", "test-driven-development",
             "verification", "systematic-debugging", "subagent-patterns",
-            "identity", "live-testing-guard", "git-worktrees",
-            "model-vetting", "branch-guard",
+            "identity", "live-testing-guard", "branch-guard",
         }
         self.assertEqual(set(rules_scope.PINNED_FLOOR), expected)
 
@@ -228,22 +227,22 @@ class NicheCategoryTests(unittest.TestCase):
 
     def test_niche_module_not_installed_is_never_proposed(self):
         with tempfile.TemporaryDirectory() as modules_dir, tempfile.TemporaryDirectory() as home:
-            _write_module(modules_dir, "dreaming", category="workflow", rule_files=["rules/dreaming.md"])
+            _write_module(modules_dir, "multi-agent", category="workflow", rule_files=["rules/multi-agent.md"])
             proposed = rules_scope.propose_excludes({}, modules_dir, installed_modules=[], home=home)
             self.assertEqual(proposed, [])
 
     def test_niche_category_is_not_gated_on_repo_profile(self):
         """Unlike tech-specific, niche modules are proposed regardless of
         what detect_repo_profile() found -- there is no per-repo signal for
-        "will this session touch the nightly dreaming pipeline."""
+        "will this session touch a multi-clone workspace."""
         with tempfile.TemporaryDirectory() as modules_dir, tempfile.TemporaryDirectory() as home:
-            _write_module(modules_dir, "dreaming", category="workflow", rule_files=["rules/dreaming.md"])
+            _write_module(modules_dir, "multi-agent", category="workflow", rule_files=["rules/multi-agent.md"])
             full_profile = {"tailwind": True, "shadcn": True, "supabase": True,
                              "cloudflare": True, "mcp-development": True}
             proposed = rules_scope.propose_excludes(
-                full_profile, modules_dir, installed_modules=["dreaming"], home=home
+                full_profile, modules_dir, installed_modules=["multi-agent"], home=home
             )
-            self.assertEqual({row["rule"] for row in proposed}, {"rules/dreaming.md"})
+            self.assertEqual({row["rule"] for row in proposed}, {"rules/multi-agent.md"})
 
 
 class PathResolutionTests(unittest.TestCase):

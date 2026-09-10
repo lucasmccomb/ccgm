@@ -18,6 +18,20 @@ agent scores the render against the target, and the loop self-signs-off only whe
 passes twice in a row. Human input is bounded to ≤1 reference image per screen plus one
 spot-check of the first sign-off.
 
+## When to use it
+
+- Building or refining a UI feature against a design spec + reference screenshots.
+- You want autonomous fix-and-recheck iteration with minimal human direction (≤1 reference image per
+  screen + one spot-check), not hand-judging every change.
+- A feature has an Argus spec at `argus/specs/{feature}/` (or you are about to author one from
+  `~/.claude/skills/argus/references/_template/`).
+
+## When NOT to use it
+
+- Bug fixes with no visual/spec target (use `/debug`).
+- Backend-only work, or a feature with no reference and no intent to supply one.
+- Pure refactors (the snapshot baseline guards the look; Argus is for *changing* the UI to a target).
+
 ## Usage
 
 ```

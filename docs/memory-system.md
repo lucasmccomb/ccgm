@@ -9,7 +9,7 @@ CCGM's durable, cross-session memory: a store that learns from your work and sur
 The memory system splits into two halves that share one store:
 
 - **Read path** — the [`self-improving`](../modules/self-improving/rules/self-improving.md) learnings store plus a `SessionStart` hook that surfaces the current project's top-ranked learnings at the start of each new session. **Local and free — no network calls.**
-- **Write path** — the [`dreaming`](../modules/dreaming/rules/dreaming.md) module: a nightly analyzer that mines your session transcripts into evidence-tagged *proposals* for new learnings, behind a human gate. **Opt-in; spends Anthropic API tokens.**
+- **Write path** — the [`dreaming`](../modules/dreaming/skills/dreaming/SKILL.md) module: a nightly analyzer that mines your session transcripts into evidence-tagged *proposals* for new learnings, behind a human gate. **Opt-in; spends Anthropic API tokens.**
 
 The read path is the valuable, always-safe half and is complete on its own. The write path is an optional layer that automates capture — you never need it to benefit from memory.
 
@@ -418,6 +418,6 @@ ccgm-learnings-sync init | commit [-m …] | pull | push | revert <sha> | status
 ### Source (the authoritative, agent-facing specs this guide distills)
 
 - [`self-improving.md`](../modules/self-improving/rules/self-improving.md) — the reflection loop and capture triggers
-- [`learnings-store.md`](../modules/self-improving/rules/learnings-store.md) — store schema, confidence decay, supersede chains, the dwell window, git sync, and rollback
-- [`dreaming.md`](../modules/dreaming/rules/dreaming.md) — the nightly pipeline, the proposal / evidence / gate contract, and the optimistic auto-integration engine
+- [the `learnings-store` skill](../modules/self-improving/skills/learnings-store/SKILL.md) — store schema, confidence decay, supersede chains, the dwell window, git sync, and rollback
+- [the `dreaming` skill](../modules/dreaming/skills/dreaming/SKILL.md) — the nightly pipeline, the proposal / evidence / gate contract, and the optimistic auto-integration engine
 - Store library: `modules/self-improving/lib/learnings_store.py` · hooks: `modules/self-improving/hooks/` · dreaming pipeline: `modules/dreaming/lib/`

@@ -74,7 +74,7 @@ Autonomous mode is where these four plan tenets matter most: after startup there
 - It does NOT skip the final execution gate. 6.5 is non-bypassable.
 - It does NOT grant live-testing permission. Autonomous planning can infer a tech stack; it cannot approve running app launches, dictation, synthetic input, focus changes, machine-global input/audio overrides, or mic capture on the user's behalf. Plan §8.6 records `NOT AUTHORIZED`, the 6.A walkthrough shows the affected steps, and `/etp` or `/xplan-resume` holds each one and asks before running it. See `~/.claude/rules/live-testing-guard.md`.
 - It does NOT automatically proceed to execution. The default recommendation at 6.5 in autonomous mode leans toward "save plan, don't execute yet" so the user can review before committing to multi-agent work.
-- It does NOT leave a worktree behind on that gate-stop path. When `--repo` is set, Phase 0.4.0 creates a temp anchor worktree; because autonomous mode usually stops at the 6.5 gate *without* executing, run the Phase 8.7 worktree teardown on exit anyway (it is explicitly early-exit-safe). If any execution worktrees were created, `/worktree-sweep` reclaims the leaks. Nothing worktree-shaped outlives the run — see `git-worktrees.md`.
+- It does NOT leave a worktree behind on that gate-stop path. When `--repo` is set, Phase 0.4.0 creates a temp anchor worktree; because autonomous mode usually stops at the 6.5 gate *without* executing, run the Phase 8.7 worktree teardown on exit anyway (it is explicitly early-exit-safe). If any execution worktrees were created, `/worktree-sweep` reclaims the leaks. Nothing worktree-shaped outlives the run — see the `git-worktrees` skill.
 
 For the fast path (reduced depth, minimal interaction), use `/xplan --light` instead.
 

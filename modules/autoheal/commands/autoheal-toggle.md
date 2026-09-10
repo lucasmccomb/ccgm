@@ -101,6 +101,6 @@ agent. The agent:
 
 ## Cross-references
 
-- Rule: `~/.claude/rules/autoheal.md` (config keys table)
+- Rule: `~/.claude/skills/autoheal-reference/SKILL.md` (config keys table)
 - Plan: `~/code/plans/ccgm-autoheal/plan.md` §5 Epic 7, §5 Epic 10
   (realtime), §5 Epic 11 (autoapply), §5 Epic 12 (webhook).

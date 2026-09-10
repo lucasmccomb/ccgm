@@ -1766,7 +1766,7 @@ options:
    gh repo create {username}/{project-name} --private --description "{description}"
    ```
 
-2. **Provision isolation** based on the Phase 2.7 decision. **On a single machine, worktrees are the default** — each parallel epic gets its own `isolation: "worktree"` worktree (ephemeral, shared `.git`, torn down after its PR merges at 7.3.4). Provision permanent clones only for the cases that actually need them (a large multi-epic plan run under the workspace model, per-branch dev-server ports, hook-driven per-branch `tracking.csv`, or long-lived independent agents). When execution runs via `/etp`, it already applies this worktree-default-with-mandatory-teardown model. See `git-worktrees.md`.
+2. **Provision isolation** based on the Phase 2.7 decision. **On a single machine, worktrees are the default** — each parallel epic gets its own `isolation: "worktree"` worktree (ephemeral, shared `.git`, torn down after its PR merges at 7.3.4). Provision permanent clones only for the cases that actually need them (a large multi-epic plan run under the workspace model, per-branch dev-server ports, hook-driven per-branch `tracking.csv`, or long-lived independent agents). When execution runs via `/etp`, it already applies this worktree-default-with-mandatory-teardown model. See the `git-worktrees` skill.
 
    ```bash
    # Only when Phase 2.7 chose clones (heavier multi-clone plans):

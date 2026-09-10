@@ -3,12 +3,14 @@
   "displayName": "Git Worktrees",
   "description": "Git worktrees as the default isolation for parallel sub-agent delegation on one machine, with a safe janitor that enforces teardown so worktrees never silently fill the disk.",
   "category": "workflow",
-  "scope": ["global"],
+  "scope": [
+    "global"
+  ],
   "dependencies": [],
   "files": {
-    "rules/git-worktrees.md": {
-      "target": "rules/git-worktrees.md",
-      "type": "rule",
+    "skills/git-worktrees/SKILL.md": {
+      "target": "skills/git-worktrees/SKILL.md",
+      "type": "skill",
       "template": false
     },
     "commands/worktree-start.md": {
@@ -32,6 +34,11 @@
       "template": false
     }
   },
-  "tags": ["git", "worktree", "isolation", "workflow"],
+  "tags": [
+    "git",
+    "worktree",
+    "isolation",
+    "workflow"
+  ],
   "configPrompts": []
 }

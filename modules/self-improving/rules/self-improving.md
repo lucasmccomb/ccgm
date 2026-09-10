@@ -33,7 +33,7 @@ ccgm-learnings-log \
   --confidence 8
 ```
 
-See `learnings-store.md` for the full schema, type vocabulary, and confidence-decay model. `MEMORY.md` remains as a human-readable index that `/reflect` dual-writes into during the transition, but the JSONL is the source of truth.
+See the `learnings-store` skill for the full schema, type vocabulary, and confidence-decay model. `MEMORY.md` remains as a human-readable index that `/reflect` dual-writes into during the transition, but the JSONL is the source of truth.
 
 Before logging, search for an existing entry (`ccgm-learnings-search --query "<topic>"`). If the pattern already exists, run `ccgm-learnings-log verify <id>` to reinforce it instead of creating a duplicate.
 

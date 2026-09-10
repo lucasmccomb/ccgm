@@ -942,7 +942,7 @@ def run_auto_apply(day: str) -> dict[str, Any]:
     day dream-daily.sh just generated). NEVER learning_add/supersede/
     deprecate/contradict, at ANY confidence -- verify is the only op whose
     confidence-raise is bounded (+0.25/use, capped at +2.0, per
-    self-improving/rules/learnings-store.md) and reversible by a human
+    self-improving/skills/learnings-store/SKILL.md) and reversible by a human
     contradict; every other op either writes/destroys content
     irreversibly, or (contradict) is a silent-suppression vector sec-5
     excludes from auto-apply entirely. A `_global`-targeting

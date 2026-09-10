@@ -87,7 +87,7 @@ Do NOT pick an option on the user's behalf. If the reply is not `1`, `2`, `3`, o
 3. Push: `git push -u origin <branch>`
 4. Create PR: `gh pr create` with title and body. Use the repo's PR template if one exists (check `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, and repo root). Do not add AI attribution footers.
 5. Report the PR URL.
-6. Leave the worktree in place until the PR merges — then remove it. Per the worktree lifecycle (`git-worktrees.md`), teardown is mandatory, not optional: run `/worktree-finish` again after the merge, or `git worktree remove <path>`. `/worktree-sweep` is the backstop that reclaims this worktree if it is ever forgotten.
+6. Leave the worktree in place until the PR merges — then remove it. Per the worktree lifecycle (the `git-worktrees` skill), teardown is mandatory, not optional: run `/worktree-finish` again after the merge, or `git worktree remove <path>`. `/worktree-sweep` is the backstop that reclaims this worktree if it is ever forgotten.
 
 #### Option 3: Keep
 

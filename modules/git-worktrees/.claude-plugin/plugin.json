@@ -5,18 +5,6 @@
   },
   "description": "Git worktrees as the default isolation for parallel sub-agent delegation on one machine, with a safe janitor that enforces teardown so worktrees never silently fill the disk.",
   "displayName": "Git Worktrees",
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
-            "type": "command"
-          }
-        ]
-      }
-    ]
-  },
   "keywords": [
     "git",
     "isolation",

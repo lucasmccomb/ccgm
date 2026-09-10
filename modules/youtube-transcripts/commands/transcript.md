@@ -219,3 +219,27 @@ Extraction and analysis are phases of one intent. The default value is "what doe
 - The script is the source of truth for slug + upload-date computation. Do not re-derive them in the slash command — read the path the script printed and reuse it.
 - The script handles `--force` itself (refuses to overwrite without it). The slash command does NOT need to pre-check.
 - The subagent's task includes reading the user's MEMORY.md. The path to MEMORY.md is project-slug-derived; if you cannot resolve it, the subagent should proceed without it and note the gap in section 6 of the analysis. Do not block extraction on missing MEMORY.md.
+
+---
+
+## ASR caveats — how to read the saved transcript
+
+The transcript is **auto-generated YouTube captions**, not a human transcript. Expect:
+
+- **Misheard proper nouns**: "open AAI" = OpenAI, "openclaw" = Open Code, "Verscell" = Vercel, "Nanobanana" = Nano Banana, "menu genen" = Menu Gen, "spirious" = spurious, "micro GPT" = nanoGPT. The `note:` field in the frontmatter calls these out per-transcript when the analyst can identify them.
+- **Run-on sentences**: ASR has no punctuation model; sentences blur. Speaker turns (`>>`) are the most reliable structural signal.
+- **Stage directions**: `[laughter]`, `[applause]`, `[clears throat]`, `[snorts]` are preserved. Don't strip them — they're useful context for tone.
+- **Repeated phrases**: ASR sometimes double-prints; the dedupe pass collapses adjacent identical lines but verbal stutters ("uh, uh, well") survive.
+
+When quoting from the transcript, paraphrase rather than verbatim-quote unless you're sure the ASR got it right. When summarizing, lead with the speaker's argument, not their literal words.
+
+## How downstream consumers should treat the output
+
+The two files are:
+
+- `~/code/docs/transcripts/<slug>-<upload_date>.md` — raw cleaned transcript with YAML frontmatter (title, source, url, uploader, upload_date, duration, type, caption_source, note).
+- `~/code/docs/transcript-analysis/<slug>-<upload_date>.md` — opinionated implications doc with frontmatter pointing back to the transcript via relative path. Six sections: claims / project implications / tooling / focus / open questions / confidence.
+
+The analysis is a **first-pass synthesis intended to be fed to a downstream agent.** It is opinionated, names specific projects from `MEMORY.md`, and explicitly flags low-confidence claims. Treat it as a starting point for pressure-testing, not as authoritative.
+
+When citing either file in later work, prefer the analysis doc — it has the project context. Drop into the transcript only when you need a specific quote or claim verified.

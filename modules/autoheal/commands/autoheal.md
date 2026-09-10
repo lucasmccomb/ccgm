@@ -27,7 +27,7 @@ actions.
 This command is a thin Claude reader, not a shell script. The agent:
 
 1. Reads `~/.claude/autoheal/config.json` (treating missing keys as
-   defaults from the rule file `modules/autoheal/rules/autoheal.md`).
+   defaults from the rule file `modules/autoheal/skills/autoheal-reference/SKILL.md`).
 2. Lists files under `~/.claude/autoheal/proposals/`,
    `~/.claude/autoheal/events/`, `~/.claude/autoheal/digests/`, and
    `~/.claude/autoheal/sent/` to summarize state.
@@ -47,7 +47,7 @@ This command is a thin Claude reader, not a shell script. The agent:
 
 ## Config flags
 
-See the autoheal rule (`~/.claude/rules/autoheal.md`) for the full config
+See the autoheal rule (`~/.claude/skills/autoheal-reference/SKILL.md`) for the full config
 schema. Defaults: `realtime_alerts_enabled: false`, `auto_apply_enabled:
 false`, `email_enabled: false`, `digest_enabled: true`, `webhook_url:
 null`.
@@ -61,5 +61,5 @@ null`.
 
 ## Cross-references
 
-- Rule: `~/.claude/rules/autoheal.md`
+- Rule: `~/.claude/skills/autoheal-reference/SKILL.md`
 - Plan: `~/code/plans/ccgm-autoheal/plan.md` §5 Epic 7

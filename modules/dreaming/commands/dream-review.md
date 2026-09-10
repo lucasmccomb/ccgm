@@ -285,7 +285,7 @@ row. Prefer per-row `veto` in that configuration.
 **Why `ccgm-learnings-sync revert` does not use `git revert`:** see that
 command's own docstring. In short, every shard file this store writes
 carries the `*.jsonl merge=union` gitattribute (needed for safe concurrent
-sync — see `rules/learnings-store.md`), and that same attribute makes
+sync — see `skills/learnings-store/SKILL.md`), and that same attribute makes
 `git revert`'s 3-way merge either silently drop the revert entirely or
 hit an unnecessary manual conflict, for the realistic case where a shard
 has had further writes since the batch being reverted. `ccgm-learnings-sync
@@ -328,7 +328,7 @@ is sound precisely because of this store's append-only write invariant.
 - CLI: `modules/self-improving/bin/ccgm-learnings-sync` (`revert <sha>`),
   `modules/self-improving/bin/ccgm-learnings-log` (`verify` / `deprecate` /
   `supersede`).
-- Rule: `modules/self-improving/rules/learnings-store.md` (dwell window,
+- Rule: `modules/self-improving/skills/learnings-store/SKILL.md` (dwell window,
   supersede semantics, the `deprecated`/`verify` fold behavior the honest
   caveat above is grounded in).
 - Plan: `~/code/plans/ccgm-optimistic-memory/plan.md` §5 Epic 6.

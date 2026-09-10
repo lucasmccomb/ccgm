@@ -48,7 +48,6 @@ screen and exposes a structured tree can be added. See
 |------|------|
 | `skills/argus/SKILL.md` | The `/argus` orchestrator loop (modes: interactive / report-only / headless) |
 | `agents/argus-judge.md` | The separate judge agent (read-only tools; never sees the diff) |
-| `rules/argus.md` | Lean always-on rule: what Argus is, when to use it, the integrity principle |
 | `skills/argus/references/spec.schema.json` | Contract for a feature's `spec.json` |
 | `skills/argus/references/verdict.schema.json` | The judge's verdict envelope |
 | `skills/argus/references/gate-result.schema.json` | The deterministic gate-result shape |
@@ -85,7 +84,6 @@ Or manually:
 mkdir -p ~/.claude/skills ~/.claude/agents ~/.claude/rules
 cp -R skills/argus ~/.claude/skills/argus
 cp agents/argus-judge.md ~/.claude/agents/argus-judge.md
-cp rules/argus.md ~/.claude/rules/argus.md
 chmod +x ~/.claude/skills/argus/scripts/gates.sh ~/.claude/skills/argus/scripts/image_unchanged.sh
 ```
 

@@ -111,7 +111,7 @@ Collect all created issue numbers.
 
 ### Phase 4: Plan Agent Allocation
 
-**Isolation — worktrees by default.** Each parallel issue agent runs in its own **git worktree** (`isolation: "worktree"`) created from the current clone: ephemeral, sharing the parent `.git`, and torn down after its PR merges (Phase 5.3). The branch-creation tracking hook fires inside a worktree exactly as it does in a clone (worktrees share `.git/hooks`), so `tracking.csv` still works. Provision or reuse permanent clones only when the repo *already* has a multi-clone/workspace setup, or a specific need forces it (per-branch dev-server ports, multiple long-lived agents). See `git-worktrees.md`.
+**Isolation — worktrees by default.** Each parallel issue agent runs in its own **git worktree** (`isolation: "worktree"`) created from the current clone: ephemeral, sharing the parent `.git`, and torn down after its PR merges (Phase 5.3). The branch-creation tracking hook fires inside a worktree exactly as it does in a clone (worktrees share `.git/hooks`), so `tracking.csv` still works. Provision or reuse permanent clones only when the repo *already* has a multi-clone/workspace setup, or a specific need forces it (per-branch dev-server ports, multiple long-lived agents). See the `git-worktrees` skill.
 
 The clone discovery + occupancy checks below apply **only when reusing an existing multi-clone setup**; for the default worktree path, the concurrency cap (Phase 5.1) — not a fixed clone count — bounds the wave.
 
@@ -206,7 +206,7 @@ For each wave:
 
 Use the Agent tool to launch one agent per assigned issue, each in its own **worktree** (`isolation: "worktree"`) by default — or its assigned clone directory when reusing a multi-clone setup (Phase 4):
 
-> **Concurrency — avoid the 429 throttle.** With worktrees the wave is bounded by the concurrency cap; with clones it is bounded by the clone count. Execution agents run on `sonnet` (light), so a wave of up to ~8 is safe. If a wave has more units than that (or you escalate agents to a heavier model, cap 4), split into sub-waves. If a wave reports `Server is temporarily limiting requests · Rate limited`, wait 30–60s and re-launch only the failed issues. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+> **Concurrency — avoid the 429 throttle.** With worktrees the wave is bounded by the concurrency cap; with clones it is bounded by the clone count. Execution agents run on `sonnet` (light), so a wave of up to ~8 is safe. If a wave has more units than that (or you escalate agents to a heavier model, cap 4), split into sub-waves. If a wave reports `Server is temporarily limiting requests · Rate limited`, wait 30–60s and re-launch only the failed issues. See `~/.claude/rules/subagent-patterns.md` (Concurrency and Rate Limits).
 
 Each agent should:
 1. Work in its own worktree (`isolation: "worktree"`) — or navigate to its assigned clone directory when reusing a multi-clone setup

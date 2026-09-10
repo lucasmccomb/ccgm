@@ -14,20 +14,20 @@ This module installs a rules file that instructs Claude to:
 
 ## Manual Installation
 
-Copy `rules/browser-automation.md` into your Claude configuration:
+Copy `skills/browser-automation/SKILL.md` into your Claude configuration:
 
 ```bash
 # Global (all projects)
 mkdir -p ~/.claude/rules
-cp rules/browser-automation.md ~/.claude/rules/browser-automation.md
+mkdir -p ~/.claude/skills
+cp -R skills/browser-automation ~/.claude/skills/browser-automation
 
 # Project-level
 mkdir -p .claude/rules
-cp rules/browser-automation.md .claude/rules/browser-automation.md
 ```
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `rules/browser-automation.md` | Rule file covering tool selection, verification priority, and UI verification workflow |
+| `skills/browser-automation/SKILL.md` | Rule file covering tool selection, verification priority, and UI verification workflow |

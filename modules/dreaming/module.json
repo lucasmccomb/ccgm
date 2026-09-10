@@ -13,9 +13,9 @@
     "session-history"
   ],
   "files": {
-    "rules/dreaming.md": {
-      "target": "rules/dreaming.md",
-      "type": "rule",
+    "skills/dreaming/SKILL.md": {
+      "target": "skills/dreaming/SKILL.md",
+      "type": "skill",
       "template": false
     },
     "lib/transcript_miner.py": {

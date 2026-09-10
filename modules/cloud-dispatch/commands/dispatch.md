@@ -90,7 +90,7 @@ bash ~/.claude/lib/cloud-dispatch/workspace-setup-all.sh "https://github.com/$RE
 bash ~/.claude/lib/cloud-dispatch/agent-launch-all.sh --max-turns $MAX_TURNS --jitter 75
 ```
 
-> **Concurrency — avoid the 429 throttle.** The org-level rate limit applies across *all* VMs at once, not per machine — every remote agent's requests bill against the same ceiling. Keep `VM_COUNT` modest and the launch `--jitter` on (it staggers VM starts so they don't burst together). If a run reports `Server is temporarily limiting requests · Rate limited`, that is the server throttle, not a usage cap — reduce `VM_COUNT` and re-dispatch the affected issues rather than relaunching the whole fleet. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+> **Concurrency — avoid the 429 throttle.** The org-level rate limit applies across *all* VMs at once, not per machine — every remote agent's requests bill against the same ceiling. Keep `VM_COUNT` modest and the launch `--jitter` on (it staggers VM starts so they don't burst together). If a run reports `Server is temporarily limiting requests · Rate limited`, that is the server throttle, not a usage cap — reduce `VM_COUNT` and re-dispatch the affected issues rather than relaunching the whole fleet. See `~/.claude/rules/subagent-patterns.md` (Concurrency and Rate Limits).
 
 ### Step 7: Report
 

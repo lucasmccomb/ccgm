@@ -1412,7 +1412,7 @@ def finalize_proposal(
         # first row and is silently deduped forever across every prior
         # proposals/*.jsonl file (existing_fingerprints() has no expiry) --
         # the opposite of the store's own repeated-reinforcement design
-        # (self-improving/rules/learnings-store.md: "Each successful
+        # (self-improving/skills/learnings-store/SKILL.md: "Each successful
         # reuse... slightly boosts effective confidence and refreshes
         # last_verified"). Fold in a component that varies with the
         # supporting evidence (distinct session ids + the sanitized

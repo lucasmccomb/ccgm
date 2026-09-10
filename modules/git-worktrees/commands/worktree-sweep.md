@@ -5,7 +5,7 @@ allowed-tools: Bash, Read
 
 # /worktree-sweep - Sweep Orphaned Worktrees
 
-The backstop that keeps worktree isolation from silently filling the disk. It enumerates every worktree of the current repo, removes the **clean** ones with a non-force `git worktree remove`, preserves anything with unsaved work, prunes already-gone entries, and reports what it did. It is the orphan-sweep step of the worktree lifecycle (`git-worktrees.md`) — run it after a delegation run, or any time `git worktree list` looks crowded.
+The backstop that keeps worktree isolation from silently filling the disk. It enumerates every worktree of the current repo, removes the **clean** ones with a non-force `git worktree remove`, preserves anything with unsaved work, prunes already-gone entries, and reports what it did. It is the orphan-sweep step of the worktree lifecycle (the `git-worktrees` skill) — run it after a delegation run, or any time `git worktree list` looks crowded.
 
 It exists because the harness's `isolation: "worktree"` auto-removes a worktree **only if it is unchanged** — a worktree an agent built in is "changed" and lingers forever. On 2026-07-13 that left 33 stale worktrees consuming ~237 GB on one repo. This command reclaims them safely.
 
@@ -65,5 +65,5 @@ Report the summary the script prints: how many worktrees were removed (and disk 
 
 ## Related
 
-- `git-worktrees.md` — the worktree lifecycle, removal-safety rule, and honest economics.
+- the `git-worktrees` skill — the worktree lifecycle, removal-safety rule, and honest economics.
 - `/worktree-finish` — finish **one** worktree interactively (merge / PR / keep / discard). Use `/worktree-sweep` for the many-at-once orphan cleanup.
