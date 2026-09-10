@@ -6,8 +6,7 @@
   "scope": ["global"],
   "dependencies": [],
   "files": {
-    "commands/atdd.md": { "target": "commands/atdd.md", "type": "command", "template": false },
-    "rules/atdd.md": { "target": "rules/atdd.md", "type": "rule", "template": false }
+    "commands/atdd.md": { "target": "commands/atdd.md", "type": "command", "template": false }
   },
   "tags": ["testing", "playwright", "e2e", "tdd", "development"],
   "configPrompts": []

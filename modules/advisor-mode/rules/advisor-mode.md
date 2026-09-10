@@ -28,7 +28,7 @@ For any implementation-shaped request:
 
 1. **Route.** Plan- or investigated-issue-shaped work goes through `/etp` — it already runs this loop at full ceremony. Everything below is the collapsed loop for ad-hoc work.
 2. **Spec.** Write the four-field spec (`subagent-patterns`): objective, context (file paths, line ranges), constraints, deliverable — plus the *why*, explicit acceptance criteria including the must-fail half (what must now work AND what must still fail), and **any safety-critical session constraints, copied in verbatim** — subagents do not inherit them, and a delegation that omits one is how a known constraint gets violated by a fresh context.
-3. **Dispatch** an `implementer` (sonnet default) with `isolation: "worktree"`. Parallel units follow the concurrency caps (`concurrency-and-rate-limits.md`). Delegation depth stays at one — implementers do not spawn implementers.
+3. **Dispatch** an `implementer` (sonnet default) with `isolation: "worktree"`. Parallel units follow the concurrency caps (`subagent-patterns.md` (Concurrency and Rate Limits)). Delegation depth stays at one — implementers do not spawn implementers.
 4. **Review personally**, spec compliance first, then code quality. Read the actual spec, diff/source and fresh verification evidence; the implementer's rationale is not proof. Record findings and evidence. Delegate required builds/tests to a verifier, then inspect its actual outputs. Explicit `--light-review` in ETP selects spec only; full two-stage review remains the default.
 5. **Triage** supported findings and dispatch fixes, whichever agent raised them. Three fix rounds are the normal checkpoint; further bounded work needs new evidence and a viable next check. **Cross-provider review is opt-in**, through `--cross-provider` or explicit natural language. Only those runs use the policy's provider routing, frozen evidence and acknowledgment gates. On provider error, stop the optional run and preserve its reports/findings; the lead can separately assess delivery with personal review and normal checks without calling the stopped run approved. Coordinator repairs require no recursive provider consensus.
 6. **Merge** only reviewed + CI-green work, then tear down the unit's worktree. Follow-ups that surface get the same treatment as first-class units.
@@ -83,8 +83,8 @@ Be honest about the economics: delegation's wins are context protection (impleme
 ## Cross-References
 
 - `subagent-patterns.md` — spec format, two-stage review, four-state status protocol, results-in-files
-- `concurrency-and-rate-limits.md` — wave sizes and model defaults for fan-outs
-- `git-worktrees.md` — worktree lifecycle and mandatory teardown
+- `subagent-patterns.md` (Concurrency and Rate Limits) — wave sizes and model defaults for fan-outs
+- the `git-worktrees` skill — worktree lifecycle and mandatory teardown
 - `/etp` — the full-ceremony execution loop this mode routes ready work into
 - The cross-agent pilot workflow reference — provider provenance, current evidence, bounded disputes and actual handback; used only when those pilot commands invoke it
 - `verification.md` — the reviewer's cited evidence is the fresh evidence; a self-report is a claim

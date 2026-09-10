@@ -70,7 +70,7 @@ reviewable, committable artifact.
   seven `SAFETY_CORE_TIERS` modules (`git-workflow`, `hooks`, `autonomy`,
   `test-driven-development`, `verification`, `systematic-debugging`,
   `subagent-patterns`) plus `identity`, `live-testing-guard`,
-  `git-worktrees`, `model-vetting`, and `branch-guard` — derived from
+  and `branch-guard` — derived from
   `relevance_select.safety_core_modules()` plus four named additions, in
   exactly one place (`lib/rules_scope.py`'s `PINNED_FLOOR`), never
   re-typed. This is checked explicitly in code, not merely true by

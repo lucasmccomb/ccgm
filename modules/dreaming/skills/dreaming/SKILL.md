@@ -1,6 +1,12 @@
+---
+name: dreaming
+description: >
+  Reference for CCGM's nightly dreaming pipeline: transcript mining, proposals, optimistic auto-integration with dwell windows and blast caps, the eval gate, digest, and rollback. Load when working on modules/dreaming, ~/.claude/dreaming, or the /dream commands.
+---
+
 # Dreaming: Nightly Durable-Memory Mining
 
-Dreaming is CCGM's nightly, cost-capped, out-of-band pipeline that mines Claude Code session transcripts for cross-session failure patterns and turns them into **evidence-tagged proposals** against the `self-improving` learnings store — behind a human gate. It is `autoheal`'s capture-analyze-propose pipeline, retargeted at session transcripts instead of permission events. See `modules/self-improving/rules/learnings-store.md` for the store this module proposes changes to.
+Dreaming is CCGM's nightly, cost-capped, out-of-band pipeline that mines Claude Code session transcripts for cross-session failure patterns and turns them into **evidence-tagged proposals** against the `self-improving` learnings store — behind a human gate. It is `autoheal`'s capture-analyze-propose pipeline, retargeted at session transcripts instead of permission events. See `modules/self-improving/skills/learnings-store/SKILL.md` for the store this module proposes changes to.
 
 ## What dreaming does
 
@@ -23,7 +29,7 @@ The "promote what's prevalent" heuristic dreaming is built on is its own top att
 
 - **Origin binding is transcript-verified, not caller-supplied.** A proposal's cited evidence sessions must resolve to real transcript files under `~/.claude/projects/**`; `writer` is derived from that transcript's own recorded `cwd`, never from a freely-exportable env var like `CCGM_AGENT_ID`. A supersede can never *raise* an entry's `source` tier (e.g. `inferred` → `user-stated`) without an independently-verified new session backing it.
 - **Breadth is informational, not a bypass.** `promotion_min_sessions`/`promotion_min_agents` gate what the *digest* labels `needs_manual_promotion` for an under-prevalence `_global` proposal — it is never dropped, and it never becomes a silent, automated write. Per the plan's own honesty note (plan.md §1.4): the `agents ≥ 2` breadth condition is realistically unsatisfiable for a solo, single-clone user (every transcript inside one project slug carries exactly one writer), so treat "fleet-wide automated promotion" as a latent capability for genuine multi-agent usage, not a V1 solo-user outcome.
-- **`_global` is promotion-only, through exactly one path.** `learnings_store.promote_to_global()`, invoked only by `apply_dream_proposal.py` after a recorded human accept in `/dream-apply`. No automated `_global` add exists anywhere in this module. The `CCGM_LEARNINGS_ADMIN=1` hatch (see `learnings-store.md`) is a terminal-only manual one-off, never the intended accept path — a digest never points a human at it.
+- **`_global` is promotion-only, through exactly one path.** `learnings_store.promote_to_global()`, invoked only by `apply_dream_proposal.py` after a recorded human accept in `/dream-apply`. No automated `_global` add exists anywhere in this module. The `CCGM_LEARNINGS_ADMIN=1` hatch (see the `learnings-store` skill) is a terminal-only manual one-off, never the intended accept path — a digest never points a human at it.
 
 ## Optimistic auto-integration: posture, dwell, caps, breaker
 
@@ -71,7 +77,7 @@ The operator will not reliably read a daily report, so **prevention** cannot dep
 - **Exposure bounding** (zero reads required): the dwell window delays a bad row from ever reaching agent context for `dwell_hours` — time-based, never contingent on a human acting.
 - **Correction** (needs a read, but only for *undo*, never *prevent*): the daily report + `/dream-review` + `ccgm-learnings-sync revert <sha>`. If the operator never reads the report, no *additional* harm occurs beyond what prevention already bounded — the row decays on schedule or is caught by a later eval run.
 
-The honest residual: the dwell window shrinks the *pre-exposure* blind spot to zero, but nothing shrinks the *post-exposure* one except a shorter `dwell_hours` (more report lead time) and decay — once a row has been exposed and a live session has already read it into its frozen SessionStart context, only a human catching it and reverting removes it from *future* sessions (see `learnings-store.md`'s Rollback section).
+The honest residual: the dwell window shrinks the *pre-exposure* blind spot to zero, but nothing shrinks the *post-exposure* one except a shorter `dwell_hours` (more report lead time) and decay — once a row has been exposed and a live session has already read it into its frozen SessionStart context, only a human catching it and reverting removes it from *future* sessions (see the `learnings-store` skill's Rollback section).
 
 ## The eval harness fails loud
 
@@ -90,7 +96,7 @@ Take a red gate at its word only after checking the run wrote rows at all.
 
 ## Post-hoc review + rollback
 
-`/dream-review` surfaces auto-integrated and still-dwelling rows for a human veto — pass `--include-dwelling` (`ccgm-learnings-search` / `learnings_store.search()`) to see rows agent context cannot. Reverting a bad batch is `ccgm-learnings-sync revert <sha>` — **not** a raw `git revert`, which is unsound against this store's `merge=union` shard files (see `learnings-store.md`'s Rollback section for why, and how the real mechanism works instead).
+`/dream-review` surfaces auto-integrated and still-dwelling rows for a human veto — pass `--include-dwelling` (`ccgm-learnings-search` / `learnings_store.search()`) to see rows agent context cannot. Reverting a bad batch is `ccgm-learnings-sync revert <sha>` — **not** a raw `git revert`, which is unsound against this store's `merge=union` shard files (see the `learnings-store` skill's Rollback section for why, and how the real mechanism works instead).
 
 ## Reconciliation is read-only
 
@@ -134,8 +140,8 @@ cat ~/.claude/dreaming/config.json
 
 ## Cross-references
 
-- `modules/self-improving/rules/learnings-store.md` — the store every proposal here targets; schema, confidence decay, supersede chains, `dwell_until`/`include_dwelling`, git sync, and the `ccgm-learnings-sync revert` rollback mechanism.
-- `modules/autoheal/rules/autoheal.md` — the sibling pipeline this module's capture-analyze-propose shape is modeled on (permission events, not transcripts).
+- `modules/self-improving/skills/learnings-store/SKILL.md` — the store every proposal here targets; schema, confidence decay, supersede chains, `dwell_until`/`include_dwelling`, git sync, and the `ccgm-learnings-sync revert` rollback mechanism.
+- `modules/autoheal/skills/autoheal-reference/SKILL.md` — the sibling pipeline this module's capture-analyze-propose shape is modeled on (permission events, not transcripts).
 - Plan (mining/apply/eval/scheduler foundation): `~/code/plans/ccgm-durable-memory-system/plan.md` §3 (architecture), §5 Epics 1–8 (per-epic specs), §11 (risk register — origin binding, promotion guard, and auto-apply gating each have a dedicated row).
 - Plan (optimistic auto-integration): `~/code/plans/ccgm-optimistic-memory/plan.md` §3 (dwell-window architecture, per-op-kind posture, blast-radius caps, circuit breaker), §5 Epics 1–8 (per-epic specs), §11 (risk register).
 - `modules/dreaming/docs/composite-eligibility-poisoning-analysis.md` — the adversarial poisoning analysis of the composite eligibility gate ("Eligibility composite" above) when enabled: threat model, per-signal forgeability table, attack walkthroughs, and the residual-risk register, every claim cited to a passing test.

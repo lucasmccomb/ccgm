@@ -1,3 +1,9 @@
+---
+name: learnings-store
+description: >
+  Schema, CLI, confidence decay, supersede chains, dwell window, git sync, and rollback for the personal learnings store at ~/.claude/learnings. Load before running ccgm-learnings-log or ccgm-learnings-sync, or when editing modules/self-improving.
+---
+
 # Learnings Store
 
 Structured, schema-validated, append-only JSONL store for personal, cross-project learnings. Replaces the narrative-only `MEMORY.md` flow with a queryable store that supports confidence decay, staleness detection, and token-budgeted injection into command context.
@@ -101,7 +107,7 @@ effective = base * 0.5 ^ (age_days / half_life_days)
 
 Entries whose effective confidence falls below the deprecate threshold (default 2.0) are skipped at read time without being deleted from the JSONL. This keeps the audit trail intact.
 
-**Read-time decay vs gate-time eligibility — different clocks, non-duplicative.** The `dreaming` module's opt-in composite-eligibility gate (see `modules/dreaming/rules/dreaming.md` → "Eligibility composite") scores an *evidence recency* signal at **admission** time — how old the mined transcript evidence is when a `learning_add`/`learning_supersede` is auto-integrated, on a short (default 30-day) half-life. The confidence decay above is a separate, later clock: it ages an *already-admitted* entry by its own `timestamp` on the store's 90-day half-life, every time the entry is read. One is a write-gate on evidence freshness; the other is a read-time weakening of stored rows. They never double-count — a row that clears the gate then begins decaying independently — so neither is a substitute for the other.
+**Read-time decay vs gate-time eligibility — different clocks, non-duplicative.** The `dreaming` module's opt-in composite-eligibility gate (see `modules/dreaming/skills/dreaming/SKILL.md` → "Eligibility composite") scores an *evidence recency* signal at **admission** time — how old the mined transcript evidence is when a `learning_add`/`learning_supersede` is auto-integrated, on a short (default 30-day) half-life. The confidence decay above is a separate, later clock: it ages an *already-admitted* entry by its own `timestamp` on the store's 90-day half-life, every time the entry is read. One is a write-gate on evidence freshness; the other is a read-time weakening of stored rows. They never double-count — a row that clears the gate then begins decaying independently — so neither is a substitute for the other.
 
 ---
 
@@ -170,7 +176,7 @@ When the entry lists `files`, the search path can optionally verify those files 
 
 ## Dwell Window
 
-`dwell_until` (optimistic-memory plan.md §3.2) marks a row **written but not yet live** — the mechanism behind `dreaming`'s opt-in optimistic auto-integration (see `modules/dreaming/rules/dreaming.md`). A row with a `dwell_until` in the future is excluded from `search()` — and therefore from SessionStart injection and the mining reduce projection — until that timestamp passes, exactly mirroring how `include_stale`/`include_superseded` work above:
+`dwell_until` (optimistic-memory plan.md §3.2) marks a row **written but not yet live** — the mechanism behind `dreaming`'s opt-in optimistic auto-integration (see `modules/dreaming/skills/dreaming/SKILL.md`). A row with a `dwell_until` in the future is excluded from `search()` — and therefore from SessionStart injection and the mining reduce projection — until that timestamp passes, exactly mirroring how `include_stale`/`include_superseded` work above:
 
 - `is_dwelling(entry, now=...)` returns true iff `dwell_until` parses to a time strictly after `now`. Absent or malformed `dwell_until` fails open to `False` ("live") — a parse bug must never trap a row in permanent dwell.
 - `search()` takes a matching `include_dwelling: bool = False` kwarg; `ccgm-learnings-search` exposes it as `--include-dwelling`, so a human reviewing the store (or `/dream-review`) can see a still-dwelling row while agent context cannot.
@@ -374,7 +380,7 @@ Instead, `revert` computes the exact set of lines commit `<sha>` **added** (`git
 
 `revert` is guarded by the same store-wide sync lock as `commit`/`pull`/`push`, and refuses outright (not attempted) on a dirty working tree or an already in-progress git operation. Two caveats:
 
-- **Revert stops future reads, not the current session's.** A row that was already read, ranked, and injected into a live session's frozen SessionStart context (see "Injection Filter" above) stays in that session's prompt — the frozen prefix cannot be un-injected mid-session. `ccgm-learnings-sync revert` removes the row from every projection computed *after* the revert; an already-running session that picked it up must be restarted to actually drop it. This is also the honest limit on `dreaming`'s optimistic-integration dwell window (see `modules/dreaming/rules/dreaming.md`): the dwell shrinks the *pre-exposure* blind spot to zero, but reverting an already-exposed row still only stops *future* sessions, not the one that already read it.
+- **Revert stops future reads, not the current session's.** A row that was already read, ranked, and injected into a live session's frozen SessionStart context (see "Injection Filter" above) stays in that session's prompt — the frozen prefix cannot be un-injected mid-session. `ccgm-learnings-sync revert` removes the row from every projection computed *after* the revert; an already-running session that picked it up must be restarted to actually drop it. This is also the honest limit on `dreaming`'s optimistic-integration dwell window (see `modules/dreaming/skills/dreaming/SKILL.md`): the dwell shrinks the *pre-exposure* blind spot to zero, but reverting an already-exposed row still only stops *future* sessions, not the one that already read it.
 - Pre-`init` mutations (writes made before this repo existed) have no commit to revert; use `ccgm-learnings-log deprecate <id>` instead.
 
 ### Autocommit lives outside the store

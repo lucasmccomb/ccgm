@@ -121,7 +121,7 @@ Build a mental model of:
 
 Launch analysis agents in parallel using the Agent tool. Set model to **sonnet** for all agents.
 
-> **Concurrency:** four `sonnet` agents in one wave is within the safe band — keep the model on `sonnet` and the count at 4. If you widen this fan-out, cap simultaneous heavy agents at 4 and wave the rest. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+> **Concurrency:** four `sonnet` agents in one wave is within the safe band — keep the model on `sonnet` and the count at 4. If you widen this fan-out, cap simultaneous heavy agents at 4 and wave the rest. See `~/.claude/rules/subagent-patterns.md` (Concurrency and Rate Limits).
 
 Each agent receives:
 1. The target repo path

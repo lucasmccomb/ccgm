@@ -1,3 +1,9 @@
+---
+name: model-vetting
+description: >
+  Vetting checklist for wiring any new or third-party model into the harness or the local dev system: weights provenance, file-format safety, license and data terms, serving path, staged agentic access. Load before repointing ANTHROPIC_BASE_URL, adding a wrapper or proxy, or downloading weights.
+---
+
 # Model Vetting: Verify Before Integrating Any New Model
 
 **Iron Law:** NO NEW MODEL ENTERS THE HARNESS OR THE LOCAL DEV SYSTEM WITHOUT PASSING THE VETTING CHECKLIST. "OPEN SOURCE" IS A CLAIM, NOT A VERIFICATION.
@@ -89,4 +95,4 @@ Stop and run the checklist if you catch yourself:
 - `subagent-patterns.md` — the two-stage review that contains Stage 2 implementer output
 - `verification.md` — evidence-before-claims; a vetting record is evidence, a vendor claim is not
 - `config-change-detection.md` — the hash-marker pattern for re-verification on config drift
-- `git-worktrees.md` — the isolation mechanism for Stage 1/2 sandboxing
+- the `git-worktrees` skill — the isolation mechanism for Stage 1/2 sandboxing

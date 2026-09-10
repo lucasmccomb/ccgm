@@ -81,3 +81,13 @@ Stop and run the check if you catch yourself:
 - Before reporting a task as complete
 - Before pushing, with the full pre-push suite (see code-quality.md)
 - After resolving merge conflicts
+
+## Evidence Tiers
+
+| Tier | What it is | Counts as proof? |
+|------|-----------|------------------|
+| L1 | A fresh artifact captured this session: command output with exit code, test summary, screenshot, log line, HTTP response | Yes, the only tier that satisfies a claim |
+| L2 | A reasoned argument: "the diff is small", "the types line up" | No, a hypothesis |
+| L3 | A bare assertion: "tests pass", "it works", "fixed" | No, this is the failure the gate catches |
+
+Before saying done, complete, fixed, passing, or deployed, paste the L1 artifact next to the claim. An artifact you ran but did not show reads as L3; a claim with no L1 artifact is downgraded to "changed X, not yet verified".

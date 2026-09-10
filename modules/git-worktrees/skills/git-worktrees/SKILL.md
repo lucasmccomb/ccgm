@@ -1,3 +1,9 @@
+---
+name: git-worktrees
+description: >
+  Git worktree lifecycle for parallel delegation: one worktree per unit of work, mandatory teardown after merge, the safe-removal classification, and branch cleanup after squash merges. Load when creating, removing, or sweeping worktrees, or when dispatching implementers with isolation: worktree.
+---
+
 # Git Worktrees (Default Parallel-Delegation Isolation)
 
 A worktree is a second working tree checked out from the **same** `.git`. Each worktree has its **own index, HEAD, and working directory**, so two agents can build, test, and commit on different branches at the same time without touching each other's files. That independent-index-and-HEAD property is exactly what makes worktrees safe for parallel work.

@@ -5,18 +5,6 @@
   },
   "description": "Security vetting gate for new AI models: before any open-weights or hosted model is integrated into the Claude Code harness or local dev system, verify weights provenance and integrity, file-format safety, license and data terms, the serving path, and stage its agentic access.",
   "displayName": "Model Vetting",
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-rule-inject.py\"",
-            "type": "command"
-          }
-        ]
-      }
-    ]
-  },
   "keywords": [
     "models",
     "provenance",

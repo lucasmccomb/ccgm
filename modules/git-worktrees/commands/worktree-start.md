@@ -7,7 +7,7 @@ allowed-tools: Bash, Read, Edit, Write
 
 Creates an isolated git worktree so feature work does not disturb the main checkout. This is the **hands-on** single-worktree creator (you, working a branch directly).
 
-For **parallel sub-agent delegation**, you usually do not run this by hand — the delegating command (`/etp`, `/mawf`, `/xplan`) or the Agent/Workflow `isolation: "worktree"` option creates one worktree per unit automatically, and removes it when the unit merges. Worktrees are the default isolation for that; see `git-worktrees.md`. Reach for a permanent clone only for long-lived independent agents, per-branch dev-server ports, per-branch `tracking.csv`, or cross-machine dispatch.
+For **parallel sub-agent delegation**, you usually do not run this by hand — the delegating command (`/etp`, `/mawf`, `/xplan`) or the Agent/Workflow `isolation: "worktree"` option creates one worktree per unit automatically, and removes it when the unit merges. Worktrees are the default isolation for that; see the `git-worktrees` skill. Reach for a permanent clone only for long-lived independent agents, per-branch dev-server ports, per-branch `tracking.csv`, or cross-machine dispatch.
 
 Whichever path creates the worktree, its lifecycle ends the same way: removed when its PR merges, with `/worktree-sweep` as the orphan backstop.
 

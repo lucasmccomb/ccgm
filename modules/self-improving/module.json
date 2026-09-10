@@ -6,8 +6,8 @@
   "scope": ["global"],
   "dependencies": [],
   "files": {
+    "skills/learnings-store/SKILL.md": { "target": "skills/learnings-store/SKILL.md", "type": "skill", "template": false },
     "rules/self-improving.md": { "target": "rules/self-improving.md", "type": "rule", "template": false },
-    "rules/learnings-store.md": { "target": "rules/learnings-store.md", "type": "rule", "template": false },
     "commands/reflect.md": { "target": "commands/reflect.md", "type": "command", "template": false },
     "commands/consolidate.md": { "target": "commands/consolidate.md", "type": "command", "template": false },
     "commands/retro.md": { "target": "commands/retro.md", "type": "command", "template": false },

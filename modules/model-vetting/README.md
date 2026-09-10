@@ -15,20 +15,20 @@ This module installs a rule that blocks "just wire it up" model integrations beh
 
 ## Manual Installation
 
-Copy `rules/model-vetting.md` into your Claude configuration:
+Copy `skills/model-vetting/SKILL.md` into your Claude configuration:
 
 ```bash
 # Global (all projects)
 mkdir -p ~/.claude/rules
-cp rules/model-vetting.md ~/.claude/rules/model-vetting.md
+mkdir -p ~/.claude/skills
+cp -R skills/model-vetting ~/.claude/skills/model-vetting
 
 # Project-level
 mkdir -p .claude/rules
-cp rules/model-vetting.md .claude/rules/model-vetting.md
 ```
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `rules/model-vetting.md` | Rule file: the vetting checklist, staged-access table, rationalizations, and red flags |
+| `skills/model-vetting/SKILL.md` | Rule file: the vetting checklist, staged-access table, rationalizations, and red flags |

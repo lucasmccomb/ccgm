@@ -28,20 +28,14 @@ The parent rule is backed by four focused sub-rules that give agents named moves
 # Global (all projects)
 mkdir -p ~/.claude/rules
 cp rules/systematic-debugging.md ~/.claude/rules/systematic-debugging.md
-cp rules/debugging.md ~/.claude/rules/debugging.md
-cp rules/root-cause-tracing.md ~/.claude/rules/root-cause-tracing.md
-cp rules/defense-in-depth.md ~/.claude/rules/defense-in-depth.md
+mkdir -p ~/.claude/skills
+cp -R skills/debugging-techniques ~/.claude/skills/debugging-techniques
 cp rules/condition-based-waiting.md ~/.claude/rules/condition-based-waiting.md
-cp rules/animals-vs-ghosts.md ~/.claude/rules/animals-vs-ghosts.md
 
 # Project-level
 mkdir -p .claude/rules
 cp rules/systematic-debugging.md .claude/rules/systematic-debugging.md
-cp rules/debugging.md .claude/rules/debugging.md
-cp rules/root-cause-tracing.md .claude/rules/root-cause-tracing.md
-cp rules/defense-in-depth.md .claude/rules/defense-in-depth.md
 cp rules/condition-based-waiting.md .claude/rules/condition-based-waiting.md
-cp rules/animals-vs-ghosts.md .claude/rules/animals-vs-ghosts.md
 ```
 
 ## Files
@@ -49,8 +43,5 @@ cp rules/animals-vs-ghosts.md .claude/rules/animals-vs-ghosts.md
 | File | Description |
 |------|-------------|
 | `rules/systematic-debugging.md` | 4-phase debugging methodology with red flags and escalation rules |
-| `rules/debugging.md` | Trigger guide for the `/debug` skill |
-| `rules/root-cause-tracing.md` | Trace errors backward up the call chain to the originating trigger |
-| `rules/defense-in-depth.md` | Layered validation that makes a fixed bug structurally impossible to reintroduce |
+| `skills/debugging-techniques/SKILL.md` | Root-cause tracing, defense-in-depth validation, and the animals-vs-ghosts mental model, loaded on demand during debugging |
 | `rules/condition-based-waiting.md` | Replace arbitrary sleeps with condition polling to kill flaky tests |
-| `rules/animals-vs-ghosts.md` | Mental model: LLMs are statistical simulators, not animal intelligences - diagnose which RL circuit you're in instead of anthropomorphizing failure |

@@ -1,3 +1,9 @@
+---
+name: browser-automation
+description: >
+  Browser verification workflow: CLI and API first, WebMCP tools, Chrome extension versus Playwright, deployment-timing checks, and the verification steps for UI changes. Load when verifying a UI change or a deployment in a browser, or when debugging client-side behavior.
+---
+
 # Browser Automation
 
 ## MCP Plugins & Tool Permissions

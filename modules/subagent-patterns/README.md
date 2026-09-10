@@ -24,7 +24,6 @@ Installs rules covering subagent coordination:
 # Global (all projects)
 mkdir -p ~/.claude/rules
 cp rules/subagent-patterns.md ~/.claude/rules/subagent-patterns.md
-cp rules/concurrency-and-rate-limits.md ~/.claude/rules/concurrency-and-rate-limits.md
 mkdir -p ~/.claude/agents
 cp agents/implementer.md ~/.claude/agents/implementer.md
 cp agents/spec-compliance-reviewer.md ~/.claude/agents/spec-compliance-reviewer.md
@@ -46,7 +45,6 @@ chmod +x ~/.claude/hooks/task-completed-check.py
 | File | Description |
 |------|-------------|
 | `rules/subagent-patterns.md` | Subagent decomposition, dispatch patterns, and review methodology |
-| `rules/concurrency-and-rate-limits.md` | Caps heavy-agent fan-out concurrency, wave sizing, and 429-throttle recovery for the Workflow tool and direct parallel Agent dispatch |
 | `agents/implementer.md` | Reusable prompt template for implementer subagents - enforces scope discipline and four-state status |
 | `agents/spec-compliance-reviewer.md` | Stage 1 reviewer - adversarial stance, verifies deliverables and constraints independently of the implementer's self-report |
 | `agents/code-quality-reviewer.md` | Stage 2 reviewer - refuses to run unless Stage 1 returned DONE; checks project patterns, edge cases, simplicity |

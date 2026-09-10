@@ -15,7 +15,7 @@ Key capabilities:
 
 ## Why It Exists
 
-On 2026-07-13, delegated work using `isolation: "worktree"` left 33 stale worktrees consuming ~237 GB on one repo. The harness auto-removes a worktree only if it is *unchanged*; a built-in worktree lingers forever, and nothing mandated cleaning them up. This module makes worktrees the default (ephemeral, shared `.git`) **and** makes teardown load-bearing (mandatory per-unit removal + `/worktree-sweep` orphan backstop). See `rules/git-worktrees.md` for the full lifecycle and removal-safety rule.
+On 2026-07-13, delegated work using `isolation: "worktree"` left 33 stale worktrees consuming ~237 GB on one repo. The harness auto-removes a worktree only if it is *unchanged*; a built-in worktree lingers forever, and nothing mandated cleaning them up. This module makes worktrees the default (ephemeral, shared `.git`) **and** makes teardown load-bearing (mandatory per-unit removal + `/worktree-sweep` orphan backstop). See `skills/git-worktrees/SKILL.md` for the full lifecycle and removal-safety rule.
 
 ## Worktrees vs Multi-Agent Clones
 
@@ -34,7 +34,7 @@ Worktrees share `.git` objects and external caches, but **each still builds its 
 
 | File | Type | Description |
 |------|------|-------------|
-| `rules/git-worktrees.md` | rule | Default-isolation framing, delegation lifecycle, honest economics, removal-safety rule, pitfalls |
+| `skills/git-worktrees/SKILL.md` | rule | Default-isolation framing, delegation lifecycle, honest economics, removal-safety rule, pitfalls |
 | `commands/worktree-start.md` | command | `/worktree-start {branch-name}` |
 | `commands/worktree-finish.md` | command | `/worktree-finish` — four-option gate for one worktree |
 | `commands/worktree-sweep.md` | command | `/worktree-sweep` — safe repo-wide orphan janitor |
@@ -49,7 +49,8 @@ None. The module is self-contained.
 ```bash
 # Rule
 mkdir -p ~/.claude/rules
-cp rules/git-worktrees.md ~/.claude/rules/git-worktrees.md
+mkdir -p ~/.claude/skills
+cp -R skills/git-worktrees ~/.claude/skills/git-worktrees
 
 # Commands
 mkdir -p ~/.claude/commands

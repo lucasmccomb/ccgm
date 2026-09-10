@@ -20,7 +20,6 @@ This module installs:
 
 | File | Installs to |
 |------|-------------|
-| `rules/youtube-transcripts.md` | `~/.claude/rules/youtube-transcripts.md` |
 | `commands/transcript.md` | `~/.claude/commands/transcript.md` |
 | `lib/grab-transcript.sh` | `~/.claude/lib/grab-transcript.sh` |
 | `lib/analyze-transcript.md` | `~/.claude/lib/analyze-transcript.md` |
@@ -37,7 +36,6 @@ Manual install (without `./start.sh`):
 
 ```bash
 mkdir -p ~/.claude/rules ~/.claude/commands ~/.claude/lib
-cp modules/youtube-transcripts/rules/youtube-transcripts.md   ~/.claude/rules/
 cp modules/youtube-transcripts/commands/transcript.md         ~/.claude/commands/
 cp modules/youtube-transcripts/lib/grab-transcript.sh         ~/.claude/lib/
 cp modules/youtube-transcripts/lib/analyze-transcript.md      ~/.claude/lib/

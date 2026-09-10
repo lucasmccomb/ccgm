@@ -22,13 +22,11 @@ Covers tests, linting, builds, bug fixes, deployments, and type checking. Preven
 # Global (all projects)
 mkdir -p ~/.claude/rules
 cp rules/verification.md ~/.claude/rules/verification.md
-cp rules/evidence-tier-gate.md ~/.claude/rules/evidence-tier-gate.md
 cp rules/config-change-detection.md ~/.claude/rules/config-change-detection.md
 
 # Project-level
 mkdir -p .claude/rules
 cp rules/verification.md .claude/rules/verification.md
-cp rules/evidence-tier-gate.md .claude/rules/evidence-tier-gate.md
 cp rules/config-change-detection.md .claude/rules/config-change-detection.md
 ```
 
@@ -37,5 +35,5 @@ cp rules/config-change-detection.md .claude/rules/config-change-detection.md
 | File | Description |
 |------|-------------|
 | `rules/verification.md` | 5-step verification process with evidence requirements table |
-| `rules/evidence-tier-gate.md` | Mechanical L1/L2/L3 evidence gate: a completion claim with no fresh L1 artifact auto-fails |
+| `rules/verification.md` | Mechanical L1/L2/L3 evidence gate: a completion claim with no fresh L1 artifact auto-fails |
 | `rules/config-change-detection.md` | Hash-of-config pattern for re-verifying expensive automation when config drifts |

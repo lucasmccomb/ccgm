@@ -67,7 +67,7 @@ An **opt-in composite eligibility gate** in front of the optimistic engine's
 `optimistic_integration.eligibility.enabled` is `false` by default; the
 operator opts in via `memory-setup.sh` (offered only once optimistic mode
 itself is on), never a hand JSON edit. Full contract:
-`modules/dreaming/rules/dreaming.md` > "Eligibility composite".
+`modules/dreaming/skills/dreaming/SKILL.md` > "Eligibility composite".
 
 ## What's implemented so far (optimistic-memory Epics 1-8)
 
@@ -105,7 +105,7 @@ analyzer below:
 - `bin/ccgm-learnings-sync` (in `self-improving`) -- `revert <sha>`: a
   line-set-difference rollback that does NOT shell out to `git revert`
   (unsound against this store's `merge=union` shard files -- see
-  `modules/self-improving/rules/learnings-store.md`'s Rollback section).
+  `modules/self-improving/skills/learnings-store/SKILL.md`'s Rollback section).
 - `lib/scorecard.py` -- extended with auto-integrated / mid-dwell /
   reverted / breaker-trip counts.
 - `bin/memory-setup.sh` (in `self-improving`) -- the activation
@@ -382,7 +382,7 @@ bash modules/dreaming/tests/test-dream-pipeline.sh
   they only read it (for the reduce-phase projection) and propose.
   `/dream-apply` is the always-available, human-gated write path; the
   opt-in `optimistic_integration` engine (default off) is the other one --
-  see `modules/dreaming/rules/dreaming.md` for the full contract. Do not
+  see `modules/dreaming/skills/dreaming/SKILL.md` for the full contract. Do not
   hand-edit `~/.claude/dreaming/proposals/*.jsonl` expecting either path to
   respect the edit.
 - Do not call `mine()`/`discover()` against real transcripts expecting a

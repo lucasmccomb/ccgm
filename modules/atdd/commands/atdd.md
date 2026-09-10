@@ -17,6 +17,14 @@ Build app code to pass E2E vision specs. Vision specs (Playwright test files) de
 6. Repeat until all green
 7. Commit, push, PR
 
+## The ATDD Contract
+
+1. **Specs are immutable** - Never modify test files during an ATDD run. If a spec seems wrong, flag it and move on - do not "fix" the spec to match current behavior.
+2. **Mocks are the API contract** - Test fixtures mock API responses. These mock shapes ARE the expected API response format. If the real API returns a different shape, change the API, not the mock.
+3. **UI expectations are the design spec** - If a test expects `getByRole("button", { name: /create habit/i })`, that button must exist with that accessible name. The test defines the UX.
+4. **Work incrementally** - Don't try to make all tests pass at once. Pick one failing test, make it green, move to the next. Commit every 5-10 tests.
+5. **Failing for the right reason** - A test that fails because the page doesn't load is different from one that fails because a button has the wrong label. Diagnose accurately.
+
 ---
 
 ## Input

@@ -6,7 +6,7 @@
 # removes ONLY the clean ones with a NON-FORCE `git worktree remove`, prunes
 # stale metadata, and prints a report. It NEVER forces, so git's own refusal on
 # a modified-or-untracked worktree is a second safety gate on top of the
-# classification. See modules/git-worktrees/rules/git-worktrees.md.
+# classification. See modules/git-worktrees/skills/git-worktrees/SKILL.md.
 #
 # KEY SAFETY FACT: removing a clean ON-BRANCH worktree never loses committed
 # work - the branch ref stays in the parent .git; only the working-tree checkout

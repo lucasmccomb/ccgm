@@ -62,9 +62,9 @@ Note: If agents share dependencies (Agent 3's output is needed by 1 and 2), run 
 
 ### Isolate Parallel Implementers in Worktrees
 
-When parallel implementers modify files, give each its own **git worktree** (`isolation: "worktree"`) — the default isolation for parallel sub-agent delegation on one machine. Each worktree has its own index and HEAD, so agents editing, building, and committing at the same time never collide; this is the structural enforcement of the "no shared state" coordination rule below. Worktrees are ephemeral — created per unit, removed when the unit's PR merges, with `/worktree-sweep` as the orphan backstop. Do **not** spin up extra permanent clones just for parallelism; reserve clones for long-lived independent agents, per-branch dev-server ports, hook-driven per-branch `tracking.csv`, or cross-machine dispatch. **Teardown is mandatory**: a worktree an agent built in does not auto-remove, and forgetting to remove merged worktrees is what filled 237 GB on one repo (2026-07-13). See `git-worktrees.md` and `multi-agent.md`.
+When parallel implementers modify files, give each its own **git worktree** (`isolation: "worktree"`) — the default isolation for parallel sub-agent delegation on one machine. Each worktree has its own index and HEAD, so agents editing, building, and committing at the same time never collide; this is the structural enforcement of the "no shared state" coordination rule below. Worktrees are ephemeral — created per unit, removed when the unit's PR merges, with `/worktree-sweep` as the orphan backstop. Do **not** spin up extra permanent clones just for parallelism; reserve clones for long-lived independent agents, per-branch dev-server ports, hook-driven per-branch `tracking.csv`, or cross-machine dispatch. **Teardown is mandatory**: a worktree an agent built in does not auto-remove, and forgetting to remove merged worktrees is what filled 237 GB on one repo (2026-07-13). See the `git-worktrees` skill and `multi-agent.md`.
 
-**Throttle heavy fan-outs.** Launching too many heavy agents at once (whether via the Workflow tool's `parallel()`/`pipeline()` or multiple Agent calls in one message) trips a server-side 429 throttle that fails the entire burst. Cap simultaneous heavy agents to 4 (never exceed 5), launch in waves, and default fan-out agents to cheaper models / lower effort unless thoroughness is explicitly requested. See `concurrency-and-rate-limits.md` for the defaults, the exact error, and the throttled-mid-run recovery procedure.
+**Throttle heavy fan-outs.** Launching too many heavy agents at once (whether via the Workflow tool's `parallel()`/`pipeline()` or multiple Agent calls in one message) trips a server-side 429 throttle that fails the entire burst. Cap simultaneous heavy agents to 4 (never exceed 5), launch in waves, and default fan-out agents to cheaper models / lower effort unless thoroughness is explicitly requested. See Concurrency and Rate Limits below for the defaults, the exact error, and the recovery procedure.
 
 ## Pass Paths, Not Contents
 
@@ -221,3 +221,22 @@ When authoring a skill that may be called by another skill, declare which modes 
 ### Caller Rules
 
 When one skill invokes another via subagent dispatch, **pass `mode:headless` unless there is a specific reason to choose a different mode.** Headless is the contract that makes composition safe: the caller knows the callee will not prompt, will not write unexpected files, and will return parseable output. Any other mode requires the caller to reason about side effects.
+
+## Concurrency and Rate Limits
+
+A fan-out is bounded by the server's rate limit, not by how many agents you can name. Launching too many heavy agents at once trips a server-side throttle (HTTP 429, `Server is temporarily limiting requests (not your usage limit) · Rate limited`) that fails the whole burst, because each heavy agent sends its full prompt the instant it starts. This is a launch-rate problem, never a usage cap or a code bug.
+
+A **heavy** agent is any of: Opus or Fable, reasoning effort at or above high, or a large reference context at launch. Anything else at medium or lower effort with a small prompt is **light**.
+
+| Lever | Default |
+|-------|---------|
+| Heavy agents running at once | 4, never more than 5 |
+| Wave size for heavy fan-outs | 4; let a wave drain before the next |
+| Light agents running at once | about 8 |
+| Model for fan-out agents | Sonnet unless the task needs frontier depth |
+| Effort for fan-out agents | medium or low; escalate only the stages that need it |
+| Retry on a 429 | 3 attempts, backoff 30s, 60s, 120s |
+
+Reduce agent count before throttling launches: one agent handling five items beats five agents. In a Workflow script, prefer `pipeline()` over `parallel()` for heavy stages, or chunk the array into sequential waves of 4. With direct Agent-tool dispatch, send at most 4 heavy calls per message and read the results before sending the next batch. Same-prefix agents launched within a few seconds of each other share the first agent's cached prefix, which is one more reason to keep a wave on one model.
+
+When throttled mid-run: stop launching, wait 30 to 60 seconds, re-dispatch only the failed agents in waves of 3 or 4 (or on Sonnet at medium), halve the wave and double the cooldown if it trips again, and for Workflow runs resume from the journal with `resumeFromRunId` so completed agents return cached results.

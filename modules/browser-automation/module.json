@@ -6,7 +6,7 @@
   "scope": ["global"],
   "dependencies": [],
   "files": {
-    "rules/browser-automation.md": { "target": "rules/browser-automation.md", "type": "rule", "template": false }
+    "skills/browser-automation/SKILL.md": { "target": "skills/browser-automation/SKILL.md", "type": "skill", "template": false }
   },
   "tags": ["browser", "automation", "chrome", "playwright", "webmcp"],
   "configPrompts": []

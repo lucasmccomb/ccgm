@@ -351,7 +351,7 @@ No two agents may touch the same file.
 
 For repos with >12 feature domains, split into two dispatch waves of 6-8 agents each. This keeps orchestrator context manageable. Files don't conflict between waves, so this is purely for orchestrator management.
 
-> **Concurrency — avoid the 429 throttle.** The wave cap above is also what keeps the fan-out under the server-side rate limit. The `/e2e` agents are light (`model: sonnet`), so 6–8 per wave is fine; never launch all domains for a large repo in one burst, and if you escalate the agents to a heavier model, drop the wave size to ≤4. If a wave returns `Server is temporarily limiting requests · Rate limited`, wait 30–60s and re-dispatch the failed domains. See `~/.claude/rules/concurrency-and-rate-limits.md`.
+> **Concurrency — avoid the 429 throttle.** The wave cap above is also what keeps the fan-out under the server-side rate limit. The `/e2e` agents are light (`model: sonnet`), so 6–8 per wave is fine; never launch all domains for a large repo in one burst, and if you escalate the agents to a heavier model, drop the wave size to ≤4. If a wave returns `Server is temporarily limiting requests · Rate limited`, wait 30–60s and re-dispatch the failed domains. See `~/.claude/rules/subagent-patterns.md` (Concurrency and Rate Limits).
 
 ### 4.3 Dispatch Agents
 

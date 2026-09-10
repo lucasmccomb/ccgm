@@ -85,5 +85,5 @@ agent. The agent:
 ## Cross-references
 
 - Storage: `~/.claude/autoheal/snoozed.json`
-- Rule: `~/.claude/rules/autoheal.md`
+- Rule: `~/.claude/skills/autoheal-reference/SKILL.md`
 - Plan: `~/code/plans/ccgm-autoheal/plan.md` §5 Epic 7

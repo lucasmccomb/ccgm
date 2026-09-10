@@ -228,7 +228,7 @@ expected_files=(
   "rules/git-workflow.md"
   "rules/code-quality.md"
   "rules/common-mistakes.md"
-  "rules/browser-automation.md"
+  "skills/browser-automation/SKILL.md"
   "rules/supabase.md"
   "rules/cloudflare.md"
   "commands/commit.md"

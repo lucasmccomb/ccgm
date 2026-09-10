@@ -8,7 +8,6 @@
   "files": {
     "skills/argus/SKILL.md": { "target": "skills/argus/SKILL.md", "type": "skill", "template": false },
     "agents/argus-judge.md": { "target": "agents/argus-judge.md", "type": "agent", "template": false },
-    "rules/argus.md": { "target": "rules/argus.md", "type": "rule", "template": false },
 
     "skills/argus/references/spec.schema.json": { "target": "skills/argus/references/spec.schema.json", "type": "doc", "template": false },
     "skills/argus/references/verdict.schema.json": { "target": "skills/argus/references/verdict.schema.json", "type": "doc", "template": false },

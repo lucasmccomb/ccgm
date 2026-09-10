@@ -7,7 +7,6 @@ SSH access to a configured remote server. Adds a `/onremote` command for health 
 | File | Purpose |
 |------|---------|
 | `~/.claude/commands/onremote.md` | `/onremote` slash command |
-| `~/.claude/rules/remote-server.md` | Tells Claude when/how to use the remote |
 | `~/.claude/settings.json` | Adds `ssh`, `scp`, `rsync` to the allow list |
 
 ## Prerequisites
@@ -40,7 +39,7 @@ Examples:
 If not using the CCGM installer, copy the files and substitute your values:
 
 ```bash
-# In commands/onremote.md and rules/remote-server.md, replace:
+# In commands/onremote.md, replace:
 # __REMOTE_HOST__  → your server's IP or hostname
 # __REMOTE_USER__  → your SSH username
 # __REMOTE_ALIAS__ → a friendly name for the server

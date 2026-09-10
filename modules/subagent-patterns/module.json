@@ -7,7 +7,6 @@
   "dependencies": [],
   "files": {
     "rules/subagent-patterns.md": { "target": "rules/subagent-patterns.md", "type": "rule", "template": false },
-    "rules/concurrency-and-rate-limits.md": { "target": "rules/concurrency-and-rate-limits.md", "type": "rule", "template": false },
     "agents/implementer.md": { "target": "agents/implementer.md", "type": "agent", "template": false },
     "agents/spec-compliance-reviewer.md": { "target": "agents/spec-compliance-reviewer.md", "type": "agent", "template": false },
     "agents/code-quality-reviewer.md": { "target": "agents/code-quality-reviewer.md", "type": "agent", "template": false },

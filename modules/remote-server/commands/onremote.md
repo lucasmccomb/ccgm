@@ -64,3 +64,10 @@ Examples of how to interpret input:
 - "what processes are using the most CPU" → `ps aux | sort -rk3 | head -10`
 
 Use multiple SSH calls if needed. Interpret the task fully - do not ask clarifying questions unless the intent is genuinely ambiguous.
+
+### Rules
+
+- Output-only commands: never open an interactive shell (`ssh -t`).
+- Chain multi-step work with `&&` in one SSH call instead of many round-trips.
+- Prefer `tail -n 50 <log>` over verbose diagnostic tools.
+- Do not run destructive operations (`rm`, `shutdown`, `kill -9`) without the user's explicit confirmation.

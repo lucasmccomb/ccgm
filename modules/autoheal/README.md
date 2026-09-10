@@ -21,7 +21,7 @@ Self-healing observability loop for Claude Code. Captures permission events, too
 
 User-global config lives at `~/.claude/autoheal/config.json`. Per-repo overrides live in `.autoheal/config.json` at the repo root.
 
-See `rules/autoheal.md` for the full config-key table and merge rules.
+See `skills/autoheal-reference/SKILL.md` for the full config-key table and merge rules.
 
 ## API keys
 
@@ -33,7 +33,7 @@ Autoheal reads `ANTHROPIC_API_KEY` (analyzer) and `RESEND_API_KEY` (email) from 
 
 ## Cross-references
 
-- Rule file: `rules/autoheal.md` (the contract autoheal expects Claude Code to follow).
+- Rule file: `skills/autoheal-reference/SKILL.md` (the contract autoheal expects Claude Code to follow).
 - Plan: `~/code/plans/ccgm-autoheal/plan.md`.
 - Bring-up runbook: `plan.md §9.1`.
 

@@ -103,13 +103,13 @@ above) is SEPARATELY `false` by default (`DEFAULT_OPTIMISTIC_INTEGRATION`
 in `dream_analyze.py`). The activation prompt that offers it ships in
 `memory-setup.sh` (PR #824) — turning it on is a `y` at that prompt, never a
 hand-edit of `~/.claude/dreaming/config.json`, per
-`modules/dreaming/rules/dreaming.md`'s do-not-hand-edit rule.
+`modules/dreaming/skills/dreaming/SKILL.md`'s do-not-hand-edit rule.
 
 `optimistic_integration.eligibility.enabled` is a further, independent opt-in
 *beneath* the flag above (governs `learning_add`/`learning_supersede`
 admission only), also `false` by default. `memory-setup.sh` offers it as a
 separate prompt, only once optimistic integration itself is on. See
-`modules/dreaming/rules/dreaming.md` > "Eligibility composite" for the gate's
+`modules/dreaming/skills/dreaming/SKILL.md` > "Eligibility composite" for the gate's
 full contract.
 
 ## When NOT to invoke
@@ -123,11 +123,11 @@ full contract.
 
 - `/dream-review [veto|revert]` — the optimistic model's post-hoc review
   and rollback surface (Epic 6).
-- Rule: `modules/dreaming/rules/dreaming.md` — the full dreaming +
+- Rule: `modules/dreaming/skills/dreaming/SKILL.md` — the full dreaming +
   optimistic-integration contract, including the "Eligibility composite"
   subsection and the do-not-hand-edit rule for
   `~/.claude/dreaming/config.json`. Store side:
-  `modules/self-improving/rules/learnings-store.md`.
+  `modules/self-improving/skills/learnings-store/SKILL.md`.
 - Plan: `~/code/plans/ccgm-optimistic-memory/plan.md` §5 Epic 6 (this
   command's own update); `~/code/plans/ccgm-durable-memory-system/plan.md`
   §5 Epic 6 (the original `/dream`/`/dream-apply` this command predates).
