@@ -50,7 +50,7 @@ The advisory reminder stays — it teaches the workflow. This hook enforces it. 
 
 ## Known Gaps
 
-- Raw shell writes (`echo > file`, `sed -i`, `tee`) are not detectable from the command string. The Edit/Write gate is the primary defense; write files through the file tools.
+- Raw shell writes (`echo > file`, `sed -i`, `tee`) are not detectable from the command string, so edits to tracked repo files go through Edit/Write/NotebookEdit, where this guard (and the freeze and advisor gates) can see them. Read-only work may use any tool.
 - `cd <other-repo> && git add .` is checked against the session cwd, not the `cd` target. Use `git -C <path>` (which IS resolved) when operating on another repo.
 - The guard fails OPEN on git errors (cannot determine the branch → allow) so a broken git state never bricks the session. The one exception is the gitignored-path check, which fails CLOSED (see above) — failing open there would widen the gate exactly when git can't be trusted.
 

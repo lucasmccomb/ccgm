@@ -2,65 +2,7 @@
 
 These are patterns where Claude has historically made errors. Pay special attention to avoid repeating them.
 
-## 1. Shallow Directory Exploration in Monorepos
-
-**Problem**: When exploring repositories, Claude tends to only check top-level directories and misses nested structures like `apps/`, `packages/`, or workspace subdirectories.
-
-**Rule**: When performing operations across a monorepo (updating hooks, configs, dependencies, etc.), use a **two-method verification pattern**:
-
-### Step 1: Initial Discovery (Glob)
-
-Use Glob to find all relevant files recursively:
-```bash
-# Example: Find all package.json files
-Glob: **/package.json
-
-# Example: Find all .husky directories
-Glob: **/.husky
-```
-
-### Step 2: Independent Verification
-
-Run a second, independent discovery method to verify completeness:
-```bash
-# Verify package.json discovery
-find . -name "package.json" -not -path "*/node_modules/*" | wc -l
-
-# Verify .husky directories
-find . -name ".husky" -type d | wc -l
-
-# Verify workspace packages
-cat package.json | jq '.workspaces // empty'
-```
-
-### Step 3: Compare and Reconcile
-
-Before reporting completion:
-1. Compare counts from both methods
-2. If discrepancy exists, investigate missing items
-3. Document which directories/files were processed
-
-### Verification Checklist (REQUIRED before reporting "done")
-
-For any multi-directory operation, confirm:
-- [ ] Glob results match independent `find` count
-- [ ] All workspace packages (from `package.json` or `pnpm-workspace.yaml`) were processed
-- [ ] No subdirectories of `apps/`, `packages/`, `libs/` were skipped
-
-### Common Scenarios
-
-| Task | Glob Pattern | Verification Command |
-|------|--------------|---------------------|
-| Update pre-commit hooks | `**/.husky/*` | `find . -name ".husky" -type d` |
-| Audit package.json files | `**/package.json` | `find . -name "package.json" -not -path "*/node_modules/*"` |
-| Find TypeScript configs | `**/tsconfig*.json` | `find . -name "tsconfig*.json"` |
-| Locate test files | `**/*.test.{ts,tsx}` | `find . -name "*.test.ts" -o -name "*.test.tsx"` |
-
-**Never report "done" on a monorepo-wide task without completing the verification checklist.**
-
----
-
-## 2. Branching Without Checking Open PRs (Dependency Blindness)
+## 1. Branching Without Checking Open PRs (Dependency Blindness)
 
 **Problem**: Creating a feature branch from `origin/main` without checking for open PRs. A foundational PR (build infrastructure, CSS pipeline) may still be unmerged. The new branch would be missing critical build config, breaking the project. Hours can be wasted debugging missing CSS, missing entry points, and broken UI - all because the branch was based on an incomplete `main`.
 
@@ -99,7 +41,7 @@ gh pr list --state open
 
 ---
 
-## 3. ESLint React Fast Refresh Violations
+## 2. ESLint React Fast Refresh Violations
 
 **Problem**: Consolidating files and violating ESLint's React Fast Refresh rules, requiring a revert.
 
@@ -115,7 +57,7 @@ gh pr list --state open
 
 ---
 
-## 4. Suggesting Already-Tried Solutions
+## 3. Suggesting Already-Tried Solutions
 
 **Problem**: When debugging, suggesting "run the full workflow" when the user had already done that before asking for help.
 
@@ -131,7 +73,7 @@ gh pr list --state open
 
 ---
 
-## 5. Premature Solutions Without Full Context
+## 4. Premature Solutions Without Full Context
 
 **Problem**: Proposing fixes before fully understanding the codebase structure, leading to solutions that violate existing patterns or lint rules.
 
@@ -143,7 +85,7 @@ gh pr list --state open
 
 ---
 
-## 6. Git Multi-Clone Repos
+## 5. Git Multi-Clone Repos
 
 Some repos use a multi-clone architecture for multi-agent parallel work. Two models exist:
 
@@ -159,7 +101,7 @@ Key reminders:
 
 ---
 
-## 7. Cloudflare Pages vs Workers Confusion
+## 6. Cloudflare Pages vs Workers Confusion
 
 **Problem**: Creating a Cloudflare Workers project instead of a Pages project for a static site, leading to multiple failed deploy attempts with confusing errors.
 
@@ -169,7 +111,7 @@ The **cloudflare** module is the canonical source for this — see `modules/clou
 
 ---
 
-## 8. Cloudflare Pages Created Without Git Integration
+## 7. Cloudflare Pages Created Without Git Integration
 
 **Problem**: An agent runs `wrangler pages deploy <new-project-name>` to "get something live", which creates a direct-upload Pages project. The project never auto-deploys from GitHub — pushes to main are silently ignored, and the production site goes stale after every merge. **Cloudflare does not support retrofitting Git integration onto an existing direct-upload project.** The only fix is to delete the project and recreate it with Git integration (migrating custom domains, env vars, and bindings) — multi-session production work. This mistake recurs across projects and burns hours every time it happens.
 

@@ -94,17 +94,6 @@ Use Chrome automation tools to verify:
 
 ### Verification Workflow
 
-#### 0. Ask About Auth State (REQUIRED)
-
-Before browser verification, **ask the user** about the required auth state:
-- **Logged-in verification** - Proceed normally (user's session is active)
-- **Logged-out verification** - Ask user to log out first, or open an incognito window manually
-
-**Why this matters**:
-- The Chrome plugin cannot open incognito windows - it only works in the normal browser
-- Testing a logged-in feature while logged out will fail
-- Testing a public feature while logged in may hide bugs visible to anonymous users
-
 #### 1. Get Browser Context
 ```
 tabs_context_mcp (createIfEmpty: true)

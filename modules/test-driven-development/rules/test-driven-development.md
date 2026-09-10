@@ -24,7 +24,6 @@ Violating the letter of this rule is violating the spirit of this rule. If you d
 
 - Improve the code while keeping all tests green
 - Remove duplication, improve naming, extract functions
-- Run tests after each refactoring step
 
 ### 4. Repeat
 

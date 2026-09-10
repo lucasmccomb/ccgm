@@ -110,18 +110,9 @@ The agent loads only the file that matches its path.
 
 ## Tool Selection
 
-### Native Over Shell
+### Which Tool Does the Work
 
-Prefer the agent's native tools over shell-invoked equivalents. Native tools are faster, stream results, and don't pollute the context with shell noise.
-
-| Task | Prefer | Avoid |
-|------|--------|-------|
-| Find files by pattern | native file-search tool (e.g., Glob) | `find` / `ls -R` |
-| Search file contents | native content-search tool (e.g., Grep) | `grep` / `rg` in Bash |
-| Read a file | native file-read tool (e.g., Read) | `cat` / `head` / `tail` |
-| Edit a file | native edit tool | `sed` / `awk` |
-
-When a skill instructs an agent to run `grep` or `find`, it is burning tokens on output that the native tool would stream more cleanly.
+Edits to files inside a repository go through the agent's native edit and write tools (Edit, Write, NotebookEdit). CCGM's branch-guard, freeze, and advisor gates key on those tool calls; a shell write (`sed -i`, `tee`, a heredoc) passes them unseen. Reads and searches may use either the native tools (Glob, Grep, Read) or the shell; pick whichever gives the smaller, cleaner output for the task. A skill that hard-codes `cat` or `find` where a native tool would stream less is spending tokens for nothing, and one that hard-codes the native tool where a one-line pipeline would do is spending turns for nothing.
 
 ### Describe Tools by Capability Class
 

@@ -33,8 +33,6 @@ Only involve the user when you **genuinely cannot proceed** without them:
 - "You should restart the app to see the changes" - NO. Restart it yourself.
 - "You should check the dashboard" - NO. Use the CLI, MCP tools, or API first. Only ask the user if CLI access is insufficient.
 - "Here are the steps to set this up: 1. 2. 3." - NO. Execute the steps. Report the result.
-- "Would you like me to...?" for routine operations - NO. Just do it.
-- Presenting a menu of next actions after startup - NO. If there's obvious work to continue, continue it. If not, ask what to work on.
 - "Don't forget to..." or "Make sure you..." - NO. Do it yourself or it doesn't need doing.
 - Leaving an app in a broken state after changes - NO. If you changed code, get the app back to a testable state.
 
@@ -70,18 +68,3 @@ Before reporting a task as done, ask yourself: **if a senior engineer made these
 
 **The user should be able to immediately test your changes without doing anything themselves - no rebuild, no relaunch, no "open the app", no "reload the simulator". "Build succeeded" is not the finish line; the relaunched, running app is.**
 
----
-
-# Task Completion: Call to Action Prompt
-
-**After finishing a task** (code changes committed, verification passed), if you haven't already been given direction on what to do next, **prompt the user with a call to action** instead of just summarizing what you completed.
-
-**Options to present:**
-1. **Commit, create PR, and merge** - If changes are ready for review
-2. **Run dev server** - Start the dev server so the user can test locally
-3. **Something else** - Let the user specify a different next step
-
-**When NOT to prompt:**
-- The user already told you what to do next in their original request
-- You're in the middle of a multi-step task with clear next steps
-- The work was trivial (e.g., a config-only change with no need to test)
