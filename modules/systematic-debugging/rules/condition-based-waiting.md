@@ -1,3 +1,12 @@
+---
+paths:
+  - "**/*.test.*"
+  - "**/*.spec.*"
+  - "**/tests/**"
+  - "**/test/**"
+  - "**/__tests__/**"
+  - "**/e2e/**"
+---
 # Condition-Based Waiting
 
 Most "flaky test" bugs are timing bugs. The test guesses at how long an async operation should take, the guess is right on the developer's machine, and wrong under CI load. The fix is almost never "increase the timeout." The fix is to wait for the actual condition, not a duration.

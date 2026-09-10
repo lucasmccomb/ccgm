@@ -2,6 +2,8 @@
 
 4-phase root cause investigation methodology for debugging.
 
+`rules/condition-based-waiting.md` is path-scoped (#1061): it carries `paths:` frontmatter and loads only after Claude reads a file matching one of `**/*.test.*`, `**/*.spec.*`, `**/tests/**`, `**/test/**`, `**/__tests__/**`, `**/e2e/**`. It costs no context at session start otherwise.
+
 ## What It Does
 
 Installs a rules file that enforces structured debugging instead of random fix attempts:

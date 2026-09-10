@@ -1,3 +1,8 @@
+---
+paths:
+  - "**/components/ui/**"
+  - "**/components.json"
+---
 # shadcn/ui Patterns
 
 Guidelines for working with shadcn/ui components in React projects.

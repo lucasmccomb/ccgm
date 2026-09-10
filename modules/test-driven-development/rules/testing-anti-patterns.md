@@ -1,3 +1,12 @@
+---
+paths:
+  - "**/*.test.*"
+  - "**/*.spec.*"
+  - "**/tests/**"
+  - "**/test/**"
+  - "**/__tests__/**"
+  - "**/e2e/**"
+---
 # Testing Anti-Patterns
 
 Five testing mistakes agents default to under pressure. Each has a **Gate Function** - a question to ask before writing the test. If the answer is wrong, stop and redesign the test.

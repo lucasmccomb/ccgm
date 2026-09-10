@@ -1,3 +1,17 @@
+---
+paths:
+  - ".github/workflows/**"
+  - "**/.github/workflows/**"
+  - "**/wrangler.toml"
+  - "**/wrangler.json"
+  - "**/wrangler.jsonc"
+  - "**/.env*"
+  - "**/supabase/migrations/**"
+  - "**/vercel.json"
+  - "**/fly.toml"
+  - "**/Dockerfile*"
+  - "**/docker-compose*"
+---
 # Config Change Detection
 
 **Iron Law:** RE-VERIFY WHEN CONFIG CHANGES. NEVER ASSUME LAST RUN'S RESULT STILL APPLIES.

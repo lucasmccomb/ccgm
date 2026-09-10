@@ -1,3 +1,9 @@
+---
+paths:
+  - "**/*mcp*/**"
+  - "**/*mcp*.*"
+  - "**/.mcp.json"
+---
 # MCP Server Development
 
 Guidelines for building Model Context Protocol (MCP) servers that enable LLMs to interact with external services.

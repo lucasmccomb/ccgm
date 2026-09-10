@@ -62,6 +62,32 @@ def test_flag_via_env_file(tmp_path, monkeypatch):
     assert hook.build_context(root) is not None
 
 
+def test_skips_path_scoped_rules(tmp_path, monkeypatch):
+    """A rule with `paths:` frontmatter loads only for matching files under the
+    native install; injecting it at session start would defeat that (#1061)."""
+    monkeypatch.setenv(hook.FLAG, "true")
+    monkeypatch.setattr(hook, "_read_env_file", lambda: {})
+    scoped = '---\npaths:\n  - "**/*.css"\n---\n# Scoped\nScoped body'
+    unscoped_fm = "---\ndescription: not path scoped\n---\n# Plain\nPlain body"
+    root = _make_plugin(
+        tmp_path, {"a.md": "Rule A body", "b.md": scoped, "c.md": unscoped_fm}
+    )
+    ctx = hook.build_context(root)
+    assert ctx is not None
+    assert "Rule A body" in ctx
+    assert "Plain body" in ctx
+    assert "Scoped body" not in ctx
+    assert "rule: b.md" not in ctx
+
+
+def test_none_when_every_rule_is_path_scoped(tmp_path, monkeypatch):
+    monkeypatch.setenv(hook.FLAG, "true")
+    monkeypatch.setattr(hook, "_read_env_file", lambda: {})
+    scoped = '---\npaths:\n  - "**/*.sql"\n---\nOnly body'
+    root = _make_plugin(tmp_path, {"only.md": scoped})
+    assert hook.build_context(root) is None
+
+
 def test_none_when_no_rules_dir(tmp_path, monkeypatch):
     monkeypatch.setenv(hook.FLAG, "true")
     monkeypatch.setattr(hook, "_read_env_file", lambda: {})

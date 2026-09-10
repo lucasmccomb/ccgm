@@ -2,6 +2,8 @@
 
 Cloudflare-specific rules for Pages vs Workers selection, deployment methods, Git integration requirements, Email Service, and token scopes.
 
+`rules/cloudflare.md` is path-scoped (#1061): it carries `paths:` frontmatter and loads only after Claude reads a file matching one of `**/wrangler.toml`, `**/wrangler.json`, `**/wrangler.jsonc`, `**/functions/**`, `**/_headers`, `**/_redirects`, `**/workers/**`, `**/.dev.vars*`. It costs no context at session start otherwise.
+
 ## What It Does
 
 This module installs a rules file that instructs Claude to:

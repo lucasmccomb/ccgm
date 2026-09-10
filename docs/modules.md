@@ -1224,7 +1224,7 @@ Principles for designing applications where an agent is a first-class user — a
 
 Convention for shipping machine-readable docs alongside human docs.
 
-**Installs**: `rules/docs-for-agents.md`
+**Installs**: `rules/docs-for-agents.md` (path-scoped: loads only for matching files)
 
 **What it does**: Any project an agent will install, build, test, deploy, or debug should have an `AGENTS.md` next to its `README.md` — copy-pasteable command blocks, not prose, not "open the dashboard and click..." steps. The rule explains what to include and what to leave out.
 
@@ -1248,7 +1248,7 @@ TDD-style discipline for writing rules that hold up under pressure.
 
 Discipline for writing skills and slash commands that stay efficient, portable, and context-safe.
 
-**Installs**: `rules/skill-authoring.md`
+**Installs**: `rules/skill-authoring.md` (path-scoped: loads only for matching files)
 
 **What it does**: Covers reference-file inclusion (vs. inlining), conditional content extraction, tool selection (when to spawn a subagent vs. handle inline), and writing style for skill markdown. Aimed at avoiding skills that bloat context or hide important behavior in opaque scripts.
 
@@ -1280,7 +1280,7 @@ Guides for specific technologies and platforms.
 
 Cloudflare Pages and Workers deployment guide.
 
-**Installs**: `rules/cloudflare.md`
+**Installs**: `rules/cloudflare.md` (path-scoped: loads only for matching files)
 
 **What it does**: Prevents common Cloudflare deployment mistakes:
 
@@ -1299,7 +1299,7 @@ Cloudflare Pages and Workers deployment guide.
 
 Supabase API key terminology, environment variables, and migration workflow.
 
-**Installs**: `rules/supabase.md`
+**Installs**: `rules/supabase.md` (path-scoped: loads only for matching files)
 
 **What it does**: Ensures correct Supabase terminology and practices:
 
@@ -1316,7 +1316,7 @@ Supabase API key terminology, environment variables, and migration workflow.
 
 Guide for building MCP (Model Context Protocol) servers.
 
-**Installs**: `rules/mcp-development.md`
+**Installs**: `rules/mcp-development.md` (path-scoped: loads only for matching files)
 
 **What it does**: Provides patterns for building MCP servers:
 
@@ -1336,7 +1336,7 @@ Guide for building MCP (Model Context Protocol) servers.
 
 Patterns for using shadcn/ui components in React projects.
 
-**Installs**: `rules/shadcn.md`
+**Installs**: `rules/shadcn.md` (path-scoped: loads only for matching files)
 
 **What it does**: Establishes conventions for shadcn/ui usage:
 

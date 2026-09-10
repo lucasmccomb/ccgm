@@ -1,3 +1,9 @@
+---
+paths:
+  - "**/AGENTS.md"
+  - "**/CLAUDE.md"
+  - "**/CLAUDE.local.md"
+---
 # Docs for Agents (AGENTS.md)
 
 Every project that an agent will install, build, test, deploy, or debug needs an `AGENTS.md`. Human docs (README, CLAUDE.md) explain context and intent. `AGENTS.md` gives the agent exactly what it needs to act: one command per operation, nothing more.

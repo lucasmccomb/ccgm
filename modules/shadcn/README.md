@@ -2,6 +2,8 @@
 
 shadcn/ui component patterns and best practices.
 
+`rules/shadcn.md` is path-scoped (#1061): it carries `paths:` frontmatter and loads only after Claude reads a file matching one of `**/components/ui/**`, `**/components.json`. It costs no context at session start otherwise.
+
 ## What It Does
 
 Installs a rules file covering shadcn/ui workflows:

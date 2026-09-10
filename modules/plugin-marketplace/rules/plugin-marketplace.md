@@ -1,3 +1,9 @@
+---
+paths:
+  - "**/module.json"
+  - "**/.claude-plugin/**"
+  - "**/marketplace.json"
+---
 # Plugin Marketplace
 
 CCGM can be installed two ways. They are not equivalent; pick deliberately.

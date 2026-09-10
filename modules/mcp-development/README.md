@@ -2,6 +2,8 @@
 
 Guide for building Model Context Protocol (MCP) servers.
 
+`rules/mcp-development.md` is path-scoped (#1061): it carries `paths:` frontmatter and loads only after Claude reads a file matching one of `**/*mcp*/**`, `**/*mcp*.*`, `**/.mcp.json`. It costs no context at session start otherwise.
+
 ## What It Does
 
 Installs a rules file covering MCP server development:

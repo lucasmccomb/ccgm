@@ -1,3 +1,14 @@
+---
+paths:
+  - "**/wrangler.toml"
+  - "**/wrangler.json"
+  - "**/wrangler.jsonc"
+  - "**/functions/**"
+  - "**/_headers"
+  - "**/_redirects"
+  - "**/workers/**"
+  - "**/.dev.vars*"
+---
 # Cloudflare Rules
 
 ## Pages vs Workers: Choose the Right Product
