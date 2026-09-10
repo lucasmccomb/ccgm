@@ -1356,7 +1356,7 @@ TMPL
           echo ""
           case "$id_communication" in
             "Concise and direct")
-              echo "I prefer terse communication. Show me the diff, not the explanation. Don't summarize what you just did - I can read the output."
+              echo "I prefer terse communication. Show me the diff, not the explanation."
               ;;
             "Detailed explanations")
               echo "I appreciate thorough explanations of trade-offs and reasoning. Walk me through your approach so I can verify and learn."

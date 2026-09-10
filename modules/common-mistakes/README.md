@@ -6,14 +6,13 @@
 
 This module installs a rules file that teaches Claude to avoid these common mistakes:
 
-1. **Shallow Directory Exploration** - Missing nested structures in monorepos
-2. **Dependency Blindness** - Branching without checking open PRs
-3. **ESLint Fast Refresh Violations** - Mixing component and non-component exports
-4. **Suggesting Already-Tried Solutions** - Repeating what the user already attempted
-5. **Premature Solutions** - Proposing fixes without understanding the full codebase
-6. **Git Multi-Clone Issues** - Forgetting to branch from origin/main in multi-clone setups
-7. **Cloudflare Pages vs Workers** - Choosing the wrong product for the use case
-8. **Missing Git Integration** - Creating Cloudflare Pages without Git integration at inception (cannot be added later)
+1. **Dependency Blindness** - Branching without checking open PRs
+2. **ESLint Fast Refresh Violations** - Mixing component and non-component exports
+3. **Suggesting Already-Tried Solutions** - Repeating what the user already attempted
+4. **Premature Solutions** - Proposing fixes without understanding the full codebase
+5. **Git Multi-Clone Issues** - Forgetting to branch from origin/main in multi-clone setups
+6. **Cloudflare Pages vs Workers** - Choosing the wrong product for the use case
+7. **Missing Git Integration** - Creating Cloudflare Pages without Git integration at inception (cannot be added later)
 
 ## Manual Installation
 

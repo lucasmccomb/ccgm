@@ -11,7 +11,7 @@ Violating the letter of this rule is violating the spirit of this rule. Never as
 Before claiming any task is complete:
 
 1. **Identify** the specific command or action that proves the claim
-2. **Execute** the command fresh (do not rely on cached or prior results)
+2. **Execute** the command at claim time and capture its output
 3. **Read** the full output, including exit codes and failure counts
 4. **Verify** the output actually supports the claim you are making
 5. **Report** with evidence attached (not just "tests pass")
@@ -31,9 +31,8 @@ Before claiming any task is complete:
 
 ## Rules
 
-### Run Fresh
+### One Check Is Not Another
 
-- Do NOT rely on previous runs, even from earlier in the same session
 - Do NOT assume passing one check means another also passes (lint passing does not mean types check)
 - Do NOT trust partial output (10/12 tests passing means 2 are failing)
 
@@ -61,8 +60,6 @@ Before claiming any task is complete:
 
 | You are about to say... | The reality is... |
 |-------------------------|-------------------|
-| "The change is too small to bother re-running" | Small changes break builds all the time. Run it. |
-| "I ran it earlier in this session" | State has changed since then. Run it again. |
 | "Type check passed, that's good enough" | Type check is not a test run. It is not a lint run. They catch different classes of problems. |
 | "The subagent said it succeeded" | A subagent's summary describes what it intended. Read the diff. |
 | "CI will catch anything I miss" | CI is a last-resort. Local checks are faster and cheaper. Do not ship the blame. |
@@ -74,15 +71,13 @@ Stop and run the check if you catch yourself:
 
 - Saying "tests pass" without having just run them
 - Claiming a fix works before seeing fresh output
-- Trusting an earlier-in-session result after editing code
 - Reporting a subagent's result as your own without verifying the artifact
 - Summarizing what you did instead of showing the output
 - "I'll just do one more thing before I run the full suite"
 
 ## When to Verify
 
-- Before every commit
 - Before claiming a bug is fixed
 - Before reporting a task as complete
-- After any refactoring, no matter how minor
+- Before pushing, with the full pre-push suite (see code-quality.md)
 - After resolving merge conflicts

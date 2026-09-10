@@ -1088,20 +1088,19 @@ Browser tool selection hierarchy and verification workflows.
 
 ### common-mistakes
 
-Eight documented anti-patterns extracted from real mistakes.
+Seven documented anti-patterns extracted from real mistakes.
 
 **Installs**: `rules/common-mistakes.md`
 
 **What it does**: Prevents Claude from repeating known failure patterns:
 
-1. **Shallow directory exploration** - always use two-method verification in monorepos
-2. **Dependency blindness** - check open PRs before creating branches
-3. **ESLint Fast Refresh violations** - never mix component and non-component exports
-4. **Suggesting already-tried solutions** - assume the user already tried the obvious
-5. **Premature solutions** - check linter configs and existing patterns first
-6. **Git multi-clone confusion** - branch from `origin/main`, check sibling clones
-7. **Cloudflare Pages vs Workers** - know which product to use
-8. **CF Pages without Git integration** - must be created with Git integration at inception, via the API or the dashboard (cannot be retrofitted)
+1. **Dependency blindness** - check open PRs before creating branches
+2. **ESLint Fast Refresh violations** - never mix component and non-component exports
+3. **Suggesting already-tried solutions** - assume the user already tried the obvious
+4. **Premature solutions** - check linter configs and existing patterns first
+5. **Git multi-clone confusion** - branch from `origin/main`, check sibling clones
+6. **Cloudflare Pages vs Workers** - know which product to use
+7. **CF Pages without Git integration** - must be created with Git integration at inception, via the API or the dashboard (cannot be retrofitted)
 
 **Dependencies**: None
 
