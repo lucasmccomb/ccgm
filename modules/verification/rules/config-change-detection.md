@@ -14,7 +14,7 @@ paths:
 ---
 # Config Change Detection
 
-**Iron Law:** RE-VERIFY WHEN CONFIG CHANGES. NEVER ASSUME LAST RUN'S RESULT STILL APPLIES.
+Re-verify when config changes. A green run last week proves nothing about today's config.
 
 This is a specialization of the verification discipline for automation that is dangerous on first run or after configuration drift. Deploys, migrations, new integrations, any workflow that depends on an external contract (env file, deploy config, wrangler.toml, CI secrets) must re-verify when that contract changes. A green run last week does not prove anything about today's config.
 

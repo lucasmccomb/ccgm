@@ -1,142 +1,39 @@
 # Common Mistakes to Avoid
 
-These are patterns where Claude has historically made errors. Pay special attention to avoid repeating them.
+Patterns where Claude has repeatedly gone wrong. Each is a problem and the rule that prevents it.
 
-## 1. Branching Without Checking Open PRs (Dependency Blindness)
+## 1. Branching Without Checking Open PRs
 
-**Problem**: Creating a feature branch from `origin/main` without checking for open PRs. A foundational PR (build infrastructure, CSS pipeline) may still be unmerged. The new branch would be missing critical build config, breaking the project. Hours can be wasted debugging missing CSS, missing entry points, and broken UI - all because the branch was based on an incomplete `main`.
+**Problem**: a feature branch cut from `origin/main` while a foundational PR (build infrastructure, CSS pipeline, entry points) is still unmerged is missing that config, and hours go to debugging missing CSS or broken UI on a stale base.
 
-**Rule**: **Before creating any new branch**, check for open PRs and determine if the new work depends on any of them.
-
-### Pre-Branch Checklist (MANDATORY)
-
-```bash
-# 1. List open PRs
-gh pr list --state open
-
-# 2. For each open PR, check if the new work touches the same packages/areas
-# 3. If there's a dependency, either:
-#    a. Merge the dependency PR first (if approved/ready)
-#    b. Branch from the dependency PR's branch instead of main
-#    c. Explicitly tell the user about the dependency and ask how to proceed
-```
-
-### How to Detect Dependencies
-
-| New work touches... | Check for open PRs that... |
-|---------------------|---------------------------|
-| A package's source code | Add build config, entry points, or manifest entries for that package |
-| UI components | Add CSS, styles, or theming infrastructure |
-| A specific feature | Add the underlying API, types, or shared utilities for that feature |
-| Extension behavior | Modify webpack config, manifest, or background scripts |
-
-### Red Flags That You're on a Stale Base
-
-- `dist/` is missing expected files after build
-- CSS files aren't being generated or copied
-- Entry points exist in source but not in build output
-- Features that "were working before" suddenly break after switching branches
-
-**Never assume `origin/main` has everything you need. Always verify open PRs first.**
-
----
+**Rule**: before creating any branch, run `gh pr list --state open` and check whether the new work touches the same packages or areas as an open PR. If it does, merge the dependency first, branch from its branch, or tell the user about the dependency and ask. Signs of a stale base: `dist/` missing expected files after build, CSS not generated, entry points present in source but absent from the build, features that "were working before" breaking after a branch switch.
 
 ## 2. ESLint React Fast Refresh Violations
 
-**Problem**: Consolidating files and violating ESLint's React Fast Refresh rules, requiring a revert.
-
-**Rule**: In React/TypeScript projects (especially Vite), NEVER export both React components and non-components (hooks, utilities, constants) from the same file. Fast Refresh requires:
-- Components in their own files (only component exports)
-- Hooks in separate files
-- Utilities/constants in separate files
-
-**Before consolidating or refactoring files**, check:
-1. Is this a Vite project? (check for `vite.config.ts`)
-2. Does ESLint config include `react-refresh` plugin?
-3. Will the resulting file mix component and non-component exports?
-
----
+**Rule**: in React/TypeScript projects, especially Vite, never export both React components and non-components (hooks, utilities, constants) from the same file. Fast Refresh needs components, hooks, and utilities in separate files. Before consolidating files, check for `vite.config.ts` and a `react-refresh` ESLint plugin.
 
 ## 3. Suggesting Already-Tried Solutions
 
-**Problem**: When debugging, suggesting "run the full workflow" when the user had already done that before asking for help.
-
-**Rule**: Before suggesting diagnostic steps, assume the user has already:
-- Checked the obvious (restarted, refreshed, retried)
-- Run the failing operation at least once
-- Looked at basic error messages
-
-**Instead of suggesting basic steps**, either:
-- Ask "What have you tried so far?" if unclear
-- Jump directly to deeper analysis (logs, data state, code paths)
-- Focus on the specific error details they provided
-
----
+**Rule**: assume the user has already restarted, refreshed, retried, run the failing operation, and read the basic error. Either ask what they have tried or go straight to deeper analysis (logs, data state, code paths) and the specific error they gave.
 
 ## 4. Premature Solutions Without Full Context
 
-**Problem**: Proposing fixes before fully understanding the codebase structure, leading to solutions that violate existing patterns or lint rules.
-
-**Rule**: Before implementing fixes that touch multiple files or involve refactoring:
-1. Check for ESLint/linter configurations (`.eslintrc`, `eslint.config.js`)
-2. Look at existing patterns in similar files
-3. Run linters BEFORE committing to catch violations early
-4. If a lint rule seems wrong, ask the user rather than assuming it can be ignored
-
----
+**Rule**: before a fix that touches multiple files or refactors, check the linter configuration (`.eslintrc`, `eslint.config.js`), look at existing patterns in similar files, and run the linter before committing. If a lint rule seems wrong, ask rather than ignore it.
 
 ## 5. Git Multi-Clone Repos
 
-Some repos use a multi-clone architecture for multi-agent parallel work. Two models exist:
+Two models exist: the workspace model (`~/code/{repo}-workspaces/{repo}-wX/{repo}-wX-cY/`, agent identity `agent-wX-cY`) and the flat clone model (`~/code/{repo}-repos/{repo}-N/`, agent `agent-N`). See `~/.claude/multi-agent-system.md`. Branch with `git checkout -b {branch} origin/main`, check sibling clones' branches before claiming an issue, and read `.env.clone` for agent identity, port offset, and workspace and clone numbers.
 
-- **Workspace model** (preferred): `~/code/{repo}-workspaces/{repo}-wX/{repo}-wX-cY/` with agent identity `agent-wX-cY`
-- **Flat clone model** (legacy): `~/code/{repo}-repos/{repo}-N/` with agent identity `agent-N`
+## 6. Cloudflare Pages vs Workers
 
-See `~/.claude/multi-agent-system.md` for full details on both models.
-
-Key reminders:
-- **Prefer branching from `origin/main`** - `git checkout -b {branch} origin/main` ensures you start from latest
-- **Check sibling clone branches** before claiming issues to avoid duplicate work
-- **Read `.env.clone`** for agent identity, port offset, and workspace/clone numbers
-
----
-
-## 6. Cloudflare Pages vs Workers Confusion
-
-**Problem**: Creating a Cloudflare Workers project instead of a Pages project for a static site, leading to multiple failed deploy attempts with confusing errors.
-
-**Rule**: Cloudflare Pages and Workers are **different products** — Pages for static sites/SPAs (Git-integration auto-deploy, blank deploy-command field), Workers for serverless functions/APIs (`wrangler deploy`, `wrangler.toml`). If you reach for `wrangler deploy` or hit "Must specify a project name" on a static site, you created a Workers project by mistake.
-
-The **cloudflare** module is the canonical source for this — see `modules/cloudflare/rules/cloudflare.md` > "Pages vs Workers: Choose the Right Product" for the full comparison table, the decision checklist, and the wrong-product symptoms. (Installed standalone, that rule lives at `~/.claude/rules/cloudflare.md`.)
-
----
+Pages and Workers are different products: Pages for static sites and SPAs (Git-integration auto-deploy, blank deploy-command field), Workers for serverless functions and APIs (`wrangler deploy`, `wrangler.toml`). Reaching for `wrangler deploy` or hitting "Must specify a project name" on a static site means a Workers project was created by mistake. The `cloudflare` rule (`modules/cloudflare/rules/cloudflare.md`, loaded when a wrangler config is read) has the comparison and the checklist.
 
 ## 7. Cloudflare Pages Created Without Git Integration
 
-**Problem**: An agent runs `wrangler pages deploy <new-project-name>` to "get something live", which creates a direct-upload Pages project. The project never auto-deploys from GitHub — pushes to main are silently ignored, and the production site goes stale after every merge. **Cloudflare does not support retrofitting Git integration onto an existing direct-upload project.** The only fix is to delete the project and recreate it with Git integration (migrating custom domains, env vars, and bindings) — multi-session production work. This mistake recurs across projects and burns hours every time it happens.
+**Problem**: `wrangler pages deploy <new-project-name>` creates a direct-upload Pages project that never auto-deploys from GitHub, and Cloudflare cannot retrofit Git integration; the only fix is deleting and recreating the project, migrating domains, env vars, and bindings.
 
-**Rule**: **Cloudflare Pages projects MUST be created with Git integration at inception** — via the API (`POST /accounts/{account_id}/pages/projects` with `source.type: "github"`) or the dashboard's Connect-to-Git flow. Never via `wrangler pages deploy <new-name>` for a project that should auto-deploy (~99% of cases). The API path's only precondition is a one-time Cloudflare GitHub App install on the GitHub account; ask the user for that if it's missing, rather than falling back to direct-upload. Verify either path with a read-back: `GET /accounts/{account_id}/pages/projects/{name}` and confirm `source.type == "github"`.
-
-The **cloudflare** module is the canonical source — see `modules/cloudflare/rules/cloudflare.md` > "Pages: MUST Be Created With Git Integration At Inception" for the full creation procedure, acceptable exceptions, the "created wrong" symptoms, and the destructive remediation steps if you inherit a broken project.
-
----
+**Rule**: create Pages projects with Git integration at inception, via `POST /accounts/{account_id}/pages/projects` with `source.type: "github"` or the dashboard's Connect-to-Git flow, never via `wrangler pages deploy <new-name>`. The one precondition is the Cloudflare GitHub App installed on the GitHub account; ask the user for that rather than falling back to direct upload. Verify with `GET /accounts/{account_id}/pages/projects/{name}` and confirm `source.type == "github"`. The `cloudflare` rule has the full procedure and the remediation steps.
 
 ## Adding New Mistakes
 
-This document is a living record, not a frozen list. When the self-improving reflection loop identifies a pattern that:
-
-1. Caused significant wasted time (30+ minutes of wrong approach)
-2. Is likely to recur across projects (not one-off)
-3. Has a clear "Problem / Rule" structure
-
-Add it as a new numbered entry following the existing format:
-
-### N. {Short Problem Title}
-
-**Problem**: What went wrong and why it was hard to catch.
-
-**Rule**: The concrete behavior change that prevents recurrence.
-
-After adding an entry, run `/ccgm-sync` to preserve it in the CCGM repo. Local additions not synced back may be overwritten on module reinstall.
-
-Patterns that are project-specific or unlikely to recur belong in memory files instead (feedback type), not in this shared document.
+Add an entry when a pattern cost 30 or more minutes of wrong approach, is likely to recur across projects, and has a clear problem-and-rule shape. Run `/ccgm-sync` afterward so the entry survives module reinstall. Project-specific or one-off patterns belong in memory files instead.

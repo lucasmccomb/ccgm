@@ -30,12 +30,12 @@ Read the target rule file. Verify it exists and is a Markdown file. If missing o
 
 Capture:
 
-- **Iron Law** - extract the all-caps declarative sentence near the top
+- **Rule statement** - extract the one-sentence rule near the top
 - **Discipline** - name the behavior the rule enforces
 - **Existing Rationalizations Table** - note any rows already present
 - **Existing Red Flags list** - note any items already present
 
-If the rule is missing an Iron Law or spirit-vs-letter clause, flag this to the user and ask whether to proceed (pressure-testing is most valuable on rules that already have those structural elements in place).
+If the rule has no clear one-sentence statement, flag this to the user and offer to draft one before testing.
 
 ---
 
@@ -129,7 +129,7 @@ Compare RED and GREEN compliance rates.
 
 - **GREEN >= 4 of 5 comply:** Rule is effective. Proceed to Phase 5 (adversarial self-test).
 - **GREEN 2-3 of 5 comply:** Rule partially effective. Analyze the bypass rationalizations and propose additions.
-- **GREEN <= 1 of 5 comply:** Rule ineffective. Either the Iron Law is too soft, the rule is too vague, or the scenarios target a loophole the rule does not address. Report to user and recommend revising the Iron Law before adding more table rows.
+- **GREEN <= 1 of 5 comply:** Rule ineffective. Either the rule statement is too soft, the rule is too vague, or the scenarios target a loophole the rule does not address. Report to user and recommend revising the statement before adding table rows.
 
 ### Rationalization Extraction
 
@@ -194,7 +194,7 @@ Produce a final report:
 ## Pressure-Test Report: {rule-name}
 
 **Rule file:** {path}
-**Iron Law:** {extracted Iron Law}
+**Rule:** {extracted rule statement}
 
 ### Baseline (RED) compliance: {N/total}
 ### After rule loaded (GREEN) compliance: {N/total}
@@ -217,15 +217,15 @@ Produce a final report:
 {any scenarios where the rule still fails, or any DONE_WITH_CONCERNS the agent raised}
 
 ### Recommendation
-{one of: ship as-is | iterate further | Iron Law needs sharpening}
+{one of: ship as-is | iterate further | rule statement needs sharpening}
 ```
 
 ---
 
 ## Edge Cases
 
-### The rule has no Iron Law
-Flag to user. Pressure-testing a rule without an Iron Law is less useful - there is no sharp discipline to measure compliance against. Offer to draft an Iron Law sentence first, then pressure-test.
+### The rule has no one-sentence statement
+Flag to user; there is no sharp discipline to measure compliance against. Offer to draft the sentence first, then pressure-test.
 
 ### Baseline compliance is already 5 of 5
 The rule may not address a real bypass problem. The agent already complies without the rule. Report this honestly: the rule may be redundant, or the scenarios may not be adversarial enough. Offer to regenerate scenarios with more layered pressure.

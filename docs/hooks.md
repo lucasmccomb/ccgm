@@ -366,18 +366,6 @@ Hard gate ensuring every AskUserQuestion carries visible decision context. The o
 
 ---
 
-### session-start-enforce.py
-
-**Type**: SessionStart
-**Module**: hooks
-**Can block**: No (context injection only)
-
-Experimental (OFF by default). Injects a rule-enforcement meta-instruction at fresh session start, reminding the agent to route through the discipline rules (TDD, systematic-debugging, verification) as real gates.
-
-**Opt in**: Set `CCGM_RULE_ENFORCEMENT=true` in `~/.claude/.ccgm.env`. Fires only on `source == "startup"`, not on resume or compaction.
-
----
-
 ### pretooluse-bash-dispatch.py
 
 **Type**: PreToolUse:Bash
