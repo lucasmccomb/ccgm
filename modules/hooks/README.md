@@ -4,7 +4,7 @@ Python hooks that enforce git workflow rules: issue-first workflow, commit messa
 
 ## What It Does
 
-This module installs fifteen Python hooks, several Python libraries, and a settings partial:
+This module installs fourteen Python hooks, several Python libraries, and a settings partial:
 
 | Hook | Event | Purpose |
 |------|-------|---------|

@@ -35,5 +35,4 @@ cp rules/config-change-detection.md .claude/rules/config-change-detection.md
 | File | Description |
 |------|-------------|
 | `rules/verification.md` | 5-step verification process with evidence requirements table |
-| `rules/verification.md` | Mechanical L1/L2/L3 evidence gate: a completion claim with no fresh L1 artifact auto-fails |
 | `rules/config-change-detection.md` | Hash-of-config pattern for re-verifying expensive automation when config drifts |

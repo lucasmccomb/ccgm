@@ -53,9 +53,7 @@ reviewable, committable artifact.
      `tailwind.config.*` and no `tailwindcss` dependency -> `tailwind.md`
      and `frontend-css.md` are proposed).
    - **niche** (not repo-profile-gated): a small, conservative, hand-picked
-     set of rule files about specific CCGM meta-workflows (the nightly
-     dreaming pipeline, the Argus visual-convergence loop, SSH to a
-     configured remote box, ...) that are rarely in play regardless of the
+     set of rule files about specific CCGM meta-workflows (agent-native's audit principles, the multi-clone parallel-work preference, the reflection loop, ...) that are rarely in play regardless of the
      target repo's tech stack.
 4. It prints every proposed row (module, rule file, category, estimated
    token cost) and a total. **Nothing is written at this point.**

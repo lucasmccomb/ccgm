@@ -236,7 +236,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **relevance-injection** [BETA] | workflow | `/rules-scope` | Opt-in relevance-scoped rule injection with a tiered always-on safety core. Off by default | hooks |
 | **remote-server** | workflow | `/onremote` | SSH access to a configured remote server with /onremote command for health checks and remote task execution | - |
 | **research** | commands | `/research` | Multi-channel research using parallel agents with WebSearch, WebFetch, GitHub, Reddit. Zero dependencies.* | - |
-| **rule-authoring** | patterns | `/pressure-test` | Discipline for writing rules that hold up under pressure. Treats rule authoring as a first-class skill with iron-law structure | - |
+| **rule-authoring** | patterns | `/pressure-test` | Discipline for writing rules that hold up under pressure: one plain-sentence rule plus mechanism and facts, pressure-tested with adversarial scenarios before shipping | - |
 | **self-improving** | workflow |  `/consolidate`, `/learnings-store`, `/reflect`, `/retro`  | Meta-learning system: /reflect and /consolidate commands, PostToolUse hook (PR merge/issue close reminders), PreCompact hook (pre-compaction capture), prescriptive reflection triggers | - |
 | **session-history** | workflow | `/recall` | `/recall` for unified session transcript history across all clones of a repo; session-historian agent for deeper retrieval | - |
 | **session-lifecycle** | workflow | `/sds` | Autonomous session shutdown: commit dirty work, update issues, reflect, write a handoff, broadcast to sibling clones | multi-agent, self-improving, git-workflow |

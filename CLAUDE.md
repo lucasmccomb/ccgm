@@ -192,7 +192,7 @@ The judge is one Messages API call per run: no sampling parameters (current judg
 
 ### Dreaming posture
 
-Human-gated apply (`/dream-apply`) is always on and requires no opt-in. Optimistic auto-integration is opt-in and off by default; every gate (eval regression, blast-radius caps, anomaly check, circuit breaker) is designed to hold even if the daily report is never read — only *undoing* an already-integrated row needs a read. See `modules/dreaming/rules/dreaming.md` for the full contract.
+Human-gated apply (`/dream-apply`) is always on and requires no opt-in. Optimistic auto-integration is opt-in and off by default; every gate (eval regression, blast-radius caps, anomaly check, circuit breaker) is designed to hold even if the daily report is never read — only *undoing* an already-integrated row needs a read. See `modules/dreaming/skills/dreaming/SKILL.md` for the full contract.
 
 ## Commit Message Format
 

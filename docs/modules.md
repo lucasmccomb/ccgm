@@ -8,7 +8,7 @@ A module installs one or more of these file types:
 
 | File type | Location | How Claude uses it |
 |-----------|----------|-------------------|
-| **Rules** (`rules/*.md`) | `~/.claude/rules/` | Loaded automatically at session start. Guides Claude's behavior. |
+| **Rules** (`rules/*.md`) | `~/.claude/rules/` | Loaded automatically at session start, unless the rule carries `paths:` frontmatter, in which case it loads only after Claude reads a matching file. Guides Claude's behavior. |
 | **Commands** (`commands/*.md`) | `~/.claude/commands/` | Available as `/command-name` slash commands. |
 | **Agents** (`agents/*.md`) | `~/.claude/agents/` | Reusable subagent prompts invoked by commands or skills via the Task tool. Use for prompts shared by multiple callers; keep one-off prompts inline. |
 | **Hooks** (`hooks/*.py`) | `~/.claude/hooks/` | Triggered by Claude Code events (tool calls, session start, etc.). |
@@ -99,6 +99,9 @@ Base `settings.json` with 800+ pre-configured tool permission entries.
 - **Deny list**: Dangerous commands blocked (force push to main, `rm -rf /`, dropping databases, etc.)
 - **Default mode**: Configurable as `ask` (confirm before risky tools) or `dontAsk` (auto-approve everything not denied)
 
+- **Attribution off**: `attribution.commit` and `attribution.pr` are empty and `attribution.sessionUrl` is false, so Claude Code adds no Co-Authored-By trailer, PR footer, or session link
+- **One-hour prompt cache**: `promptCacheTtl` and `subagentPromptCacheTtl` are `1h`, so fan-outs and CI waits longer than five minutes keep their cached prefix
+
 **Config prompts**: Permission mode (`ask` or `dontAsk`)
 
 **Template variables**: `__HOME__`, `__CODE_DIR__`, `__DEFAULT_MODE__`
@@ -111,7 +114,7 @@ Base `settings.json` with 800+ pre-configured tool permission entries.
 
 Python hooks that automate and enforce development workflows.
 
-**Installs**: 15 hook scripts, 6 Python libraries, settings.json fragment
+**Installs**: 14 hook scripts, 6 Python libraries, settings.json fragment
 
 This module installs the most hooks of any module. See [Hooks Reference](hooks.md) for detailed documentation of each hook.
 
@@ -194,7 +197,7 @@ Keeps agent-driven live testing off the machine the operator is working on.
 
 Maintainer tooling that projects CCGM's modules into a native Claude Code plugin marketplace.
 
-**Installs**: `rules/plugin-marketplace.md`, `lib/gen_marketplace.py`, `lib/validate_marketplace.py`, `hooks/plugin-rule-inject.py`
+**Installs**: `rules/plugin-marketplace.md` (path-scoped: loads only for matching files), `lib/gen_marketplace.py`, `lib/validate_marketplace.py`, `hooks/plugin-rule-inject.py`
 
 **What it does**: Generates `.claude-plugin/marketplace.json` plus a per-module `plugin.json` from every `modules/*/module.json`, additively — the bash installer remains the canonical full-fidelity install path. Ships the generator, a JSON-schema validator (CI runs `gen_marketplace.py --check` to fail on drift), and a SessionStart rule-injection hook that bridges the plugin-CLAUDE-md-not-loaded gap.
 
@@ -492,7 +495,7 @@ A decision map for CCGM's overlapping command/skill clusters - answers "which on
 
 `/transcript <url>` - extract a YouTube transcript AND analyze it against your project memory in one invocation.
 
-**Installs**: 1 command file, 1 rule file, 1 shell script (`lib/grab-transcript.sh`), 1 prompt template (`lib/analyze-transcript.md`)
+**Installs**: 1 command file, 1 shell script (`lib/grab-transcript.sh`), 1 prompt template (`lib/analyze-transcript.md`)
 
 **What it does**: One slash command runs the full pipeline:
 
@@ -647,7 +650,7 @@ Commands installed:
 
 Agentic Test-Driven Development - build app code to pass E2E vision specs.
 
-**Installs**: 1 command file, 1 rule file
+**Installs**: 1 command file
 
 **What it does**: Provides a spec-driven development workflow where E2E vision specs (Playwright tests) define target behavior and agents iteratively build app code until all specs pass. The `/atdd` command runs a 4-phase workflow:
 
@@ -1020,7 +1023,7 @@ Opt-in, backward-compatible relevance-scoped rule injection plus a tiered always
 
 **What it does**: Addresses the always-on rule-token load without changing default behavior. Three pieces:
 
-- **Tiered safety core**: an authoritative precedence for the always-on Iron Laws (safety/permissions > confusion protocol > TDD/verification > the rest), so they are tiered rather than nine-way flat. Documentation + metadata only.
+- **Tiered safety core**: an authoritative precedence for the always-on core rules (safety/permissions > confusion protocol > TDD/verification > the rest), so they are tiered rather than nine-way flat. Documentation + metadata only.
 - **Opt-in injection**: when `CCGM_RELEVANCE_INJECTION=true` is set in `~/.claude/.ccgm.env`, a `SessionStart` hook emits an `additionalContext` pointer naming the safety core plus the modules relevant to an optional task profile (`CCGM_RELEVANCE_LANGS`, `CCGM_RELEVANCE_TASKTYPES`). When the flag is unset (the default), the hook no-ops and all rules load exactly as before.
 - **Measurement + repo scoping**: an `InstructionsLoaded` hook logs which instruction files Claude Code actually loads, as the deterministic oracle for whether injection is working. `/rules-scope` inspects a repo for tech-stack markers and the installed manifest, then proposes (and, with `--write`, applies) a `claudeMdExcludes` block that drops irrelevant tech-specific and niche meta-workflow rule files for that repo.
 
@@ -1048,7 +1051,7 @@ Reusable development patterns and methodologies.
 
 Code standards, testing requirements, error handling, security practices, and build verification.
 
-**Installs**: `rules/code-quality.md`, `rules/change-philosophy.md`
+**Installs**: `rules/code-quality.md`, `rules/change-philosophy.md`, `rules/completeness.md`, `rules/latent-vs-deterministic.md`, `rules/receiving-code-review.md`, `rules/in-the-circuits.md`, `rules/spec-is-the-artifact.md`, `rules/menu-gen-test.md`
 
 **What it does**: A comprehensive code quality ruleset covering:
 
@@ -1153,7 +1156,7 @@ Complements `design-review` (automated review) with both aesthetic direction and
 
 Structured 4-phase root cause investigation methodology.
 
-**Installs**: `rules/systematic-debugging.md`
+**Installs**: `rules/systematic-debugging.md`, `rules/condition-based-waiting.md` (path-scoped: loads only for matching files), `skills/debugging-techniques/SKILL.md`
 
 **What it does**: Prevents scattered debugging by enforcing a systematic process:
 
@@ -1164,7 +1167,7 @@ Structured 4-phase root cause investigation methodology.
 
 Also includes a "three-strike rule": if you try three approaches without progress, step back and reassess your understanding of the problem.
 
-The `debugging.md` rule routes bug fix and debugging requests to the `/debug` skill (from the debugging module) for structured Opus-powered root-cause analysis, rather than ad-hoc investigation.
+The `debugging-techniques` skill (root-cause tracing, defense-in-depth validation, the animals-vs-ghosts model) loads on demand during any debugging that goes past a one-line fix; bug and debugging requests route to the `/debug` command (from the debugging module) for structured root-cause analysis.
 
 **Dependencies**: None
 
@@ -1174,7 +1177,7 @@ The `debugging.md` rule routes bug fix and debugging requests to the `/debug` sk
 
 Strict red-green-refactor TDD discipline.
 
-**Installs**: `rules/test-driven-development.md`
+**Installs**: `rules/test-driven-development.md`, `rules/testing-anti-patterns.md` (path-scoped: loads only for matching files)
 
 **What it does**: Enforces TDD when writing new code:
 
@@ -1194,7 +1197,7 @@ Strict red-green-refactor TDD discipline.
 
 Evidence-before-claims methodology for confirming work is done.
 
-**Installs**: `rules/verification.md`
+**Installs**: `rules/verification.md`, `rules/config-change-detection.md` (path-scoped: loads only for matching files)
 
 **What it does**: Prevents Claude from claiming completion without proof:
 
@@ -1354,7 +1357,7 @@ Patterns for using shadcn/ui components in React projects.
 
 Tailwind CSS v4 design system patterns.
 
-**Installs**: `rules/tailwind.md`, `rules/frontend-css.md`
+**Installs**: `rules/tailwind.md`, `rules/frontend-css.md` (both path-scoped: load only for matching files)
 
 **What it does**: Guides Tailwind v4 usage (CSS-first configuration, not the deprecated `tailwind.config.ts`):
 

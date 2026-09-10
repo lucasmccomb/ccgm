@@ -82,7 +82,7 @@ Processes each file according to its type:
 |-----------|----------|
 | **copy** (default) | Copies the file to the target location. Template variables are expanded via `sed`. |
 | **link** | Creates a symlink to the source file in the CCGM repo. Only available with `--link` flag. |
-| **merge** | Deep-merges JSON into the existing `settings.json` using `jq`. Arrays like `allow` and `deny` are deduplicated. Hook arrays are concatenated. |
+| **merge** | Deep-merges JSON into the existing `settings.json` using `jq`. Arrays like `allow` and `deny` are deduplicated. Hook arrays are deduplicated per (matcher, command), so re-running the installer never registers a hook twice. |
 
 Also writes `~/.claude/.ccgm.env` with all collected configuration values.
 
@@ -125,7 +125,7 @@ The settings merge (`lib/merge.sh`) deserves special attention because `settings
 When multiple modules contribute to `settings.json` (via `settings.partial.json` files with `"merge": true`), the installer deep-merges them using a custom `jq` function:
 
 - **`allow` and `deny` arrays**: Entries are concatenated and deduplicated with `unique`
-- **`hooks` object**: Hook event arrays (PreToolUse, PostToolUse, etc.) are concatenated
+- **`hooks` object**: Hook event arrays (PreToolUse, PostToolUse, etc.) are merged and deduplicated per (matcher, command)
 - **`enabledPlugins`**: Deep-merged
 - **Other keys**: Standard JSON merge (later values override earlier)
 

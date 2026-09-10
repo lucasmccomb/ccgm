@@ -4,6 +4,8 @@ Tailwind CSS v4 design system patterns.
 
 `rules/tailwind.md` is path-scoped (#1061): it carries `paths:` frontmatter and loads only after Claude reads a file matching one of `**/*.css`, `**/tailwind.config.*`, `**/postcss.config.*`, `**/*.tsx`, `**/*.jsx`, `**/*.vue`, `**/*.svelte`, `**/*.astro`. It costs no context at session start otherwise.
 
+`rules/frontend-css.md` is path-scoped the same way, on `**/*.css`, `**/tailwind.config.*`, and `**/postcss.config.*`.
+
 ## What It Does
 
 Installs two rules files covering Tailwind v4 architecture and a known gotcha:

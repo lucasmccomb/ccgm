@@ -24,9 +24,9 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. Eight other modules add the rest: **advisor-mode** 4, **self-improving** 3, **subagent-patterns** 2, **relevance-injection** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, and **commands-preamble**. Total: 30 hooks across 9 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 36).
+The **hooks** module installs 14 hooks, 6 Python libraries, and a settings partial. Eight other modules add the rest: **advisor-mode** 4, **self-improving** 3, **subagent-patterns** 2, **relevance-injection** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, and **commands-preamble**. Total: 29 hooks across 9 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 35).
 
-This count excludes `hooks/plugin-rule-inject.py`, which brings the true `"type": "hook"` file total to 37. It is the **plugin-marketplace** module's own hook, copied into every other rules-bearing module's `hooks/` directory so each module's generated Claude Code plugin manifest can register it independently - see [plugin-marketplace](../modules/plugin-marketplace/README.md) for what it does.
+This count excludes `hooks/plugin-rule-inject.py`, which brings the true `"type": "hook"` file total to 36. It is the **plugin-marketplace** module's own hook, copied into every other rules-bearing module's `hooks/` directory so each module's generated Claude Code plugin manifest can register it independently - see [plugin-marketplace](../modules/plugin-marketplace/README.md) for what it does.
 
 ---
 
@@ -60,12 +60,7 @@ The most critical hook. Enforces branch protection and commit message formatting
 
 Detects when the user asks Claude to do implementation work (keywords: update, fix, add, create, implement, build, etc.) and injects a workflow reminder into Claude's context.
 
-**Injected reminder**:
-- Check for an existing GitHub issue (or create one)
-- Create a feature branch from the issue
-- Implement the changes
-- Commit with issue prefix
-- Create a pull request
+**Injected reminder**: a three-line `<workflow-reminder>` block: find or create the GitHub issue (`gh issue create`), branch `{issue#}-{description}` from origin/main, commit as `#{issue#}: {description}`, and open the PR with `Closes #{issue#}`. It states that docs and config changes are covered too.
 
 If the working directory has a `.claude/logs/` directory (indicating multi-agent setup), an additional coordination reminder is injected to read other agents' logs.
 
