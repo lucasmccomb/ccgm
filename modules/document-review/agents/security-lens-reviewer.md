@@ -3,6 +3,7 @@ name: security-lens-reviewer
 description: >
   Reviews a plan, spec, or design doc for security exposure at the plan stage. Flags auth/authz gaps, input validation gaps, secret handling gaps, data exposure, missing RLS/ACL considerations, injection risks, and insecure defaults baked into the proposed design. Returns structured JSON findings with severity and confidence. Plan-stage security review - cheaper to fix before code is written.
 tools: Read, Glob, Grep
+effort: high
 ---
 
 # security-lens-reviewer

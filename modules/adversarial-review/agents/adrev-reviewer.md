@@ -3,6 +3,7 @@ name: adrev-reviewer
 description: >
   Adversarial review of any entity - plan, spec, doc, PR, issue, code, directory, or stated concept. Attacks premises, hunts failure modes, steelmans the strongest case against, and checks falsifiability and reversal cost. For plan targets it also enforces the autonomous-execution tenets: minimal and edge-bucketed human involvement, a follow-up-completion contract, enough decision context to direct unplanned work without a human, and a comprehensive autonomous E2E test suite over every testable surface. Returns structured JSON findings with severity and confidence. Returns evidence-grounded findings; the calling workflow assigns accepted changes to a separate designated writer.
 tools: Read, Glob, Grep
+effort: high
 ---
 
 # adrev-reviewer

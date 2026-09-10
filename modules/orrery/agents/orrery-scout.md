@@ -9,6 +9,7 @@ description: >
   injected instruction no exfiltration or side-effect channel.
 tools: Read, Grep, Glob
 model: sonnet
+effort: low
 ---
 
 # orrery-scout

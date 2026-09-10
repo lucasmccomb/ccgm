@@ -3,6 +3,7 @@ name: adversarial-document-reviewer
 description: >
   Reviews a plan, spec, or design doc by attacking its premises. Applies four tests - falsification, reversal cost, decision-scope mismatch, abstraction audit - to surface unstated assumptions, weak foundations, and decisions the author has not realized they are making. Challenges premises rather than details. Returns structured JSON findings with severity and confidence.
 tools: Read, Glob, Grep
+effort: high
 ---
 
 # adversarial-document-reviewer

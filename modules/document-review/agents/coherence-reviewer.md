@@ -3,6 +3,7 @@ name: coherence-reviewer
 description: >
   Reviews a plan, spec, or design doc for internal consistency. Flags contradictions between sections, dangling references, step ordering errors, undefined terms, and scope/detail mismatches. Returns structured JSON findings with severity and confidence. Does not judge feasibility, scope, or security - only whether the document agrees with itself.
 tools: Read, Glob, Grep
+effort: medium
 ---
 
 # coherence-reviewer

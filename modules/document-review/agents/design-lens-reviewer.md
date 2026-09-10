@@ -3,6 +3,7 @@ name: design-lens-reviewer
 description: >
   Reviews a plan, spec, or design doc for software design quality. Flags fragile coupling, leaky abstractions, mixed responsibilities, awkward data flow, unnecessary state, and patterns that will be painful to change. Returns structured JSON findings with severity and confidence. Does not judge feasibility, scope, or security - only whether the proposed shape will be a good shape to live with.
 tools: Read, Glob, Grep
+effort: medium
 ---
 
 # design-lens-reviewer
