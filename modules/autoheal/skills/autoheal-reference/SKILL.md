@@ -30,6 +30,7 @@ Autoheal is a CCGM module that observes how you and your agents interact with Cl
 | `digest_email` | string OR string list | `null` | Recipient(s) for the optional email digest |
 | `webhook_url` | string | `null` | When set, daily run POSTs to `${webhook_url}/v1/ingest` |
 | `webhook_token` | string | generated at install time | 32-char Bearer token for the webhook |
+| `aggregation` | object | `{window_days: 14, min_occurrences: 5, min_sessions: 2, min_days: 2}` | Window and qualifying bar for `bin/autoheal-aggregate.py` |
 | `retention_gzip_days` | int | `30` | Gzip events/proposals/digests older than N days |
 | `retention_delete_days` | int | `60` | Delete gzipped artifacts older than N days |
 | `calibration_days` | int | `7` | Relaxed thresholds during the first N days after install |

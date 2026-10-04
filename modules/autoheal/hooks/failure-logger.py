@@ -47,6 +47,15 @@ _SUBCOMMAND_PROGRAMS = frozenset(
         "uv", "pip", "pip3", "xcrun", "xcodebuild", "claude", "make",
     }
 )
+# Global options that sit between the program and its subcommand, for the
+# programs where that is routine (`git -C <path> log`, `gh -R o/r pr view`).
+# Value: options that consume the next word. Any other leading `-...` word
+# is skipped alone. Programs not listed here keep a flag-first command as a
+# bare program, because a flag there is not known to precede a subcommand.
+_GLOBAL_OPTS_WITH_ARG = {
+    "git": frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace"}),
+    "gh": frozenset({"-R", "--repo"}),
+}
 _SUBCOMMAND_RE = re.compile(r"^[a-z][a-z0-9_:-]*$")
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _SEGMENT_SPLIT_RE = re.compile(r"&&|\|\||;|\||\n")
@@ -118,12 +127,13 @@ def cmd_head(command: str) -> str | None:
         if not words or words[0] in _SKIP_PROGRAMS:
             continue
         head = words[0]
-        if (
-            head in _SUBCOMMAND_PROGRAMS
-            and len(words) > 1
-            and _SUBCOMMAND_RE.match(words[1])
-        ):
-            head = head + " " + words[1]
+        rest = words[1:]
+        with_arg = _GLOBAL_OPTS_WITH_ARG.get(head)
+        if with_arg is not None:
+            while rest and rest[0].startswith("-"):
+                rest = rest[2:] if rest[0] in with_arg else rest[1:]
+        if head in _SUBCOMMAND_PROGRAMS and rest and _SUBCOMMAND_RE.match(rest[0]):
+            head = head + " " + rest[0]
         return _truncate(hook_utils.redact_secrets(head), _MAX_HEAD_LEN)
     return None
 
