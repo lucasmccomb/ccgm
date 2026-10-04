@@ -1,1046 +1,400 @@
 #!/usr/bin/env bash
-# Tests for modules/autoheal/bin/autoheal-analyze.sh (Epic 6).
-#
-# The analyzer talks to the Anthropic Messages API over curl. We never
-# call the real API from tests; CCGM_AUTOHEAL_FIXTURE_API_RESPONSE
-# replaces the curl response body with a local fixture file.
+# Tests for modules/autoheal/bin/autoheal-analyze.sh: the drafting flow of
+# #1099 Phase 2.2. The analyzer aggregates signatures, sends at most three
+# small prompts, and builds the diff itself. Nothing here calls the network:
+# tests/fixtures/fake-curl.py stands in for curl on PATH.
 #
 # Coverage:
-#   - Happy path: a single day's events produces a proposal that lands
-#     in proposals/{today}.jsonl
-#   - Prompt log is written (sanity check that the constructed prompt
-#     is well-formed and contains the expected runtime context)
-#   - 40k token cap rejects an oversized day without crashing
-#   - Cost cap honored: a synthesized cost.log at $0.51 short-circuits
-#     the run with exit code 2
-#   - Calibration window: a never-analyzed install runs in calibration
+#   - zsh-quoting signature -> rule_insert whose target exists and whose diff
+#     passes `git apply --check` in a fixture repo; id == signature_id
+#   - request shape: model, max_tokens 2000, thinking off, enum-constrained
+#     target_path, cache_control on the stable prefix, no transcript dump
+#   - input measured through count_tokens; > 15k tokens is refused unsent
+#   - anchor_missing / path_not_candidate / skip handling
+#   - hook-denial signature -> `issue` proposal, no model call
+#   - no qualifying signature -> zero API calls; missing key, cost cap,
+#     unsupported model, no source repo -> zero messages calls
+#   - failed calls are not retried; at most 3 signatures per run
+#   - per-model pricing and the cache-token cost terms
+#   - the calibration / SHA counter / rejected-day hold are gone
 
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ANALYZER="${MODULE_ROOT}/bin/autoheal-analyze.sh"
-FIXTURE="${SCRIPT_DIR}/fixtures/api-response-sample.json"
+# shellcheck source=analyzer-fixture.sh
+. "${SCRIPT_DIR}/analyzer-fixture.sh"
 
 PASS=0
 FAIL=0
+TODAY="2026-10-04"
+ROOT=$(mktemp -d -t autoheal_api.XXXXXX)
+trap 'rm -rf "${ROOT}"' EXIT
 
-assert_eq() {
-    local actual="$1"
-    local expected="$2"
-    local label="$3"
-    if [ "${actual}" = "${expected}" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        echo "FAIL: ${label}"
-        echo "  expected: ${expected}"
-        echo "  actual:   ${actual}"
-    fi
+ZSH_ANSWER='{"proposal":{"kind":"rule_insert","target_path":"modules/code-quality/rules/code-quality.md","anchor_heading":"Code Standards","insert_markdown":"- Bash runs under zsh. Quote `====` separators and glob flags such as `--include='"'"'*.sh'"'"'`."}}'
+
+# scenario <name>: fresh repo, HOME, state dir, fake curl. Sets S_* globals.
+scenario() {
+    S_ROOT="${ROOT}/$1"
+    S_REPO="${S_ROOT}/repo"
+    S_HOME="${S_ROOT}/home"
+    S_AH="${S_HOME}/.claude/autoheal"
+    S_BIN="${S_ROOT}/bin"
+    S_FAKE="${S_ROOT}/fake"
+    mkdir -p "${S_AH}"
+    fx_repo "${S_REPO}"
+    fx_home "${S_HOME}" "${S_REPO}"
+    fx_curl "${S_BIN}" "${S_FAKE}"
 }
 
-assert_contains() {
-    local haystack="$1"
-    local needle="$2"
-    local label="$3"
-    case "${haystack}" in
-        *"${needle}"*)
-            PASS=$((PASS + 1))
-            ;;
-        *)
-            FAIL=$((FAIL + 1))
-            echo "FAIL: ${label}"
-            echo "  expected substring: ${needle}"
-            echo "  actual (first 400): ${haystack:0:400}"
-            ;;
-    esac
+# zsh_events: 12 zsh "== not found" failures over 3 sessions and 2 days.
+zsh_events() {
+    fx_events "${S_AH}" "${TODAY}" Bash echo zsh_not_found "(eval):1: ==== not found" 12 3
 }
 
-assert_file_exists() {
-    local path="$1"
-    local label="$2"
-    if [ -f "${path}" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        echo "FAIL: ${label}"
-        echo "  expected file: ${path}"
-    fi
+# run_analyzer [extra env assignments...]: runs the analyzer in the scenario.
+run_analyzer() {
+    env HOME="${S_HOME}" PATH="${S_BIN}:${PATH}" FAKE_CURL_DIR="${S_FAKE}" \
+        CCGM_AUTOHEAL_DIR="${S_AH}" CCGM_AUTOHEAL_TODAY="${TODAY}" \
+        CCGM_AUTOHEAL_CLONE_ID="ccgm-w1-c0" ANTHROPIC_API_KEY="sk-test-not-real" \
+        "$@" bash "${ANALYZER}" >"${S_ROOT}/run.out" 2>"${S_ROOT}/run.err"
+    RC=$?
+    ERR="$(cat "${S_ROOT}/run.err")"
 }
 
-mk_state() {
-    local root="$1"
-    mkdir -p "${root}/events" "${root}/proposals"
-}
+# ---------------------------------------------------------------------
+# Test 1 - zsh signature -> rule_insert, diff applies, request is small.
+# ---------------------------------------------------------------------
+scenario t1
+zsh_events
+fx_answer "${S_FAKE}/messages.response.json" "${ZSH_ANSWER}"
+echo '{"input_tokens": 9000}' > "${S_FAKE}/count_tokens.response.json"
+PROMPT_LOG="${S_ROOT}/prompt.log"
+run_analyzer CCGM_AUTOHEAL_PROMPT_LOG="${PROMPT_LOG}"
+assert_eq "${RC}" "0" "t1: analyzer exits 0"
+assert_eq "$(fx_calls "${S_FAKE}" count_tokens)" "1" "t1: one count_tokens call"
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "1" "t1: one messages call"
 
-make_curl_shim() {
-    # make_curl_shim <shim path> <request capture path> <body file> <http code> [curl exit]
-    #
-    # Stands in for curl on PATH: keeps the request body the analyzer
-    # built, writes the given body to curl's -o target, and prints the
-    # given status code the way `-w '%{http_code}'` does. With a non-zero
-    # curl exit it simulates a transport failure (28 == --max-time).
-    local shim="$1"
-    local capture="$2"
-    local body_file="$3"
-    local http_code="$4"
-    local curl_exit="${5:-0}"
-    mkdir -p "$(dirname "${shim}")"
-    cat > "${shim}" <<EOF
-#!/usr/bin/env bash
-set -u
-out_target=""
-prev=""
-for arg in "\$@"; do
-    case "\${prev}" in
-        databinary)
-            case "\${arg}" in
-                @*) cp "\${arg#@}" "${capture}" 2>/dev/null || true ;;
-            esac
-            prev=""
-            continue
-            ;;
-        outfile)
-            out_target="\${arg}"
-            prev=""
-            continue
-            ;;
-    esac
-    case "\${arg}" in
-        --data-binary) prev="databinary" ;;
-        -o) prev="outfile" ;;
-        *) prev="" ;;
-    esac
+P1="${S_AH}/proposals/${TODAY}.jsonl"
+assert_file_exists "${P1}" "t1: proposals file written"
+assert_eq "$(wc -l < "${P1}" | tr -d ' ')" "1" "t1: exactly one row"
+SIG_ID="$(python3 -c "
+import json
+d=json.load(open('${S_AH}/signatures/${TODAY}.json'))
+print([s for s in d['signatures'] if s['qualifies']][0]['signature_id'])")"
+assert_eq "$(jsonl_get "${P1}" 1 "d['signature_id']")" "${SIG_ID}" "t1: signature_id is the aggregator's"
+assert_eq "$(jsonl_get "${P1}" 1 "d['id']")" "${SIG_ID}" "t1: id == signature_id (sha256(signature)[:12])"
+assert_eq "$(jsonl_get "${P1}" 1 "d['kind']")" "rule_insert" "t1: kind"
+assert_eq "$(jsonl_get "${P1}" 1 "d['state']")" "ready" "t1: state ready"
+assert_eq "$(jsonl_get "${P1}" 1 "d['target']")" "modules/code-quality/rules/code-quality.md" "t1: target"
+assert_eq "$(jsonl_get "${P1}" 1 "d['anchor']")" "Code Standards" "t1: anchor"
+assert_contains "$(jsonl_get "${P1}" 1 "d['insert_markdown']")" "Bash runs under zsh" "t1: insert text kept"
+assert_eq "$(jsonl_get "${P1}" 1 "d['evidence']['count']")" "12" "t1: evidence count"
+assert_eq "$(jsonl_get "${P1}" 1 "d['evidence']['sessions']")" "3" "t1: evidence sessions"
+assert_contains "$(jsonl_get "${P1}" 1 "d['evidence']['samples']")" "not found" "t1: evidence sample errors"
+assert_eq "$(jsonl_get "${P1}" 1 "d['originating_clone']")" "ccgm-w1-c0" "t1: originating_clone"
+assert_eq "$(jsonl_get "${P1}" 1 "d['proposed_diff_target']")" "modules/code-quality/rules/code-quality.md" "t1: apply-path target alias"
+
+# The diff is built by code and applies to the real file.
+jsonl_get "${P1}" 1 "d['diff']" > "${S_ROOT}/t1.diff"
+git -C "${S_REPO}" apply --check "${S_ROOT}/t1.diff" 2>"${S_ROOT}/apply.err"
+assert_eq "$?" "0" "t1: generated diff passes git apply --check ($(cat "${S_ROOT}/apply.err"))"
+assert_contains "$(cat "${S_ROOT}/t1.diff")" "+- Bash runs under zsh" "t1: diff adds the insert text"
+assert_contains "$(cat "${S_ROOT}/t1.diff")" "--- a/modules/code-quality/rules/code-quality.md" "t1: diff names the real file"
+# The insert lands inside the anchored section, before the next heading.
+git -C "${S_REPO}" apply "${S_ROOT}/t1.diff"
+SECTION="$(sed -n '/^## Code Standards/,/^## Testing/p' "${S_REPO}/modules/code-quality/rules/code-quality.md")"
+assert_contains "${SECTION}" "Bash runs under zsh" "t1: insert sits under its anchor heading"
+git -C "${S_REPO}" checkout -q -- .
+
+# Request shape.
+REQ="${S_FAKE}/messages-1.request.json"
+assert_eq "$(json_get "${REQ}" "d['model']")" "claude-sonnet-5" "t1: model"
+assert_eq "$(json_get "${REQ}" "d['max_tokens']")" "2000" "t1: max_tokens 2000"
+assert_eq "$(json_get "${REQ}" "d['thinking']['type']")" "disabled" "t1: thinking off"
+assert_eq "$(json_get "${REQ}" "sorted(d['output_config']['format']['schema']['properties']['proposal']['anyOf'][0]['properties']['target_path']['enum'])")" \
+    "['modules/code-quality/rules/code-quality.md', 'modules/common-mistakes/rules/common-mistakes.md']" \
+    "t1: target_path enum is exactly the candidate files"
+assert_eq "$(json_get "${REQ}" "d['system'][-1].get('cache_control',{}).get('type')")" "ephemeral" "t1: stable prefix marked for caching"
+assert_contains "$(json_get "${REQ}" "d['system'][-1]['text']")" "modules/git-workflow/rules/git-workflow.md" "t1: module index is in the prefix"
+USER_TEXT="$(json_get "${REQ}" "d['messages'][0]['content']")"
+assert_contains "${USER_TEXT}" "## Code Standards" "t1: full candidate file text is sent"
+assert_contains "${USER_TEXT}" "==== not found" "t1: sample error is sent"
+assert_not_contains "${USER_TEXT}" "git-workflow.md" "t1: non-candidate files are not sent in full"
+assert_eq "$(python3 -c "print(1 if len(open('${REQ}').read()) < 60000 else 0)")" "1" "t1: request is small"
+# count_tokens saw the same prompt without the output-only fields.
+CREQ="${S_FAKE}/count_tokens-1.request.json"
+assert_eq "$(json_get "${CREQ}" "d['model']")" "claude-sonnet-5" "t1: count_tokens body carries the model"
+assert_eq "$(json_get "${CREQ}" "d['messages'] == json.load(open('${REQ}'))['messages']")" "True" "t1: count_tokens measures the real messages"
+assert_file_exists "${PROMPT_LOG}" "t1: prompt log written"
+
+# Cost log and run summary.
+assert_eq "$(awk -F'\t' '{print $1"|"$2"|"$3"|"$4"|"$5}' "${S_AH}/cost.log")" "${TODAY}|1200|240|0.004800|claude-sonnet-5" "t1: cost.log row"
+assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['failed_calls']")" "0" "t1: runs summary written, no failures"
+
+# The existing digest renders the row; the apply command reads the same id.
+digest_for() {
+    CCGM_AUTOHEAL_PROPOSALS_DIR="${S_AH}/proposals" CCGM_AUTOHEAL_DIGESTS_DIR="${S_AH}/digests" \
+        CCGM_AUTOHEAL_SENT_DIR="${S_AH}/sent" CCGM_AUTOHEAL_CONFIG="${S_AH}/none.json" \
+        CCGM_AUTOHEAL_TODAY="${TODAY}" CCGM_AUTOHEAL_LIB_DIR="${MODULE_ROOT}/../hooks/lib" \
+        HOME="${S_HOME}" bash "${MODULE_ROOT}/bin/autoheal-digest.sh" >/dev/null 2>&1
+    cat "${S_AH}/digests/${TODAY}.md" 2>/dev/null
+}
+DIGEST_BODY="$(digest_for)"
+assert_contains "${DIGEST_BODY}" "/autoheal-apply ${SIG_ID}" "t1: digest renders the proposal with its apply command"
+assert_contains "${DIGEST_BODY}" "add a rule to code-quality.md" "t1: digest shows the title"
+
+# A second run drafts nothing: the signature now has a proposal.
+rm -f "${S_FAKE}/calls.log"
+run_analyzer
+assert_eq "${RC}" "0" "t1b: rerun exits 0"
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "0" "t1b: covered signature is not sent again"
+assert_contains "${ERR}" "no qualifying" "t1b: rerun logs that nothing qualifies"
+
+# ---------------------------------------------------------------------
+# Test 2 - input over 15k tokens (measured by count_tokens) is refused.
+# ---------------------------------------------------------------------
+scenario t2
+zsh_events
+fx_answer "${S_FAKE}/messages.response.json" "${ZSH_ANSWER}"
+echo '{"input_tokens": 15001}' > "${S_FAKE}/count_tokens.response.json"
+run_analyzer
+assert_eq "$(fx_calls "${S_FAKE}" count_tokens)" "1" "t2: input was measured"
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "0" "t2: 15001 tokens is never sent"
+assert_contains "${ERR}" "input_over_limit" "t2: refusal is logged with its reason"
+assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['failed_calls']")" "1" "t2: refusal counts as a failed call"
+assert_eq "${RC}" "1" "t2: refusal makes the run exit non-zero"
+assert_no_file "${S_AH}/cost.log" "t2: nothing was spent"
+
+scenario t2b
+zsh_events
+fx_answer "${S_FAKE}/messages.response.json" "${ZSH_ANSWER}"
+echo '{"input_tokens": 15000}' > "${S_FAKE}/count_tokens.response.json"
+run_analyzer
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "1" "t2b: exactly 15000 tokens is allowed"
+
+scenario t2c
+zsh_events
+echo '{"type":"error"}' > "${S_FAKE}/count_tokens.response.json"
+echo 400 > "${S_FAKE}/count_tokens.status"
+run_analyzer
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "0" "t2c: a failed measurement blocks the paid call"
+assert_contains "${ERR}" "count_tokens_http_400" "t2c: failure reason names the status"
+
+# ---------------------------------------------------------------------
+# Test 3 - code-side checks drop bad answers with a counted reason.
+# ---------------------------------------------------------------------
+scenario t3
+zsh_events
+BAD_ANCHOR='{"proposal":{"kind":"rule_insert","target_path":"modules/code-quality/rules/code-quality.md","anchor_heading":"No Such Heading","insert_markdown":"- x"}}'
+fx_answer "${S_FAKE}/messages.response.json" "${BAD_ANCHOR}"
+run_analyzer
+assert_eq "${RC}" "0" "t3: a dropped proposal is not a failed run"
+assert_no_file "${S_AH}/proposals/${TODAY}.jsonl" "t3: anchor_missing writes no proposal"
+assert_contains "$(cat "${S_HOME}/.claude/logs/autoheal-rejected-${TODAY}.log")" "anchor_missing" "t3: rejection log names anchor_missing"
+assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['dropped']['anchor_missing']")" "1" "t3: runs summary counts anchor_missing"
+assert_contains "${ERR}" "anchor_missing" "t3: stderr names anchor_missing"
+
+scenario t3b
+zsh_events
+BAD_PATH='{"proposal":{"kind":"rule_insert","target_path":"modules/invented/rules/made-up.md","anchor_heading":"Code Standards","insert_markdown":"- x"}}'
+fx_answer "${S_FAKE}/messages.response.json" "${BAD_PATH}"
+run_analyzer
+assert_no_file "${S_AH}/proposals/${TODAY}.jsonl" "t3b: invented path writes no proposal"
+assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['dropped']['path_not_candidate']")" "1" "t3b: runs summary counts path_not_candidate"
+
+scenario t3c
+zsh_events
+SKIP='{"proposal":{"kind":"skip","reason":"the failure is environmental"}}'
+fx_answer "${S_FAKE}/messages.response.json" "${SKIP}"
+run_analyzer
+assert_eq "${RC}" "0" "t3c: skip exits 0"
+P3C="${S_AH}/proposals/${TODAY}.jsonl"
+assert_eq "$(jsonl_get "${P3C}" 1 "d['state']")" "skipped" "t3c: skip is recorded with state skipped"
+assert_eq "$(jsonl_get "${P3C}" 1 "d['reason']")" "the failure is environmental" "t3c: skip reason kept"
+assert_not_contains "$(digest_for)" "skipped:" "t3c: the digest does not list a skipped row as a proposal"
+rm -f "${S_FAKE}/calls.log"
+run_analyzer
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "0" "t3c: a skipped signature is not re-sent"
+
+# ---------------------------------------------------------------------
+# Test 4 - hook denials never reach the model.
+# ---------------------------------------------------------------------
+scenario t4
+fx_events "${S_AH}" "${TODAY}" Edit "" hook_denial_branch_guard "BRANCH GUARD: no edits on main" 8 2
+run_analyzer
+assert_eq "${RC}" "0" "t4: exits 0"
+assert_eq "$(fx_calls "${S_FAKE}" count_tokens)" "0" "t4: no count_tokens call"
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "0" "t4: no model call for a hook denial"
+P4="${S_AH}/proposals/${TODAY}.jsonl"
+assert_eq "$(jsonl_get "${P4}" 1 "d['kind']")" "issue" "t4: proposal kind is issue"
+assert_eq "$(jsonl_get "${P4}" 1 "d['state']")" "ready" "t4: issue is ready"
+assert_eq "$(jsonl_get "${P4}" 1 "d['module']")" "branch-guard" "t4: names the denying hook's module"
+assert_eq "$(jsonl_get "${P4}" 1 "d['evidence']['count']")" "8" "t4: evidence carried"
+assert_contains "$(jsonl_get "${P4}" 1 "d['issue_body']")" "BRANCH GUARD" "t4: issue body drafted locally with the sample error"
+assert_eq "$(jsonl_get "${P4}" 1 "'diff' in d")" "False" "t4: an issue carries no diff"
+assert_no_file "${S_AH}/cost.log" "t4: no spend"
+
+# Hook denial works without an API key and without a source repo.
+scenario t4b
+fx_events "${S_AH}" "${TODAY}" Edit "" hook_denial_advisor_guard "advisor mode: delegate this" 6 2
+rm -rf "${S_HOME}/.claude/rules"
+run_analyzer ANTHROPIC_API_KEY=
+assert_eq "${RC}" "0" "t4b: exits 0 with no key and no repo"
+assert_eq "$(jsonl_get "${S_AH}/proposals/${TODAY}.jsonl" 1 "d['kind']")" "issue" "t4b: issue still drafted locally"
+
+# ---------------------------------------------------------------------
+# Test 5 - nothing qualifies: zero API calls.
+# ---------------------------------------------------------------------
+scenario t5
+fx_events "${S_AH}" "${TODAY}" Bash echo zsh_not_found "(eval):1: ==== not found" 4 3
+run_analyzer
+assert_eq "${RC}" "0" "t5: exits 0"
+assert_no_file "${S_FAKE}/calls.log" "t5: zero API calls"
+assert_contains "${ERR}" "no qualifying" "t5: logs that no signature qualified"
+assert_no_file "${S_AH}/proposals/${TODAY}.jsonl" "t5: no proposals"
+
+scenario t5b
+run_analyzer
+assert_eq "${RC}" "0" "t5b: no events at all exits 0"
+assert_no_file "${S_FAKE}/calls.log" "t5b: zero API calls with no events"
+
+# ---------------------------------------------------------------------
+# Test 6 - guards that stop a paid call before it is made.
+# ---------------------------------------------------------------------
+scenario t6a
+zsh_events
+run_analyzer ANTHROPIC_API_KEY=
+assert_eq "${RC}" "0" "t6a: no API key exits 0"
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "0" "t6a: no key, no call"
+assert_contains "${ERR}" "ANTHROPIC_API_KEY" "t6a: says why"
+
+scenario t6b
+zsh_events
+printf '%s\t1\t1\t10.500000\tclaude-sonnet-5\n' "${TODAY}" > "${S_AH}/cost.log"
+run_analyzer
+assert_eq "${RC}" "2" "t6b: daily cost cap exits 2"
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "0" "t6b: cap reached, no call"
+
+scenario t6c
+zsh_events
+echo '{"default_model": "claude-sonnet-4-6"}' > "${S_AH}/config.json"
+run_analyzer
+assert_eq "${RC}" "2" "t6c: a model without structured outputs exits 2"
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "0" "t6c: nothing sent"
+assert_contains "${ERR}" "does not support structured outputs" "t6c: names the problem"
+
+scenario t6d
+zsh_events
+rm -rf "${S_HOME}/.claude/rules"
+run_analyzer
+assert_eq "${RC}" "0" "t6d: copy install (no source repo) exits 0"
+assert_no_file "${S_FAKE}/calls.log" "t6d: no calls without a source repo"
+assert_contains "${ERR}" "no_source_repo" "t6d: logged reason"
+assert_no_file "${S_AH}/proposals/${TODAY}.jsonl" "t6d: no invented proposal"
+
+scenario t6e
+zsh_events
+rm -rf "${S_HOME}/.claude/rules"
+printf '{"ccgm_repo_path": "%s"}\n' "${S_REPO}" > "${S_AH}/config.json"
+fx_answer "${S_FAKE}/messages.response.json" "${ZSH_ANSWER}"
+run_analyzer
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "1" "t6e: ccgm_repo_path config key supplies the source repo"
+
+# ---------------------------------------------------------------------
+# Test 7 - failed calls are not retried or held.
+# ---------------------------------------------------------------------
+scenario t7a
+zsh_events
+echo '{"type":"error","error":{"message":"overloaded"}}' > "${S_FAKE}/messages.response.json"
+echo 529 > "${S_FAKE}/messages.status"
+run_analyzer
+assert_eq "${RC}" "1" "t7a: HTTP failure exits 1"
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "1" "t7a: a failed call is not retried in-run"
+assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['failed_calls']")" "1" "t7a: failure counted"
+assert_no_file "${S_AH}/rejected-days.jsonl" "t7a: no rejected-days ledger"
+assert_no_file "${S_AH}/proposals/${TODAY}.jsonl" "t7a: no proposal"
+
+scenario t7b
+zsh_events
+fx_answer "${S_FAKE}/messages.response.json" '{"proposal":{"kind":"skip","reason":"cut"}}' max_tokens
+run_analyzer
+assert_eq "${RC}" "1" "t7b: stop_reason max_tokens is a failed call"
+assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['truncated_calls']")" "1" "t7b: truncation counted"
+assert_no_file "${S_AH}/proposals/${TODAY}.jsonl" "t7b: truncated answer is not used"
+assert_eq "$(awk -F'\t' '{print $2}' "${S_AH}/cost.log")" "1200" "t7b: a billed call is still in cost.log"
+
+scenario t7c
+zsh_events
+fx_answer "${S_FAKE}/messages.response.json" "" end_turn
+run_analyzer
+assert_eq "${RC}" "1" "t7c: empty response is a failed call"
+assert_contains "${ERR}" "empty_response_text" "t7c: names the reason"
+
+scenario t7d
+zsh_events
+echo 28 > "${S_FAKE}/messages.curl_exit"
+run_analyzer
+assert_eq "${RC}" "1" "t7d: transport failure exits 1"
+assert_contains "${ERR}" "transport_exit_28" "t7d: names the reason"
+
+# ---------------------------------------------------------------------
+# Test 8 - at most three signatures per run, ranked.
+# ---------------------------------------------------------------------
+scenario t8
+for spec in "echo:zsh_not_found:5" "grep:zsh_no_matches:9" "ls:no_such_file:7" "cat:no_such_file:6" "cp:permission_denied:8"; do
+    IFS=: read -r head cls n <<< "${spec}"
+    fx_events "${S_AH}" "${TODAY}" Bash "${head}" "${cls}" "boom ${cls}" "${n}" 2
 done
-
-if [ "${curl_exit}" -ne 0 ]; then
-    echo "curl: (${curl_exit}) simulated transport failure" >&2
-    exit ${curl_exit}
-fi
-
-if [ -n "\${out_target}" ]; then
-    cp "${body_file}" "\${out_target}"
-fi
-printf '%s' "${http_code}"
-EOF
-    chmod +x "${shim}"
-}
-
-write_events() {
-    local file="$1"
-    local count="$2"
-    # Build N synthetic permission_request rows.
-    python3 - "${file}" "${count}" <<'PY'
-import datetime as dt
+fx_answer "${S_FAKE}/messages.response.json" '{"proposal":{"kind":"skip","reason":"no rule helps"}}'
+run_analyzer
+assert_eq "$(fx_calls "${S_FAKE}" messages)" "3" "t8: five qualify, three are drafted"
+assert_eq "$(fx_calls "${S_FAKE}" count_tokens)" "3" "t8: three measurements"
+assert_eq "$(wc -l < "${S_AH}/proposals/${TODAY}.jsonl" | tr -d ' ')" "3" "t8: three rows"
+TOP="$(python3 -c "
 import json
-import sys
+rows=[json.loads(l) for l in open('${S_AH}/proposals/${TODAY}.jsonl')]
+print(sorted(r['evidence']['count'] for r in rows))")"
+assert_eq "${TOP}" "[7, 8, 9]" "t8: the three highest count x sessions go first"
 
-path = sys.argv[1]
-count = int(sys.argv[2])
-
-now = dt.datetime.now(dt.timezone.utc)
-with open(path, "w", encoding="utf-8") as fh:
-    for i in range(count):
-        rec = {
-            "kind": "permission_request",
-            "timestamp": (now - dt.timedelta(minutes=i)).isoformat(),
-            "session_id": f"s-{i % 3}",
-            "tool_name": "Bash",
-            "redacted_command": "git diff --staged",
-            "exit_code": None,
-            "permission_decision": "ask",
-            "cwd": "/tmp/repo",
-            "clone_path": "/tmp/repo",
-        }
-        fh.write(json.dumps(rec) + "\n")
-PY
+# ---------------------------------------------------------------------
+# Test 9 - pricing and cache terms.
+# ---------------------------------------------------------------------
+cost_for() {
+    # cost_for <model> <config json or ""> <in> <out> [cache_create] [cache_read]
+    scenario "cost_$1_$3_${5:-0}"
+    zsh_events
+    [ -n "$2" ] && printf '%s\n' "$2" > "${S_AH}/config.json"
+    fx_answer "${S_FAKE}/messages.response.json" "${ZSH_ANSWER}" end_turn "$3" "$4" "${5:-0}" "${6:-0}"
+    run_analyzer
+    COST="$(awk -F'\t' '{print $4}' "${S_AH}/cost.log")"
+    LOGGED_MODEL="$(awk -F'\t' '{print $5}' "${S_AH}/cost.log")"
+    LOGGED_IN="$(awk -F'\t' '{print $2}' "${S_AH}/cost.log")"
 }
+PRICES='"cost_pricing": {"claude-sonnet-5": {"input_per_million": 2, "output_per_million": 10}, "claude-opus-4-8": {"input_per_million": 5, "output_per_million": 25}}'
+cost_for sonnet "{\"default_model\": \"claude-sonnet-5\", ${PRICES}}" 1200 240
+assert_eq "${COST}" "0.004800" "t9a: sonnet-5 at \$2/M in + \$10/M out"
+assert_eq "${LOGGED_MODEL}" "claude-sonnet-5" "t9a: model id in cost.log"
+cost_for opus "{\"default_model\": \"claude-opus-4-8\", ${PRICES}}" 1200 240
+assert_eq "${COST}" "0.012000" "t9b: opus-4-8 at \$5/M in + \$25/M out"
+assert_eq "$(json_get "${S_FAKE}/messages-1.request.json" "d['model']")" "claude-opus-4-8" "t9b: the request carries the configured model"
+cost_for haiku '{"default_model": "claude-haiku-4-5", "cost_pricing": {"claude-sonnet-5": {"input_per_million": 2, "output_per_million": 10}}}' 1200 240
+assert_eq "${COST}" "0.004800" "t9c: unpriced model falls back to sonnet-5 rates"
+assert_contains "${ERR}" "no cost_pricing for model claude-haiku-4-5" "t9c: warns about the fallback"
+# Cache writes bill at 1.25x input, cache reads at 0.1x:
+#   (200*2 + 1000*2*1.25 + 4000*2*0.1 + 240*10) / 1e6 = 0.006100
+cost_for cache "{\"default_model\": \"claude-sonnet-5\", ${PRICES}}" 200 240 1000 4000
+assert_eq "${COST}" "0.006100" "t9d: cache write and read terms are billed"
+assert_eq "${LOGGED_IN}" "5200" "t9d: cost.log input column counts cached tokens"
 
 # ---------------------------------------------------------------------
-# Test 1 — happy path with fixture API response.
+# Test 10 - the machinery this design removed is gone.
 # ---------------------------------------------------------------------
-
-T1_HOME=$(mktemp -d -t autoheal_t1.XXXXXX)
-trap 'rm -rf "${T1_HOME}"' EXIT
-T1_DIR="${T1_HOME}/autoheal"
-mk_state "${T1_DIR}"
-
-YESTERDAY=$(python3 -c "import datetime as dt; print((dt.date.today()-dt.timedelta(days=1)).isoformat())")
-TODAY=$(python3 -c "import datetime; print(datetime.datetime.now(datetime.timezone.utc).date().isoformat())")
-write_events "${T1_DIR}/events/${YESTERDAY}.jsonl" 3
-
-PROMPT_LOG="${T1_HOME}/prompt.log"
-
-env \
-    HOME="${T1_HOME}" \
-    CCGM_AUTOHEAL_DIR="${T1_DIR}" \
-    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
-    CCGM_AUTOHEAL_PROMPT_LOG="${PROMPT_LOG}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    CCGM_AUTOHEAL_CLONE_ID="ccgm-w1-c0" \
-    ANTHROPIC_API_KEY="test-not-used-because-fixture" \
-    bash "${ANALYZER}" >"${T1_HOME}/run.out" 2>"${T1_HOME}/run.err"
-RC=$?
-
-assert_eq "${RC}" "0" "happy path: analyzer exits 0"
-
-PROPOSALS_FILE="${T1_DIR}/proposals/${TODAY}.jsonl"
-assert_file_exists "${PROPOSALS_FILE}" "happy path: proposals file created"
-
-assert_file_exists "${PROMPT_LOG}" "happy path: prompt log written"
-
-if [ -f "${PROMPT_LOG}" ]; then
-    PL_BODY=$(cat "${PROMPT_LOG}")
-    assert_contains "${PL_BODY}" "originating_clone" "prompt log: contains originating_clone"
-    assert_contains "${PL_BODY}" "ccgm-w1-c0" "prompt log: contains clone id"
-    assert_contains "${PL_BODY}" "calibration_mode" "prompt log: contains calibration_mode"
-    assert_contains "${PL_BODY}" "git diff --staged" "prompt log: contains the redacted command from events"
-fi
-
-if [ -f "${PROPOSALS_FILE}" ]; then
-    LINE_COUNT=$(wc -l < "${PROPOSALS_FILE}" | tr -d ' ')
-    assert_eq "${LINE_COUNT}" "1" "happy path: one proposal accepted"
-    KIND=$(python3 -c "import json; print(json.loads(open('${PROPOSALS_FILE}').readline())['kind'])")
-    assert_eq "${KIND}" "settings_allow_add" "happy path: proposal kind"
-    OCLONE=$(python3 -c "import json; print(json.loads(open('${PROPOSALS_FILE}').readline())['originating_clone'])")
-    assert_eq "${OCLONE}" "ccgm-w1-c0" "happy path: originating_clone preserved"
-fi
-
-# Cost log entry written.
-COST_LOG="${T1_DIR}/cost.log"
-assert_file_exists "${COST_LOG}" "happy path: cost log written"
-
-# last-analyzed bumped to today.
-LAST="${T1_DIR}/last-analyzed"
-assert_file_exists "${LAST}" "happy path: last-analyzed written"
-if [ -f "${LAST}" ]; then
-    LAST_VAL=$(cat "${LAST}")
-    assert_eq "${LAST_VAL}" "${TODAY}" "happy path: last-analyzed == today"
-fi
-
-# ---------------------------------------------------------------------
-# Test 2 — token cap rejection.
-#
-# Issue #517 raised the default cap from 40k to 200k and made it
-# configurable. To trigger the rejection deterministically we set
-# max_input_tokens to a tight 5k via config — 1000 friction events
-# (permission_request) at ~250 chars each still exceed it even at
-# window=0 (no excerpts).
-# ---------------------------------------------------------------------
-
-T2_HOME=$(mktemp -d -t autoheal_t2.XXXXXX)
-T2_DIR="${T2_HOME}/autoheal"
-mk_state "${T2_DIR}"
-
-# Tight cap so 1000 permission_request friction events overflow even at
-# window=0. Friction events are kept as full records (they're the
-# signal); only routine successes get clustered.
-cat > "${T2_DIR}/config.json" <<'EOF'
-{
-  "max_input_tokens": 5000,
-  "daily_cost_cap_usd": 1.00
-}
-EOF
-
-python3 - "${T2_DIR}/events/${YESTERDAY}.jsonl" 1000 <<'PY'
-import datetime as dt
-import json
-import sys
-
-path = sys.argv[1]
-count = int(sys.argv[2])
-
-now = dt.datetime.now(dt.timezone.utc)
-with open(path, "w", encoding="utf-8") as fh:
-    for i in range(count):
-        rec = {
-            "kind": "permission_request",
-            # `permission_decision: "ask"` keeps these as friction
-            # post-fix (issue #519); friction events are NOT clustered,
-            # so 1000 of them at ~250 chars each genuinely overflow the
-            # tight 5K cap even at window=0. Without the decision field
-            # the events would cluster down to a single record and the
-            # cap would never be hit.
-            "permission_decision": "ask",
-            "timestamp": (now - dt.timedelta(seconds=i)).isoformat(),
-            "session_id": f"s-{i}",
-            "tool_name": "Bash",
-            "redacted_command": "git " + ("x" * 220),
-            "cwd": "/tmp/repo",
-        }
-        fh.write(json.dumps(rec) + "\n")
-PY
-
-env \
-    HOME="${T2_HOME}" \
-    CCGM_AUTOHEAL_DIR="${T2_DIR}" \
-    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="x" \
-    bash "${ANALYZER}" >"${T2_HOME}/run.out" 2>"${T2_HOME}/run.err"
-RC=$?
-
-# The analyzer rejects the day but continues; overall rc=0 unless other
-# days fail. With a single oversize day, rc=0 and the proposals file is
-# either absent or empty.
-assert_eq "${RC}" "0" "token cap: analyzer exits 0 (rejects day, continues)"
-
-if [ -f "${T2_DIR}/proposals/${TODAY}.jsonl" ]; then
-    SIZE=$(wc -c < "${T2_DIR}/proposals/${TODAY}.jsonl" | tr -d ' ')
-    assert_eq "${SIZE}" "0" "token cap: no proposals on oversize day"
-fi
-
-ERR_BODY=$(cat "${T2_HOME}/run.err")
-assert_contains "${ERR_BODY}" "estimated input tokens" "token cap: warning printed to stderr"
-
-# Issue #517: rejected day must be logged AND last-analyzed must NOT
-# advance past it (so the next run with a higher cap retries it).
-assert_file_exists "${T2_DIR}/rejected-days.jsonl" "token cap: rejection logged to rejected-days.jsonl"
-
-if [ -f "${T2_DIR}/rejected-days.jsonl" ]; then
-    REJ_DATE=$(python3 -c "
-import json
-with open('${T2_DIR}/rejected-days.jsonl') as fh:
-    for line in fh:
-        line = line.strip()
-        if not line:
-            continue
-        rec = json.loads(line)
-        print(rec.get('date',''))
-        break
-")
-    assert_eq "${REJ_DATE}" "${YESTERDAY}" "token cap: rejected-days.jsonl records the right date"
-fi
-
-LAST_VAL=""
-if [ -f "${T2_DIR}/last-analyzed" ]; then
-    LAST_VAL=$(cat "${T2_DIR}/last-analyzed" | tr -d '\n')
-fi
-# last-analyzed must be < rejected day (so next run will retry it).
-if [ -n "${LAST_VAL}" ]; then
-    if [ "${LAST_VAL}" \< "${YESTERDAY}" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        echo "FAIL: token cap: last-analyzed should be < rejected day ${YESTERDAY}, got ${LAST_VAL}"
-    fi
-fi
-
-# ---------------------------------------------------------------------
-# Test 3 — daily cost cap honored.
-# ---------------------------------------------------------------------
-
-T3_HOME=$(mktemp -d -t autoheal_t3.XXXXXX)
-T3_DIR="${T3_HOME}/autoheal"
-mk_state "${T3_DIR}"
-write_events "${T3_DIR}/events/${YESTERDAY}.jsonl" 3
-
-# Issue #517 raised the default cost cap to $1.00. Pin the test to its
-# original $0.50 cap via config so the synthesized $0.51 cost.log line
-# still triggers a skip — keeps the test about cost-cap mechanics, not
-# default values.
-cat > "${T3_DIR}/config.json" <<'EOF'
-{
-  "daily_cost_cap_usd": 0.50
-}
-EOF
-
-# Synthesize a cost.log near the limit (51 cents today).
-printf '%s\t100000\t5000\t0.510000\n' "${TODAY}" > "${T3_DIR}/cost.log"
-
-env \
-    HOME="${T3_HOME}" \
-    CCGM_AUTOHEAL_DIR="${T3_DIR}" \
-    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="x" \
-    bash "${ANALYZER}" >"${T3_HOME}/run.out" 2>"${T3_HOME}/run.err"
-RC=$?
-
-assert_eq "${RC}" "2" "cost cap: analyzer exits 2 when over cap"
-
-if [ -f "${T3_DIR}/proposals/${TODAY}.jsonl" ]; then
-    SIZE=$(wc -c < "${T3_DIR}/proposals/${TODAY}.jsonl" | tr -d ' ')
-    assert_eq "${SIZE}" "0" "cost cap: no proposals written when capped"
-fi
-
-CC_ERR=$(cat "${T3_HOME}/run.err")
-assert_contains "${CC_ERR}" "daily cost cap reached" "cost cap: stderr explains the skip"
-
-# ---------------------------------------------------------------------
-# Test 4 — calibration window math: fresh install means calibration on.
-# ---------------------------------------------------------------------
-
-T4_HOME=$(mktemp -d -t autoheal_t4.XXXXXX)
-T4_DIR="${T4_HOME}/autoheal"
-mk_state "${T4_DIR}"
-write_events "${T4_DIR}/events/${YESTERDAY}.jsonl" 3
-
-CAL_PROMPT="${T4_HOME}/cal-prompt.log"
-
-env \
-    HOME="${T4_HOME}" \
-    CCGM_AUTOHEAL_DIR="${T4_DIR}" \
-    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
-    CCGM_AUTOHEAL_PROMPT_LOG="${CAL_PROMPT}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="x" \
-    bash "${ANALYZER}" >"${T4_HOME}/run.out" 2>"${T4_HOME}/run.err"
-RC=$?
-
-assert_eq "${RC}" "0" "calibration: analyzer exits 0"
-
-if [ -f "${CAL_PROMPT}" ]; then
-    CAL_BODY=$(cat "${CAL_PROMPT}")
-    # A fresh install has no last-analyzed file — mtime-based check
-    # cannot fire — we conservatively return calibration_mode=true.
-    assert_contains "${CAL_BODY}" "\"calibration_mode\": true" "calibration: prompt encodes calibration_mode=true on fresh install"
-fi
-
-# ---------------------------------------------------------------------
-# Test 5 — graceful skip when ANTHROPIC_API_KEY absent and no fixture.
-# ---------------------------------------------------------------------
-
-T5_HOME=$(mktemp -d -t autoheal_t5.XXXXXX)
-T5_DIR="${T5_HOME}/autoheal"
-mk_state "${T5_DIR}"
-write_events "${T5_DIR}/events/${YESTERDAY}.jsonl" 1
-
-# Unset ANTHROPIC_API_KEY in a subshell rather than passing -u to env
-# (GNU env supports it but BSD env on macOS does not).
-(
-    unset ANTHROPIC_API_KEY
-    export HOME="${T5_HOME}"
-    export CCGM_AUTOHEAL_DIR="${T5_DIR}"
-    export CCGM_AUTOHEAL_TODAY="${TODAY}"
-    bash "${ANALYZER}" >"${T5_HOME}/run.out" 2>"${T5_HOME}/run.err"
-)
-RC=$?
-
-assert_eq "${RC}" "0" "no API key: analyzer exits 0 gracefully"
-NK_ERR=$(cat "${T5_HOME}/run.err")
-assert_contains "${NK_ERR}" "ANTHROPIC_API_KEY not set" "no API key: stderr explains the skip"
-
-# ---------------------------------------------------------------------
-# Test 6 — rejection log + cost log use locked appends (issue #503).
-# log_rejection and append_cost must route through the same fcntl.flock
-# path as append_jsonl so concurrent clones cannot tear writes. Guard
-# the property at the source level.
-# ---------------------------------------------------------------------
-
-ANALYZER_SRC=$(cat "${ANALYZER}")
-assert_contains "${ANALYZER_SRC}" "fcntl.flock" "locked-append: analyzer uses fcntl.flock"
-assert_contains "${ANALYZER_SRC}" "append_locked(path" "locked-append: log_rejection/append_cost route through append_locked"
-
-# ---------------------------------------------------------------------
-# Test 7 — per-model cost pricing (issue #497).
-#
-# Since #1034 the configured model is the model the REQUEST uses, so
-# every model named here must be one the analyzer can actually call
-# (structured-outputs capable). Fixture usage block is
-# {input: 1200, output: 240}. Verify:
-#   - sonnet-5 default config -> $2/M in + $10/M out
-#       cost = (1200*2 + 240*10) / 1e6 = (2400 + 2400) / 1e6 = 0.004800
-#   - opus-4-8 default_model -> $5/M in + $25/M out
-#       cost = (1200*5 + 240*25) / 1e6 = (6000 + 6000) / 1e6 = 0.012000
-#   - a supported model with no price entry -> stderr warning + the
-#     analyzer's own model's rate as the fallback (0.004800)
-#   - cost.log lines include the model id as the 5th tab-separated field
-# ---------------------------------------------------------------------
-
-write_config() {
-    # write_config <path> <default_model> [include_pricing]
-    local path="$1"
-    local default_model="$2"
-    local include_pricing="${3:-1}"
-    mkdir -p "$(dirname "${path}")"
-    if [ "${include_pricing}" = "1" ]; then
-        cat > "${path}" <<EOF
-{
-  "default_model": "${default_model}",
-  "cost_pricing": {
-    "claude-sonnet-5":    {"input_per_million": 2,    "output_per_million": 10},
-    "claude-opus-4-8":    {"input_per_million": 5,    "output_per_million": 25},
-    "claude-haiku-4-5":   {"input_per_million": 1,    "output_per_million": 5}
-  }
-}
-EOF
-    else
-        cat > "${path}" <<EOF
-{
-  "default_model": "${default_model}"
-}
-EOF
-    fi
-}
-
-read_cost_field() {
-    # read_cost_field <cost.log path> <today> <0-based field index>
-    python3 - "$1" "$2" "$3" <<'PY'
-import sys
-path, today, idx = sys.argv[1], sys.argv[2], int(sys.argv[3])
-with open(path, "r", encoding="utf-8") as fh:
-    for line in fh:
-        line = line.rstrip("\n")
-        if not line:
-            continue
-        parts = line.split("\t")
-        if parts and parts[0] == today:
-            print(parts[idx] if idx < len(parts) else "")
-            break
-PY
-}
-
-# Test 7a — sonnet default pricing.
-T7A_HOME=$(mktemp -d -t autoheal_t7a.XXXXXX)
-T7A_DIR="${T7A_HOME}/autoheal"
-mk_state "${T7A_DIR}"
-write_events "${T7A_DIR}/events/${YESTERDAY}.jsonl" 1
-write_config "${T7A_DIR}/config.json" "claude-sonnet-5"
-
-env \
-    HOME="${T7A_HOME}" \
-    CCGM_AUTOHEAL_DIR="${T7A_DIR}" \
-    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="x" \
-    bash "${ANALYZER}" >"${T7A_HOME}/run.out" 2>"${T7A_HOME}/run.err"
-RC=$?
-assert_eq "${RC}" "0" "pricing sonnet: analyzer exits 0"
-
-T7A_COST_VAL=$(read_cost_field "${T7A_DIR}/cost.log" "${TODAY}" 3)
-assert_eq "${T7A_COST_VAL}" "0.004800" "pricing sonnet: cost matches \$2/M + \$10/M"
-T7A_MODEL_VAL=$(read_cost_field "${T7A_DIR}/cost.log" "${TODAY}" 4)
-assert_eq "${T7A_MODEL_VAL}" "claude-sonnet-5" "pricing sonnet: model id recorded in cost.log"
-
-T7A_ERR=$(cat "${T7A_HOME}/run.err")
-case "${T7A_ERR}" in
-    *"no cost_pricing"*)
-        FAIL=$((FAIL + 1))
-        echo "FAIL: pricing sonnet: should not emit unknown-model warning"
-        ;;
-    *)
-        PASS=$((PASS + 1))
-        ;;
-esac
-
-# Test 7b — opus default_model uses opus pricing.
-T7B_HOME=$(mktemp -d -t autoheal_t7b.XXXXXX)
-T7B_DIR="${T7B_HOME}/autoheal"
-mk_state "${T7B_DIR}"
-write_events "${T7B_DIR}/events/${YESTERDAY}.jsonl" 1
-write_config "${T7B_DIR}/config.json" "claude-opus-4-8"
-
-env \
-    HOME="${T7B_HOME}" \
-    CCGM_AUTOHEAL_DIR="${T7B_DIR}" \
-    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="x" \
-    bash "${ANALYZER}" >"${T7B_HOME}/run.out" 2>"${T7B_HOME}/run.err"
-RC=$?
-assert_eq "${RC}" "0" "pricing opus: analyzer exits 0"
-
-T7B_COST_VAL=$(read_cost_field "${T7B_DIR}/cost.log" "${TODAY}" 3)
-assert_eq "${T7B_COST_VAL}" "0.012000" "pricing opus: cost matches \$5/M + \$25/M"
-T7B_MODEL_VAL=$(read_cost_field "${T7B_DIR}/cost.log" "${TODAY}" 4)
-assert_eq "${T7B_MODEL_VAL}" "claude-opus-4-8" "pricing opus: model id recorded in cost.log"
-
-# Test 7c — a callable model with no price entry falls back AND warns.
-# (Before #1034 this used a made-up model id; the configured model is now
-# the model the request uses, so it has to be one the analyzer can call.)
-T7C_HOME=$(mktemp -d -t autoheal_t7c.XXXXXX)
-T7C_DIR="${T7C_HOME}/autoheal"
-mk_state "${T7C_DIR}"
-write_events "${T7C_DIR}/events/${YESTERDAY}.jsonl" 1
-cat > "${T7C_DIR}/config.json" <<'EOF'
-{
-  "default_model": "claude-haiku-4-5",
-  "cost_pricing": {
-    "claude-sonnet-5": {"input_per_million": 2, "output_per_million": 10}
-  }
-}
-EOF
-
-env \
-    HOME="${T7C_HOME}" \
-    CCGM_AUTOHEAL_DIR="${T7C_DIR}" \
-    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="x" \
-    bash "${ANALYZER}" >"${T7C_HOME}/run.out" 2>"${T7C_HOME}/run.err"
-RC=$?
-assert_eq "${RC}" "0" "pricing unpriced: analyzer exits 0"
-
-T7C_COST_VAL=$(read_cost_field "${T7C_DIR}/cost.log" "${TODAY}" 3)
-# The last-resort rate tracks the model the analyzer defaults to
-# (claude-sonnet-5, $2/M in + $10/M out since #1028):
-#   (1200*2 + 240*10) / 1e6 = (2400 + 2400) / 1e6 = 0.004800
-assert_eq "${T7C_COST_VAL}" "0.004800" "pricing unpriced: cost falls back to the analyzer's own model (\$2/M + \$10/M)"
-T7C_MODEL_VAL=$(read_cost_field "${T7C_DIR}/cost.log" "${TODAY}" 4)
-assert_eq "${T7C_MODEL_VAL}" "claude-haiku-4-5" "pricing unpriced: the model that was actually called is recorded"
-
-T7C_ERR=$(cat "${T7C_HOME}/run.err")
-assert_contains "${T7C_ERR}" "no cost_pricing for model claude-haiku-4-5" "pricing unpriced: stderr warning emitted"
-assert_contains "${T7C_ERR}" "falling back to claude-sonnet-5" "pricing unpriced: stderr names the model it fell back to"
-
-# Test 7e — the configured model is the model the REQUEST uses (#1034).
-# Before this, the request always used the shell constant while the cost
-# log named the configured model: a call that never happened, at the
-# wrong rate.
-T7E_HOME=$(mktemp -d -t autoheal_t7e.XXXXXX)
-T7E_DIR="${T7E_HOME}/autoheal"
-mk_state "${T7E_DIR}"
-write_events "${T7E_DIR}/events/${YESTERDAY}.jsonl" 3
-write_config "${T7E_DIR}/config.json" "claude-opus-4-8"
-
-T7E_BIN="${T7E_HOME}/bin"
-mkdir -p "${T7E_BIN}"
-make_curl_shim "${T7E_BIN}/curl" "${T7E_HOME}/request.json" "${FIXTURE}" "200"
-
-env \
-    HOME="${T7E_HOME}" \
-    PATH="${T7E_BIN}:${PATH}" \
-    CCGM_AUTOHEAL_DIR="${T7E_DIR}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="sk-test-not-a-real-key" \
-    bash "${ANALYZER}" >"${T7E_HOME}/run.out" 2>"${T7E_HOME}/run.err"
-RC=$?
-assert_eq "${RC}" "0" "configured model: analyzer exits 0"
-
-if [ -f "${T7E_HOME}/request.json" ]; then
-    T7E_REQ_MODEL=$(python3 -c "
-import json, sys
-print(json.load(open(sys.argv[1]))['model'])
-" "${T7E_HOME}/request.json")
-    assert_eq "${T7E_REQ_MODEL}" "claude-opus-4-8" "configured model: the request carries the configured model, not the shell constant"
-    T7E_LOGGED_MODEL=$(read_cost_field "${T7E_DIR}/cost.log" "${TODAY}" 4)
-    assert_eq "${T7E_LOGGED_MODEL}" "${T7E_REQ_MODEL}" "configured model: the cost log names the model that was called"
-else
-    FAIL=$((FAIL + 1))
-    echo "FAIL: configured model: no request body captured"
-fi
-rm -rf "${T7E_HOME}"
-
-# Test 7f — a model that cannot honor structured outputs stops the run
-# before anything is spent, and leaves last-analyzed alone (#1028).
-#
-# Runs for both ungated shapes: the migration pin the installer rewrites,
-# and a model that is priced but not gated (Opus 4.7 is active and has a
-# rate, and is still not on the structured-outputs list). Being priced
-# must not be mistaken for being callable.
-assert_model_refused() {
-    # assert_model_refused <label> <model id>
-    local label="$1"
-    local model="$2"
-    local home
-    home=$(mktemp -d -t autoheal_gate.XXXXXX)
-    local dir="${home}/autoheal"
-    mk_state "${dir}"
-    write_events "${dir}/events/${YESTERDAY}.jsonl" 3
-    printf '{\n  "default_model": "%s"\n}\n' "${model}" > "${dir}/config.json"
-
-    env \
-        HOME="${home}" \
-        CCGM_AUTOHEAL_DIR="${dir}" \
-        CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
-        CCGM_AUTOHEAL_TODAY="${TODAY}" \
-        ANTHROPIC_API_KEY="x" \
-        bash "${ANALYZER}" >"${home}/run.out" 2>"${home}/run.err"
-    local rc=$?
-    local err
-    err=$(cat "${home}/run.err")
-
-    assert_eq "${rc}" "2" "${label}: analyzer stops before calling"
-    assert_contains "${err}" "${model}" "${label}: stderr names the offending model"
-    assert_contains "${err}" "structured outputs" "${label}: stderr says why"
-    if [ -f "${dir}/last-analyzed" ]; then
-        FAIL=$((FAIL + 1))
-        echo "FAIL: ${label}: last-analyzed must not be written"
-    else
-        PASS=$((PASS + 1))
-    fi
-
-    # The remediation message may only recommend models that are both
-    # gated and priced -- following it must not produce a config that
-    # logs every call at the fallback rate.
-    local unpriced
-    unpriced=$(ANALYZER_PATH="${ANALYZER}" ERR_TEXT="${err}" python3 <<'PY'
-import os
-import re
-
-analyzer = open(os.environ["ANALYZER_PATH"], encoding="utf-8").read()
-err = os.environ["ERR_TEXT"]
-
-gate = re.search(r'^STRUCTURED_OUTPUT_MODELS="([^"]+)"', analyzer, re.M)
-gate = gate.group(1).split() if gate else []
-
-start = analyzer.index("FALLBACK_PRICING = {")
-block = analyzer[start:analyzer.index("}\n", start)]
-priced = set(re.findall(r'"(claude-[a-z0-9-]+)":\s*\{', block))
-
-recommended = [m for m in re.findall(r"claude-[a-z0-9-]+", err) if m in gate]
-print(" ".join(sorted(set(recommended) - priced)))
-PY
-)
-    if [ -z "${unpriced}" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        echo "FAIL: ${label}: the fix message recommends unpriced models: ${unpriced}"
-    fi
-
-    # A retired model must never be recommended.
-    case "${err}" in
-        *claude-opus-4-1*)
-            FAIL=$((FAIL + 1))
-            echo "FAIL: ${label}: the fix message names the retired claude-opus-4-1"
-            ;;
-        *)
-            PASS=$((PASS + 1))
-            ;;
-    esac
-
-    rm -rf "${home}"
-}
-
-assert_model_refused "ungated migration pin" "claude-sonnet-4-6"
-assert_model_refused "priced but ungated" "claude-opus-4-7"
-
-# Test 7d — back-compat: a cost.log written by older code (no model
-# field) parses cleanly when summing today's spend (cap check).
-T7D_HOME=$(mktemp -d -t autoheal_t7d.XXXXXX)
-T7D_DIR="${T7D_HOME}/autoheal"
-mk_state "${T7D_DIR}"
-write_events "${T7D_DIR}/events/${YESTERDAY}.jsonl" 1
-# Legacy 4-field line (no model). Sum is 0.40, well below the 50c cap so
-# the analyzer must proceed. If today_cost_cents() crashes on a missing
-# 5th field, the analyzer exits 1 instead of 0.
-printf '%s\t100000\t5000\t0.400000\n' "${TODAY}" > "${T7D_DIR}/cost.log"
-
-env \
-    HOME="${T7D_HOME}" \
-    CCGM_AUTOHEAL_DIR="${T7D_DIR}" \
-    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="x" \
-    bash "${ANALYZER}" >"${T7D_HOME}/run.out" 2>"${T7D_HOME}/run.err"
-RC=$?
-assert_eq "${RC}" "0" "pricing back-compat: legacy 4-field cost.log still parses"
-
-# After the run, a new 5-field line should sit alongside the legacy one.
-LEGACY_LINE_COUNT=$(grep -c "^${TODAY}" "${T7D_DIR}/cost.log" || true)
-if [ "${LEGACY_LINE_COUNT}" -ge 2 ]; then
-    PASS=$((PASS + 1))
-else
-    FAIL=$((FAIL + 1))
-    echo "FAIL: pricing back-compat: expected legacy + new cost.log lines, got ${LEGACY_LINE_COUNT}"
-fi
-
-# Cleanup test 7 dirs.
-for d in "${T7A_HOME}" "${T7B_HOME}" "${T7C_HOME}" "${T7D_HOME}"; do
-    rm -rf "${d}"
-done
-
-# ---------------------------------------------------------------------
-# Test 8 — request shape on the wire (#1026, #1028).
-#
-# The fixture path short-circuits curl, so this test shims curl on PATH
-# instead: the shim keeps the real request body the analyzer built and
-# answers with the same fixture. Every field checked here belongs in the
-# body; none of them is a header.
-# ---------------------------------------------------------------------
-
-T8_HOME=$(mktemp -d -t autoheal_t8.XXXXXX)
-T8_DIR="${T8_HOME}/autoheal"
-mk_state "${T8_DIR}"
-write_events "${T8_DIR}/events/${YESTERDAY}.jsonl" 3
-
-T8_BIN="${T8_HOME}/bin"
-make_curl_shim "${T8_BIN}/curl" "${T8_HOME}/request.json" "${FIXTURE}" "200"
-
-env \
-    HOME="${T8_HOME}" \
-    PATH="${T8_BIN}:${PATH}" \
-    CCGM_AUTOHEAL_DIR="${T8_DIR}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="sk-test-not-a-real-key" \
-    bash "${ANALYZER}" >"${T8_HOME}/run.out" 2>"${T8_HOME}/run.err"
-RC=$?
-assert_eq "${RC}" "0" "request shape: analyzer exits 0 against the capturing curl shim"
-assert_file_exists "${T8_HOME}/request.json" "request shape: request body captured"
-
-if [ -f "${T8_HOME}/request.json" ]; then
-    REQ_CHECK=$(python3 - "${T8_HOME}/request.json" "${MODULE_ROOT}/lib/proposal-schema.json" <<'PY'
-import json
-import sys
-
-body = json.load(open(sys.argv[1], encoding="utf-8"))
-proposal_schema = json.load(open(sys.argv[2], encoding="utf-8"))
-problems = []
-
-
-def want(label, actual, expected):
-    if actual != expected:
-        problems.append(f"{label}: expected {expected!r}, got {actual!r}")
-
-
-want("model", body.get("model"), "claude-sonnet-5")
-want("max_tokens", body.get("max_tokens"), 16000)
-want("thinking", body.get("thinking"), {"type": "disabled"})
-
-oc = body.get("output_config") or {}
-want("effort", oc.get("effort"), "low")
-fmt = oc.get("format") or {}
-want("format.type", fmt.get("type"), "json_schema")
-
-schema = fmt.get("schema") or {}
-want("schema.required", schema.get("required"), ["proposals"])
-want("schema.additionalProperties", schema.get("additionalProperties"), False)
-item = ((schema.get("properties") or {}).get("proposals") or {}).get("items") or {}
-want("item.additionalProperties", item.get("additionalProperties"), False)
-
-# The offered fields are exactly proposal-schema.json's own required set,
-# so what the model is held to and what the post-parse check validates
-# cannot drift apart.
-want("item.required", sorted(item.get("required", [])), sorted(proposal_schema.get("required", [])))
-want("item.properties", sorted(item.get("properties", {})), sorted(proposal_schema.get("required", [])))
-
-# Bounds the structured-outputs subset rejects must not survive.
-banned = {"minimum", "maximum", "multipleOf", "minLength", "maxLength",
-          "minItems", "maxItems", "uniqueItems", "pattern", "default"}
-
-
-def walk(node):
-    if isinstance(node, dict):
-        yield node
-        for value in node.values():
-            yield from walk(value)
-    elif isinstance(node, list):
-        for value in node:
-            yield from walk(value)
-
-
-for node in walk(schema):
-    for keyword in sorted(banned & set(node)):
-        problems.append(f"unsupported schema keyword survived: {keyword}")
-
-print("OK" if not problems else "; ".join(problems))
-PY
-)
-    assert_eq "${REQ_CHECK}" "OK" "request shape: model, cap, thinking, effort, and output schema are all as specified"
-
-    # None of the output-contract fields travels as a header.
-    assert_contains "$(grep -- '-H "' "${ANALYZER}" | tr -d '\n')" "anthropic-version" "request shape: headers are auth/version/content-type only"
-    for banned_hdr in "thinking" "effort" "output_config" "json_schema"; do
-        if grep -- '-H "' "${ANALYZER}" | grep -q "${banned_hdr}"; then
-            FAIL=$((FAIL + 1))
-            echo "FAIL: request shape: ${banned_hdr} must not be sent as a header"
-        else
-            PASS=$((PASS + 1))
-        fi
-    done
-fi
-
-# Test 8b — a call that did not end cleanly is a failed call: the day is
-# held (last-analyzed does not move past it), the reason is on stderr,
-# and the run summary the digest reads carries the count (#1026, and the
-# #1033 review's findings 6 and 9).
-#
-# Runs the same assertions for each way a call can fail to produce a
-# usable answer.
-mutate_fixture() {
-    # mutate_fixture <out path> <python expression applied to `resp`>
-    python3 - "${FIXTURE}" "$1" "$2" <<'PY'
-import json
-import sys
-
-resp = json.load(open(sys.argv[1], encoding="utf-8"))
-exec(sys.argv[3])  # noqa: S102 - test-local mutation of a local fixture
-with open(sys.argv[2], "w", encoding="utf-8") as fh:
-    json.dump(resp, fh)
-PY
-}
-
-assert_call_failure() {
-    # assert_call_failure <label> <mutation> <expected stderr substring> <expect truncated count>
-    local label="$1"
-    local mutation="$2"
-    local needle="$3"
-    local want_truncated="$4"
-
-    local home
-    home=$(mktemp -d -t autoheal_callfail.XXXXXX)
-    local dir="${home}/autoheal"
-    mk_state "${dir}"
-    write_events "${dir}/events/${YESTERDAY}.jsonl" 3
-    printf '%s\n' "2000-01-01" > "${dir}/last-analyzed"
-
-    local fixture="${home}/response.json"
-    mutate_fixture "${fixture}" "${mutation}"
-
-    env \
-        HOME="${home}" \
-        CCGM_AUTOHEAL_DIR="${dir}" \
-        CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${fixture}" \
-        CCGM_AUTOHEAL_TODAY="${TODAY}" \
-        ANTHROPIC_API_KEY="x" \
-        bash "${ANALYZER}" >"${home}/run.out" 2>"${home}/run.err"
-    local rc=$?
-
-    assert_eq "${rc}" "1" "${label}: analyzer reports the failure"
-    assert_contains "$(cat "${home}/run.err")" "${needle}" "${label}: stderr says what went wrong"
-    assert_contains "$(cat "${home}/run.err")" "day held" "${label}: stderr says the day is held"
-
-    local last_val=""
-    if [ -f "${dir}/last-analyzed" ]; then
-        last_val=$(tr -d '\n' < "${dir}/last-analyzed")
-    fi
-    if [ "${last_val}" \< "${YESTERDAY}" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        echo "FAIL: ${label}: last-analyzed must stay before the failed day (got '${last_val}')"
-    fi
-
-    local summary="${dir}/runs/${TODAY}.json"
-    assert_file_exists "${summary}" "${label}: run summary written for the digest"
-    if [ -f "${summary}" ]; then
-        local counts
-        counts=$(python3 -c "
-import json, sys
-s = json.load(open(sys.argv[1]))
-print(f\"{s.get('truncated_calls', 0)} {s.get('failed_calls', 0)}\")
-" "${summary}")
-        assert_eq "${counts}" "${want_truncated} 1" "${label}: run summary counts the failure"
-    fi
-
-    rm -rf "${home}"
-}
-
-assert_call_failure "truncation" \
-    'resp["stop_reason"] = "max_tokens"' \
-    "stop_reason=max_tokens" "1"
-
-assert_call_failure "refusal" \
-    'resp["stop_reason"] = "refusal"' \
-    "stop_reason=refusal" "0"
-
-assert_call_failure "empty content" \
-    'resp["content"] = []' \
-    "carried no assistant text" "0"
-
-# Test 8d — a non-200 response is not parsed as if it succeeded, and the
-# day is held rather than skipped past (#1033 review finding 3).
-T8D_HOME=$(mktemp -d -t autoheal_t8d.XXXXXX)
-T8D_DIR="${T8D_HOME}/autoheal"
-mk_state "${T8D_DIR}"
-write_events "${T8D_DIR}/events/${YESTERDAY}.jsonl" 3
-printf '%s\n' "2000-01-01" > "${T8D_DIR}/last-analyzed"
-
-cat > "${T8D_HOME}/error-body.json" <<'EOF'
-{"type":"error","error":{"type":"invalid_request_error","message":"output_config.format: unsupported for this model"}}
-EOF
-
-T8D_BIN="${T8D_HOME}/bin"
-make_curl_shim "${T8D_BIN}/curl" "${T8D_HOME}/request.json" "${T8D_HOME}/error-body.json" "400"
-
-env \
-    HOME="${T8D_HOME}" \
-    PATH="${T8D_BIN}:${PATH}" \
-    CCGM_AUTOHEAL_DIR="${T8D_DIR}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="sk-test-not-a-real-key" \
-    bash "${ANALYZER}" >"${T8D_HOME}/run.out" 2>"${T8D_HOME}/run.err"
-RC=$?
-assert_eq "${RC}" "1" "http 400: analyzer reports the failure"
-T8D_ERR=$(cat "${T8D_HOME}/run.err")
-assert_contains "${T8D_ERR}" "HTTP 400" "http 400: stderr names the status"
-assert_contains "${T8D_ERR}" "invalid_request_error" "http 400: stderr carries a body excerpt"
-assert_contains "${T8D_ERR}" "day held" "http 400: stderr says the day is held"
-T8D_LAST=""
-if [ -f "${T8D_DIR}/last-analyzed" ]; then
-    T8D_LAST=$(tr -d '\n' < "${T8D_DIR}/last-analyzed")
-fi
-if [ "${T8D_LAST}" \< "${YESTERDAY}" ]; then
-    PASS=$((PASS + 1))
-else
-    FAIL=$((FAIL + 1))
-    echo "FAIL: http 400: last-analyzed must not advance past the failed day (got '${T8D_LAST}')"
-fi
-if [ -f "${T8D_DIR}/proposals/${TODAY}.jsonl" ]; then
-    T8D_SIZE=$(wc -c < "${T8D_DIR}/proposals/${TODAY}.jsonl" | tr -d ' ')
-    assert_eq "${T8D_SIZE}" "0" "http 400: an error body never becomes proposals"
-fi
-rm -rf "${T8D_HOME}"
-
-# Test 8e — a curl transport failure (exit 28 is what --max-time gives)
-# holds the day too. This is the branch that used to advance the
-# watermark past a day that was never analyzed.
-T8E_HOME=$(mktemp -d -t autoheal_t8e.XXXXXX)
-T8E_DIR="${T8E_HOME}/autoheal"
-mk_state "${T8E_DIR}"
-write_events "${T8E_DIR}/events/${YESTERDAY}.jsonl" 3
-printf '%s\n' "2000-01-01" > "${T8E_DIR}/last-analyzed"
-
-T8E_BIN="${T8E_HOME}/bin"
-make_curl_shim "${T8E_BIN}/curl" "${T8E_HOME}/request.json" "${FIXTURE}" "000" "28"
-
-env \
-    HOME="${T8E_HOME}" \
-    PATH="${T8E_BIN}:${PATH}" \
-    CCGM_AUTOHEAL_DIR="${T8E_DIR}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    ANTHROPIC_API_KEY="sk-test-not-a-real-key" \
-    bash "${ANALYZER}" >"${T8E_HOME}/run.out" 2>"${T8E_HOME}/run.err"
-RC=$?
-assert_eq "${RC}" "1" "curl timeout: analyzer reports the failure"
-T8E_ERR=$(cat "${T8E_HOME}/run.err")
-assert_contains "${T8E_ERR}" "curl failed" "curl timeout: stderr names the transport failure"
-assert_contains "${T8E_ERR}" "exit 28" "curl timeout: stderr carries the curl exit code"
-T8E_LAST=""
-if [ -f "${T8E_DIR}/last-analyzed" ]; then
-    T8E_LAST=$(tr -d '\n' < "${T8E_DIR}/last-analyzed")
-fi
-if [ "${T8E_LAST}" \< "${YESTERDAY}" ]; then
-    PASS=$((PASS + 1))
-else
-    FAIL=$((FAIL + 1))
-    echo "FAIL: curl timeout: last-analyzed must not advance past the failed day (got '${T8E_LAST}')"
-fi
-rm -rf "${T8E_HOME}"
-
-# Test 8f — the timeout and the output cap are chosen together (#1026):
-# a 90s timeout against a 16000-token cap makes the cap unreachable.
-T8F_MAXTIME=$(grep -o '^CURL_MAX_TIME_SECONDS=[0-9]*' "${ANALYZER}" | head -n 1 | cut -d= -f2)
-T8F_CAP=$(grep -o '^DEFAULT_MAX_OUTPUT_TOKENS=[0-9]*' "${ANALYZER}" | head -n 1 | cut -d= -f2)
-assert_eq "${T8F_CAP}" "16000" "timeout pairing: the output cap is the non-streaming ceiling"
-if [ "${T8F_MAXTIME}" -ge 300 ]; then
-    PASS=$((PASS + 1))
-else
-    FAIL=$((FAIL + 1))
-    echo "FAIL: timeout pairing: --max-time ${T8F_MAXTIME}s is too short to ever reach a ${T8F_CAP}-token answer"
-fi
-
-# Test 8c — the fence stripper is gone; a fenced body is a failure now.
-assert_contains "${ANALYZER_SRC}" "structured outputs" "no fence stripper: parse_proposals documents why it does not strip"
-case "${ANALYZER_SRC}" in
-    *'Strip an optional code fence'*)
-        FAIL=$((FAIL + 1))
-        echo "FAIL: no fence stripper: the code-fence stripping branch must be gone (#1028)"
-        ;;
-    *)
-        PASS=$((PASS + 1))
-        ;;
-esac
-
-rm -rf "${T8_HOME}"
-
-# ---------------------------------------------------------------------
-# Summary.
-# ---------------------------------------------------------------------
+GONE="$(cd "${MODULE_ROOT}" && grep -rniE 'calibrat|REJECT_GIVEUP|rejected-days|rejected_count_for_day|analyzer_version|hold_day_for_failure|char_total|// ?4\b' bin/autoheal-analyze.sh lib/analyzer-prompt.md lib/draft_proposals.py lib/proposal-schema.json || true)"
+assert_eq "${GONE}" "" "t10: no calibration, SHA counter, rejected-day hold or chars/4 estimate"
+assert_not_contains "$(cat "${MODULE_ROOT}/bin/autoheal-analyze.sh")" "max_input_tokens" "t10: the config max_input_tokens cap is not read"
 
 echo ""
 echo "test-analyzer-api-call.sh: ${PASS} passed, ${FAIL} failed"
-[ "${FAIL}" -eq 0 ] || exit 1
-exit 0
+[ "${FAIL}" -eq 0 ]

@@ -252,6 +252,11 @@ if os.path.isfile(proposals_file):
                 # of corruption that the analyzer test suite covers.
                 continue
 
+# Rows the analyzer keeps only so a signature is not drafted twice (the
+# model skipped it) are not proposals to review. Rows from before the state
+# field existed read as ready.
+proposals = [p for p in proposals if isinstance(p, dict) and p.get("state", "ready") == "ready"]
+
 
 def safe(record, key, default=""):
     val = record.get(key)

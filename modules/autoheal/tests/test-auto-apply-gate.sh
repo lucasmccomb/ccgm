@@ -225,6 +225,19 @@ records = [
     ),
     with_id(id="prop_snooze_06", snoozed_until="2099-01-01T00:00:00Z"),
     with_id(id="prop_blocked_07", auto_apply_blocked=True),
+    # Rows the drafting analyzer writes (#1099 Phase 2.2). They carry no
+    # confidence or breadth_score and are never settings_allow_add, so the
+    # gate must pass over them until the rule_insert path earns auto-apply.
+    {
+        "id": "prop_ruleinsert_08", "signature_id": "prop_ruleinsert_08", "state": "ready",
+        "kind": "rule_insert", "target": "modules/settings/settings.partial.json",
+        "proposed_diff_target": "modules/settings/settings.partial.json",
+        "proposed_diff": diff_qualify, "diff": diff_qualify, "fix_surface": "rule",
+    },
+    {
+        "id": "prop_skipped_09", "signature_id": "prop_skipped_09", "state": "skipped",
+        "kind": "skip", "fix_surface": "rule", "reason": "environmental",
+    },
 ]
 
 with open(path, "w", encoding="utf-8") as fh:
@@ -236,7 +249,7 @@ PY
 }
 
 PROP_COUNT="$(build_proposals)"
-assert_eq "${PROP_COUNT}" "7" "fixture proposal count"
+assert_eq "${PROP_COUNT}" "9" "fixture proposal count"
 
 # ---------------------------------------------------------------------
 # Test 1: auto_apply_enabled: false → no applies at all.
@@ -307,8 +320,8 @@ rc=$?
 assert_eq "${rc}" "0" "test 2: script exits 0 with autoapply on"
 
 # Summary line must show 7 evaluated, 1 qualified, 1 applied, 0 failed.
-assert_contains "${out}" "evaluated=7 qualified=1" \
-    "test 2: summary reports 7 evaluated, 1 qualified"
+assert_contains "${out}" "evaluated=9 qualified=1" \
+    "test 2: summary reports 9 evaluated, 1 qualified"
 assert_contains "${out}" "applied=1 failed=0" \
     "test 2: summary reports 1 applied, 0 failed"
 
@@ -321,6 +334,8 @@ assert_contains "${log_content}" "prop_kind_04"    "test 2: wrong-kind skip logg
 assert_contains "${log_content}" "prop_target_05"  "test 2: wrong-target skip logged"
 assert_contains "${log_content}" "prop_snooze_06"  "test 2: snoozed skip logged"
 assert_contains "${log_content}" "prop_blocked_07" "test 2: blocked skip logged"
+assert_contains "${log_content}" "prop_ruleinsert_08" "test 2: analyzer rule_insert row skipped by the gate"
+assert_contains "${log_content}" "prop_skipped_09" "test 2: analyzer skipped row skipped by the gate"
 
 # The qualifying proposal must have a feature branch + a commit.
 branches=$(cd "${CLONE_ROOT}" && git branch --list 'autoheal/auto/prop_qualify_01')
@@ -346,7 +361,7 @@ else
     assert_eq "${success_count}" "1" \
         "test 2: applied/{today}.jsonl contains 1 record for prop_qualify_01"
 
-    for rejected in prop_lowconf_02 prop_breadth_03 prop_kind_04 prop_target_05 prop_snooze_06 prop_blocked_07; do
+    for rejected in prop_lowconf_02 prop_breadth_03 prop_kind_04 prop_target_05 prop_snooze_06 prop_blocked_07 prop_ruleinsert_08 prop_skipped_09; do
         miss=$(grep -c "\"proposal_id\":\"${rejected}\"" "${APPLIED_FILE}" || true)
         assert_eq "${miss}" "0" \
             "test 2: applied/{today}.jsonl has NO record for ${rejected}"

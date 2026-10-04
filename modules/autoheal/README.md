@@ -1,15 +1,40 @@
 # autoheal
 
-Self-healing observability loop for Claude Code. Captures permission events, tool failures, and user-correction signals; runs a daily analyzer via direct Anthropic API call; surfaces a digest with proposed configuration changes. Optional real-time security alerts and confidence-gated auto-apply, both default off.
+Self-healing observability loop for Claude Code. Captures permission events, tool failures, and user-correction signals; counts recurring failures with plain code; drafts a small rule for each recurring failure through a direct Anthropic API call; surfaces a digest with the proposals. Optional real-time security alerts and confidence-gated auto-apply, both default off.
 
 ## What this module installs
 
 - **5 hooks** across `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, and `UserPromptSubmit`:
   - **3 event-capture hooks**: `permission-event-logger.py` (PermissionRequest rows; PostToolUse / PostToolUseFailure bump the daily per-tool counter `counts/{date}.json`), `failure-logger.py` (PostToolUseFailure: the only writer of failure rows, with `error`, `error_class`, `cmd_head`), `user-correction-detector.py` (UserPromptSubmit: a short prompt after a failure or interrupt).
   - **2 response hooks**: `permission-request-suppress.py` (PermissionRequest contextual auto-allow) and `realtime-security-scanner.py` (PostToolUse opt-in mid-session alerts).
-- **Signature aggregator**: `bin/autoheal-aggregate.py [--date D]` counts recurring failures over a 14-day window with no model call and writes `signatures/{date}.json`, ranked by count x sessions. A signature qualifies at 5 or more occurrences across 2 or more sessions and 2 or more days (override under `aggregation` in `config.json`). It is not yet scheduled; a later unit wires it into the daily run.
+- **Signature aggregator**: `bin/autoheal-aggregate.py [--date D]` counts recurring failures over a 14-day window with no model call and writes `signatures/{date}.json`, ranked by count x sessions. A signature qualifies at 5 or more occurrences across 2 or more sessions and 2 or more days (override under `aggregation` in `config.json`). `bin/autoheal-analyze.sh` runs it first.
 - **7 slash commands**: `/permission-fix`, `/permission-audit`, `/autoheal`, `/autoheal-digest`, `/autoheal-toggle`, `/autoheal-snooze`, `/autoheal-apply`.
 - **Daily LaunchAgent** (macOS) calling `bin/autoheal-daily.sh` at 08:00 local. Linux scheduling is an architectural seam, not built in v1.
+
+## How the analyzer drafts a fix
+
+`bin/autoheal-analyze.sh` is the daily analyzer. Code counts and checks; the model only writes the rule text.
+
+1. **Aggregate.** It runs `bin/autoheal-aggregate.py --date <day>` and takes at most 3 qualifying signatures from `signatures/<day>.json`. With none, it makes no API call, logs that, and exits 0.
+2. **Route.**
+   - A hook-denial signature (`hook_denial_*`) never goes to the model. Code writes an `issue` proposal (title, body and evidence drafted locally, naming the denying hook's module). Nothing is filed on GitHub; filing waits for Apply in a later unit.
+   - Any other signature gets a request of about 6 to 12k tokens: the signature record, the module index, the full text of at most 2 candidate rule files, and at most one redacted excerpt of 1,500 characters or less. `lib/signature-module-map.json` picks the candidates (command head such as `git`, then error class such as `zsh_not_found`); keyword matching against the index is the fallback.
+3. **Measure.** Before each call it measures the input with the Anthropic `count_tokens` endpoint (free). Input over 15,000 tokens is refused unsent and counted as a failed call.
+4. **Ask.** The model answers through structured outputs (`lib/proposal-schema.json`) with a `rule_insert` (`target_path` limited to the supplied candidates, `anchor_heading`, `insert_markdown` of 8 lines or fewer) or a `skip`. It returns no diff, id or fingerprint. The request uses `claude-sonnet-5` (or `default_model` from `config.json`), thinking off, `max_tokens` 2000. The prompt and module index form a cached prefix.
+5. **Build.** `lib/draft_proposals.py` checks that the path is a candidate and the anchor heading exists in the real file, then generates the unified diff. The id is the aggregator's `signature_id` (`sha256(signature)[:12]`). A failed check drops the answer with a counted reason (`anchor_missing`, `path_not_candidate`, `insert_too_long`, ...) in `runs/{today}.json` and the rejection log.
+6. **Write.** Rows go to `proposals/{today}.jsonl` with `signature_id`, `kind`, `target`, `anchor`, `insert_markdown`, `diff` and `evidence` (count, sessions, sample errors). `state` is `ready`, or `skipped` when the model declined; a skipped signature counts as covered, so it is not sent again. The digest and `/autoheal-apply` read these rows (`proposed_diff_target` and `proposed_diff` repeat the target and diff until the single ledger replaces this directory).
+
+A failed call is logged and counted, never retried in the run and never held for a later one. There is no day watermark, no give-up counter and no calibration mode; `last-analyzed` only records the date of the last finished run.
+
+### Finding the CCGM source repo
+
+The module index and the candidate files come from the CCGM source repo, never from guesses. `lib/module-index.py` resolves it in this order:
+
+1. `ccgm_repo_path` in `config.json`, when set. It overrides everything; if it does not point at a CCGM repo (a directory holding `start.sh` and `modules/`), resolution fails rather than falling back.
+2. The `~/.claude/rules/*.md` symlinks. CCGM installs each rule file as a symlink into the repo. The first one that resolves, walked up to the directory holding `start.sh` and `modules/`, names the repo.
+3. Neither resolves (a copy install): drafting is skipped with a logged `no_source_repo` reason. Paths are never invented. Hook-denial `issue` proposals still work, since they need no repo.
+
+Run `python3 lib/module-index.py` to see what resolves and the index text.
 
 ## Default posture
 

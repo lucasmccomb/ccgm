@@ -3,15 +3,16 @@
 #
 # Every autoheal proposal names the one surface that fixes it:
 # check (hook, test, lint), rule, tool, or access. Verifies:
-#   1. proposal-schema.json carries a required fix_surface enum.
-#   2. The analyzer accepts a valid fix_surface and rejects an invalid or
-#      missing one.
+#   1. The schema the drafting model answers has no fix_surface: the model
+#      cannot choose its own surface.
+#   2. The analyzer sets fix_surface in code: `rule` for a rule_insert,
+#      `check` for a hook-denial issue (the fix is a hook change).
 #   3. The digest shows the surface; a legacy proposal without the field
 #      renders as `rule`.
 #   4. apply-proposal.py reads a legacy proposal as `rule`, refuses a
 #      `check` proposal without a failing demonstration, and validates
 #      the demonstration it records.
-#   5. The analyzer prompt and /autoheal-apply doc name the surface rules.
+#   5. The /autoheal-apply doc names the demonstration rule for `check`.
 #
 # Run: bash modules/autoheal/tests/test-fix-surface.sh
 
@@ -21,6 +22,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${MODULE_ROOT}/../.." && pwd)"
 ANALYZER="${MODULE_ROOT}/bin/autoheal-analyze.sh"
+# shellcheck source=analyzer-fixture.sh
+. "${SCRIPT_DIR}/analyzer-fixture.sh"
 DIGEST="${MODULE_ROOT}/bin/autoheal-digest.sh"
 APPLY_LIB="${MODULE_ROOT}/lib/apply-proposal.py"
 SCHEMA="${MODULE_ROOT}/lib/proposal-schema.json"
@@ -56,63 +59,32 @@ assert_contains() {
 SCHEMA_CHECK="$(python3 - "${SCHEMA}" <<'PY'
 import json, sys
 s = json.load(open(sys.argv[1]))
-enum = s["properties"].get("fix_surface", {}).get("enum")
-ok = enum == ["check", "rule", "tool", "access"] and "fix_surface" in s["required"]
-print("OK" if ok else f"bad: {enum}")
+print("OK" if "fix_surface" not in json.dumps(s) else "model schema offers fix_surface")
 PY
 )"
-assert_eq "${SCHEMA_CHECK}" "OK" "schema: fix_surface is a required four-value enum"
+assert_eq "${SCHEMA_CHECK}" "OK" "schema: the model is not asked for fix_surface"
 
 # --- 2. analyzer -------------------------------------------------------
-YESTERDAY=$(python3 -c "import datetime as dt; print((dt.date.today()-dt.timedelta(days=1)).isoformat())")
-TODAY=$(python3 -c "import datetime; print(datetime.datetime.now(datetime.timezone.utc).date().isoformat())")
-
-run_analyzer_case() {
-    # Args: label surface ("" omits the field).
-    local label="$1" surface="$2"
-    local home="${TMPROOT}/an_${label}"
-    mkdir -p "${home}/autoheal/events"
-    python3 - "${home}" "${YESTERDAY}" "${label}" "${surface}" <<'PY'
-import datetime as dt, json, sys
-home, day, label, surface = sys.argv[1:5]
-now = dt.datetime.now(dt.timezone.utc).isoformat()
-with open(f"{home}/autoheal/events/{day}.jsonl", "w") as fh:
-    fh.write(json.dumps({"kind": "permission_request", "timestamp": now, "session_id": "s-1",
-                         "tool_name": "Bash", "redacted_command": "git diff", "cwd": "/tmp/r"}) + "\n")
-prop = {
-    "id": f"prop_{label}", "kind": "settings_allow_add", "title": "t", "rationale": "r",
-    "confidence": 9, "breadth_score": 2, "occurrence_count": 2, "session_ids": ["a", "b"],
-    "proposed_diff_target": "modules/settings/settings.partial.json", "proposed_diff": "+ x",
-    "fingerprint": "0" * 64, "originating_clone": "ccgm-w1-c0",
-    "generated_at": "2026-05-18T08:00:00+00:00",
-}
-if surface:
-    prop["fix_surface"] = surface
-resp = {"id": "m", "type": "message", "role": "assistant", "model": "claude-sonnet-4-6",
-        "usage": {"input_tokens": 1, "output_tokens": 1},
-        "content": [{"type": "text", "text": json.dumps({"proposals": [prop]})}]}
-json.dump(resp, open(f"{home}/fixture.json", "w"))
-PY
-    echo "2020-01-01" > "${home}/autoheal/last-analyzed"
-    touch -t 202001010000 "${home}/autoheal/last-analyzed" 2>/dev/null || true
-    env HOME="${home}" CCGM_AUTOHEAL_DIR="${home}/autoheal" \
-        CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${home}/fixture.json" \
-        CCGM_AUTOHEAL_TODAY="${TODAY}" CCGM_AUTOHEAL_CLONE_ID="ccgm-w1-c0" ANTHROPIC_API_KEY="x" \
-        bash "${ANALYZER}" >"${home}/run.out" 2>"${home}/run.err"
-}
-
-run_analyzer_case valid check
-accepted="$(cat "${TMPROOT}/an_valid/autoheal/proposals/${TODAY}.jsonl" 2>/dev/null)"
-assert_contains "${accepted}" '"fix_surface": "check"' "analyzer: valid fix_surface accepted and persisted"
-
-for bad in bogus ""; do
-    label="bad${bad:-missing}"
-    run_analyzer_case "${label}" "${bad}"
-    size="$(wc -c 2>/dev/null < "${TMPROOT}/an_${label}/autoheal/proposals/${TODAY}.jsonl" | tr -d ' ')"
-    assert_eq "${size:-0}" "0" "analyzer: fix_surface '${bad:-<missing>}' is not persisted"
-    rej="$(cat "${TMPROOT}/an_${label}/.claude/logs/autoheal-rejected-${TODAY}.log" 2>/dev/null)"
-    assert_contains "${rej}" "fix_surface" "analyzer: fix_surface '${bad:-<missing>}' rejection is logged"
-done
+TODAY="2026-10-04"
+FS_ROOT="${TMPROOT}/an"
+FS_HOME="${FS_ROOT}/home"
+FS_AH="${FS_HOME}/.claude/autoheal"
+mkdir -p "${FS_AH}"
+fx_repo "${FS_ROOT}/repo"
+fx_home "${FS_HOME}" "${FS_ROOT}/repo"
+fx_curl "${FS_ROOT}/bin" "${FS_ROOT}/fake"
+fx_events "${FS_AH}" "${TODAY}" Bash echo zsh_not_found "(eval):1: ==== not found" 8 3
+fx_events "${FS_AH}" "${TODAY}" Edit "" hook_denial_branch_guard "BRANCH GUARD: x" 6 2
+fx_answer "${FS_ROOT}/fake/messages.response.json" \
+    '{"proposal":{"kind":"rule_insert","target_path":"modules/code-quality/rules/code-quality.md","anchor_heading":"Code Standards","insert_markdown":"- Quote separators under zsh."}}'
+env HOME="${FS_HOME}" PATH="${FS_ROOT}/bin:${PATH}" FAKE_CURL_DIR="${FS_ROOT}/fake" \
+    CCGM_AUTOHEAL_DIR="${FS_AH}" CCGM_AUTOHEAL_TODAY="${TODAY}" ANTHROPIC_API_KEY="x" \
+    bash "${ANALYZER}" >"${FS_ROOT}/run.out" 2>"${FS_ROOT}/run.err"
+FS_ROWS="${FS_AH}/proposals/${TODAY}.jsonl"
+assert_eq "$(python3 -c "
+import json
+print(sorted((r['kind'], r['fix_surface']) for r in map(json.loads, open('${FS_ROWS}'))))")" \
+    "[('issue', 'check'), ('rule_insert', 'rule')]" "analyzer: rule_insert is surface rule, hook-denial issue is surface check"
 
 # --- 3. digest ---------------------------------------------------------
 PROPS="${TMPROOT}/dg/proposals"
@@ -163,9 +135,7 @@ assert_contains "${APPLY_OUT}" "unreverted=True" "apply: an unreverted violation
 assert_contains "${APPLY_OUT}" "missing=True" "apply: no demonstration is rejected"
 assert_contains "${APPLY_OUT}" "refused=True" "apply: check proposal without demonstration is refused before any git work"
 
-# --- 5. prompt and command doc ----------------------------------------
-assert_contains "$(cat "${MODULE_ROOT}/lib/analyzer-prompt.md")" "fix_surface" "prompt: names fix_surface"
-assert_contains "$(cat "${MODULE_ROOT}/lib/analyzer-prompt.md")" 'Prefer `check`' "prompt: prefers check"
+# --- 5. command doc ----------------------------------------------------
 assert_contains "$(cat "${MODULE_ROOT}/commands/autoheal-apply.md")" "--demonstration" "apply doc: names the demonstration step"
 
 echo "passed=${PASS} failed=${FAIL}"
