@@ -35,6 +35,16 @@ Self-healing observability loop for Claude Code. Captures permission events, too
    | The source repo cannot be resolved, `origin/main` is missing, or a check timed out | `validation_unavailable` |
 
    A failing row is stored with `state: dropped` and a `drop_reason`, counted in `runs/{today}.json`, and never shown. The checks read the local `origin/main` ref and call no API; the gate does not fetch.
+
+   Every dropped draft is stored, including answers the build step rejects (`anchor_missing`, `path_not_candidate`, `insert_too_long`, ...). The aggregator turns a dropped row into a cooldown so a draft that cannot pass is not paid for again every night (`excluded: "cooldown"` with `cooldown_until` in `signatures/{date}.json`):
+
+   | Last drop | Signature is covered for |
+   |---|---|
+   | Content reason (anything but `validation_unavailable`) | `aggregation.redraft_cooldown_days` (default 14) from the drop date; each further content drop doubles it, capped at 90 days |
+   | `validation_unavailable` | 1 day; three in a row start the 14-day cooldown |
+   | Model `skip` (state `skipped`) | No expiry |
+
+   Rows dropped as `validation_unavailable` carry `consecutive_unavailable`; at three, the row also carries `health_reason`, for the health writer to surface.
 7. **Write.** Rows go to `proposals/{today}.jsonl` with `signature_id`, `kind`, `target`, `anchor`, `insert_markdown`, `diff` and `evidence` (count, sessions, sample errors). `state` is `ready`, or `skipped` when the model declined; a skipped signature counts as covered, so it is not sent again. The digest and `/autoheal-apply` read these rows (`proposed_diff_target` and `proposed_diff` repeat the target and diff until the single ledger replaces this directory).
 
 A failed call is logged and counted, never retried in the run and never held for a later one. There is no day watermark, no give-up counter and no calibration mode; `last-analyzed` only records the date of the last finished run.

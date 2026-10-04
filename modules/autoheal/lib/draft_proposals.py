@@ -566,10 +566,20 @@ def cmd_finish(args) -> int:
         gate = _load(os.path.join(_HERE, "apply-proposal.py"), "autoheal_apply")
         ok, reason = gate.validate(row, repo_root=meta["repo_root"])
         if not ok:
-            row["state"], row["drop_reason"] = "dropped", reason
-            append_jsonl(_proposals_path(agg), row)
             row, why = None, reason
     if row is None:
+        # Every drop is stored. The aggregator turns the row into a cooldown, so the
+        # signature is not drafted (and paid for) again the next night.
+        dropped = _base_row(meta["signature"], ctx)
+        dropped.update({"kind": "rule_insert", "state": "dropped", "drop_reason": why})
+        if why in agg.INFRA_DROP_REASONS:
+            history = agg.drop_history(agg.autoheal_dir()).get(meta["signature_id"], [])
+            # Read by the health writer: three in a row means validation is broken, not the draft.
+            dropped["consecutive_unavailable"] = agg.unavailable_streak(history) + 1
+            if dropped["consecutive_unavailable"] >= agg.INFRA_STREAK_FOR_COOLDOWN:
+                dropped["health_reason"] = (f"validation_unavailable {dropped['consecutive_unavailable']} "
+                                            f"nights running for signature {meta['signature_id']}")
+        append_jsonl(_proposals_path(agg), dropped)
         if args.rejected_log:
             append_jsonl(args.rejected_log, {
                 "ts": dt.datetime.now(dt.timezone.utc).isoformat(),

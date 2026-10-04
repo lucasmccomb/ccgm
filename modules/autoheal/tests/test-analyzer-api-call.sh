@@ -191,7 +191,7 @@ BAD_ANCHOR='{"proposal":{"kind":"rule_insert","target_path":"modules/code-qualit
 fx_answer "${S_FAKE}/messages.response.json" "${BAD_ANCHOR}"
 run_analyzer
 assert_eq "${RC}" "0" "t3: a dropped proposal is not a failed run"
-assert_no_file "${S_AH}/proposals/${TODAY}.jsonl" "t3: anchor_missing writes no proposal"
+assert_eq "$(jsonl_get "${S_AH}/proposals/${TODAY}.jsonl" 1 "d['state'] + ' ' + d['drop_reason']")" "dropped anchor_missing" "t3: anchor_missing is stored as dropped, never ready"
 assert_contains "$(cat "${S_HOME}/.claude/logs/autoheal-rejected-${TODAY}.log")" "anchor_missing" "t3: rejection log names anchor_missing"
 assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['dropped']['anchor_missing']")" "1" "t3: runs summary counts anchor_missing"
 assert_contains "${ERR}" "anchor_missing" "t3: stderr names anchor_missing"
@@ -201,7 +201,7 @@ zsh_events
 BAD_PATH='{"proposal":{"kind":"rule_insert","target_path":"modules/invented/rules/made-up.md","anchor_heading":"Code Standards","insert_markdown":"- x"}}'
 fx_answer "${S_FAKE}/messages.response.json" "${BAD_PATH}"
 run_analyzer
-assert_no_file "${S_AH}/proposals/${TODAY}.jsonl" "t3b: invented path writes no proposal"
+assert_eq "$(jsonl_get "${S_AH}/proposals/${TODAY}.jsonl" 1 "d['state'] + ' ' + d['drop_reason']")" "dropped path_not_candidate" "t3b: invented path is stored as dropped, never ready"
 assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['dropped']['path_not_candidate']")" "1" "t3b: runs summary counts path_not_candidate"
 
 scenario t3c

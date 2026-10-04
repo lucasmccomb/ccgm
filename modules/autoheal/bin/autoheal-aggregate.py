@@ -11,6 +11,18 @@ Input, under the autoheal data dir ($CCGM_AUTOHEAL_DIR, default
   snoozed.json          {"<signature_id or tool|head|class>": {"snoozed_until": ISO}}
   proposals.jsonl       optional ledger; rows carrying `signature_id` cover that
                         signature unless their state is "dropped"
+  proposals/{date}.jsonl  the drafting step's rows (same rule)
+
+A dropped row covers its signature for a cooldown instead (item `excluded`:
+"cooldown", with `cooldown_until`), so a draft that cannot pass validation is
+not paid for again every night:
+  - content drop (personal_data, module_tests, apply_conflict, rule_budget,
+    anchor_missing, path_not_candidate, insert_too_long, ...): `redraft_cooldown_days`
+    (default 14) from the row's drop date. Each further content drop doubles
+    it, capped at 90 days.
+  - validation_unavailable (infrastructure, not the proposal's fault): 1 day.
+    Three such drops in a row start the 14-day cooldown.
+A model `skip` row is not dropped: it covers its signature with no expiry.
 
 Signature: (tool_name, cmd_head, error_class), from tool_failure rows only.
 Rows written before PR #1112 have no error_class; they become class
@@ -21,7 +33,8 @@ Output: signatures/{date}.json, ranked by count x sessions.
 
 Bar and window come from config.json (CCGM_AUTOHEAL_CONFIG or
 <dir>/config.json), key "aggregation":
-  {"window_days": 14, "min_occurrences": 5, "min_sessions": 2, "min_days": 2}
+  {"window_days": 14, "min_occurrences": 5, "min_sessions": 2, "min_days": 2,
+   "redraft_cooldown_days": 14}
 
 Usage: autoheal-aggregate.py [--date YYYY-MM-DD]   (default: today, UTC)
 
@@ -37,7 +50,11 @@ import json
 import os
 import sys
 
-DEFAULTS = {"window_days": 14, "min_occurrences": 5, "min_sessions": 2, "min_days": 2}
+DEFAULTS = {"window_days": 14, "min_occurrences": 5, "min_sessions": 2, "min_days": 2,
+            "redraft_cooldown_days": 14}
+MAX_COOLDOWN_DAYS = 90
+INFRA_DROP_REASONS = ("validation_unavailable",)
+INFRA_STREAK_FOR_COOLDOWN = 3
 MAX_SAMPLES = 3
 MAX_SAMPLE_LEN = 300
 UNKNOWN = "unknown"
@@ -174,8 +191,8 @@ def _repo(cwd) -> str:
     return name
 
 
-def _covered_ids(data_dir: str) -> set:
-    ids = set()
+def _ledger_rows(data_dir: str):
+    """(row, file date or None) for every row of the ledger and proposals/*.jsonl."""
     paths = [os.path.join(data_dir, "proposals.jsonl")]
     try:
         pdir = os.path.join(data_dir, "proposals")
@@ -183,6 +200,10 @@ def _covered_ids(data_dir: str) -> set:
     except OSError:
         pass
     for path in paths:
+        try:
+            day = dt.date.fromisoformat(os.path.basename(path)[: -len(".jsonl")])
+        except ValueError:
+            day = None
         try:
             fh = open(path, "r", encoding="utf-8")
         except OSError:
@@ -193,10 +214,54 @@ def _covered_ids(data_dir: str) -> set:
                     row = json.loads(line)
                 except ValueError:
                     continue
-                if (isinstance(row, dict) and row.get("state") != "dropped"
-                        and isinstance(row.get("signature_id"), str)):
-                    ids.add(row["signature_id"])
-    return ids
+                if isinstance(row, dict) and isinstance(row.get("signature_id"), str):
+                    yield row, day
+
+
+def _covered_ids(data_dir: str) -> set:
+    return {row["signature_id"] for row, _ in _ledger_rows(data_dir) if row.get("state") != "dropped"}
+
+
+def drop_history(data_dir: str) -> dict:
+    """{signature_id: [(drop date, drop_reason), ...]} oldest first, dropped rows only."""
+    hist: dict = {}
+    for row, day in _ledger_rows(data_dir):
+        if row.get("state") != "dropped":
+            continue
+        when = day
+        try:
+            when = dt.datetime.fromisoformat(str(row.get("generated_at"))).date()
+        except ValueError:
+            pass
+        if when is None:
+            continue
+        hist.setdefault(row["signature_id"], []).append((when, str(row.get("drop_reason") or "")))
+    for rows in hist.values():
+        rows.sort()
+    return hist
+
+
+def unavailable_streak(history: list) -> int:
+    """Length of the run of validation_unavailable drops at the end of the history."""
+    n = 0
+    for _, reason in reversed(history):
+        if reason not in INFRA_DROP_REASONS:
+            break
+        n += 1
+    return n
+
+
+def cooldown_until(history: list, base_days: int):
+    """First date a dropped signature may be drafted again, or None with no history."""
+    if not history:
+        return None
+    last_day, last_reason = history[-1]
+    if last_reason in INFRA_DROP_REASONS:
+        days = base_days if unavailable_streak(history) >= INFRA_STREAK_FOR_COOLDOWN else 1
+    else:
+        content_drops = sum(1 for _, r in history if r not in INFRA_DROP_REASONS)
+        days = min(MAX_COOLDOWN_DAYS, base_days * 2 ** (content_drops - 1))
+    return last_day + dt.timedelta(days=days)
 
 
 def _snoozed_keys(data_dir: str, as_of: dt.datetime) -> set:
@@ -259,6 +324,7 @@ def aggregate(data_dir: str, end: dt.date, cfg: dict) -> dict:
                 rec["samples"][text] = True
 
     covered = _covered_ids(data_dir)
+    drops = drop_history(data_dir)
     as_of = dt.datetime.combine(end, dt.time(23, 59, 59), tzinfo=dt.timezone.utc)
     snoozed = _snoozed_keys(data_dir, as_of)
     call_totals: dict = {}
@@ -277,6 +343,9 @@ def aggregate(data_dir: str, end: dt.date, cfg: dict) -> dict:
             excluded = "covered"
         elif sid in snoozed or "|".join(sig) in snoozed:
             excluded = "snoozed"
+        until = cooldown_until(drops.get(sid, []), cfg["redraft_cooldown_days"])
+        if excluded is None and until is not None and end < until:
+            excluded = "cooldown"
         meets = (rec["count"] >= cfg["min_occurrences"]
                  and len(rec["sessions"]) >= cfg["min_sessions"]
                  and len(rec["days"]) >= cfg["min_days"])
@@ -298,6 +367,8 @@ def aggregate(data_dir: str, end: dt.date, cfg: dict) -> dict:
         }
         if excluded:
             item["excluded"] = excluded
+        if excluded == "cooldown":
+            item["cooldown_until"] = until.isoformat()
         out.append(item)
     out.sort(key=lambda s: (-s["count"] * s["sessions"], s["signature_id"]))
 
