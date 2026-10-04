@@ -154,6 +154,7 @@ After installation, invoke with:
 - `/xplan <concept>` - full interactive mode; choose 1–3 adversarial passes upfront (default one)
 - `/xplan <concept> --cross-provider` - explicitly enable the optional native review path; local binary/login preflight runs before planning
 - `/xplan <concept> --adversarial-reviews 2` - explicit count; no duplicate startup question
+- `/xplan <concept> --ambiguity 0.1` - stricter interview gate (default 0.20)
 - `/xplan <concept> --repo <existing-repo-path>` - plan work against an existing repo
 - `/xplan <concept> --light` - fast path, minimal interaction
 - `/xplan <concept> --autonomous` or `/xplana <concept>` - full-depth pipeline with zero mid-flow prompts after the upfront count choice; completed plan presented at the end
