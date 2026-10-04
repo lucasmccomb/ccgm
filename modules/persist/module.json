@@ -1,0 +1,16 @@
+{
+  "name": "persist",
+  "displayName": "Persist",
+  "description": "Opt-in Stop hook that keeps the main agent working on a declared task until it is marked done. /persist starts, finishes, or cancels the loop; the hook blocks a stop only while a fresh, active, same-session state file exists, and fails open on context-limit stops, high transcript context, user aborts, auth errors, stale state, the iteration cap, a cancel signal, another session or project, re-entrancy, and any parse or IO error.",
+  "category": "workflow",
+  "scope": ["global"],
+  "dependencies": ["settings"],
+  "files": {
+    "commands/persist.md": { "target": "commands/persist.md", "type": "command", "template": false },
+    "hooks/persist-stop.py": { "target": "hooks/persist-stop.py", "type": "hook", "template": false },
+    "bin/ccgm-persist": { "target": "bin/ccgm-persist", "type": "script", "template": false },
+    "settings.partial.json": { "target": "settings.json", "type": "config", "merge": true, "template": false }
+  },
+  "tags": ["hooks", "stop-hook", "persistence", "run-to-completion", "fail-open"],
+  "configPrompts": []
+}

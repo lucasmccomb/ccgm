@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/persist-stop.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}

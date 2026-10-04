@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""
+ccgm-persist - start, inspect, finish, or cancel a persist loop.
+
+The persist Stop hook (persist-stop.py) blocks the agent from stopping while a
+state file exists for the session. This CLI writes and removes that file.
+
+Usage:
+    ccgm-persist [--session ID] start --task TEXT [--criteria TEXT] [--max N]
+    ccgm-persist [--session ID] status
+    ccgm-persist [--session ID] done       # task verified; end the loop
+    ccgm-persist [--session ID] cancel     # abandon the task; end the loop
+
+The session id comes from --session, else $CLAUDE_CODE_SESSION_ID. With
+neither, the command exits 2: it never guesses a session.
+
+State: ~/.claude/persist/<session_id>.json
+Exit codes: 0 ok, 2 usage or environment error.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+DEFAULT_MAX_ITERATIONS = 50
+HARD_MAX_ITERATIONS = 200
+SESSION_ID_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def fail(message: str) -> None:
+    print(f"ccgm-persist: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
+def resolve_session(arg: str | None) -> str:
+    sid = arg or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    if not sid:
+        fail("no session id: pass --session or run inside Claude Code (CLAUDE_CODE_SESSION_ID)")
+    if sid in (".", "..") or not SESSION_ID_RE.fullmatch(sid):
+        fail(f"unsafe session id: {sid!r}")
+    return sid
+
+
+def paths(sid: str) -> tuple[Path, Path, Path]:
+    d = Path.home() / ".claude" / "persist"
+    return d, d / f"{sid}.json", d / f"{sid}.cancel"
+
+
+def cmd_start(sid: str, args: argparse.Namespace) -> None:
+    if not args.task or not args.task.strip():
+        fail("start needs --task")
+    if args.max < 1:
+        fail("--max must be at least 1")
+    if args.max > HARD_MAX_ITERATIONS:
+        fail(f"--max cannot exceed {HARD_MAX_ITERATIONS}")
+    directory, state_path, cancel_path = paths(sid)
+    directory.mkdir(parents=True, exist_ok=True)
+    cancel_path.unlink(missing_ok=True)
+    state = {
+        "task": args.task.strip(),
+        "iteration": 0,
+        "max_iterations": args.max,
+        "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "done_criteria": (args.criteria or "").strip(),
+    }
+    project = os.environ.get("CLAUDE_PROJECT_DIR")
+    if project:
+        state["project"] = project
+    tmp = state_path.with_name(state_path.name + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2) + "\n")
+    os.replace(tmp, state_path)
+    print(f"persist started for session {sid}: {state['task']} (max {args.max} iterations)")
+
+
+def cmd_status(sid: str) -> None:
+    _, state_path, _ = paths(sid)
+    if not state_path.exists():
+        print(f"persist: no active loop for session {sid}")
+        return
+    try:
+        state = json.loads(state_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"cannot read {state_path}: {exc}")
+    active = state.get("active") is not False
+    print(
+        f"persist {'active' if active else 'inactive (cap reached)'} for session {sid}\n"
+        f"  task: {state.get('task')}\n"
+        f"  iteration: {state.get('iteration')}/{state.get('max_iterations')}\n"
+        f"  started_at: {state.get('started_at')}\n"
+        f"  done_criteria: {state.get('done_criteria') or '(none)'}"
+    )
+
+
+def cmd_done(sid: str) -> None:
+    _, state_path, _ = paths(sid)
+    existed = state_path.exists()
+    state_path.unlink(missing_ok=True)
+    print("persist: task marked done, loop ended" if existed else "persist: no active loop")
+
+
+def cmd_cancel(sid: str) -> None:
+    directory, state_path, cancel_path = paths(sid)
+    directory.mkdir(parents=True, exist_ok=True)
+    cancel_path.write_text(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") + "\n")
+    state_path.unlink(missing_ok=True)
+    print("persist: cancelled, loop ended")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="ccgm-persist")
+    parser.add_argument("--session", help="session id (default: $CLAUDE_CODE_SESSION_ID)")
+    sub = parser.add_subparsers(dest="command", required=True)
+    start = sub.add_parser("start")
+    start.add_argument("--task")
+    start.add_argument("--criteria")
+    start.add_argument("--max", type=int, default=DEFAULT_MAX_ITERATIONS)
+    for name in ("status", "done", "cancel"):
+        sub.add_parser(name)
+    args = parser.parse_args()
+
+    sid = resolve_session(args.session)
+    try:
+        if args.command == "start":
+            cmd_start(sid, args)
+        elif args.command == "status":
+            cmd_status(sid)
+        elif args.command == "done":
+            cmd_done(sid)
+        else:
+            cmd_cancel(sid)
+    except OSError as exc:
+        fail(str(exc))
+
+
+if __name__ == "__main__":
+    main()
