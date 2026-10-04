@@ -206,10 +206,10 @@ if active_incidents or reduce_failures or truncated_call_incidents:
             out.append(f"- `{slug}` (failed {info.get('date', '?')}, still unresolved): {info.get('detail', '')}")
         out.append("")
     if truncated_call_incidents:
-        out.append("**Map calls that stopped at the output cap (mined evidence NOT consumed, watermark NOT advanced):**")
+        out.append("**Map calls that stopped at the output cap, still unresolved (mined evidence NOT consumed; the slug is re-mined each night and this clears when its evidence is next consumed):**")
         out.append("")
         for slug, info in sorted(truncated_call_incidents.items()):
-            out.append(f"- `{slug}` (last failed {info.get('date', '?')}): {info.get('detail', '')}")
+            out.append(f"- `{slug}` (failed {info.get('date', '?')}, still unresolved): {info.get('detail', '')}")
         out.append("")
 
 # --- Run summary -------------------------------------------------------------

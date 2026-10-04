@@ -969,6 +969,98 @@ class CursorTests(unittest.TestCase):
         self.assertEqual(due, {str(self.path): first_len})
 
 
+class LargeTranscriptPerformanceTests(unittest.TestCase):
+    """_iter_jsonl must be lazy and linear: a ~20 MB / 40k-line transcript
+    mines in seconds, and callers that stop early never read the rest."""
+
+    CWD = "/Users/fixtureuser/code/perf-target"
+    LINES = 40_000
+
+    @classmethod
+    def setUpClass(cls):
+        cls._td = tempfile.TemporaryDirectory()
+        cls.path = Path(cls._td.name) / "big.jsonl"
+        pad = "x" * 440
+        with open(cls.path, "w", encoding="utf-8") as fh:
+            for i in range(cls.LINES):
+                fh.write(json.dumps({
+                    "type": "user", "sessionId": "big", "cwd": cls.CWD, "gitBranch": "main", "version": "2.1.198",
+                    "timestamp": f"2026-01-01T10:{(i // 60) % 60:02d}:{i % 60:02d}.000Z",
+                    "message": {"role": "user", "content": [{"type": "text", "text": f"{i} {pad}"}]},
+                }) + "\n")
+        assert cls.path.stat().st_size > 20_000_000
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._td.cleanup()
+
+    def test_mine_from_zero_and_from_a_mid_file_cursor_is_linear(self):
+        start = time.monotonic()
+        full = tm.mine(self.path)
+        self.assertEqual(full["turn_count"], self.LINES)
+        mid = tm.mine(self.path, start_offset=self.path.stat().st_size // 2)
+        self.assertEqual(mid["end_offset"], self.path.stat().st_size)
+        self.assertEqual(mid["cwd"], self.CWD)
+        self.assertGreater(mid["turn_count"], 0)
+        self.assertLess(mid["turn_count"], self.LINES)
+        self.assertLess(time.monotonic() - start, 10.0)
+
+    def _bytes_read_by(self, fn):
+        """Total bytes handed back by read()/readline() on files fn opens."""
+        import builtins
+
+        real_open = builtins.open
+        total = [0]
+
+        class Counting:
+            def __init__(self, fh):
+                self._fh = fh
+
+            def read(self, *a):
+                data = self._fh.read(*a)
+                total[0] += len(data)
+                return data
+
+            def readline(self, *a):
+                data = self._fh.readline(*a)
+                total[0] += len(data)
+                return data
+
+            def __getattr__(self, name):
+                return getattr(self._fh, name)
+
+            def __enter__(self):
+                self._fh.__enter__()
+                return self
+
+            def __exit__(self, *exc):
+                return self._fh.__exit__(*exc)
+
+        def counting_open(*a, **kw):
+            return Counting(real_open(*a, **kw))
+
+        builtins.open = counting_open
+        try:
+            fn()
+        finally:
+            builtins.open = real_open
+        return total[0]
+
+    def test_head_metadata_does_not_read_past_the_head(self):
+        read = self._bytes_read_by(lambda: tm._head_metadata(self.path))  # noqa: SLF001
+        self.assertLess(read, 100_000, "only the first few lines should be read, not the 20 MB file")
+
+    def test_has_new_content_stops_at_the_first_timestamped_line(self):
+        read = self._bytes_read_by(lambda: tm._has_new_content(self.path, 0))  # noqa: SLF001
+        self.assertLess(read, 100_000)
+
+    def test_generator_is_lazy(self):
+        gen = tm._iter_jsonl(self.path)  # noqa: SLF001
+        first = next(gen)
+        self.assertEqual(first[0], 1)
+        gen.close()
+
+
 class SchemaValidationTests(unittest.TestCase):
     def test_self_check_bundle_validates_against_schema(self):
         summary = tm.self_check()

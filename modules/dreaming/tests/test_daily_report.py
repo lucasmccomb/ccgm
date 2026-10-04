@@ -511,6 +511,19 @@ class CanaryBannerTests(DailyReportTestBase):
         self.assertIn("clears when that slug's next reduce succeeds", body)
         self.assertNotIn("watermark NOT advanced", body.split("Map calls")[0])
 
+    def test_truncated_call_banner_matches_the_reduce_failure_wording(self) -> None:
+        date = "2026-04-06"
+        self._write_canary({
+            "active_incidents": {}, "reduce_failures": {},
+            "truncated_calls": {"widget-app": {"date": "2026-03-30", "detail": "map call stopped at the output cap"}},
+        })
+        proc = self._run_digest(date)
+        self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
+        body = self._digest_path(date).read_text(encoding="utf-8")
+        self.assertIn("`widget-app` (failed 2026-03-30, still unresolved)", body)
+        self.assertIn("this clears when its evidence is next consumed", body)
+        self.assertNotIn("watermark NOT advanced", body)
+
 
 if __name__ == "__main__":
     unittest.main()

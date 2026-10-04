@@ -756,6 +756,18 @@ def clear_reduce_failure_incident(slug: str) -> None:
     _write_json_atomic(canary_state_path(), state)
 
 
+def clear_truncated_call_incident(slug: str) -> None:
+    """Drop `slug` from canary.json's truncated_calls once its evidence has
+    been consumed (same never-cleared shape as R8). Writes nothing if there
+    is nothing to clear."""
+    state = _read_json(canary_state_path(), _default_canary_state())
+    if slug not in (state.get("truncated_calls") or {}):
+        return
+    del state["truncated_calls"][slug]
+    state["last_updated"] = _utc_now_iso()
+    _write_json_atomic(canary_state_path(), state)
+
+
 def record_truncated_call_incident(slug: str, date: str, detail: str) -> None:
     """Durable marker for a map call that stopped at the output cap
     (#1026). The slug's mined evidence was paid for but never extracted,
@@ -1906,7 +1918,7 @@ def main(argv: list[str] | None = None) -> int:
             truncated_slugs.add(slug)
             record_truncated_call_incident(
                 slug, today,
-                "map call stopped at the output cap; evidence NOT consumed, watermark NOT advanced",
+                "map call stopped at the output cap; evidence NOT consumed, cursor NOT advanced",
             )
         total_input_tokens += usage["input_tokens"]
         total_output_tokens += usage["output_tokens"]
@@ -2051,6 +2063,7 @@ def main(argv: list[str] | None = None) -> int:
         # first).
         tm.write_cursors(slug, mined_offsets.get(slug, {}))
         clear_reduce_failure_incident(slug)
+        clear_truncated_call_incident(slug)
         sessions = bundles[slug].get("sessions", [])
         timestamps = [s.get("ended_at") or s.get("started_at") for s in sessions]
         timestamps = [t for t in timestamps if t]

@@ -1704,6 +1704,28 @@ class MiningCursorIntegrationTests(unittest.TestCase):
         self.assertEqual(rc2, 0)
         self.assertEqual(json.loads(canary_file.read_text())["reduce_failures"], {})
 
+    def test_truncated_map_followed_by_success_leaves_no_truncation_record(self):
+        dreaming_dir = _isolate_env(self)
+        root = _make_projects_root("trunc-clear")
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        canary_file = dreaming_dir / "state" / "canary.json"
+
+        rc, _ = self._run(root, "2026-01-01", TRUNCATED_MAP_FIXTURES)
+        self.assertEqual(rc, 0)
+        self.assertIn("widget-app", json.loads(canary_file.read_text())["truncated_calls"])
+
+        rc2, _ = self._run(root, "2026-01-02")
+        self.assertEqual(rc2, 0)
+        self.assertEqual(json.loads(canary_file.read_text())["truncated_calls"], {})
+
+    def test_clear_truncated_call_only_touches_its_slug(self):
+        dreaming_dir = _isolate_env(self)
+        da.record_truncated_call_incident("other-slug", "2026-01-01", "x")
+        da.record_truncated_call_incident("widget-app", "2026-01-01", "x")
+        da.clear_truncated_call_incident("widget-app")
+        state = json.loads((dreaming_dir / "state" / "canary.json").read_text())
+        self.assertEqual(list(state["truncated_calls"]), ["other-slug"])
+
     def test_success_clears_only_its_own_slug(self):
         dreaming_dir = _isolate_env(self)
         da.record_reduce_failure_incident("other-slug", "2026-01-01", "x")

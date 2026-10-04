@@ -383,8 +383,12 @@ def _iter_jsonl(path: str | Path, start_offset: int = 0):
     whole or from a cursor. A final line with no trailing newline is
     yielded only if it parses; otherwise the writer is mid-append, and the
     line is left for the next read (end_byte never passes it).
+
+    Lazy and linear: lines are read one at a time, so a caller that stops
+    early (_head_metadata, _has_new_content) never reads the rest of the file.
     """
     with open(path, "rb") as fh:
+        # Count the lines before the cursor in chunks (never held in memory).
         head_lines = 0
         remaining = start_offset
         while remaining > 0:
@@ -393,29 +397,27 @@ def _iter_jsonl(path: str | Path, start_offset: int = 0):
                 break
             head_lines += chunk.count(b"\n")
             remaining -= len(chunk)
-        data = fh.read()
 
-    pos = start_offset
-    lineno = head_lines
-    while data:
-        newline = data.find(b"\n")
-        terminated = newline != -1
-        raw = data[:newline] if terminated else data
-        consumed = len(raw) + (1 if terminated else 0)
-        data = data[consumed:]
-        lineno += 1
-        line_start, pos = pos, pos + consumed
-        line = raw.decode("utf-8", errors="replace").strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            if not terminated:
+        pos = start_offset
+        lineno = head_lines
+        while True:
+            raw_line = fh.readline()
+            if not raw_line:
                 return
-            yield lineno, None, line_start, pos
-            continue
-        yield lineno, (obj if isinstance(obj, dict) else None), line_start, pos
+            terminated = raw_line.endswith(b"\n")
+            lineno += 1
+            line_start, pos = pos, pos + len(raw_line)
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                if not terminated:
+                    return
+                yield lineno, None, line_start, pos
+                continue
+            yield lineno, (obj if isinstance(obj, dict) else None), line_start, pos
 
 
 def _file_end_offset(path: str | Path, start_offset: int = 0) -> int:
