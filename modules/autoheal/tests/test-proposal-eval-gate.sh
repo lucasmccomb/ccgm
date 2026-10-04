@@ -12,6 +12,8 @@
 #     A3. A NO-IMPROVEMENT proposal (adds a rule that matches nothing in
 #         the fixture set) fails (exit 1).
 #     A4. An EMPTY proposal (no extractable allow rules) fails (exit 1).
+#     A4b. A rule_insert row from the drafting analyzer (markdown diff, no
+#         allow-rules) fails too: this eval scores allow-rule proposals only.
 #     A5. Token-prefix safety: a "git diff" rule must NOT subsume
 #         "git difftool" (no regression on the difftool guard scenario).
 #     A6. A dangerous broad rule ("Bash(sudo:*)" / "Bash(rm:*)") that hits
@@ -147,6 +149,14 @@ empty_rec='{"id":"p","kind":"settings_allow_add","proposed_diff":""}'
 out="$(printf '%s' "${empty_rec}" | python3 "${EVAL_LIB}" - "${SCENARIOS}" 2>&1)"
 assert_eq "$?" "1" "A4: empty proposal fails (exit 1)"
 assert_contains "${out}" "no allow-rules" "A4: reason explains no rules"
+
+# A4b: a rule_insert row as the drafting analyzer writes it carries a diff to a
+# markdown rule file. It has no allow-rules to score, so this eval refuses it
+# rather than passing it by default.
+ri_rec='{"id":"abc123def456","kind":"rule_insert","state":"ready","target":"modules/code-quality/rules/code-quality.md","proposed_diff":"--- a/modules/code-quality/rules/code-quality.md\n+++ b/modules/code-quality/rules/code-quality.md\n@@ -1,3 +1,4 @@\n # Code Quality\n+- Bash runs under zsh.\n \n x\n"}'
+out="$(printf '%s' "${ri_rec}" | python3 "${EVAL_LIB}" - "${SCENARIOS}" 2>&1)"
+assert_eq "$?" "1" "A4b: analyzer rule_insert row fails the allow-rule eval (exit 1)"
+assert_contains "${out}" "no allow-rules" "A4b: reason explains no rules"
 
 # A5: token-prefix safety. "Bash(git diff:*)" must NOT auto-allow
 # "git difftool" (the difftool guard scenario expects prompt). Already

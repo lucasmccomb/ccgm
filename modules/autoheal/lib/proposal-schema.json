@@ -1,115 +1,45 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Autoheal Proposal Record",
-  "description": "Append-only proposal record written by the daily analyzer to ~/.claude/autoheal/proposals/{YYYY-MM-DD}.jsonl. Each proposal describes a settings/hook/command change suggested by analysis of recent event traffic. See plan.md §3.4 and §3.7 for the data model and auto-apply confidence gate.",
+  "title": "Autoheal drafting answer",
+  "description": "The only thing the drafting model returns, requested through structured outputs. Two kinds. rule_insert adds at most 8 lines of markdown under an existing heading of one of the candidate files supplied in the prompt. skip declines. The model never returns a diff, an id or a fingerprint: code derives the id from the signature, checks target_path and anchor_heading against the real file, and builds the diff itself. draft_proposals.py replaces the target_path enum with the candidate paths of each call and strips the keywords the structured-outputs subset rejects (maxLength and the like); it enforces those limits after the parse.",
   "type": "object",
-  "required": [
-    "id",
-    "kind",
-    "title",
-    "rationale",
-    "fix_surface",
-    "confidence",
-    "breadth_score",
-    "occurrence_count",
-    "session_ids",
-    "proposed_diff_target",
-    "proposed_diff",
-    "fingerprint",
-    "originating_clone",
-    "generated_at"
-  ],
   "additionalProperties": false,
+  "required": ["proposal"],
   "properties": {
-    "id": {
-      "type": "string",
-      "description": "uuid4 short (e.g. 'prop_01HW...'). Stable for the lifetime of the proposal."
-    },
-    "kind": {
-      "type": "string",
-      "enum": [
-        "settings_allow_add",
-        "settings_deny_remove",
-        "hook_narrow",
-        "new_command",
-        "rule_update",
-        "command_doc_tweak"
-      ],
-      "description": "Kind of change being proposed. Auto-apply (Epic 11) targets only 'settings_allow_add'."
-    },
-    "title": {
-      "type": "string",
-      "maxLength": 200,
-      "description": "Human-readable one-line title; passed through redact_secrets() before persistence."
-    },
-    "rationale": {
-      "type": "string",
-      "maxLength": 2000,
-      "description": "Multi-line rationale; passed through redact_secrets() before persistence."
-    },
-    "fix_surface": {
-      "type": "string",
-      "enum": ["check", "rule", "tool", "access"],
-      "description": "The one surface that fixes the finding: check (a hook, test or lint enforces it), rule (steering doc), tool (a missing capability), access (the agent lacked a fact or file). Prefer check. Proposals written before this field existed lack it; readers treat a missing value as rule."
-    },
-    "confidence": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 10,
-      "description": "Analyzer confidence. Auto-apply gate requires >= 9."
-    },
-    "breadth_score": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 10,
-      "description": "How sweeping the change is. 1 = highly specific (single command); 10 = sweeping (entire tool family). Auto-apply gate requires <= 1."
-    },
-    "occurrence_count": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "How many events in the analyzed window support this proposal."
-    },
-    "session_ids": {
-      "type": "array",
-      "items": {"type": "string"},
-      "minItems": 1,
-      "description": "Distinct session ids that contributed evidence. High-confidence proposals must have >= 2."
-    },
-    "proposed_diff_target": {
-      "type": "string",
-      "description": "Path of the file the diff applies to, repo-relative (e.g. 'modules/settings/settings.partial.json'). Auto-apply gate requires startswith('modules/settings/')."
-    },
-    "proposed_diff": {
-      "type": "string",
-      "description": "Unified diff or before/after JSON description. Applied verbatim by apply-proposal.py."
-    },
-    "fingerprint": {
-      "type": "string",
-      "description": "sha256 over the normalized (kind, target, sorted-diff-content) form. Used by cross-clone dedup so two clones cannot file the same proposal twice."
-    },
-    "originating_clone": {
-      "type": "string",
-      "description": "Clone path or identifier where the proposal was first emitted (e.g. 'ccgm-w1-c0'). For cross-clone audit."
-    },
-    "generated_at": {
-      "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 UTC timestamp when the analyzer emitted the proposal."
-    },
-    "snoozed_until": {
-      "type": ["string", "null"],
-      "format": "date-time",
-      "description": "If set, /autoheal-snooze suppresses this proposal until the given timestamp."
-    },
-    "auto_apply_blocked": {
-      "type": "boolean",
-      "default": false,
-      "description": "If true, auto-apply skips this proposal even if it passes the gate. Set when a previous auto-apply attempt rolled back or when the user explicitly blocked it."
-    },
-    "source_events": {
-      "type": "array",
-      "items": {"type": "string"},
-      "description": "Event ids that triggered the proposal. Optional but useful for digest rendering."
+    "proposal": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "target_path", "anchor_heading", "insert_markdown"],
+          "properties": {
+            "kind": {"type": "string", "enum": ["rule_insert"]},
+            "target_path": {
+              "type": "string",
+              "enum": [],
+              "description": "Repo-relative path of one candidate file. Replaced per call with the candidate paths."
+            },
+            "anchor_heading": {
+              "type": "string",
+              "description": "Exact text of an existing heading in target_path. The insert goes at the end of that section."
+            },
+            "insert_markdown": {
+              "type": "string",
+              "maxLength": 1200,
+              "description": "The rule text to insert: 8 lines or fewer, in the voice of the file."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "reason"],
+          "properties": {
+            "kind": {"type": "string", "enum": ["skip"]},
+            "reason": {"type": "string", "maxLength": 300, "description": "Why no rule line would have prevented these occurrences."}
+          }
+        }
+      ]
     }
   }
 }

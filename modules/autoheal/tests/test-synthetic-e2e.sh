@@ -5,14 +5,15 @@
 #
 # Exercises the FULL autoheal daily pipeline end-to-end, OFFLINE:
 #
-#   1. Seed a synthetic events.jsonl in a temp ~/.claude/autoheal/events/
-#      with a varied 7-event mix (permission_request, tool_failure,
-#      user_correction; redacted commands; varied tool_names).
-#   2. Run bin/autoheal-analyze.sh with CCGM_AUTOHEAL_FIXTURE_API_RESPONSE
-#      pointed at tests/fixtures/api-response-sample.json. This bypasses
-#      curl entirely so we never reach api.anthropic.com.
-#      Expect: proposals/{today}.jsonl created with the fixture's
-#      privilege-passing proposals.
+#   1. Seed synthetic events in a temp ~/.claude/autoheal/events/: eight
+#      zsh-quoting tool_failure rows over three sessions and two days (a
+#      qualifying signature) plus noise the analyzer must ignore
+#      (permission_request, user_correction, a one-off failure).
+#   2. Run bin/autoheal-analyze.sh with tests/fixtures/fake-curl.py first on
+#      PATH, so no request reaches api.anthropic.com. The fake serves a
+#      count_tokens reply and a rule_insert answer.
+#      Expect: proposals/{today}.jsonl holds one rule_insert whose diff was
+#      built by code against the fixture repo.
 #   3. Run bin/autoheal-digest.sh against those proposals.
 #      Expect: digests/{today}.md rendered with the proposals (5-cap
 #      respected, footer present).
@@ -34,7 +35,8 @@ REPO_ROOT="$(cd "${MODULE_ROOT}/../.." && pwd)"
 ANALYZER="${MODULE_ROOT}/bin/autoheal-analyze.sh"
 DIGEST_SCRIPT="${MODULE_ROOT}/bin/autoheal-digest.sh"
 EMAIL_SCRIPT="${MODULE_ROOT}/bin/autoheal-email.sh"
-FIXTURE_API="${SCRIPT_DIR}/fixtures/api-response-sample.json"
+# shellcheck source=analyzer-fixture.sh
+. "${SCRIPT_DIR}/analyzer-fixture.sh"
 MOCK_SERVER="${SCRIPT_DIR}/fixtures/resend-mock-server.py"
 LIB_DIR="${REPO_ROOT}/modules/hooks/lib"
 
@@ -125,7 +127,7 @@ assert_file_exists() {
 # ---------------------------------------------------------------------------
 
 for f in "${ANALYZER}" "${DIGEST_SCRIPT}" "${EMAIL_SCRIPT}" \
-         "${FIXTURE_API}" "${MOCK_SERVER}" "${LIB_DIR}/hook_utils.py"; do
+         "${MOCK_SERVER}" "${LIB_DIR}/hook_utils.py"; do
     if [ ! -f "${f}" ]; then
         echo "FATAL: missing required file: ${f}"
         exit 1
@@ -147,95 +149,62 @@ TODAY="$(python3 -c "import datetime; print(datetime.datetime.now(datetime.timez
 YESTERDAY="$(python3 -c "import datetime as dt; print((dt.date.today()-dt.timedelta(days=1)).isoformat())")"
 
 # ---------------------------------------------------------------------------
-# Stage 1: seed synthetic events.jsonl with a varied 7-event mix.
+# Stage 1: seed synthetic events.
 # ---------------------------------------------------------------------------
 #
-# Events live under YESTERDAY because the analyzer's "compute_days" walks
-# (last_analyzed, today]; on a fresh install the lookback window covers the
-# last 7 days. Putting events on YESTERDAY ensures the analyzer picks them
-# up regardless of the time-of-day the test runs.
+# The analyzer aggregates a 14-day window ending at TODAY, so the qualifying
+# rows sit on TODAY and YESTERDAY (two days, three sessions).
 
-EVENTS_FILE="${AUTOHEAL_DIR}/events/${YESTERDAY}.jsonl"
+EVENTS_FILE="${AUTOHEAL_DIR}/events/${TODAY}.jsonl"
 
+fx_repo "${TMPROOT}/repo"
+fx_home "${TMPROOT}" "${TMPROOT}/repo"
+fx_events "${AUTOHEAL_DIR}" "${TODAY}" Bash echo zsh_not_found "(eval):1: ==== not found" 8 3
+fx_events "${AUTOHEAL_DIR}" "${TODAY}" Bash "pnpm test" other "error: missing dependency" 1 1
 python3 - "${EVENTS_FILE}" <<'PY'
 import datetime as dt
 import json
 import sys
 
-path = sys.argv[1]
 now = dt.datetime.now(dt.timezone.utc)
-
-
-def row(i, **kw):
-    base = {
-        "timestamp": (now - dt.timedelta(minutes=i)).isoformat(),
-        "session_id": f"sess-{i % 3}",
-        "tool_name": "Bash",
-        "redacted_command": None,
-        "exit_code": None,
-        "stderr_excerpt": None,
-        "permission_decision": None,
-        "cwd": "/tmp/repo",
-        "clone_path": "/tmp/repo",
-    }
-    base.update(kw)
-    return base
-
-
-# 3x permission_request for the same command (drives the synthesized
-# proposal in the fixture: "Auto-approve git diff --staged").
-events = [
-    row(1, kind="permission_request", redacted_command="git diff --staged",
-        permission_decision="ask"),
-    row(2, kind="permission_request", redacted_command="git diff --staged",
-        permission_decision="ask"),
-    row(3, kind="permission_request", redacted_command="git diff --staged",
-        permission_decision="ask"),
-    # 2x tool_failure on a different command (variety; analyzer-fixture
-    # ignores these but we want to prove the pipeline tolerates a mix).
-    row(4, kind="tool_failure", tool_name="Bash",
-        redacted_command="pnpm test", exit_code=1,
-        stderr_excerpt="error: missing dependency"),
-    row(5, kind="tool_failure", tool_name="Edit",
-        redacted_command=None, exit_code=2,
-        stderr_excerpt="permission denied"),
-    # 1x user_correction (synthesized by user-correction-detector hook).
-    row(6, kind="user_correction", tool_name="Edit",
-        redacted_command=None),
-    # 1x permission_request with a different tool.
-    row(7, kind="permission_request", tool_name="WebFetch",
-        redacted_command=None, permission_decision="ask"),
-]
-
-with open(path, "w", encoding="utf-8") as fh:
-    for ev in events:
-        fh.write(json.dumps(ev) + "\n")
+with open(sys.argv[1], "a", encoding="utf-8") as fh:
+    for i, (kind, tool, cmd) in enumerate([
+        ("permission_request", "Bash", "git diff --staged"),
+        ("permission_request", "WebFetch", None),
+        ("user_correction", "Edit", None),
+    ]):
+        fh.write(json.dumps({
+            "kind": kind, "timestamp": (now - dt.timedelta(minutes=i)).isoformat(),
+            "session_id": f"sess-{i}", "tool_name": tool, "redacted_command": cmd,
+            "cwd": "/tmp/repo", "clone_path": "/tmp/repo"}) + "\n")
 PY
 
-# Sanity: the events file is populated.
-EVENT_COUNT="$(grep -c . "${EVENTS_FILE}" 2>/dev/null || echo 0)"
-assert_eq "${EVENT_COUNT}" "7" "stage1: 7 events seeded"
+EVENT_COUNT="$(cat "${AUTOHEAL_DIR}"/events/*.jsonl | grep -c . || echo 0)"
+assert_eq "$([ "${EVENT_COUNT}" -ge 10 ] && echo ok || echo "${EVENT_COUNT}")" "ok" "stage1: signal and noise rows seeded"
 
 # ---------------------------------------------------------------------------
-# Stage 2: run autoheal-analyze with the fixture API response.
+# Stage 2: run autoheal-analyze against the fake curl.
 # ---------------------------------------------------------------------------
 #
-# CCGM_AUTOHEAL_FIXTURE_API_RESPONSE short-circuits the curl call entirely.
-# CCGM_AUTOHEAL_API_URL points at an unreachable address as belt-and-braces:
-# if the fixture path were ever ignored we want the test to FAIL LOUDLY, not
-# silently reach the real API.
+# Every curl call lands in fake-curl.py, which records it in calls.log. The
+# test checks that log, so a real request would fail loudly instead of
+# silently reaching the API.
 
+FAKE_DIR="${TMPROOT}/fake"
+fx_curl "${TMPROOT}/bin" "${FAKE_DIR}"
+fx_answer "${FAKE_DIR}/messages.response.json" \
+    '{"proposal":{"kind":"rule_insert","target_path":"modules/code-quality/rules/code-quality.md","anchor_heading":"Code Standards","insert_markdown":"- Bash runs under zsh. Quote separators such as `====`."}}'
 PROMPT_LOG="${TMPROOT}/analyzer-prompt.log"
 
 env \
     HOME="${TMPROOT}" \
+    PATH="${TMPROOT}/bin:${PATH}" \
+    FAKE_CURL_DIR="${FAKE_DIR}" \
     CCGM_AUTOHEAL_DIR="${AUTOHEAL_DIR}" \
-    CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${FIXTURE_API}" \
-    CCGM_AUTOHEAL_API_URL="http://127.0.0.1:1/never-called" \
     CCGM_AUTOHEAL_PROMPT_LOG="${PROMPT_LOG}" \
     CCGM_AUTOHEAL_TODAY="${TODAY}" \
     CCGM_AUTOHEAL_CLONE_ID="ccgm-w1-e2e" \
-    ANTHROPIC_API_KEY="placeholder-unused-because-fixture" \
+    ANTHROPIC_API_KEY="placeholder-not-a-real-key" \
     bash "${ANALYZER}" >"${TMPROOT}/analyze.out" 2>"${TMPROOT}/analyze.err"
 ANALYZE_RC=$?
 
@@ -245,27 +214,27 @@ PROPOSALS_FILE="${AUTOHEAL_DIR}/proposals/${TODAY}.jsonl"
 assert_file_exists "${PROPOSALS_FILE}" "stage2: proposals/{today}.jsonl written"
 assert_file_exists "${PROMPT_LOG}" "stage2: prompt log captured"
 
-# Shape check: exactly one proposal accepted (fixture has one, and it
-# passes the privilege gate: confidence=9, breadth_score=1).
+# Shape check: one signature qualified, one proposal written.
 if [ -f "${PROPOSALS_FILE}" ]; then
     PROP_COUNT="$(grep -c . "${PROPOSALS_FILE}" 2>/dev/null || echo 0)"
-    assert_eq "${PROP_COUNT}" "1" "stage2: one proposal accepted (fixture)"
+    assert_eq "${PROP_COUNT}" "1" "stage2: one proposal written"
 
     PROP_KIND="$(jq -r 'select(.id) | .kind' < "${PROPOSALS_FILE}" | head -1)"
-    assert_eq "${PROP_KIND}" "settings_allow_add" "stage2: proposal kind preserved"
+    assert_eq "${PROP_KIND}" "rule_insert" "stage2: proposal kind is rule_insert"
 
-    PROP_CONFIDENCE="$(jq -r 'select(.id) | .confidence' < "${PROPOSALS_FILE}" | head -1)"
-    assert_eq "${PROP_CONFIDENCE}" "9" "stage2: proposal confidence preserved"
+    PROP_TARGET="$(jq -r 'select(.id) | .target' < "${PROPOSALS_FILE}" | head -1)"
+    assert_eq "${PROP_TARGET}" "modules/code-quality/rules/code-quality.md" "stage2: target is a real file"
+    assert_file_exists "${TMPROOT}/repo/${PROP_TARGET}" "stage2: target exists in the source repo"
 
-    PROP_BREADTH="$(jq -r 'select(.id) | .breadth_score' < "${PROPOSALS_FILE}" | head -1)"
-    assert_eq "${PROP_BREADTH}" "1" "stage2: proposal breadth_score preserved"
+    jq -r '.diff' < "${PROPOSALS_FILE}" > "${TMPROOT}/e2e.diff"
+    git -C "${TMPROOT}/repo" apply --check "${TMPROOT}/e2e.diff"
+    assert_eq "$?" "0" "stage2: the diff passes git apply --check"
 fi
 
-# No real API call ever happened: the fixture path was hot and the
-# CCGM_AUTOHEAL_API_URL was an unreachable 127.0.0.1:1, so an accidental
-# curl would have produced an error in stderr. Verify we did not see one.
+# Only the fake served requests: one measurement, one draft, nothing else.
+assert_eq "$(fx_calls "${FAKE_DIR}" count_tokens)" "1" "stage2: one count_tokens call"
+assert_eq "$(fx_calls "${FAKE_DIR}" messages)" "1" "stage2: one messages call"
 ANALYZE_ERR="$(cat "${TMPROOT}/analyze.err" 2>/dev/null || echo "")"
-assert_not_contains "${ANALYZE_ERR}" "curl: " "stage2: no curl invocation (fixture honored)"
 assert_not_contains "${ANALYZE_ERR}" "Could not resolve host" "stage2: no DNS attempt"
 
 # ---------------------------------------------------------------------------
@@ -290,7 +259,7 @@ assert_file_exists "${DIGEST_FILE}" "stage3: digest markdown rendered"
 if [ -f "${DIGEST_FILE}" ]; then
     DIGEST_BODY="$(cat "${DIGEST_FILE}")"
     assert_contains "${DIGEST_BODY}" "Autoheal digest" "stage3: digest header present"
-    assert_contains "${DIGEST_BODY}" "Auto-approve git diff --staged" "stage3: fixture title rendered"
+    assert_contains "${DIGEST_BODY}" "add a rule to code-quality.md" "stage3: proposal title rendered"
     assert_contains "${DIGEST_BODY}" "/autoheal-apply" "stage3: apply hint present"
     assert_contains "${DIGEST_BODY}" "/autoheal-toggle" "stage3: footer toggle link present"
 fi
@@ -369,7 +338,7 @@ if [ "${N_POSTS}" = "1" ]; then
     assert_contains "${POST_SUBJECT}" "autoheal digest" "stage4: POST subject names autoheal digest"
 
     POST_BODY="$(printf '%s' "${REQS_JSON}" | jq -r '.requests[0].body_json.text')"
-    assert_contains "${POST_BODY}" "Auto-approve git diff --staged" "stage4: POST body carries proposal title"
+    assert_contains "${POST_BODY}" "add a rule to code-quality.md" "stage4: POST body carries proposal title"
 
     # Idempotency key: ccgm-autoheal-{today}-{rec_hash}.
     POST_IDEM="$(printf '%s' "${REQS_JSON}" | jq -r '.requests[0].idempotency_key')"
@@ -386,22 +355,21 @@ assert_file_exists "${PROPOSALS_FILE}" "stage5: proposals file persisted"
 assert_file_exists "${DIGEST_FILE}" "stage5: digest file persisted"
 assert_file_exists "${SENT_FLAG}" "stage5: sent flag persisted"
 
-# Cost log exists from analyze stage (proves the fixture path still
-# wrote a cost record, even though the fixture has $0 cost).
+# Cost log exists from the analyze stage (one billed call).
 COST_LOG="${AUTOHEAL_DIR}/cost.log"
 assert_file_exists "${COST_LOG}" "stage5: cost log written"
 
-# last-analyzed advanced to today.
+# last-analyzed records the day the run finished.
 LAST_FILE="${AUTOHEAL_DIR}/last-analyzed"
-assert_file_exists "${LAST_FILE}" "stage5: last-analyzed advanced"
+assert_file_exists "${LAST_FILE}" "stage5: last-analyzed written"
 if [ -f "${LAST_FILE}" ]; then
     LAST_VAL="$(cat "${LAST_FILE}" 2>/dev/null || echo "")"
     assert_eq "${LAST_VAL}" "${TODAY}" "stage5: last-analyzed == today"
 fi
 
 # No real API or Resend call ever reached the public internet. The
-# email step exclusively hit 127.0.0.1; the analyzer exclusively read
-# the fixture. The email error log file may be touched by `2>>` even
+# email step exclusively hit 127.0.0.1; the analyzer exclusively talked
+# to the fake curl. The email error log file may be touched by `2>>` even
 # on success, but it must be EMPTY when the Resend mock succeeded.
 EMAIL_ERR_LOG="${LOGS_DIR}/autoheal-email-${TODAY}.err.log"
 if [ -s "${EMAIL_ERR_LOG}" ]; then

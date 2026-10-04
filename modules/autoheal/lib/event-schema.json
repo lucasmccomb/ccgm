@@ -91,7 +91,7 @@
     },
     "transcript_path": {
       "type": ["string", "null"],
-      "description": "Path to the Claude Code session transcript JSONL, copied from the top-level hook stdin envelope. Enables autoheal-analyze.sh to pre-extract ±3-turn transcript excerpts around each event before calling the Anthropic API. Optional; older events written before this field was introduced omit it."
+      "description": "Path to the Claude Code session transcript JSONL, copied from the top-level hook stdin envelope. Lets a reader find the session behind an event. The analyzer does not read transcripts; its excerpt comes from the event row. Optional; older events written before this field was introduced omit it."
     }
   }
 }

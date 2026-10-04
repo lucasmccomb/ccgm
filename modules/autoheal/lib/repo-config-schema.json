@@ -18,7 +18,7 @@
     "calibration_days": {
       "type": "integer",
       "minimum": 0,
-      "description": "Per-repo override of the analyzer calibration window (in days). 0 disables calibration; analyzer treats all events as production-quality."
+      "description": "Inert. Calibration mode was removed from the analyzer in #1099; the key is still accepted so existing per-repo configs stay valid."
     },
     "thresholds": {
       "type": "object",

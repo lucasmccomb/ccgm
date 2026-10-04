@@ -1,282 +1,110 @@
 #!/usr/bin/env bash
-# Test the privilege-escalation filter in autoheal-analyze.sh (Epic 6).
+# The model's answer is untrusted: it can only reach a file and a heading the
+# code already vetted. This test pins the checks lib/draft_proposals.py
+# `finish` runs between the model's answer and a proposal row. It replaced
+# the breadth/confidence privilege gate, which guarded a free-form proposal
+# the model no longer writes (#1099 Phase 2.2).
 #
-# The gate rejects any proposal with `breadth_score >= 8 AND
-# confidence < 9` (plan.md §1.2 insight #7, §5 Epic 6 step 7).
-# Calibration mode relaxes the breadth threshold to 10 (so 9 is still
-# accepted) — see analyzer-prompt.md.
-#
-# Strategy: build two fixture API responses, one with a violating
-# proposal and one with a compliant one. Run the analyzer with each as
-# the fixture and assert the proposals/{today}.jsonl + rejection log
-# reflect the gate decision.
+# Each case feeds `finish` one answer and expects either a row or a counted
+# drop reason, and checks that a dropped answer leaves no proposal behind.
 
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ANALYZER="${MODULE_ROOT}/bin/autoheal-analyze.sh"
+# shellcheck source=analyzer-fixture.sh
+. "${SCRIPT_DIR}/analyzer-fixture.sh"
 
 PASS=0
 FAIL=0
+TODAY="2026-10-04"
+ROOT=$(mktemp -d -t autoheal_gate.XXXXXX)
+trap 'rm -rf "${ROOT}"' EXIT
 
-assert_eq() {
-    local actual="$1"
-    local expected="$2"
-    local label="$3"
-    if [ "${actual}" = "${expected}" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        echo "FAIL: ${label}"
-        echo "  expected: ${expected}"
-        echo "  actual:   ${actual}"
-    fi
-}
+REPO="${ROOT}/repo"
+fx_repo "${REPO}"
+CQ="modules/code-quality/rules/code-quality.md"
+GW="modules/git-workflow/rules/git-workflow.md"
 
-assert_contains() {
-    local haystack="$1"
-    local needle="$2"
-    local label="$3"
-    case "${haystack}" in
-        *"${needle}"*)
-            PASS=$((PASS + 1))
-            ;;
-        *)
-            FAIL=$((FAIL + 1))
-            echo "FAIL: ${label}"
-            echo "  expected substring: ${needle}"
-            echo "  actual (first 400): ${haystack:0:400}"
-            ;;
-    esac
-}
-
-write_events() {
-    local file="$1"
-    mkdir -p "$(dirname "${file}")"
-    python3 - "${file}" <<'PY'
-import datetime as dt
-import json
-import sys
-
-path = sys.argv[1]
-now = dt.datetime.now(dt.timezone.utc).isoformat()
-with open(path, "w", encoding="utf-8") as fh:
-    fh.write(json.dumps({
-        "kind": "permission_request",
-        "timestamp": now,
-        "session_id": "s-1",
-        "tool_name": "Bash",
-        "redacted_command": "git diff --staged",
-        "cwd": "/tmp/repo",
-    }) + "\n")
+# finish_case <name> <answer json>: run finish with candidates = code-quality only.
+finish_case() {
+    CASE="${ROOT}/$1"
+    mkdir -p "${CASE}/ah"
+    python3 - "${CASE}/meta.json" "${REPO}" <<'PY'
+import json, sys
+json.dump({
+    "signature_id": "abc123def456", "model": "claude-sonnet-5", "repo_root": sys.argv[2],
+    "candidates": ["modules/code-quality/rules/code-quality.md"],
+    "signature": {"signature_id": "abc123def456", "tool_name": "Bash", "cmd_head": "echo",
+                  "error_class": "zsh_not_found", "count": 12, "sessions": 3, "repos": 1, "days": 2,
+                  "first_seen": "2026-10-03", "last_seen": "2026-10-04", "calls": 500,
+                  "rate_per_100_calls": 2.4, "samples": ["(eval):1: ==== not found"]},
+}, open(sys.argv[1], "w"))
 PY
+    printf '%s' "$2" > "${CASE}/answer.json"
+    RESULT="$(CCGM_AUTOHEAL_DIR="${CASE}/ah" CCGM_AUTOHEAL_TODAY="${TODAY}" \
+        python3 "${MODULE_ROOT}/lib/draft_proposals.py" finish --meta "${CASE}/meta.json" \
+        --answer "${CASE}/answer.json" --date "${TODAY}" --rejected-log "${CASE}/rejected.log" 2>&1)"
+    ROWS="${CASE}/ah/proposals/${TODAY}.jsonl"
+}
+rule_insert() {
+    python3 -c "
+import json, sys
+print(json.dumps({'proposal': {'kind': 'rule_insert', 'target_path': sys.argv[1], 'anchor_heading': sys.argv[2], 'insert_markdown': sys.argv[3]}}))" "$@"
+}
+dropped_with() {
+    assert_contains "${RESULT}" "\"reason\": \"$2\"" "$1: dropped as $2"
+    assert_no_file "${ROWS}" "$1: no proposal row"
+    assert_contains "$(cat "${CASE}/rejected.log")" "$2" "$1: reason in the rejection log"
 }
 
-make_fixture() {
-    # Generate a fixture API response whose content[0].text is a
-    # JSON-encoded proposals envelope. Args: out_path confidence breadth.
-    local out="$1"
-    local confidence="$2"
-    local breadth="$3"
-    local id_label="$4"
-    python3 - "${out}" "${confidence}" "${breadth}" "${id_label}" <<'PY'
-import json
-import sys
+# A compliant answer is accepted.
+finish_case ok "$(rule_insert "${CQ}" "Code Standards" "- Quote glob flags under zsh.")"
+assert_contains "${RESULT}" '"outcome": "rule_insert"' "ok: accepted"
+assert_eq "$(jsonl_get "${ROWS}" 1 "d['id']")" "abc123def456" "ok: id comes from the signature, not the model"
 
-out, confidence, breadth, label = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
+# The model cannot write outside the candidate set, even to a real file.
+finish_case other_real_file "$(rule_insert "${GW}" "Never Stash" "- x")"
+dropped_with other_real_file path_not_candidate
+finish_case invented_file "$(rule_insert "modules/invented/rules/made-up.md" "Anything" "- x")"
+dropped_with invented_file path_not_candidate
+finish_case traversal "$(rule_insert "../../etc/hosts" "Anything" "- x")"
+dropped_with traversal path_not_candidate
+finish_case absolute "$(rule_insert "${REPO}/${CQ}" "Code Standards" "- x")"
+dropped_with absolute path_not_candidate
 
-proposal = {
-    "id": f"prop_{label}",
-    "kind": "settings_allow_add",
-    "fix_surface": "rule",
-    "title": f"Synthetic proposal {label}",
-    "rationale": f"Test fixture for the privilege gate; confidence={confidence}, breadth_score={breadth}.",
-    "confidence": confidence,
-    "breadth_score": breadth,
-    "occurrence_count": 2,
-    "session_ids": ["s-aaa", "s-bbb"],
-    "proposed_diff_target": "modules/settings/settings.partial.json",
-    "proposed_diff": f"+ Bash(synthetic-{label})",
-    "fingerprint": "0" * 64,
-    "originating_clone": "ccgm-w1-c0",
-    "generated_at": "2026-05-18T08:00:00+00:00",
-}
+# The anchor must be a real heading of that file. Text outside headings and
+# headings inside code fences do not count.
+finish_case anchor "$(rule_insert "${CQ}" "No Such Heading" "- x")"
+dropped_with anchor anchor_missing
+finish_case anchor_body_text "$(rule_insert "${CQ}" "Choose the simplest implementation that fully meets the requirements." "- x")"
+dropped_with anchor_body_text anchor_missing
+finish_case anchor_hashes "$(rule_insert "${CQ}" "## Code Standards" "- x")"
+assert_contains "${RESULT}" '"outcome": "rule_insert"' "anchor_hashes: a leading ## on the anchor is tolerated"
 
-text = json.dumps({"proposals": [proposal]})
+# Length limits.
+finish_case long "$(rule_insert "${CQ}" "Code Standards" "$(printf 'line\n%.0s' 1 2 3 4 5 6 7 8 9)")"
+dropped_with long insert_too_long
+finish_case eight "$(rule_insert "${CQ}" "Code Standards" "$(printf 'line\n%.0s' 1 2 3 4 5 6 7 8)")"
+assert_contains "${RESULT}" '"outcome": "rule_insert"' "eight: 8 lines is allowed"
+finish_case empty "$(rule_insert "${CQ}" "Code Standards" "  ")"
+dropped_with empty insert_empty
 
-response = {
-    "id": f"msg_{label}",
-    "type": "message",
-    "role": "assistant",
-    "model": "claude-sonnet-4-6",
-    "usage": {"input_tokens": 100, "output_tokens": 100},
-    "content": [{"type": "text", "text": text}],
-}
+# Shape errors.
+finish_case notjson "this is not json"
+dropped_with notjson answer_not_json
+finish_case wrongkind '{"proposal": {"kind": "settings_allow_add", "id": "x"}}'
+dropped_with wrongkind answer_malformed
+finish_case flat '{"kind": "rule_insert", "target_path": "x"}'
+dropped_with flat answer_malformed
+finish_case diffonly '{"proposal": {"kind": "rule_insert", "target_path": "modules/code-quality/rules/code-quality.md", "anchor_heading": "Code Standards"}}'
+dropped_with diffonly answer_malformed
 
-with open(out, "w", encoding="utf-8") as fh:
-    json.dump(response, fh)
-PY
-}
-
-run_analyzer() {
-    local home="$1"
-    local fixture="$2"
-    local today="$3"
-    local extra_env_calibration="${4:-}"
-
-    # We want the analyzer to NOT be in calibration mode for the main
-    # tests so the gate fires at breadth>=8. Bump last-analyzed's mtime
-    # far back in time (well beyond the 7-day calibration window).
-    if [ "${extra_env_calibration}" = "post-calibration" ]; then
-        mkdir -p "${home}/autoheal"
-        echo "2020-01-01" > "${home}/autoheal/last-analyzed"
-        # mtime 30 days ago
-        if command -v touch >/dev/null 2>&1; then
-            # macOS BSD touch accepts -t YYYYMMDDhhmm
-            touch -t 202001010000 "${home}/autoheal/last-analyzed" 2>/dev/null || true
-        fi
-    fi
-
-    env \
-        HOME="${home}" \
-        CCGM_AUTOHEAL_DIR="${home}/autoheal" \
-        CCGM_AUTOHEAL_FIXTURE_API_RESPONSE="${fixture}" \
-        CCGM_AUTOHEAL_TODAY="${today}" \
-        CCGM_AUTOHEAL_CLONE_ID="ccgm-w1-c0" \
-        ANTHROPIC_API_KEY="x" \
-        bash "${ANALYZER}" \
-            >"${home}/run.out" 2>"${home}/run.err"
-    return $?
-}
-
-YESTERDAY=$(python3 -c "import datetime as dt; print((dt.date.today()-dt.timedelta(days=1)).isoformat())")
-TODAY=$(python3 -c "import datetime; print(datetime.datetime.now(datetime.timezone.utc).date().isoformat())")
-
-# -----------------------------------------------------------------
-# Test A — violating proposal (breadth=9, confidence=8) rejected.
-# -----------------------------------------------------------------
-
-A_HOME=$(mktemp -d -t pe_test_a.XXXXXX)
-trap 'rm -rf "${A_HOME}"' EXIT
-write_events "${A_HOME}/autoheal/events/${YESTERDAY}.jsonl"
-A_FIX="${A_HOME}/violating.json"
-make_fixture "${A_FIX}" 8 9 "violating"
-
-run_analyzer "${A_HOME}" "${A_FIX}" "${TODAY}" "post-calibration"
-RC=$?
-assert_eq "${RC}" "0" "violating: analyzer exits 0"
-
-A_PROPOSALS="${A_HOME}/autoheal/proposals/${TODAY}.jsonl"
-if [ -f "${A_PROPOSALS}" ]; then
-    A_SIZE=$(wc -c < "${A_PROPOSALS}" | tr -d ' ')
-    assert_eq "${A_SIZE}" "0" "violating: no accepted proposals"
-else
-    PASS=$((PASS + 1))
-fi
-
-A_REJECTED="${A_HOME}/.claude/logs/autoheal-rejected-${TODAY}.log"
-if [ -f "${A_REJECTED}" ]; then
-    PASS=$((PASS + 1))
-    A_BODY=$(cat "${A_REJECTED}")
-    assert_contains "${A_BODY}" "privilege_gate" "violating: rejection reason logged"
-    assert_contains "${A_BODY}" "prop_violating" "violating: proposal id in log"
-else
-    FAIL=$((FAIL + 1))
-    echo "FAIL: violating: rejection log not created at ${A_REJECTED}"
-fi
-
-# -----------------------------------------------------------------
-# Test B — compliant proposal (breadth=2, confidence=9) accepted.
-# -----------------------------------------------------------------
-
-B_HOME=$(mktemp -d -t pe_test_b.XXXXXX)
-write_events "${B_HOME}/autoheal/events/${YESTERDAY}.jsonl"
-B_FIX="${B_HOME}/compliant.json"
-make_fixture "${B_FIX}" 9 2 "compliant"
-
-run_analyzer "${B_HOME}" "${B_FIX}" "${TODAY}" "post-calibration"
-RC=$?
-assert_eq "${RC}" "0" "compliant: analyzer exits 0"
-
-B_PROPOSALS="${B_HOME}/autoheal/proposals/${TODAY}.jsonl"
-if [ -f "${B_PROPOSALS}" ]; then
-    LINES=$(wc -l < "${B_PROPOSALS}" | tr -d ' ')
-    assert_eq "${LINES}" "1" "compliant: one proposal accepted"
-    ID=$(python3 -c "import json; print(json.loads(open('${B_PROPOSALS}').readline())['id'])")
-    assert_eq "${ID}" "prop_compliant" "compliant: proposal id preserved"
-else
-    FAIL=$((FAIL + 1))
-    echo "FAIL: compliant: proposals file not created"
-fi
-
-# Compliant case should NOT generate a rejection log entry (or if the
-# file exists from earlier in the day, it should not contain this id).
-B_REJECTED="${B_HOME}/.claude/logs/autoheal-rejected-${TODAY}.log"
-if [ -f "${B_REJECTED}" ]; then
-    B_BODY=$(cat "${B_REJECTED}")
-    case "${B_BODY}" in
-        *prop_compliant*)
-            FAIL=$((FAIL + 1))
-            echo "FAIL: compliant: should not be in rejection log"
-            ;;
-        *)
-            PASS=$((PASS + 1))
-            ;;
-    esac
-else
-    PASS=$((PASS + 1))
-fi
-
-# -----------------------------------------------------------------
-# Test C — edge case (breadth=8, confidence=9) accepted in steady.
-# -----------------------------------------------------------------
-
-C_HOME=$(mktemp -d -t pe_test_c.XXXXXX)
-write_events "${C_HOME}/autoheal/events/${YESTERDAY}.jsonl"
-C_FIX="${C_HOME}/edge.json"
-make_fixture "${C_FIX}" 9 8 "edge"
-
-run_analyzer "${C_HOME}" "${C_FIX}" "${TODAY}" "post-calibration"
-RC=$?
-assert_eq "${RC}" "0" "edge: analyzer exits 0"
-
-C_PROPOSALS="${C_HOME}/autoheal/proposals/${TODAY}.jsonl"
-if [ -f "${C_PROPOSALS}" ]; then
-    LINES=$(wc -l < "${C_PROPOSALS}" | tr -d ' ')
-    assert_eq "${LINES}" "1" "edge: breadth=8 confidence=9 accepted"
-fi
-
-# -----------------------------------------------------------------
-# Test D — edge case (breadth=7, confidence=4) accepted: below
-# breadth threshold so gate does not apply regardless of confidence.
-# -----------------------------------------------------------------
-
-D_HOME=$(mktemp -d -t pe_test_d.XXXXXX)
-write_events "${D_HOME}/autoheal/events/${YESTERDAY}.jsonl"
-D_FIX="${D_HOME}/low-breadth.json"
-make_fixture "${D_FIX}" 4 7 "lowbreadth"
-
-run_analyzer "${D_HOME}" "${D_FIX}" "${TODAY}" "post-calibration"
-RC=$?
-assert_eq "${RC}" "0" "low-breadth: analyzer exits 0"
-
-D_PROPOSALS="${D_HOME}/autoheal/proposals/${TODAY}.jsonl"
-if [ -f "${D_PROPOSALS}" ]; then
-    LINES=$(wc -l < "${D_PROPOSALS}" | tr -d ' ')
-    assert_eq "${LINES}" "1" "low-breadth: accepted (gate does not fire)"
-fi
-
-# Cleanup of trapped first dir is in EXIT; manual cleanup of the rest.
-for d in "${B_HOME}" "${C_HOME}" "${D_HOME}"; do
-    rm -rf "${d}"
-done
-
-# -----------------------------------------------------------------
-# Summary.
-# -----------------------------------------------------------------
+# Whatever extra the model sends (a diff, an id) never reaches the row.
+finish_case extras '{"proposal": {"kind": "rule_insert", "target_path": "modules/code-quality/rules/code-quality.md", "anchor_heading": "Code Standards", "insert_markdown": "- x", "id": "evil", "proposed_diff": "rm -rf /", "diff": "bogus"}}'
+assert_eq "$(jsonl_get "${ROWS}" 1 "d['id']")" "abc123def456" "extras: a model-supplied id is ignored"
+assert_not_contains "$(cat "${ROWS}")" "rm -rf" "extras: a model-supplied diff is ignored"
 
 echo ""
 echo "test-privilege-escalation-filter.sh: ${PASS} passed, ${FAIL} failed"
-[ "${FAIL}" -eq 0 ] || exit 1
-exit 0
+[ "${FAIL}" -eq 0 ]
