@@ -238,6 +238,45 @@ class HealthComputeTest(unittest.TestCase):
             else:
                 os.environ["CCGM_DREAMING_CONFIG"] = env
 
+    def over_budget(self):
+        """$80 spent against the default $25, no recent success, as on the operator's machine."""
+        build_green(self.root)
+        (self.root / "state" / "runs" / f"{TODAY.isoformat()}.json").unlink()
+        write_json(self.root / "state" / "runs" / f"{day(5)}.json", {"generated_at": ts(5)})
+        (self.root / "cost.log").write_text(
+            f"{day(1)}\t1\t1\t40\tmap\n{day(10)}\t1\t1\t30\tmap\n{day(25)}\t1\t1\t10\tmap\n", encoding="utf-8")
+
+    def test_budget_exhausted_with_rc2_is_one_yellow_pause_not_a_failure(self):
+        self.over_budget()
+        h = compute(self.root, analyze_rc=2)
+        self.assertEqual(h["status"], "yellow")
+        self.assertEqual(codes(h), ["budget_paused"])
+        # Oct 3's $40 row leaves the 30-day window on Nov 2; before that the sum stays >= $25.
+        self.assertIn("resumes about 2026-11-02", h["reasons"][0]["message"])
+        self.assertIn("$80.00 ≥ $25.00", h["reasons"][0]["message"])
+        self.assertIn("2026-11-02", h["reasons"][0]["fix"])
+        self.assertIn("module_budget_usd_30d", h["reasons"][0]["fix"])
+
+    def test_budget_exhausted_with_other_rc_is_still_analyze_failed_red(self):
+        self.over_budget()
+        h = compute(self.root, analyze_rc=1)
+        self.assertEqual(h["status"], "red")
+        self.assertIn("analyze_failed", codes(h))
+        self.assertIn("budget_paused", codes(h))
+        self.assertNotIn("no_recent_success", codes(h))
+
+    def test_spend_at_90_percent_is_red_spend_near_budget(self):
+        build_green(self.root)
+        (self.root / "cost.log").write_text(f"{day(2)}\t1\t1\t22.50\tmap\n", encoding="utf-8")
+        h = compute(self.root)
+        self.assertEqual(h["status"], "red")
+        self.assertEqual(codes(h), ["spend_near_budget"])
+
+    def test_spend_exactly_at_budget_is_paused_not_near_budget(self):
+        build_green(self.root)
+        (self.root / "cost.log").write_text(f"{day(2)}\t1\t1\t25\tmap\n", encoding="utf-8")
+        self.assertEqual(codes(compute(self.root)), ["budget_paused"])
+
     def test_eval_budget_abort_marker_is_red_and_reported(self):
         build_green(self.root)
         (self.root / "evals").mkdir()

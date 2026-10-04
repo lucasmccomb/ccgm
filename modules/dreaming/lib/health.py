@@ -40,6 +40,11 @@ optimistic_integration is shadow or active):
                           last 7 nights was integrated, accepted or rejected
   pending_backlog     Y  oldest pending is 3+ nights old (and not red above)
   spend_near_budget   R  30-day spend over 80% of budget   Y  over 60%
+                          (below 100%; at or above it budget_paused replaces it)
+  budget_paused       Y  30-day spend >= budget. The analyzer refuses to run on
+                          purpose, so no_recent_success, success_aging and
+                          analyze_failed (rc 2 only) are suppressed. The message
+                          gives the date the 30-day window drops under budget.
   eval_budget_abort   R  an eval budget-abort marker from the last 7 days that
                           no later results file follows
 
@@ -75,7 +80,7 @@ SUCCESS_MARKER = "last-success.json"
 PRIORITY = [
     "no_recent_success", "analyze_failed", "breaker_suspended", "gate_closed",
     "no_terminal_outcomes", "spend_near_budget", "eval_budget_abort",
-    "success_aging", "pending_backlog",
+    "success_aging", "pending_backlog", "budget_paused",
 ]
 
 GateFn = Callable[..., "tuple[bool, str]"]
@@ -148,6 +153,19 @@ def _cost_rows(path: Path) -> "list[tuple[str, float, str]]":
     return out
 
 
+def _resume_date(costs: "list[tuple[str, float, str]]", budget: float, today: date) -> str:
+    """First date after `today` on which the 30-day window ending then sums
+    below the budget (same window rule as read_cost_spent_30d: a row exactly
+    30 days back is outside)."""
+    for offset in range(1, 32):
+        d = today + timedelta(days=offset)
+        cutoff = (d - timedelta(days=30)).isoformat()
+        total = sum(c for rd, c, _ in costs if cutoff < rd <= d.isoformat())
+        if total < budget:
+            return d.isoformat()
+    return (today + timedelta(days=31)).isoformat()
+
+
 def _default_gate(**_kw: Any) -> "tuple[bool, str]":
     sys.path.insert(0, str(_HERE.parent / "eval"))
     import memory_eval  # noqa: PLC0415 -- heavy; only the nightly chain needs it
@@ -186,6 +204,30 @@ def compute(
     integration_on = mode != rollout_mode.MODE_OFF
     reasons: list[dict[str, str]] = []
 
+    # --- spend and budget pause --------------------------------------------
+    # When the 30-day spend has reached the budget, the analyzer refuses to
+    # start (exit 2) on purpose. That is a pause, not a failure: no success is
+    # expected, so the failure reasons below are suppressed and one yellow
+    # budget_paused reason says when it resumes. Keyed on cost.log, the same
+    # figure the analyzer checks, not on the exit code (rc 2 is also the daily
+    # cap and invariant-violation code).
+    cost_path = dreaming / "cost.log"
+    costs = _cost_rows(cost_path)
+    spend_30d = round(da.read_cost_spent_30d(cost_path, today.isoformat()), 4)
+    week_cut = (today - timedelta(days=7)).isoformat()
+    spend_7d = round(sum(c for d, c, _ in costs if d > week_cut), 4)
+    try:
+        budget = float(cfg.get("module_budget_usd_30d", da.DEFAULT_MODULE_BUDGET_USD_30D))
+    except (TypeError, ValueError):
+        budget = float(da.DEFAULT_MODULE_BUDGET_USD_30D)
+    paused = budget > 0 and spend_30d >= budget
+    if paused:
+        resume = _resume_date(costs, budget, today)
+        reasons.append(_reason(
+            "budget_paused", "yellow",
+            f"dreaming paused: 30-day spend ${spend_30d:.2f} ≥ ${budget:.2f} budget; resumes about {resume}",
+            f"wait until {resume}, or raise module_budget_usd_30d in ~/.claude/dreaming/config.json"))
+
     # --- last success -----------------------------------------------------
     last_success: "str | None" = None
     last_success_dt: "datetime | None" = None
@@ -203,7 +245,9 @@ def compute(
         stamp = _parse(run.get("generated_at"))
         if stamp and (last_success_dt is None or stamp > last_success_dt):
             last_success_dt, last_success = stamp, run["generated_at"]
-    if last_success_dt is None:
+    if paused:
+        pass  # no success is expected while the budget pause holds
+    elif last_success_dt is None:
         reasons.append(_reason(
             "no_recent_success", "red", "dreaming has never completed a successful run",
             "bash ~/.claude/bin/dream-daily.sh"))
@@ -218,7 +262,7 @@ def compute(
                 "success_aging", "yellow", f"last successful dreaming run was {int(age_h)}h ago",
                 "tail -n 40 ~/.claude/logs/dreaming-daily-$(date -u +%F).log"))
 
-    if analyze_rc not in (None, 0):
+    if analyze_rc not in (None, 0) and not (paused and analyze_rc == 2):
         reasons.append(_reason(
             "analyze_failed", "red", f"the analyze step exited {analyze_rc}",
             "tail -n 40 ~/.claude/logs/dreaming-daily-$(date -u +%F).log"))
@@ -307,17 +351,8 @@ def compute(
                 "pending_backlog", "yellow", f"{pending} proposals pending, oldest {oldest_pending}",
                 "python3 ~/.claude/lib/apply_dream_proposal.py list"))
 
-    # --- spend -------------------------------------------------------------
-    cost_path = dreaming / "cost.log"
-    costs = _cost_rows(cost_path)
-    spend_30d = round(da.read_cost_spent_30d(cost_path, today.isoformat()), 4)
-    week_cut = (today - timedelta(days=7)).isoformat()
-    spend_7d = round(sum(c for d, c, _ in costs if d > week_cut), 4)
-    try:
-        budget = float(cfg.get("module_budget_usd_30d", da.DEFAULT_MODULE_BUDGET_USD_30D))
-    except (TypeError, ValueError):
-        budget = float(da.DEFAULT_MODULE_BUDGET_USD_30D)
-    if budget > 0 and spend_30d > SPEND_YELLOW_FRACTION * budget:
+    # --- spend (computed above; budget_paused handled there) ----------------
+    if budget > 0 and SPEND_YELLOW_FRACTION * budget < spend_30d < budget:
         red = spend_30d > SPEND_RED_FRACTION * budget
         reasons.append(_reason(
             "spend_near_budget", "red" if red else "yellow",
