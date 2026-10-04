@@ -40,6 +40,10 @@ grep -rn "old_function_name" src/ tests/ scripts/
 
 If the only hits are the definition and the shim, delete both. If you cannot name the caller, there is no caller. For a published surface the callers are outside the repo, which is exactly why that case is a requirement rather than a reflex.
 
+## The Boundary: Changed Lines
+
+Redesign covers the code the change touches. Every changed line traces to the request or to integrating it; do not "improve" adjacent code, comments, or formatting. Remove imports, variables, and functions your change left unused. Mention unrelated dead code to the user instead of deleting it.
+
 ## When to Apply
 
 Adding features to existing code, fixing bugs that reveal a design flaw, integrating a new dependency, extending a data model, renaming or reshaping anything with callers inside the repo.
