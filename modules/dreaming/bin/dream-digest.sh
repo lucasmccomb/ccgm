@@ -650,9 +650,10 @@ if not yesterday_proposals:
 else:
     applied = sum(1 for p in yesterday_proposals if p.get("status") in ("accepted", "auto_applied"))
     rejected = sum(1 for p in yesterday_proposals if p.get("status") == "rejected")
+    discarded = sum(1 for p in yesterday_proposals if p.get("status") == "discarded")
     pending = sum(1 for p in yesterday_proposals if p.get("status", "pending") == "pending")
-    out.append(f"- `{yesterday}`: {applied} applied, {rejected} rejected, {pending} still pending "
-                f"(of {len(yesterday_proposals)} total)")
+    out.append(f"- `{yesterday}`: {applied} applied, {rejected} rejected, {discarded} discarded, "
+                f"{pending} still pending (of {len(yesterday_proposals)} total)")
     out.append("")
 
 out.append("---")

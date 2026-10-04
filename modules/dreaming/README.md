@@ -280,10 +280,10 @@ The **nightly map->reduce analyzer**, on top of Epic 2's miner:
   applied counts plus store health, aggregated from the learnings store,
   injection telemetry, and proposals. Never writes to the store.
 
-Every proposal starts `status: "pending"`. This module never writes to the
-learnings store -- `dream_analyze.py` only *reads* it (to build the
-projection reduce compares candidates against) and *proposes*. Nothing
-auto-applies yet; that is a later epic, gated separately and default OFF.
+Every proposal starts `status: "pending"`. `dream_analyze.py` never writes to
+the learnings store -- it only *reads* it (to build the projection reduce
+compares candidates against) and *proposes*. The optimistic engine (opt-in,
+default off) applies; see "No human queue" below for how every proposal ends.
 
 ## What's implemented so far (Epic 2)
 
@@ -424,6 +424,61 @@ within 2 seconds after it is infra; any other bare timestamp may have been a
 batch anomaly and stays content. On the 2026-07-09 suspension every entry is
 infra, so the first `breaker-check` resumes it.
 
+## No human queue (#1098 2.3, 2.4)
+
+The operator does not review memories, so nothing waits for him. With
+`optimistic_integration.enabled: true` every proposal ends in one of two
+states, written on the row and as an apply-audit record:
+
+| State | Status | Reason (`discard_reason`, audit `reason`) |
+|---|---|---|
+| integrated | `auto_applied` | dwell 24h, then live, behind the caps, corroboration and rollback |
+| discarded | `discarded` | `low_confidence`, `low_prevalence`, `failed_corroboration`, `low_composite_score`, `cap_exceeded`, `batch_anomaly`, `compaction_guard_failed`, `global_manual_only`, `unsupported_kind`, `target_gone`, `invalid`, `promotion_failed`, `malformed`, `expired` |
+
+- The engine decides tonight's rows and the still-pending rows of yesterday's
+  file. A suspended breaker, a mid-batch timeout or an infra error leaves a row
+  pending for the next night.
+- `apply_dream_proposal.py expire-pending` runs every active night, whatever the
+  gate said, and discards anything pending longer than
+  `pending_max_age_hours` (48) as `expired`, `.jsonl.gz` included.
+- Retention deletes a proposals file only through `retention-check`: in active
+  mode its pending rows are audited `expired` first.
+- A `_global` add promotes automatically when its transcript-verified evidence
+  spans `promotion_min_sessions` (3) sessions over `promotion_min_slugs` (2)
+  slugs. Otherwise it is rescoped to the slug its evidence comes from
+  (`rescoped_from: "_global"`), or discarded `failed_corroboration` when no
+  cited session verifies. Ops on existing `_global` rows stay manual.
+- Corroboration reads a session's subagent transcripts
+  (`<session>/subagents/agent-*.jsonl`) as well as the parent.
+- `/dream-apply` is a manual override; `/dream-review` is for vetoes.
+
+**Off means hold.** With integration `off` or `shadow`, nothing is discarded:
+the engine does not run (shadow writes nothing), the expiry sweep and
+`retention-check` hold, and retention keeps every proposals file that still has
+a pending row. Both read the on-disk flag the way `dream-daily.sh` does, so a
+legacy `auto_apply_counters: true` alone never starts discarding.
+
+**The daily notice.** `health.json` carries `recent_changes`, the engine's
+integrations and retirements from the last 7 days. The first session of each
+day prints one line when anything changed since the last notice, for example
+`dreaming: integrated 2 learnings last night (devtrainer: "…"; _global: "…") · retired 1 · /dream-review to veto`,
+as `systemMessage` for the user and `additionalContext` for the model. The
+sentinel is `state/notice.json`. Later sessions, and days with nothing new,
+print nothing. A red health notice takes precedence. Nothing asks a question.
+
+**Backlog close (one-off).** `bin/dream-close-backlog.sh` replays every pending
+proposal, `.jsonl.gz` included, through the current filters: the loaded-context
+prefilter (`already_encoded`), hook-error routing (`routed_to_autoheal`) and
+trigger validation (`trigger_invalid`, `trigger_unverified`, only for rows that
+carry a trigger). Everything else is discarded `expired` with detail
+`pre-redesign`. It prints the plan by default and writes nothing; `--apply`
+writes the statuses and the audit records. Run it once, by hand:
+
+```bash
+bash ~/.claude/bin/dream-close-backlog.sh            # dry run: plan + counts by reason
+bash ~/.claude/bin/dream-close-backlog.sh --apply    # pending count goes to 0
+```
+
 ## A broken pipeline announces itself (health)
 
 Dreaming once sat broken for 87 days with every signal in a file nobody opens.
@@ -443,7 +498,8 @@ problem once. Green and yellow inject nothing. With dreaming enabled but no
 Shared top-level shape (autoheal's `health.json` uses the same four keys):
 `status`, `generated_at`, `last_success_at`, `reasons[{code, message, fix}]`.
 Dreaming adds `analyze_rc`, `gate`, `breaker`, `pending_count`,
-`oldest_pending`, `nights_since_last_integration`, `spend_7d`, `spend_30d`,
+`oldest_pending`, `expired_last_night`, `discarded_last_night`,
+`recent_changes`, `nights_since_last_integration`, `spend_7d`, `spend_30d`,
 `budget_30d`, `eval_last_run`, `eval_last_cost`, `eval_budget_abort` and
 `consecutive_red_nights` (counted from `state/health-history.jsonl`, one status
 per date).
@@ -675,8 +731,8 @@ bash modules/dreaming/tests/test-dream-pipeline.sh
 
 - The miner and analyzer never write to the learnings store themselves --
   they only read it (for the reduce-phase projection) and propose.
-  `/dream-apply` is the always-available, human-gated write path; the
-  opt-in `optimistic_integration` engine (default off) is the other one --
+  The opt-in `optimistic_integration` engine (default off) applies or
+  discards every proposal; `/dream-apply` is the manual override --
   see `modules/dreaming/skills/dreaming/SKILL.md` for the full contract. Do not
   hand-edit `~/.claude/dreaming/proposals/*.jsonl` expecting either path to
   respect the edit.

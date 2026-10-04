@@ -6,18 +6,19 @@ human-gated write path from a mined proposal into the learnings store —
 including the ONE path a `_global` proposal can ever be promoted through
 (`learnings_store.promote_to_global()`, invoked here after your accept).
 
-**Back-compat note (optimistic-memory plan.md Epic 6):** this command is
-kept, unchanged, as the human-gated path for proposals the optimistic
-engine never auto-integrates — `gated`-posture kinds (any `_global`
-target, regardless of kind) and, for operators who keep
-`optimistic_integration.enabled: false`, every kind. Once optimistic
-auto-integration is enabled, most `learning_verify`/`learning_add`/
-`learning_supersede`/`learning_contradict`/`learning_deprecate` proposals
-against a non-`_global` project are applied unattended overnight and never
-reach `pending` here at all — for THOSE, use **`/dream-review`** to see
-what auto-integrated, see what's still mid-dwell, veto a bad row, or
-revert a batch. This command is not being replaced or deprecated; it is
-the correct tool for exactly the proposals described above.
+**Manual override, not a queue (#1098 item 2.3).** Nothing waits for this
+command. With optimistic integration `active`, every proposal reaches a
+terminal state on its own within about 48 hours: integrated (`auto_applied`,
+after a 24h dwell) or `discarded` with a reason (`low_confidence`,
+`failed_corroboration`, `cap_exceeded`, `expired`, ...). A `_global` add
+promotes automatically when its transcript-verified evidence spans
+`promotion_min_sessions` sessions over `promotion_min_slugs` slugs (3 over 2);
+otherwise it is rescoped to its own project. Use this command to act on a
+row before the engine does, to accept a `_global` op the engine never
+writes, or, with integration `off` or `shadow` (which hold every proposal
+`pending` and discard nothing), to apply by hand. A `discarded` row is
+terminal and is refused like any other non-pending row. To see or undo what
+integrated, use **`/dream-review`**.
 
 ## Usage
 
@@ -117,7 +118,7 @@ files.
    - `applied` — success. Report `new_entry_id` if present (the id of the
      row that landed in the store — a NEW id for `learning_add`/
      `learning_supersede`, none for verify/contradict/deprecate).
-   - `refused_not_pending` — already accepted/rejected/auto_applied
+   - `refused_not_pending` — already accepted/rejected/auto_applied/discarded
      earlier; nothing happened. Report the proposal's actual current
      status.
    - `target_not_found` / `target_no_longer_live` — the target this

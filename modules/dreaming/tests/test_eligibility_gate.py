@@ -175,9 +175,13 @@ class GateTestBase(unittest.TestCase):
         return adp._read_jsonl(adp.proposals_dir() / f"{day}.jsonl")
 
     def _status(self, day: str, pid: str) -> str | None:
+        row = self._row(day, pid)
+        return row.get("status") if row else None
+
+    def _row(self, day: str, pid: str) -> dict | None:
         for r in self._read_day(day):
             if r.get("id") == pid:
-                return r.get("status")
+                return r
         return None
 
     def _audit(self) -> list:
@@ -717,7 +721,7 @@ class WaterfallRoutingTests(GateTestBase):
 
 
 class OutcomeTests(GateTestBase):
-    def test_inferred_single_session_skipped_origin_stays_pending(self):
+    def test_inferred_single_session_skipped_origin_is_discarded(self):
         slug = self._slug()
         sid = f"sess-{uuid.uuid4().hex[:8]}"
         self._write_session(sid, slug=slug, turns=self._corroborating_turns(correction=False))
@@ -727,7 +731,8 @@ class OutcomeTests(GateTestBase):
                                             excerpt=_LONG_SENTENCE, confidence=6)])
         summary = adp.run_optimistic_integrate(day)
         self.assertEqual(summary["applied"], 0)
-        self.assertEqual(self._status(day, "a1"), "pending")
+        self.assertEqual(self._status(day, "a1"), "discarded")  # #1098 2.3: no human queue
+        self.assertEqual(self._row(day, "a1")["discard_reason"], "failed_corroboration")
         rec = self._elig_audit_for("a1")
         self.assertIsNotNone(rec)
         self.assertEqual(rec["outcome"], "skipped_origin")
@@ -815,7 +820,8 @@ class AuditTests(GateTestBase):
         self._write_day(day, [row])
         summary = adp.run_optimistic_integrate(day)
         self.assertEqual(summary["applied"], 0)
-        self.assertEqual(self._status(day, "a1"), "pending")
+        self.assertEqual(self._status(day, "a1"), "discarded")  # #1098 2.3: no human queue
+        self.assertEqual(self._row(day, "a1")["discard_reason"], "low_composite_score")
         rec = self._elig_audit_for("a1")
         self.assertEqual(rec["outcome"], "skipped_composite")
         self.assertIsNotNone(rec["margin"])

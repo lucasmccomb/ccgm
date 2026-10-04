@@ -1809,10 +1809,15 @@ def resolve_session_transcript(session_id: str | None) -> dict[str, Any] | None:
 
     Transcripts live at ~/.claude/projects/<cwd-slug>/<session-id>.jsonl --
     a DIFFERENT slug space than the learnings-store project slug (arch-1).
-    Returns {"path": Path, "cwd": str|None} on a match; None if the session
-    does not resolve to a real transcript anywhere under
-    CLAUDE_PROJECTS_ROOT. sec-1: caller-supplied session strings must never
-    be trusted for provenance without this check.
+    Returns {"path": Path, "cwd": str|None, "subagent_paths": [Path]} on a
+    match; None if the session does not resolve to a real transcript
+    anywhere under CLAUDE_PROJECTS_ROOT. sec-1: caller-supplied session
+    strings must never be trusted for provenance without this check.
+
+    `subagent_paths` lists the session's subagent transcripts,
+    <project>/<session-id>/subagents/agent-*.jsonl, sorted. A subagent line
+    carries its parent's sessionId, so evidence quoted from one belongs to
+    this session; `cwd` and `path` still come from the parent alone.
     """
     if not session_id or not re.fullmatch(r"[A-Za-z0-9\-]{1,128}", session_id):
         return None
@@ -1822,7 +1827,8 @@ def resolve_session_transcript(session_id: str | None) -> dict[str, Any] | None:
     if not matches:
         return None
     path = matches[0]
-    return {"path": path, "cwd": _extract_transcript_cwd(path)}
+    subagent_paths = sorted((path.parent / session_id / "subagents").glob("agent-*.jsonl"))
+    return {"path": path, "cwd": _extract_transcript_cwd(path), "subagent_paths": subagent_paths}
 
 
 def _extract_transcript_cwd(path: Path, *, max_lines: int = 2000) -> str | None:
@@ -2113,6 +2119,8 @@ def promote_to_global(
     *,
     evidence_sessions: list[str],
     reviewed_by: str,
+    auto: bool = False,
+    dwell_hours: float | None = None,
 ) -> dict[str, Any]:
     """
     Structural, privileged write path for `_global` scope (§3.3 adrev-405
@@ -2127,6 +2135,11 @@ def promote_to_global(
     session that resolves to a real, on-disk transcript's recorded `cwd`
     -- never from CCGM_AGENT_ID. Raises GlobalPromotionError if
     evidence_sessions is empty or none resolve to a real transcript.
+
+    `auto` and `dwell_hours` serve dreaming's optimistic engine, which
+    promotes a `_global` add itself once breadth is transcript-verified
+    (#1098 2.3): the op-event is marked unattended and dwells like any other
+    optimistic add. Both default to a human promotion's live, unmarked write.
     """
     if not evidence_sessions:
         raise GlobalPromotionError("promote_to_global requires at least one evidence session")
@@ -2165,6 +2178,7 @@ def promote_to_global(
         type_=new_entry["type"], source=new_entry["source"], content=new_entry["content"],
         confidence=new_entry["confidence"], tags=new_entry["tags"], files=new_entry["files"],
         key=new_entry["key"], source_session=resolved_session, event_id=new_entry["id"],
+        auto=auto, dwell_until=dwell_until_from_hours(dwell_hours) if dwell_hours is not None else None,
     )
     row["reviewed_by"] = reviewed_by
     row["evidence_sessions"] = list(evidence_sessions)

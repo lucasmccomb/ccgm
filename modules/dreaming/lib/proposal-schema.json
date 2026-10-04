@@ -133,8 +133,24 @@
     },
     "status": {
       "type": "string",
-      "enum": ["pending", "accepted", "rejected", "auto_applied"],
-      "description": "Every Epic 3-produced row starts 'pending'. Epic 6's /dream-apply and auto-apply gate are the only writers of the other three values."
+      "enum": ["pending", "accepted", "rejected", "auto_applied", "discarded"],
+      "description": "Every Epic 3-produced row starts 'pending'. There is no human queue (#1098 2.3): in active mode every row ends 'auto_applied' (integrated) or 'discarded' (with discard_reason), and a row still pending after pending_max_age_hours (48) is discarded 'expired'. 'accepted' and 'rejected' are /dream-apply's manual override. With optimistic integration off or in shadow, rows stay 'pending' untouched."
+    },
+    "discard_reason": {
+      "type": "string",
+      "description": "OPTIONAL. Present only on status 'discarded': why the row ended without a store write. Engine decisions: low_confidence, low_prevalence, failed_corroboration, low_composite_score, compaction_guard_failed, batch_anomaly, cap_exceeded, malformed, global_manual_only, unsupported_kind, target_gone, invalid, promotion_failed. Expiry: expired (the sweep, retention, or the one-off backlog close). Backlog filters: already_encoded, routed_to_autoheal, trigger_invalid, trigger_unverified. The same reason is in the 'discarded' apply-audit record."
+    },
+    "discard_detail": {
+      "type": "string",
+      "description": "OPTIONAL. Free-text detail for discard_reason, e.g. 'pending 72h, over the 48h limit' or 'pre-redesign'."
+    },
+    "discarded_at": {
+      "type": "string",
+      "description": "OPTIONAL. ISO 8601 UTC time the row was discarded."
+    },
+    "rescoped_from": {
+      "type": "string",
+      "description": "OPTIONAL. '_global' when the optimistic engine moved a `_global` learning_add into the project slug its transcript-verified evidence comes from, because breadth (promotion_min_sessions sessions over promotion_min_slugs slugs) did not hold. `project` and `prevalence` then describe the rescoped row."
     },
     "needs_manual_promotion": {
       "type": "string",
