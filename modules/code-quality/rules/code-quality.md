@@ -9,6 +9,10 @@ Choose the simplest implementation that fully meets the current requirements. Bo
 
 The requirements that count are the ones that exist now. Build the second case when it arrives; by then its shape is known. Signs the implementation outran the requirements: an interface with one implementer, a config option never set to anything but its default, a layer that only forwards calls, generic type parameters instantiated with the same concrete type everywhere, "we'll need this when we add X" where X is on no roadmap.
 
+- **Reuse first**: search for an existing helper, type, or pattern before writing a new one.
+- **Mark the ceiling**: where you simplified on purpose, leave a short comment naming the accepted limit and what would justify replacing it.
+- **Never cut**: validation at trust boundaries, data-loss guards, security controls, accessibility basics, or scope the user requested.
+
 ## Minimize Dependencies
 
 The ladder: built-in, then established library, then custom implementation, then framework. Check whether the language or platform already provides what you need; when it does not, prefer an established, well-maintained library over hand-rolled code; equal outcome means no dependency.
