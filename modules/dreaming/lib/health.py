@@ -41,10 +41,16 @@ optimistic_integration is shadow or active):
   pending_backlog     Y  oldest pending is 3+ nights old (and not red above)
   spend_near_budget   R  30-day spend over 80% of budget   Y  over 60%
                           (below 100%; at or above it budget_paused replaces it)
-  budget_paused       Y  30-day spend >= budget. The analyzer refuses to run on
-                          purpose, so no_recent_success, success_aging and
-                          analyze_failed (rc 2 only) are suppressed. The message
+  budget_paused       Y  30-day spend >= budget (derived from cost.log). The message
                           gives the date the 30-day window drops under budget.
+  daily_cap_reached   Y  state/last-run.json says daily_cap_refused for today
+
+state/last-run.json (written by dream_analyze.py) says how tonight's analyze run
+ended: ok, budget_refused, daily_cap_refused or failed. Only budget_refused
+(for today's date) suppresses no_recent_success, success_aging and
+analyze_failed; only a refusal recorded by the analyzer suppresses
+analyze_failed. A non-zero exit with no last-run.json, or with outcome failed,
+stays analyze_failed red even during a budget pause.
   eval_budget_abort   R  an eval budget-abort marker from the last 7 days that
                           no later results file follows
 
@@ -80,7 +86,7 @@ SUCCESS_MARKER = "last-success.json"
 PRIORITY = [
     "no_recent_success", "analyze_failed", "breaker_suspended", "gate_closed",
     "no_terminal_outcomes", "spend_near_budget", "eval_budget_abort",
-    "success_aging", "pending_backlog", "budget_paused",
+    "success_aging", "pending_backlog", "budget_paused", "daily_cap_reached",
 ]
 
 GateFn = Callable[..., "tuple[bool, str]"]
@@ -204,13 +210,22 @@ def compute(
     integration_on = mode != rollout_mode.MODE_OFF
     reasons: list[dict[str, str]] = []
 
+    # --- how tonight's analyze run ended --------------------------------------
+    # dream_analyze.py writes state/last-run.json. Only an outcome recorded by
+    # the refusing code suppresses a failure reason; exit code 2 alone never
+    # does (it is shared by both refusals and by real failures). A missing or
+    # stale (other date) file suppresses nothing.
+    last_run = _read_json(state / "last-run.json")
+    last_run = last_run if isinstance(last_run, dict) and last_run.get("date") == today.isoformat() else {}
+    if analyze_rc is None and isinstance(last_run.get("rc"), int):
+        analyze_rc = last_run["rc"]
+    budget_refused = last_run.get("outcome") == "budget_refused"
+    daily_cap_refused = last_run.get("outcome") == "daily_cap_refused"
+
     # --- spend and budget pause --------------------------------------------
     # When the 30-day spend has reached the budget, the analyzer refuses to
-    # start (exit 2) on purpose. That is a pause, not a failure: no success is
-    # expected, so the failure reasons below are suppressed and one yellow
-    # budget_paused reason says when it resumes. Keyed on cost.log, the same
-    # figure the analyzer checks, not on the exit code (rc 2 is also the daily
-    # cap and invariant-violation code).
+    # start on purpose. budget_paused is a yellow notice derived from cost.log
+    # that says when it resumes; it never hides a failure by itself.
     cost_path = dreaming / "cost.log"
     costs = _cost_rows(cost_path)
     spend_30d = round(da.read_cost_spent_30d(cost_path, today.isoformat()), 4)
@@ -245,8 +260,8 @@ def compute(
         stamp = _parse(run.get("generated_at"))
         if stamp and (last_success_dt is None or stamp > last_success_dt):
             last_success_dt, last_success = stamp, run["generated_at"]
-    if paused:
-        pass  # no success is expected while the budget pause holds
+    if budget_refused:
+        pass  # the analyzer recorded a budget refusal tonight: no success is expected
     elif last_success_dt is None:
         reasons.append(_reason(
             "no_recent_success", "red", "dreaming has never completed a successful run",
@@ -262,7 +277,11 @@ def compute(
                 "success_aging", "yellow", f"last successful dreaming run was {int(age_h)}h ago",
                 "tail -n 40 ~/.claude/logs/dreaming-daily-$(date -u +%F).log"))
 
-    if analyze_rc not in (None, 0) and not (paused and analyze_rc == 2):
+    if daily_cap_refused:
+        reasons.append(_reason(
+            "daily_cap_reached", "yellow", "the analyzer stopped at its daily cost cap; it clears tomorrow",
+            "grep daily_cost_cap_usd ~/.claude/dreaming/config.json"))
+    if analyze_rc not in (None, 0) and not (budget_refused or daily_cap_refused):
         reasons.append(_reason(
             "analyze_failed", "red", f"the analyze step exited {analyze_rc}",
             "tail -n 40 ~/.claude/logs/dreaming-daily-$(date -u +%F).log"))

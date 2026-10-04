@@ -331,7 +331,10 @@ per date).
 | `gate_closed` | closed 3+ nights in a row | closed 1 to 2 nights |
 | `no_terminal_outcomes` / `pending_backlog` | oldest pending 7+ nights, nothing integrated or discarded in 7 nights | oldest pending 3+ nights |
 | `spend_near_budget` | 30-day spend over 80% of budget (below 100%) | over 60% |
-| `budget_paused` | | 30-day spend at or above budget: the analyzer refuses to run on purpose. Replaces `spend_near_budget`, and suppresses `no_recent_success`, `success_aging` and `analyze_failed` for exit code 2. Message gives the resume date; any other non-zero exit is still `analyze_failed` red |
+| `budget_paused` | | 30-day spend at or above budget (from `cost.log`). Replaces `spend_near_budget`; the message gives the resume date. It hides nothing by itself |
+| `daily_cap_reached` | | `state/last-run.json` says the analyzer stopped at its daily cap; clears tomorrow |
+
+`dream_analyze.py` writes `state/last-run.json` (`date`, `rc`, `outcome`, `spent_30d`, `budget`) with outcome `ok`, `budget_refused`, `daily_cap_refused` or `failed`. Exit code 2 is shared by both refusals and by real failures, so health never infers a refusal from it. Only a recorded `budget_refused` for today's date suppresses `no_recent_success`, `success_aging` and `analyze_failed`; a missing file or outcome `failed` stays red, even during a budget pause.
 | `eval_budget_abort` | an eval budget-abort in the last 7 days with no later results | |
 
 Gate, breaker and backlog rules apply only when `optimistic_integration` is

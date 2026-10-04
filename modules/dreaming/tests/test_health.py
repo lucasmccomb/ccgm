@@ -246,24 +246,68 @@ class HealthComputeTest(unittest.TestCase):
         (self.root / "cost.log").write_text(
             f"{day(1)}\t1\t1\t40\tmap\n{day(10)}\t1\t1\t30\tmap\n{day(25)}\t1\t1\t10\tmap\n", encoding="utf-8")
 
-    def test_budget_exhausted_with_rc2_is_one_yellow_pause_not_a_failure(self):
+    def last_run(self, outcome, rc=2, run_date=None):
+        write_json(self.root / "state" / "last-run.json", {
+            "date": run_date or TODAY.isoformat(), "rc": rc, "outcome": outcome, "spent_30d": None, "budget": None})
+
+    def test_budget_refused_is_one_yellow_pause_not_a_failure(self):
         self.over_budget()
+        self.last_run("budget_refused")
         h = compute(self.root, analyze_rc=2)
         self.assertEqual(h["status"], "yellow")
         self.assertEqual(codes(h), ["budget_paused"])
         # Oct 3's $40 row leaves the 30-day window on Nov 2; before that the sum stays >= $25.
         self.assertIn("resumes about 2026-11-02", h["reasons"][0]["message"])
-        self.assertIn("$80.00 ≥ $25.00", h["reasons"][0]["message"])
+        self.assertIn("$80.00 \u2265 $25.00", h["reasons"][0]["message"])
         self.assertIn("2026-11-02", h["reasons"][0]["fix"])
         self.assertIn("module_budget_usd_30d", h["reasons"][0]["fix"])
 
-    def test_budget_exhausted_with_other_rc_is_still_analyze_failed_red(self):
+    def test_real_failure_with_rc2_during_budget_pause_is_red(self):
         self.over_budget()
-        h = compute(self.root, analyze_rc=1)
+        self.last_run("failed", rc=2)
+        h = compute(self.root, analyze_rc=2)
         self.assertEqual(h["status"], "red")
         self.assertIn("analyze_failed", codes(h))
         self.assertIn("budget_paused", codes(h))
-        self.assertNotIn("no_recent_success", codes(h))
+
+    def test_rc2_without_last_run_file_stays_red_during_budget_pause(self):
+        self.over_budget()
+        h = compute(self.root, analyze_rc=2)
+        self.assertEqual(h["status"], "red")
+        self.assertIn("analyze_failed", codes(h))
+
+    def test_budget_refused_from_another_date_suppresses_nothing(self):
+        self.over_budget()
+        self.last_run("budget_refused", run_date=day(1))
+        h = compute(self.root, analyze_rc=2)
+        self.assertIn("analyze_failed", codes(h))
+        self.assertEqual(h["status"], "red")
+
+    def test_budget_paused_alone_is_yellow_and_hides_nothing_else(self):
+        self.over_budget()
+        h = compute(self.root, analyze_rc=0)
+        self.assertIn("no_recent_success", codes(h))
+        self.assertIn("budget_paused", codes(h))
+
+    def test_failed_outcome_with_rc1_is_analyze_failed(self):
+        self.over_budget()
+        self.last_run("failed", rc=1)
+        h = compute(self.root, analyze_rc=1)
+        self.assertIn("analyze_failed", codes(h))
+
+    def test_daily_cap_refused_is_yellow_daily_cap_reached(self):
+        build_green(self.root)
+        self.last_run("daily_cap_refused")
+        h = compute(self.root, analyze_rc=2)
+        self.assertEqual(h["status"], "yellow")
+        self.assertEqual(codes(h), ["daily_cap_reached"])
+
+    def test_analyze_rc_falls_back_to_last_run_file(self):
+        build_green(self.root)
+        self.last_run("failed", rc=1)
+        h = compute(self.root)
+        self.assertEqual(h["analyze_rc"], 1)
+        self.assertIn("analyze_failed", codes(h))
 
     def test_spend_at_90_percent_is_red_spend_near_budget(self):
         build_green(self.root)
