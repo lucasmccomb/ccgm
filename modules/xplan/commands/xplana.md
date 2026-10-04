@@ -1,7 +1,7 @@
 ---
 description: Autonomous xplan - full-depth research + planning + reviews after one upfront review-count choice, with no mid-flow prompts. Presents the completed plan as a single artifact at the end.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--deepen [<plan-dir>]] [--adversarial-reviews <1|2|3>] [--unattended] [--cross-provider]
+argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--deepen [<plan-dir>]] [--adversarial-reviews <1|2|3>] [--ambiguity <0.05-0.5>] [--unattended] [--cross-provider]
 ---
 
 # xplana - Autonomous xplan
@@ -45,7 +45,7 @@ Autonomous mode affects these xplan phases:
 |-------|--------------------------------|
 | 0.1.1 (Adversarial count) | One startup choice: 1 (recommended), 2, 3. Explicit valid count skips the question. Wait for submission before all planning side effects. |
 | 0.4.0 (Source Freshness Guard) | Runs automatically with NO prompt when `--repo` is set: fetch, pin the origin default-branch anchor, expose a temp anchor worktree, and verify every repo fact against it. Never fast-forwards the user's clone. Skipped entirely for greenfield (no `--repo`). |
-| 0.5 (Discovery Interview) | Skipped. Defaults inferred per Phase 0.5 Inference Rules; recorded in `decisions.md`. **Except Q8 (live-testing authorization)**, which cannot be inferred: plan §8.6 records `NOT AUTHORIZED` and 6.A surfaces it. |
+| 0.5 (Discovery Interview) | Skipped. Defaults inferred per Phase 0.5 Inference Rules; recorded in `decisions.md`. The inferred answers are scored (goal, constraints, criteria, context) and the ambiguity value recorded without asking; weak dimensions surface in 6.A. **Except Q8 (live-testing authorization)**, which cannot be inferred: plan §8.6 records `NOT AUTHORIZED` and 6.A surfaces it. |
 | 1.0 (Research Config) | Locked to Full - all 7 research agents fire. |
 | 1.5 (Research Review) | Skipped mid-flow; summary stashed for final walkthrough. |
 | 2 (Naming Ideation) | Runs silently. Top pick auto-selected; top-5 surfaced in final walkthrough. |

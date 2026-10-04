@@ -1,7 +1,7 @@
 ---
 description: Interactive deep research + planning + execution framework for new projects and features
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--light | --autonomous] [--deepen [<plan-dir>]] [--adversarial-reviews <1|2|3>] [--unattended] [--cross-provider]
+argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--light | --autonomous] [--deepen [<plan-dir>]] [--adversarial-reviews <1|2|3>] [--ambiguity <0.05-0.5>] [--unattended] [--cross-provider]
 ---
 
 # xplan - Interactive Project Planning & Execution
@@ -26,6 +26,7 @@ A human-in-the-loop planning framework that interviews you upfront, deeply resea
 - `--repo <path>` - Analyze and plan work for an existing repo
 - `--light` - Skip the interactive interview phases; uses minimal clarification + traditional walkthrough at the end (old xplan behavior)
 - `--autonomous` (alias: `-a`) - Skip ALL mid-flow prompts; run the full research + planning + review pipeline end-to-end using best-guess inference, then present the completed plan as a structured artifact for review at the final gate. Mutually exclusive with `--light`.
+- `--ambiguity <N>` - Interview stop threshold (default 0.20). The interview scores goal, constraints, criteria (and context for existing repos) after each answer and ends when ambiguity is at or below N. See Phase 0.5.1b.
 - `--cross-provider` - Opt into native Claude/Codex adversarial review. A clear natural-language request is equivalent; a review count, autonomous mode, or execution authorization alone is not opt-in.
 - `--deepen [<plan-dir>]` - Skip fresh planning; load an existing plan and run targeted deepening passes on under-specified sections. See "Deepen Mode" below.
 
@@ -122,6 +123,7 @@ Extract from `$ARGUMENTS`:
 - **`--light`**: (Optional) Flag to skip interactive interview phases
 - **`--autonomous`** (alias `-a`): (Optional) Flag to skip ALL mid-flow prompts and run the full pipeline end-to-end. Mutually exclusive with `--light` - if both are set, error and stop.
 - **`--adversarial-reviews <1|2|3>`**: Number of adversarial passes, default recommendation one. Validate before any planning side effect. A clear natural-language count in the request is equivalent to an explicit value; conflicting or ambiguous counts require clarification before planning.
+- **`--ambiguity <N>`**: (Optional) Interview stop threshold for Phase 0.5.1b, a number from 0.05 to 0.5. Default `0.20`. Any other value: error and stop before planning side effects. Has no effect with `--light` or `--autonomous` (no interview); autonomous still records scores.
 - **`--cross-provider`**: Explicitly enable the optional cross-provider run; also accept a clear natural-language request. Store `review_mode: cross-provider`; otherwise store `review_mode: lead`. Do not infer opt-in from a count or another skill.
 - **`--unattended`**: Explicitly no interactive channel. Only this explicit unattended invocation may default to one without submission; `--autonomous` alone does not.
 - **`--deepen [<plan-dir>]`**: (Optional) Iteratively deepen an existing plan instead of creating a new one. Also triggered when the free-text argument is exactly `deepen` (intent keyword). If a plan directory path follows the flag, use it; otherwise fall back to the current working directory.
@@ -414,7 +416,7 @@ After 5.6 passes, run Phase 5.7 using the fresh deepen invocation's selected cou
 
 **Skip this phase entirely if `--light` OR `--autonomous` flag is active.**
 - `--light`: proceed to Phase 1 with no interview. **Q8 (live-testing authorization) is deferred, not dropped** — ask it at Phase 3.3.5 point 7, once the suite's live-testing steps are known. A user is present in light mode, so the grant is available; skipping it would silently produce a `NOT AUTHORIZED` plan.
-- `--autonomous`: proceed to Phase 1 with full-depth research forced (see Inference Rules below). Inferred answers must be written to `decisions.md` so they are visible during the final walkthrough. Q8 is the one question autonomous mode cannot answer for the user: record `NOT AUTHORIZED` in §8.6 and surface it at 6.A.
+- `--autonomous`: proceed to Phase 1 with full-depth research forced (see Inference Rules below). Inferred answers must be written to `decisions.md` so they are visible during the final walkthrough. The ambiguity gate is not asked: score the inferred answers once per the 0.5.1b table and record scores, gap notes and ambiguity under "Phase 0.5 Ambiguity Gate" with status `autonomous (not gated)`. Q8 is the one question autonomous mode cannot answer for the user: record `NOT AUTHORIZED` in §8.6 and surface it at 6.A.
 
 **Goal**: Reach 95%+ confidence about what the user wants to build before committing to research and planning. A wrong assumption at this stage cascades into hours of wasted work.
 
@@ -455,6 +457,50 @@ options:
 ```
 
 If the user selects a clarifying option, ask a focused follow-up free-text question, then re-confirm. Repeat until you hit 95% confidence. Do not proceed to 0.5.2 until confirmed.
+
+### 0.5.2 Context Questions
+
+### 0.5.1a Round 0: Lock the Components
+
+Before any scored question, name the components of the scope (for example "web app, API, background worker, billing") as a short list drawn from the concept, then confirm it in one AskUserQuestion. Put the list in the question text. Later scoring rates clarity against this fixed list; if the user changes it, restate it and re-confirm once.
+
+```
+question: "Before I ask detail questions, here is the shape of the scope as I read it: [component list, one line each]. Is this the right set of components?"
+options:
+  - "Yes, this is the set"
+  - "Add or remove components (I'll describe)"
+```
+
+### 0.5.1b Scored Rounds and the Ambiguity Gate
+
+Each answer after Round 0 is a round. After every answer, score each dimension from 0.0 (unknown) to 1.0 (fully specified) against the Round 0 components, with a one-line gap note per dimension:
+
+| Dimension | What a 1.0 means | Greenfield weight | Existing-repo weight |
+|---|---|---|---|
+| goal | What to build and for whom is unambiguous | 0.40 | 0.35 |
+| constraints | Scope limits, must-use tech, deadlines are known | 0.30 | 0.25 |
+| criteria | Success is testable | 0.30 | 0.25 |
+| context | Existing code, patterns and integration points are understood (existing repo only) | n/a | 0.15 |
+
+```
+ambiguity = 1 - sum(weight x score)
+```
+
+Use the Existing-repo column when `--repo` is set or Q1 is "Adding to an existing codebase"; otherwise Greenfield. Compute the sum with a shell one-liner or `python3 -c`, not in your head.
+
+After each round, print one line before the next question: `Round N - ambiguity 0.NN (target <= T) - weakest: {dimension} ({score}: {gap note})`. T is the `--ambiguity` value, default `0.20`.
+
+The next question targets the weakest dimension and says so in its question text. Keep the ask-context style: the payload carries its own context. Example:
+
+```
+question: "Round 3, ambiguity 0.41 (target 0.20). Weakest dimension: criteria (0.3) - you have described what to build but not how you will know it works. For the invoice export component, what would make you call v1 done?"
+```
+
+Draw questions from Q1-Q7 below when they fit the weakest dimension (skip ones already answered), otherwise write a targeted question. Q8 and 0.5.3 are not scored; ask them after the gate.
+
+**Gate**: the interview ends when ambiguity is at or below T, or when the user explicitly overrides ("enough", "proceed", or an "Override" option on a question). At round 10, add a soft warning to the next question's text: ambiguity is still above T after 10 rounds; offer to proceed anyway. Never end the interview silently above T, and never refuse an override. On an override, record the ambiguity at that point with status `overridden`.
+
+**Record** under "Phase 0.5 Ambiguity Gate" in `decisions.md` (hold in context until Phase 3.7 creates the file): the component list, final per-dimension scores with gap notes, final ambiguity, threshold, rounds used, and status `met` or `overridden`.
 
 ### 0.5.2 Context Questions
 
@@ -1083,7 +1129,7 @@ Create `~/code/plans/{concept-name}/decisions.md`:
 | 1 | ... | ... | ... | ... |
 ```
 
-Include all stack decisions from Phase 2.5 and scope decisions from Phase 2.6.
+Include all stack decisions from Phase 2.5 and scope decisions from Phase 2.6, and the "Phase 0.5 Ambiguity Gate" block from Phase 0.5.1b (omitted for `--light`).
 
 ---
 
@@ -1664,7 +1710,7 @@ Structure the output in this exact order, as a single message (or a small number
 - If no critical findings: state that explicitly
 
 **7. Assumptions that might need correction**
-- Render the full Phase 0.5 Inferences block from decisions.md
+- Render the full Phase 0.5 Inferences block from decisions.md, plus the Phase 0.5 Ambiguity Gate scores (call out any dimension under 0.7 as an assumption to confirm)
 - Include the Phase 2 naming auto-selection (with the top-5 alternatives inline so the user can swap)
 - Include the Phase 2.6 scope inference
 - Include the Phase 2.7 multi-agent setup inference
