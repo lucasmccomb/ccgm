@@ -1869,7 +1869,7 @@ class TaskLevelIsolationTests(unittest.TestCase):
 
         with mock.patch("memory_eval.run_task", side_effect=fake_run_task):
             exit_code = me.main([
-                "--tasks", str(tasks_dir / "*.json"),
+                "--full", "--tasks", str(tasks_dir / "*.json"),
                 "--offline", str(OFFLINE_FIXTURES),
                 "--runs", "1",
                 "--backbone", "fixture-model",
@@ -1921,7 +1921,7 @@ class TaskLevelIsolationTests(unittest.TestCase):
         with mock.patch("memory_eval.run_task", side_effect=fake_run_task):
             with self.assertRaises(KeyboardInterrupt):
                 me.main([
-                    "--tasks", str(tasks_dir / "*.json"),
+                    "--full", "--tasks", str(tasks_dir / "*.json"),
                     "--offline", str(OFFLINE_FIXTURES),
                     "--runs", "1",
                     "--backbone", "fixture-model",
@@ -2004,7 +2004,7 @@ class WholeRunAbortTests(unittest.TestCase):
                 mock.patch("memory_eval._call_judge_api", side_effect=counting_judge), \
                 contextlib.redirect_stderr(stderr):
             exit_code = me.main([
-                "--tasks", str(self.tasks_dir / "*.json"),
+                "--full", "--tasks", str(self.tasks_dir / "*.json"),
                 "--runs", "1",
                 "--backbone", "fixture-model",
                 "--claude-bin", "/usr/bin/true",
@@ -2129,7 +2129,7 @@ class WholeRunAbortTests(unittest.TestCase):
                 ), \
                 contextlib.redirect_stderr(stderr):
             exit_code = me.main([
-                "--tasks", str(self.tasks_dir / "*.json"),
+                "--full", "--tasks", str(self.tasks_dir / "*.json"),
                 "--runs", "1", "--backbone", "fixture-model",
             ])
 
@@ -2194,7 +2194,7 @@ class WholeRunAbortTests(unittest.TestCase):
             side_effect=AssertionError("resolve_claude_bin must not run in --offline mode"),
         ), contextlib.redirect_stderr(stderr):
             exit_code = me.main([
-                "--tasks", str(TASKS_DIR / "06-canary-unrelated-rename.json"),
+                "--full", "--tasks", str(TASKS_DIR / "06-canary-unrelated-rename.json"),
                 "--offline", str(OFFLINE_FIXTURES),
                 "--runs", "1", "--backbone", "fixture-model",
             ])
@@ -2274,7 +2274,7 @@ class PartialLaunchFailureTests(unittest.TestCase):
                 mock.patch("memory_eval._call_judge_api", side_effect=judge), \
                 contextlib.redirect_stderr(io.StringIO()):
             exit_code = me.main([
-                "--tasks", str(self.tasks_dir / "*.json"), "--runs", "5",
+                "--full", "--tasks", str(self.tasks_dir / "*.json"), "--runs", "5",
                 "--backbone", "fixture-model", "--claude-bin", "/usr/bin/true",
                 "--date", "2026-09-02",
             ])
@@ -2591,9 +2591,12 @@ class RunsValidationTests(unittest.TestCase):
         args = me.build_arg_parser().parse_args(["--runs", "3"])
         self.assertEqual(args.runs, 3)
 
-    def test_default_runs_is_positive(self):
+    def test_default_runs_is_positive_for_both_suites(self):
         args = me.build_arg_parser().parse_args([])
-        self.assertGreaterEqual(args.runs, 1)
+        self.assertIsNone(args.runs)
+        self.assertEqual(me.resolve_runs(args.runs, smoke=True), me.SMOKE_RUNS)
+        self.assertEqual(me.resolve_runs(args.runs, smoke=False), me.DEFAULT_RUNS)
+        self.assertEqual(me.resolve_runs(7, smoke=True), 7)
 
 
 if __name__ == "__main__":

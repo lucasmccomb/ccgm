@@ -2,6 +2,20 @@
 """Memory eval harness: with/without-memory A/B on a coding-native seed task
 suite, with a saturation third arm and a four-bucket outcome classifier.
 
+DEFAULT SUITE: the regression smoke (#1098 item 4.2). The tasks marked
+`"smoke": true` (one uplift, one canary, contradiction-01, dreamed-01) run in
+two arms (baseline, treatment), runs 3, on the map model: 24 sessions, about
+$1.50. Each run is graded by the task's deterministic `grader.checks` (file
+exists, regex present or absent), so there is no judge call. Per-run output,
+the workdir diff, grader results and the dreamed task's mined proposals land
+under `evals/<date>/`. `--full` runs everything below instead: the 9-task,
+3-arm, LLM-judged suite (270 sessions plus 270 judge calls, about $21).
+
+Arm auth (#1038): with CLAUDE_CODE_OAUTH_TOKEN (a long-lived subscription
+token from `claude setup-token`) the arms bill the subscription and cost.log
+records them as `eval:arm:subscription` at $0; otherwise they use the API key.
+See resolve_arm_auth().
+
 Orchestrates Epic 7 of the CCGM durable-memory plan (plan.md §5 Epic 7).
 For each task: build a fresh temp fixture workdir, seed a temp learnings
 store with the task's `seed_learnings`, then run `claude -p` under an
@@ -75,11 +89,14 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
+import difflib
 import hashlib
 import importlib
 import importlib.util
 import json
 import os
+import re
 import shlex
 import shutil
 import statistics
@@ -111,7 +128,9 @@ learnings_store = tm._import_sibling_module(  # noqa: SLF001
 # ---------------------------------------------------------------------------
 
 DEFAULT_RUNS = 5
-DEFAULT_MAX_BUDGET_USD_PER_RUN = 0.50
+# Per-session `--max-budget-usd` (#1098 item 3.5): a smoke session is a few
+# turns on a tiny fixture.
+DEFAULT_MAX_BUDGET_USD_PER_RUN = 0.25
 DEFAULT_RUN_TIMEOUT_S = 300
 # Gate freshness defaults; config keys `eval_freshness_days` and
 # `max_unevaluated_writes` in `optimistic_integration` override them.
@@ -156,6 +175,31 @@ HIGH_VALUE_SAT_TOLERANCE = 0.5      # treatment may be at most 0.5 below full_co
 HIGH_VALUE_EFFICIENCY_RATIO = 0.5   # treatment mean_total_input_tokens must be <= 0.5 * full_context mean_total_input_tokens (#789: total incl. cached prompt tokens, not just marginal input_tokens)
 
 ARMS = ("baseline", "treatment", "full_context")
+
+# The regression smoke (#1098 item 4.2), the default suite: the tasks that
+# carry `"smoke": true`, two arms, runs 3, the map model, deterministic
+# graders in place of the judge. 4 tasks x 2 arms x 3 runs = 24 sessions.
+# `--full` runs the 9-task, 3-arm, judged suite instead.
+SMOKE_ARMS = ("baseline", "treatment")
+SMOKE_RUNS = 3
+# Preflight price of one smoke session: the RCA's $0.05-0.07 per Sonnet
+# session on these small fixtures. 24 x 0.06 + the dreamed task's mining
+# estimate stays under the $2.00 refresh cap.
+SMOKE_SESSION_COST_USD = 0.06
+
+# Subscription auth for the arms (#1038). `claude setup-token` mints a
+# long-lived OAuth token; given as CLAUDE_CODE_OAUTH_TOKEN it authenticates
+# `claude -p` without a login in the config dir, so it works under the
+# isolated CLAUDE_CONFIG_DIR + HOME. The token comes from the environment
+# (which includes the dreaming .env, loaded by dream_analyze.load_env()), or
+# from a file named by CCGM_EVAL_OAUTH_TOKEN_FILE or the config key
+# `optimistic_integration.eval_oauth_token_file`.
+OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
+OAUTH_TOKEN_FILE_ENV = "CCGM_EVAL_OAUTH_TOKEN_FILE"
+OAUTH_TOKEN_FILE_CONFIG_KEY = "eval_oauth_token_file"
+# cost.log label of a subscription session: recorded at $0 because it bills
+# the subscription, not the API account.
+SUBSCRIPTION_LABEL = "eval:arm:subscription"
 
 # Stage-2 #771 Recommend fix (defense-in-depth: "refuse unless proven safe"
 # over "allow unless proven dangerous"): run_claude_p()'s isolated arm
@@ -218,8 +262,12 @@ BUDGET_ABORT_MARKER_SUFFIX = ".budget-abort"
 # 270-session run on 2026-10-04 ($20.97 / 270). Recalibrate when a run's
 # ledger rows say otherwise.
 ESTIMATED_SESSION_COST_USD = 0.08
-# Preflight price of the dreamed task's in-eval mining (2 map + 1 reduce).
-ESTIMATED_MINING_COST_USD = 0.50
+# Preflight price of the dreamed task's in-eval mining: once per run, not per
+# arm run (2 map + 1 reduce, all on the map model, see write_mining_budget()).
+# Each call reads about 6k tokens (a ~3 KB prompt plus two ~3 KB transcripts)
+# and writes up to about 3k: 6k x $2/M + 3k x $10/M = $0.042; three calls
+# round up to $0.15.
+ESTIMATED_MINING_COST_USD = 0.15
 # Preflight guess at a judge request's payload size, in characters.
 ESTIMATED_JUDGE_PAYLOAD_CHARS = 8000
 _COST_EPSILON = 1e-9
@@ -339,7 +387,7 @@ class CostTracker:
         if label.startswith("eval:arm:"):
             self.sessions_run += 1
             self.max_session_cost_usd = max(self.max_session_cost_usd, cost_usd)
-        if cost_usd > 0 or in_tok or out_tok:
+        if cost_usd > 0 or in_tok or out_tok or label == SUBSCRIPTION_LABEL:
             da._append_cost(self.ledger_path, self.date, in_tok, out_tok, cost_usd, label)  # noqa: SLF001 -- the analyzer's own ledger writer
 
 
@@ -349,6 +397,66 @@ _COST_TRACKER: CostTracker | None = None
 def set_cost_tracker(tracker: CostTracker | None) -> None:
     global _COST_TRACKER
     _COST_TRACKER = tracker
+
+
+@dataclasses.dataclass(frozen=True)
+class ArmAuth:
+    """How the `claude -p` arms authenticate: `subscription` (an OAuth token
+    from `claude setup-token`, billed to the subscription) or `api_key`
+    (billed to the API account). `source` says where the token came from,
+    never what it is: the token is kept out of repr() so it cannot reach a
+    log line."""
+
+    kind: str
+    token: str | None = dataclasses.field(default=None, repr=False)
+    source: str = "ANTHROPIC_API_KEY"
+
+
+def _read_token_file(path_text: str) -> str | None:
+    try:
+        text = Path(path_text).expanduser().read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return text.strip() or None
+
+
+def resolve_arm_auth(cfg: dict[str, Any]) -> ArmAuth:
+    """Prefer a subscription OAuth token, fall back to the API key (#1038).
+    Order: CLAUDE_CODE_OAUTH_TOKEN in the environment, then the file named by
+    CCGM_EVAL_OAUTH_TOKEN_FILE, then the config key
+    `optimistic_integration.eval_oauth_token_file`. An empty or unreadable
+    token file counts as absent."""
+    token = (os.environ.get(OAUTH_TOKEN_ENV) or "").strip()
+    if token:
+        return ArmAuth("subscription", token, OAUTH_TOKEN_ENV)
+    configured = (cfg.get("optimistic_integration") or {}).get(OAUTH_TOKEN_FILE_CONFIG_KEY)
+    for label, path_text in (
+        (OAUTH_TOKEN_FILE_ENV, os.environ.get(OAUTH_TOKEN_FILE_ENV)),
+        (f"config {OAUTH_TOKEN_FILE_CONFIG_KEY}", configured),
+    ):
+        if path_text:
+            token = _read_token_file(str(path_text)) or ""
+            if token:
+                return ArmAuth("subscription", token, f"{label} ({path_text})")
+    return ArmAuth("api_key")
+
+
+@dataclasses.dataclass
+class RunContext:
+    """Per-process run state shared by every arm run, set once by main():
+    the evals/<date>/ artifact directory (None: write none) and how the arms
+    authenticate."""
+
+    artifact_dir: Path | None = None
+    auth: ArmAuth = dataclasses.field(default_factory=lambda: ArmAuth("api_key"))
+
+
+_RUN_CONTEXT: RunContext | None = None
+
+
+def set_run_context(ctx: RunContext | None) -> None:
+    global _RUN_CONTEXT
+    _RUN_CONTEXT = ctx
 
 
 def forward_mining_cost(state_dir: Path) -> None:
@@ -375,15 +483,22 @@ def forward_mining_cost(state_dir: Path) -> None:
 
 
 def write_mining_budget(state_dir: Path) -> None:
-    """Hand the sandboxed analyzer what is left of the run cap as its daily
-    cap, so mining cannot overspend what the arms and judges already used."""
+    """Configure the sandboxed analyzer for in-eval mining. Eval-only: the
+    nightly analyzer's own config is never read or changed.
+
+    * The reduce step runs on the map model (Sonnet) instead of Opus. The
+      dreamed task mines two tiny synthetic transcripts, so the cheaper model
+      is enough, and it takes the mining estimate from about $0.50 to $0.15.
+    * What is left of the run cap becomes the analyzer's daily cap, so mining
+      cannot overspend what the arms and judges already used."""
     tracker = _COST_TRACKER
-    if tracker is None or tracker.cap_usd == float("inf"):
+    if tracker is None:
         return
+    config: dict[str, Any] = {"reduce_model": tracker.cfg.get("map_model", da.DEFAULT_MAP_MODEL)}
+    if tracker.cap_usd != float("inf"):
+        config["daily_cost_cap_usd"] = max(0.0, tracker.remaining_usd())
     state_dir.mkdir(parents=True, exist_ok=True)
-    (state_dir / "config.json").write_text(
-        json.dumps({"daily_cost_cap_usd": max(0.0, tracker.remaining_usd())}), encoding="utf-8",
-    )
+    (state_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
 
 
 def today_iso() -> str:
@@ -588,6 +703,159 @@ def snapshot_workdir(
         out[rel] = text
         total += len(text)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Deterministic graders (the smoke's replacement for the LLM judge)
+# ---------------------------------------------------------------------------
+
+_REGEX_FLAGS = {"i": re.IGNORECASE, "m": re.MULTILINE, "s": re.DOTALL}
+
+
+def task_grader(task: dict[str, Any]) -> dict[str, Any]:
+    """The grader of a smoke task: `grader` on the task, or on `follow_up`
+    for the dreamed task. Raises ValueError when there is none."""
+    grader = task.get("grader") or (task.get("follow_up") or {}).get("grader")
+    if not isinstance(grader, dict) or not grader.get("checks"):
+        raise ValueError(f"task {task.get('id')!r} has no grader.checks, so the smoke cannot grade it")
+    return grader
+
+
+def _grader_path(workdir: Path, rel: str) -> Path:
+    rel_path = Path(rel)
+    if rel_path.is_absolute() or ".." in rel_path.parts:
+        raise ValueError(f"grader path must stay inside the workdir: {rel!r}")
+    return workdir / rel_path
+
+
+def _regex_flags(spec: str) -> int:
+    flags = 0
+    for ch in spec or "":
+        if ch not in _REGEX_FLAGS:
+            raise ValueError(f"unknown regex flag {ch!r} (use i, m or s)")
+        flags |= _REGEX_FLAGS[ch]
+    return flags
+
+
+def _read_checked_file(workdir: Path, rel: str) -> str | None:
+    path = _grader_path(workdir, rel)
+    if not path.is_file():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _evaluate_check(check: dict[str, Any], workdir: Path) -> bool:
+    """One mechanical check against the agent's finished workdir. A check on
+    a file that does not exist fails, whichever way it is phrased: an absent
+    file proves nothing about what it would have said."""
+    kind = check.get("kind")
+    if kind == "file_exists":
+        return _grader_path(workdir, check["path"]).is_file()
+    if kind == "glob_empty":
+        pattern = check["pattern"]
+        if Path(pattern).is_absolute() or ".." in Path(pattern).parts:
+            raise ValueError(f"grader glob must stay inside the workdir: {pattern!r}")
+        return not any(p.is_file() for p in workdir.glob(pattern))
+    if kind in ("regex", "not_regex"):
+        text = _read_checked_file(workdir, check["path"])
+        if text is None:
+            return False
+        found = re.search(check["pattern"], text, _regex_flags(check.get("flags", ""))) is not None
+        return found if kind == "regex" else not found
+    raise ValueError(f"unknown grader check kind {kind!r}")
+
+
+def run_grader(grader: dict[str, Any], workdir: Path) -> dict[str, Any]:
+    """Grade a finished run with the task's checks: no model, no network.
+    `pass` needs every check; `score` is 10 x the share that passed, so the
+    arm aggregates (mean_score, pass_rate) work unchanged."""
+    ids = [c["id"] for c in grader["checks"]]
+    if len(set(ids)) != len(ids):
+        raise ValueError(f"grader check ids must be unique: {ids}")
+    results = [{"id": c["id"], "pass": _evaluate_check(c, workdir)} for c in grader["checks"]]
+    passed = sum(1 for r in results if r["pass"])
+    return {
+        "pass": passed == len(results),
+        "score": round(10.0 * passed / len(results), 4),
+        "checks": results,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Run artifacts (#1098 item 4.2, R10): what an agent did, kept so a result can
+# be diagnosed after the sandbox is gone
+# ---------------------------------------------------------------------------
+
+_DIFF_MAX_FILE_BYTES = 200_000
+_DIFF_MAX_TOTAL_BYTES = 2_000_000
+
+
+def workdir_diff(fixture_files: dict[str, str], workdir: Path) -> str:
+    """Unified diff of the workdir as the agent left it against the fixture
+    it started from; new files diff against /dev/null."""
+    after = snapshot_workdir(workdir, max_file_bytes=_DIFF_MAX_FILE_BYTES, max_total_bytes=_DIFF_MAX_TOTAL_BYTES)
+    chunks = []
+    for name in sorted(set(fixture_files) | set(after)):
+        before_text = fixture_files.get(name)
+        after_text = after.get(name)
+        if before_text == after_text:
+            continue
+        chunks.extend(difflib.unified_diff(
+            (before_text or "").splitlines(keepends=True), (after_text or "").splitlines(keepends=True),
+            fromfile=f"a/{name}" if before_text is not None else "/dev/null",
+            tofile=f"b/{name}" if after_text is not None else "/dev/null",
+        ))
+        if chunks and not chunks[-1].endswith("\n"):
+            chunks[-1] += "\n"
+    return "".join(chunks)
+
+
+def _safe_part(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]", "_", text) or "_"
+
+
+def artifact_dir_for(task_id: str, *parts: str) -> Path | None:
+    """`evals/<date>/<task_id>/<parts...>` under the run's artifact root, or
+    None when this run keeps no artifacts."""
+    ctx = _RUN_CONTEXT
+    if ctx is None or ctx.artifact_dir is None:
+        return None
+    return ctx.artifact_dir.joinpath(_safe_part(task_id), *(_safe_part(p) for p in parts))
+
+
+def write_run_artifacts(
+    *, task_id: str, backbone: str, arm: str, run_index: int, output: str, diff: str,
+    result_meta: dict[str, Any], graded: dict[str, Any] | None,
+) -> None:
+    run_dir = artifact_dir_for(task_id, backbone, f"{arm}-{run_index}")
+    if run_dir is None:
+        return
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "output.txt").write_text(output, encoding="utf-8")
+    (run_dir / "workdir.diff").write_text(diff, encoding="utf-8")
+    (run_dir / "result.json").write_text(json.dumps(result_meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if graded is not None:
+        (run_dir / "grader.json").write_text(json.dumps(graded, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def write_mining_artifacts(
+    task_id: str, *, proposals_path: Path, applied_info: dict[str, Any], injected_facts: list[str],
+) -> None:
+    """The dreamed task's mined proposals and what was applied and injected:
+    the evidence that tells a "dreamed no-lift" result apart (R10)."""
+    mining_dir = artifact_dir_for(task_id, "mining")
+    if mining_dir is None:
+        return
+    mining_dir.mkdir(parents=True, exist_ok=True)
+    proposals = proposals_path.read_text(encoding="utf-8") if proposals_path.is_file() else ""
+    (mining_dir / "proposals.jsonl").write_text(proposals, encoding="utf-8")
+    (mining_dir / "applied.json").write_text(
+        json.dumps({"applied": applied_info, "injected_facts": injected_facts}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -822,6 +1090,7 @@ def run_claude_p(
     claude_bin: str,
     max_budget_usd: float,
     timeout_s: int,
+    oauth_token: str | None = None,
 ) -> dict[str, Any]:
     """Invoke the real `claude -p` binary under the isolated config. Never
     raises on a subprocess failure/timeout/unparseable-output -- returns a
@@ -833,18 +1102,27 @@ def run_claude_p(
     `claude_bin` should already be an absolute path (main() runs it through
     resolve_claude_bin first, #1027). A bare name still works when the
     ambient PATH resolves it, but relying on that is what let a launchd
-    PATH turn every run into a silent format error for seven weeks."""
+    PATH turn every run into a silent format error for seven weeks.
+
+    Auth (#1038): with `oauth_token` the child gets CLAUDE_CODE_OAUTH_TOKEN
+    and NO ANTHROPIC_API_KEY (an API key in the environment outranks the
+    subscription token, so passing both would bill the API account); without
+    it the child gets the API key. Neither is ever inherited from the
+    ambient environment."""
     home_dir.mkdir(parents=True, exist_ok=True)
     env = {key: os.environ[key] for key in SUBPROCESS_ENV_ALLOWLIST if key in os.environ}
     env.update(
         {
             "HOME": str(home_dir),
             "CLAUDE_CONFIG_DIR": str(config_dir),
-            "ANTHROPIC_API_KEY": api_key or "",
             "CCGM_LEARNINGS_INJECT": "true" if inject else "false",
             "CCGM_LEARNINGS_DIR": str(learnings_dir),
         }
     )
+    if oauth_token:
+        env[OAUTH_TOKEN_ENV] = oauth_token
+    else:
+        env["ANTHROPIC_API_KEY"] = api_key or ""
     cmd = [
         claude_bin,
         "-p",
@@ -1132,19 +1410,29 @@ def _run_one(
     api_url: str,
     offline_score: dict[str, Any] | None,
     sandbox_root: Path,
+    grader: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """One arm run. With a `grader` (the smoke) the finished workdir is
+    graded by its deterministic checks and the judge is never called;
+    without one (`--full`) the judge scores it."""
     run_root = Path(tempfile.mkdtemp(prefix=f"ccgm-eval-{arm}-{run_index}-", dir=str(sandbox_root)))
     workdir = run_root / project_slug
     home_dir = run_root / "home"
     config_dir = run_root / "claude-config"
     build_fixture_workdir(fixture_files, workdir)
     build_isolated_config(config_dir)
+    ctx = _RUN_CONTEXT
+    auth = ctx.auth if ctx is not None else ArmAuth("api_key")
+    subscription = auth.kind == "subscription"
 
     if offline_score is not None:
         arm_score = offline_score
+        # A canned run can stand in for the agent's edits: `files` are written
+        # over the fixture, so the real graders run on realistic output.
+        build_fixture_workdir(arm_score.get("files") or {}, workdir)
         result = {
             "is_error": False,
-            "result": "[offline: claude -p not invoked]",
+            "result": arm_score.get("output", "[offline: claude -p not invoked]"),
             "num_turns": arm_score.get("turns", 0),
             "total_cost_usd": arm_score.get("cost_usd", 0.0),
             "usage": {
@@ -1154,20 +1442,24 @@ def _run_one(
         }
     else:
         tracker = _COST_TRACKER
-        if tracker is not None:
+        # A subscription session spends no API dollars, so it neither waits
+        # on nor draws down the run cap.
+        if tracker is not None and not subscription:
             tracker.check(tracker.next_session_estimate(max_budget_usd), "claude -p session")
+        claude_kwargs = {"oauth_token": auth.token} if subscription else {}
         result = run_claude_p(
             prompt=prompt, workdir=workdir, config_dir=config_dir, home_dir=home_dir,
             model=backbone, inject=inject, api_key=api_key, learnings_dir=learnings_dir,
             claude_bin=claude_bin, max_budget_usd=max_budget_usd, timeout_s=timeout_s,
+            **claude_kwargs,
         )
         if tracker is not None:
             session_usage = result.get("usage") or {}
             tracker.record(
                 in_tok=int(session_usage.get("input_tokens", 0) or 0),
                 out_tok=int(session_usage.get("output_tokens", 0) or 0),
-                cost_usd=float(result.get("total_cost_usd", 0.0) or 0.0),
-                label=f"eval:arm:{backbone}",
+                cost_usd=0.0 if subscription else float(result.get("total_cost_usd", 0.0) or 0.0),
+                label=SUBSCRIPTION_LABEL if subscription else f"eval:arm:{backbone}",
             )
         if result.get("is_error"):
             # Keep the first failure's raw detail for the whole-run abort in
@@ -1189,7 +1481,12 @@ def _run_one(
         # open the gate on a partially broken harness. A run that did not
         # execute must not move a score in EITHER direction.
         judged = {"pass": False, "score": 0.0, "usage": {"input_tokens": 0, "output_tokens": 0}}
+        graded = None
+    elif grader is not None:
+        graded = run_grader(grader, workdir)
+        judged = {"pass": graded["pass"], "score": graded["score"], "usage": {"input_tokens": 0, "output_tokens": 0}}
     else:
+        graded = None
         final_files = {} if offline_score is not None else snapshot_workdir(workdir)
         payload = build_judge_payload(
             prompt=prompt, criteria=criteria, final_files=final_files,
@@ -1221,7 +1518,10 @@ def _run_one(
         "total_input_tokens": input_tokens + cache_read_input_tokens + cache_creation_input_tokens,
         "output_tokens": int(usage.get("output_tokens", 0) or 0),
         "turns": int(result.get("num_turns", 0) or 0),
-        "run_cost_usd": float(result.get("total_cost_usd", 0.0) or 0.0),
+        # A subscription session bills no API dollars; the CLI's own figure
+        # (a list-price estimate) stays in the run's result.json artifact as
+        # `reported_cost_usd`.
+        "run_cost_usd": 0.0 if subscription else float(result.get("total_cost_usd", 0.0) or 0.0),
         "judge_input_tokens": int(judged.get("usage", {}).get("input_tokens", 0) or 0),
         "judge_output_tokens": int(judged.get("usage", {}).get("output_tokens", 0) or 0),
         "is_error": bool(result.get("is_error", False)),
@@ -1236,6 +1536,21 @@ def _run_one(
         # _aggregate_arm_runs() to exclude this run from mean_score.
         "judge_error": judged.get("error"),
     }
+    if graded is not None:
+        row["grader"] = graded
+    if ctx is not None and ctx.artifact_dir is not None:
+        write_run_artifacts(
+            task_id=task_id, backbone=backbone, arm=arm, run_index=run_index,
+            output=str(result.get("result") or ""), diff=workdir_diff(fixture_files, workdir),
+            result_meta={
+                "task_id": task_id, "backbone": backbone, "arm": arm, "run": run_index,
+                "inject": inject, "auth": auth.kind, "is_error": bool(result.get("is_error", False)),
+                "num_turns": row["turns"], "usage": result.get("usage") or {},
+                "reported_cost_usd": float(result.get("total_cost_usd", 0.0) or 0.0),
+                "recorded_cost_usd": row["run_cost_usd"],
+            },
+            graded=graded,
+        )
     shutil.rmtree(run_root, ignore_errors=True)
     return row
 
@@ -1270,6 +1585,30 @@ def _aggregate_arm_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     # predicate over both keeps the two from drifting apart.
     executed_runs = [r for r in runs if not (r.get("is_error") or r.get("launch_error"))]
     scored_runs = [r for r in executed_runs if not r.get("judge_error")]
+    stats = _aggregate_arm_stats(runs, executed_runs, scored_runs)
+    # Graded runs (the smoke) keep each run's check results in the row.
+    if any("grader" in r for r in runs):
+        executed_ids = {id(r) for r in executed_runs}
+        stats["run_results"] = [
+            {
+                "run": i,
+                "executed": id(r) in executed_ids,
+                "pass": bool(r["pass"]) if id(r) in executed_ids else None,
+                "score": r["score"] if id(r) in executed_ids else None,
+                # Per-check results, the input of the gate's check-level rule.
+                "checks": (
+                    [{"id": c["id"], "pass": bool(c["pass"])} for c in r["grader"]["checks"]]
+                    if id(r) in executed_ids and r.get("grader") else []
+                ),
+            }
+            for i, r in enumerate(runs)
+        ]
+    return stats
+
+
+def _aggregate_arm_stats(
+    runs: list[dict[str, Any]], executed_runs: list[dict[str, Any]], scored_runs: list[dict[str, Any]],
+) -> dict[str, Any]:
     return {
         "mean_score": statistics.fmean(r["score"] for r in scored_runs) if scored_runs else 0.0,
         "pass_rate": (sum(1 for r in scored_runs if r["pass"]) / len(scored_runs)) if scored_runs else 0.0,
@@ -1310,10 +1649,14 @@ def run_arms(
     api_url: str,
     offline_scores: dict[str, Any] | None,
     sandbox_root: Path,
+    arms: tuple[str, ...] = ARMS,
+    grader: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Run all three arms, `runs` times each, for one (task, backbone)
-    combination. Returns {"baseline": {...}, "treatment": {...},
-    "full_context": {...}} of aggregated per-arm stats."""
+    """Run `arms` (all three by default), `runs` times each, for one (task,
+    backbone) combination. Returns {"baseline": {...}, "treatment": {...},
+    "full_context": {...}} of aggregated per-arm stats; an arm that was not
+    run carries the empty aggregate (`runs: 0`). With a `grader` (the smoke)
+    runs are graded by its checks and the judge is never called."""
     arm_prompts = {
         "baseline": prompt,
         "treatment": prompt,
@@ -1323,6 +1666,9 @@ def run_arms(
 
     out: dict[str, dict[str, Any]] = {}
     for arm in ARMS:
+        if arm not in arms:
+            out[arm] = _aggregate_arm_runs([])
+            continue
         offline_score = None
         if offline_scores is not None:
             offline_score = offline_scores.get(arm) or {}
@@ -1333,7 +1679,7 @@ def run_arms(
                 backbone=backbone, inject=arm_inject[arm], api_key=api_key, claude_bin=claude_bin,
                 max_budget_usd=max_budget_usd, timeout_s=timeout_s, judge_model=judge_model,
                 judge_system_prompt=judge_system_prompt, criteria=criteria, api_url=api_url,
-                offline_score=offline_score, sandbox_root=sandbox_root,
+                offline_score=offline_score, sandbox_root=sandbox_root, grader=grader,
             )
             for i in range(runs)
         ]
@@ -1407,9 +1753,36 @@ def classify_bucket(
     return "inconclusive", delta, delta_sat
 
 
+def classify_smoke_bucket(*, baseline_mean: float, treatment_mean: float) -> tuple[str, float, float]:
+    """Bucket of a smoke row (baseline vs treatment only, no full_context
+    arm). Reporting only: the gate reads pass rates through assess_row().
+    `regression` and `uplift` use the same delta thresholds as the full
+    classifier; anything between is `neutral`. delta_sat is 0.0 (no arm to
+    compare against)."""
+    delta = treatment_mean - baseline_mean
+    if delta <= REGRESSION_DELTA_THRESHOLD:
+        return "regression", delta, 0.0
+    if delta >= HIGH_VALUE_DELTA_THRESHOLD:
+        return "uplift", delta, 0.0
+    return "neutral", delta, 0.0
+
+
 # ---------------------------------------------------------------------------
 # Per-task orchestration (the 8 non-dreamed tasks)
 # ---------------------------------------------------------------------------
+
+
+def _classify_arms(arms: dict[str, dict[str, Any]], *, smoke: bool) -> tuple[str, float, float]:
+    if smoke:
+        return classify_smoke_bucket(
+            baseline_mean=arms["baseline"]["mean_score"], treatment_mean=arms["treatment"]["mean_score"],
+        )
+    return classify_bucket(
+        baseline_mean=arms["baseline"]["mean_score"], treatment_mean=arms["treatment"]["mean_score"],
+        full_context_mean=arms["full_context"]["mean_score"],
+        treatment_input_tokens=arms["treatment"]["mean_total_input_tokens"],
+        full_context_input_tokens=arms["full_context"]["mean_total_input_tokens"],
+    )
 
 
 def run_task(
@@ -1426,6 +1799,7 @@ def run_task(
     api_url: str,
     offline_all_scores: dict[str, Any] | None,
     sandbox_root: Path,
+    smoke: bool = False,
 ) -> list[dict[str, Any]]:
     task_id = task["id"]
     kind = task["kind"]
@@ -1435,6 +1809,7 @@ def run_task(
     criteria = task.get("criteria") or []
     facts = full_context_facts(task)
     project_slug = task_id
+    grader = task_grader(task) if smoke else None
 
     offline_task_scores = offline_scores_for_task(offline_all_scores, task_id) if offline_all_scores is not None else None
 
@@ -1450,18 +1825,14 @@ def run_task(
             api_key=api_key, claude_bin=claude_bin, max_budget_usd=max_budget_usd, timeout_s=timeout_s,
             judge_model=judge_model, judge_system_prompt=judge_system_prompt, api_url=api_url,
             offline_scores=offline_task_scores, sandbox_root=sandbox_root,
+            arms=SMOKE_ARMS if smoke else ARMS, grader=grader,
         )
         shutil.rmtree(store_root, ignore_errors=True)
 
-        bucket, delta, delta_sat = classify_bucket(
-            baseline_mean=arms["baseline"]["mean_score"], treatment_mean=arms["treatment"]["mean_score"],
-            full_context_mean=arms["full_context"]["mean_score"],
-            treatment_input_tokens=arms["treatment"]["mean_total_input_tokens"],
-            full_context_input_tokens=arms["full_context"]["mean_total_input_tokens"],
-        )
+        bucket, delta, delta_sat = _classify_arms(arms, smoke=smoke)
         rows.append(_build_result_row(
             task_id=task_id, kind=kind, backbone=backbone, runs=runs, offline=offline_all_scores is not None,
-            arms=arms, bucket=bucket, delta=delta, delta_sat=delta_sat, seed=seed_learnings,
+            arms=arms, bucket=bucket, delta=delta, delta_sat=delta_sat, seed=seed_learnings, smoke=smoke,
         ))
     return rows
 
@@ -1526,7 +1897,7 @@ def downgrade_bucket_for_launch_failures(
 def _build_result_row(
     *, task_id: str, kind: str, backbone: str, runs: int, offline: bool,
     arms: dict[str, dict[str, Any]], bucket: str, delta: float, delta_sat: float, extra: dict[str, Any] | None = None,
-    seed: Any = None,
+    seed: Any = None, smoke: bool = False,
 ) -> dict[str, Any]:
     token_delta = arms["treatment"]["mean_input_tokens"] + arms["treatment"]["mean_output_tokens"] - (
         arms["baseline"]["mean_input_tokens"] + arms["baseline"]["mean_output_tokens"]
@@ -1555,6 +1926,16 @@ def _build_result_row(
         "cost_usd": round(total_cost, 6),
         "bucket": bucket,
     }
+    if smoke:
+        row["suite"] = "smoke"
+        regressed = regressed_checks(row)
+        if regressed:
+            row["regressed_checks"] = regressed
+            row["bucket"] = "regression"
+    elif _RUN_CONTEXT is not None:
+        row["suite"] = "full"
+    if _RUN_CONTEXT is not None and not offline:
+        row["auth"] = _RUN_CONTEXT.auth.kind
     if seed is not None:
         # The gate checks a non-canary task only when this changed since the
         # previous run (#1098 item 2.1).
@@ -1739,6 +2120,7 @@ def run_dreamed_task(
     offline_dir: Path | None,
     offline_all_scores: dict[str, Any] | None,
     sandbox_root: Path,
+    smoke: bool = False,
 ) -> list[dict[str, Any]]:
     """The bizlogic-001 / adrev-305 end-to-end task: mine -> analyze ->
     apply -> A/B on a real synthetic transcript corpus, plus a paired
@@ -1778,6 +2160,11 @@ def run_dreamed_task(
             applied_info = apply_proposal_row(accepted, learnings_dir=store_root)
             applied_info["proposal_id"] = accepted.get("id")
             follow_up_facts = [accepted.get("content", "")]
+        # Keep what mining produced before the sandbox goes: without it a
+        # "dreamed no-lift" result cannot be told apart (R10).
+        write_mining_artifacts(
+            task_id, proposals_path=proposals_path, applied_info=applied_info, injected_facts=follow_up_facts,
+        )
 
     project_slug = signal["slug"]
     fixture_files = (follow_up.get("fixture") or {}).get("files") or {}
@@ -1786,6 +2173,7 @@ def run_dreamed_task(
     facts = follow_up.get("full_context_facts") or follow_up_facts
 
     offline_task_scores = offline_scores_for_task(offline_all_scores, task_id) if offline_all_scores is not None else None
+    grader = task_grader(task) if smoke else None
 
     rows: list[dict[str, Any]] = []
     for backbone in backbones:
@@ -1795,16 +2183,12 @@ def run_dreamed_task(
             api_key=api_key, claude_bin=claude_bin, max_budget_usd=max_budget_usd, timeout_s=timeout_s,
             judge_model=judge_model, judge_system_prompt=judge_system_prompt, api_url=api_url,
             offline_scores=offline_task_scores, sandbox_root=sandbox_root,
+            arms=SMOKE_ARMS if smoke else ARMS, grader=grader,
         )
-        bucket, delta, delta_sat = classify_bucket(
-            baseline_mean=arms["baseline"]["mean_score"], treatment_mean=arms["treatment"]["mean_score"],
-            full_context_mean=arms["full_context"]["mean_score"],
-            treatment_input_tokens=arms["treatment"]["mean_total_input_tokens"],
-            full_context_input_tokens=arms["full_context"]["mean_total_input_tokens"],
-        )
+        bucket, delta, delta_sat = _classify_arms(arms, smoke=smoke)
         rows.append(_build_result_row(
             task_id=task_id, kind="dreamed", backbone=backbone, runs=runs, offline=offline,
-            arms=arms, bucket=bucket, delta=delta, delta_sat=delta_sat,
+            arms=arms, bucket=bucket, delta=delta, delta_sat=delta_sat, smoke=smoke,
             # The dreamed task's seed is the learning mining produced tonight.
             seed=follow_up_facts,
             extra={
@@ -1924,16 +2308,25 @@ def write_budget_abort_marker(
     return path
 
 
+def smoke_session_estimate(*, subscription: bool) -> float:
+    """Preflight price of one smoke session: a subscription session spends no
+    API dollars."""
+    return 0.0 if subscription else SMOKE_SESSION_COST_USD
+
+
 def estimate_run_cost(
     tasks: list[dict[str, Any]], *, backbones: list[str], runs: int, judge_model: str,
-    judge_system_prompt: str, tracker: CostTracker,
+    judge_system_prompt: str, tracker: CostTracker, arms: int = len(ARMS), judge: bool = True,
 ) -> float:
-    """Preflight estimate: arm sessions at the typical session price, one
-    judge call per session, and the mining cost of each dreamed task."""
-    sessions = len(tasks) * len(backbones) * len(ARMS) * runs
-    judge = tracker.judge_estimate(judge_model, judge_system_prompt, ESTIMATED_JUDGE_PAYLOAD_CHARS)
+    """Preflight estimate: arm sessions at the tracker's session price, one
+    judge call per session when there is a judge (the smoke has none), and the
+    mining cost of each dreamed task."""
+    sessions = len(tasks) * len(backbones) * arms * runs
+    judge_cost = (
+        tracker.judge_estimate(judge_model, judge_system_prompt, ESTIMATED_JUDGE_PAYLOAD_CHARS) if judge else 0.0
+    )
     mining = sum(ESTIMATED_MINING_COST_USD for t in tasks if t["kind"] == "dreamed")
-    return sessions * (tracker.session_estimate_usd + judge) + mining
+    return sessions * (tracker.session_estimate_usd + judge_cost) + mining
 
 
 def _read_results_file(path: Path) -> list[dict[str, Any]]:
@@ -2032,9 +2425,44 @@ def _scored_runs(arm: dict[str, Any], runs: int) -> int:
     return max(0, runs - failed - judge_failed)
 
 
+def _check_pass_counts(arm: dict[str, Any]) -> tuple[int, dict[str, int]]:
+    """(executed graded runs, check id -> runs that passed it) for one arm of
+    a smoke row; (0, {}) when the arm carries no per-check results."""
+    graded = [r for r in arm.get("run_results") or [] if r.get("executed") and r.get("checks")]
+    counts: dict[str, int] = {}
+    for run in graded:
+        for check in run["checks"]:
+            counts[check["id"]] = counts.get(check["id"], 0) + (1 if check["pass"] else 0)
+    return len(graded), counts
+
+
+def regressed_checks(row: dict[str, Any]) -> list[str]:
+    """Check ids on which treatment regressed against baseline: the baseline
+    arm passes the check in at least 2 of 3 runs (SUPPORTED_FRACTION) and the
+    treatment arm fails it in at least 2 of 3, each arm with at least
+    MIN_SUPPORTED_RUNS graded runs. This is the gate's rule at the grain it
+    states ("treatment fails a check baseline passes"): a task whose other
+    checks fail in baseline can still regress on the one it passes. Empty for
+    a row without per-check results (the full suite, judged rows)."""
+    n_base, base_passes = _check_pass_counts(row.get("baseline") or {})
+    n_treat, treat_passes = _check_pass_counts(row.get("treatment") or {})
+    if n_base < MIN_SUPPORTED_RUNS or n_treat < MIN_SUPPORTED_RUNS:
+        return []
+    return sorted(
+        check_id for check_id, passed in base_passes.items()
+        if passed >= SUPPORTED_FRACTION * n_base
+        and check_id in treat_passes
+        and n_treat - treat_passes[check_id] >= SUPPORTED_FRACTION * n_treat
+    )
+
+
 def assess_row(row: dict[str, Any]) -> str:
     """One checked row's verdict for the gate: `regression`, `ok`, or
     `unmeasured`.
+
+    A smoke row carries per-check results, and a regression on any single
+    check counts (regressed_checks()). The task-level pass-rate rule below
+    also applies, and is the only one for a row without per-check results.
 
     A supported regression: the baseline arm passes the task's check in at
     least 2 of 3 runs (SUPPORTED_FRACTION) and the treatment arm fails it in
@@ -2050,6 +2478,8 @@ def assess_row(row: dict[str, Any]) -> str:
     runs = int(row.get("runs", 0) or 0)
     baseline = row.get("baseline") or {}
     treatment = row.get("treatment") or {}
+    if regressed_checks(row):
+        return "regression"
     n_base, n_treat = _scored_runs(baseline, runs), _scored_runs(treatment, runs)
     if n_base >= MIN_SUPPORTED_RUNS and n_treat >= MIN_SUPPORTED_RUNS:
         base_pass = round(float(baseline.get("pass_rate", 0) or 0) * n_base)
@@ -2158,7 +2588,11 @@ def gate_check(
 
     regressions = [row for row, verdict in verdicts if verdict == "regression"]
     if regressions:
-        names = ", ".join(f"{r.get('task_id')} on {r.get('backbone')}" for r in regressions)
+        names = ", ".join(
+            f"{r.get('task_id')} on {r.get('backbone')}"
+            + (f" (check: {', '.join(regressed_checks(r))})" if regressed_checks(r) else "")
+            for r in regressions
+        )
         return _gate(
             "closed", "regression",
             f"supported regression (treatment fails a check baseline passes, >= 2 of 3 runs): {names}",
@@ -2213,7 +2647,8 @@ def render_summary_table(rows: list[dict[str, Any]]) -> str:
         any_judge_error = any_judge_error or judge_err_rate > 0
         lines.append(" | ".join([
             r["task_id"], r["kind"], r["backbone"],
-            f"{r['baseline']['mean_score']:.2f}", f"{r['treatment']['mean_score']:.2f}", f"{r['full_context']['mean_score']:.2f}",
+            f"{r['baseline']['mean_score']:.2f}", f"{r['treatment']['mean_score']:.2f}",
+            f"{r['full_context']['mean_score']:.2f}" if r["full_context"].get("runs") else "-",
             f"{r['delta']:+.2f}", f"{r['delta_sat']:+.2f}", bucket_cell,
             # Worst-case across the arms, like judge_err% beside it: a
             # launch failure in ANY arm now buckets the row `error`
@@ -2262,12 +2697,31 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def resolve_runs(requested: int | None, *, smoke: bool) -> int:
+    """`--runs` when given, else the suite's own default."""
+    if requested is not None:
+        return requested
+    return SMOKE_RUNS if smoke else DEFAULT_RUNS
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="CCGM dreaming: memory eval harness (Epic 7).")
     p.add_argument("--tasks", metavar="GLOB", default=default_tasks_glob(), help="glob of task JSON files")
-    p.add_argument("--runs", type=_positive_int, default=DEFAULT_RUNS, help="runs per arm per task per backbone")
-    p.add_argument("--backbone", metavar="A,B", help="comma-separated model list (default: configured map_model,reduce_model)")
-    p.add_argument("--judge-model", metavar="MODEL", help="default: configured reduce_model")
+    p.add_argument(
+        "--full", action="store_true",
+        help="run the full 9-task, 3-arm, LLM-judged suite (270 sessions plus 270 judge calls, about $21) "
+             "instead of the default regression smoke (4 tasks x 2 arms x 3 runs, deterministic graders)",
+    )
+    p.add_argument(
+        "--runs", type=_positive_int, default=None,
+        help=f"runs per arm per task per backbone (default: {SMOKE_RUNS} for the smoke, {DEFAULT_RUNS} with --full)",
+    )
+    p.add_argument(
+        "--backbone", metavar="A,B",
+        help="comma-separated model list (default: the configured map_model for the smoke; "
+             "map_model,reduce_model with --full)",
+    )
+    p.add_argument("--judge-model", metavar="MODEL", help="--full only; default: configured reduce_model")
     p.add_argument("--offline", metavar="DIR", help="canned judge/arm scores + analyzer responses; no network, no API key")
     p.add_argument(
         "--allow-real-dir", action="store_true",
@@ -2350,11 +2804,15 @@ def main(argv: list[str] | None = None) -> int:
         print("memory_eval: ANTHROPIC_API_KEY not set; skipping (offline-only verification is fine).", file=sys.stderr)
         return 0
 
-    backbones = (
-        [b.strip() for b in args.backbone.split(",") if b.strip()]
-        if args.backbone
-        else list(dict.fromkeys([cfg.get("map_model", da.DEFAULT_MAP_MODEL), cfg.get("reduce_model", da.DEFAULT_REDUCE_MODEL)]))
-    )
+    smoke = not args.full
+    runs = resolve_runs(args.runs, smoke=smoke)
+    map_model = cfg.get("map_model", da.DEFAULT_MAP_MODEL)
+    if args.backbone:
+        backbones = [b.strip() for b in args.backbone.split(",") if b.strip()]
+    elif smoke:
+        backbones = [map_model]
+    else:
+        backbones = list(dict.fromkeys([map_model, cfg.get("reduce_model", da.DEFAULT_REDUCE_MODEL)]))
     judge_model = args.judge_model or cfg.get("reduce_model", da.DEFAULT_REDUCE_MODEL)
     judge_system_prompt = judge_prompt_path().read_text(encoding="utf-8")
     api_url = os.environ.get("CCGM_DREAMING_API_URL", da.DEFAULT_API_URL)
@@ -2363,9 +2821,39 @@ def main(argv: list[str] | None = None) -> int:
     offline_all_scores = load_offline_scores(offline_dir) if offline_dir is not None else None
 
     tasks = load_tasks(args.tasks)
+    if smoke:
+        tasks = [t for t in tasks if t.get("smoke")]
     if not tasks:
-        print(f"memory_eval: no tasks matched {args.tasks!r}", file=sys.stderr)
+        print(
+            f"memory_eval: no {'smoke ' if smoke else ''}tasks matched {args.tasks!r}"
+            + (" (pass --full to run tasks that are not marked smoke)" if smoke else ""),
+            file=sys.stderr,
+        )
         return 1
+    if smoke:
+        try:
+            for task in tasks:
+                task_grader(task)
+        except ValueError as exc:
+            print(f"memory_eval: {exc}", file=sys.stderr)
+            return 1
+
+    # Subscription auth for the arms (#1038): decided once, logged, and kept
+    # out of an offline run, which launches no agent.
+    auth = ArmAuth("api_key") if offline_dir is not None else resolve_arm_auth(cfg)
+    if offline_dir is None:
+        if auth.kind == "subscription":
+            print(
+                f"memory_eval: arm auth: subscription ({auth.source}); arm sessions bill the subscription, "
+                f"recorded as {SUBSCRIPTION_LABEL} at $0",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "memory_eval: arm auth: api_key (ANTHROPIC_API_KEY); arm sessions bill the API account. "
+                f"Set {OAUTH_TOKEN_ENV} (from `claude setup-token`) to bill the subscription instead",
+                file=sys.stderr,
+            )
 
     # Resolve the CLI to an absolute path ONCE, before anything is spent
     # (#1027). Doing it here means the arm subprocess never depends on the
@@ -2402,16 +2890,27 @@ def main(argv: list[str] | None = None) -> int:
         cap = min(run_cap, module_budget - spent_30d)
     else:
         cap = float("inf")  # offline: no billed calls, nothing to cap
-    tracker = CostTracker(cap_usd=cap, ledger_path=ledger_path, date=ledger_day, cfg=cfg)
+    arm_names = SMOKE_ARMS if smoke else ARMS
+    session_estimate = (
+        smoke_session_estimate(subscription=auth.kind == "subscription") if smoke else ESTIMATED_SESSION_COST_USD
+    )
+    tracker = CostTracker(
+        cap_usd=cap, ledger_path=ledger_path, date=ledger_day, cfg=cfg, session_estimate_usd=session_estimate,
+    )
     if offline_dir is None:
         estimate = estimate_run_cost(
-            tasks, backbones=backbones, runs=args.runs, judge_model=judge_model,
-            judge_system_prompt=judge_system_prompt, tracker=tracker,
+            tasks, backbones=backbones, runs=runs, judge_model=judge_model,
+            judge_system_prompt=judge_system_prompt, tracker=tracker, arms=len(arm_names), judge=not smoke,
         )
+        sessions = len(tasks) * len(backbones) * len(arm_names) * runs
+        shape = (
+            f"{len(tasks)} task(s) x {len(backbones)} backbone(s) x {len(arm_names)} arms x {runs} run(s) "
+            f"= {sessions} sessions, {'no judge' if smoke else 'judged'}"
+        )
+        print(f"memory_eval: preflight estimate ${estimate:.2f} of the ${cap:.2f} cap ({shape})", file=sys.stderr)
         if estimate > cap + _COST_EPSILON:
             detail = (
-                f"preflight estimate ${estimate:.2f} exceeds the ${cap:.2f} cap "
-                f"({len(tasks)} task(s) x {len(backbones)} backbone(s) x {len(ARMS)} arms x {args.runs} run(s)); "
+                f"preflight estimate ${estimate:.2f} exceeds the ${cap:.2f} cap ({shape}); "
                 "lower --runs/--tasks/--backbone or raise --max-total-usd."
             )
             print(f"memory_eval: {detail}", file=sys.stderr)
@@ -2420,6 +2919,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
     set_cost_tracker(tracker)
+    set_run_context(RunContext(artifact_dir=evals_dir() / date, auth=auth))
 
     # What the gate reads for `date` today. A budget abort puts it back.
     results_before = results_path_for_date(date).read_bytes() if results_path_for_date(date).is_file() else None
@@ -2446,23 +2946,24 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 if task["kind"] == "dreamed":
                     rows = run_dreamed_task(
-                        task, backbones=backbones, runs=args.runs, api_key=api_key or "", claude_bin=claude_bin,
+                        task, backbones=backbones, runs=runs, api_key=api_key or "", claude_bin=claude_bin,
                         max_budget_usd=args.max_budget_usd, timeout_s=args.timeout_s, judge_model=judge_model,
                         judge_system_prompt=judge_system_prompt, api_url=api_url, offline=offline_dir is not None,
                         offline_dir=offline_dir, offline_all_scores=offline_all_scores, sandbox_root=sandbox_root,
+                        smoke=smoke,
                     )
                 else:
                     rows = run_task(
-                        task, backbones=backbones, runs=args.runs, api_key=api_key or "", claude_bin=claude_bin,
+                        task, backbones=backbones, runs=runs, api_key=api_key or "", claude_bin=claude_bin,
                         max_budget_usd=args.max_budget_usd, timeout_s=args.timeout_s, judge_model=judge_model,
                         judge_system_prompt=judge_system_prompt, api_url=api_url, offline_all_scores=offline_all_scores,
-                        sandbox_root=sandbox_root,
+                        sandbox_root=sandbox_root, smoke=smoke,
                     )
             except BudgetAbortError:
                 raise
             except Exception as exc:  # noqa: BLE001 -- ANY task-orchestration failure degrades to a recorded row; it must never discard earlier tasks' results
                 print(f"memory_eval: task {task['id']!r} raised {exc!r}; recording an error row and continuing", file=sys.stderr)
-                rows = [_synthetic_error_row(task, backbones=backbones, runs=args.runs, offline=offline_dir is not None, exc=exc)]
+                rows = [_synthetic_error_row(task, backbones=backbones, runs=runs, offline=offline_dir is not None, exc=exc)]
             all_rows.extend(rows)
             # #1027: check BEFORE writing. Once every agent run of the eval
             # so far has failed to execute, nothing measurable is left to
@@ -2537,6 +3038,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     finally:
         set_cost_tracker(None)
+        set_run_context(None)
         shutil.rmtree(sandbox_root, ignore_errors=True)
 
     results_path = write_results(all_rows, date=date)

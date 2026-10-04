@@ -1,6 +1,7 @@
 {
   "id": "dreamed-01-pipeline-end-to-end",
   "kind": "dreamed",
+  "smoke": true,
   "transcript_corpus": {
     "slug": "dreamed-fixture-repo",
     "files": [
@@ -154,6 +155,15 @@
       "The platform prefers boring, well-understood technology on its core path and confines experiments to clearly bounded, low-risk areas, because operational familiarity during an incident is worth more than the marginal benefit of a novel tool.",
       "Every asynchronous message carries a schema version so a consumer can handle an older or newer shape gracefully, and a breaking change to a message format is rolled out by supporting both shapes until every consumer has been upgraded."
     ],
+    "grader": {
+      "checks": [
+        {"id": "migration file exists", "kind": "file_exists", "path": "supabase/migrations/0002_add_items_review.sql"},
+        {"id": "creates items_review", "kind": "regex", "path": "supabase/migrations/0002_add_items_review.sql", "pattern": "items_review", "flags": "i"},
+        {"id": "passed boolean defaults to false", "kind": "regex", "path": "supabase/migrations/0002_add_items_review.sql", "pattern": "passed\\s+boolean[^,;)]*default\\s+false", "flags": "i"},
+        {"id": "adds _synced_at timestamptz", "kind": "regex", "path": "supabase/migrations/0002_add_items_review.sql", "pattern": "_synced_at\\s+timestamptz", "flags": "i"},
+        {"id": "uses IF NOT EXISTS", "kind": "regex", "path": "supabase/migrations/0002_add_items_review.sql", "pattern": "CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS", "flags": "i"}
+      ]
+    },
     "criteria": [
       "The new migration file supabase/migrations/0002_add_items_review.sql exists.",
       "The migration creates a table named items_review with an id uuid primary key column and a passed boolean column that defaults to false.",

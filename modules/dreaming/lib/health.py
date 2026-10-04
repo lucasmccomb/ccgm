@@ -237,8 +237,8 @@ def _paused_fix(code: str, eval_refresh_enabled: bool) -> str:
         no_fresh = ("the next weekly eval-refresh writes fresh results; check it with "
                     "grep eval-refresh ~/.claude/logs/dreaming-daily-$(date -u +%F).log")
     else:
-        no_fresh = ("no fresh eval: eval-refresh is disabled until the Phase 4 smoke test lands "
-                    "(optimistic_integration.eval_refresh_enabled is false), so integration stays paused")
+        no_fresh = ("no fresh eval: eval_refresh_enabled is false; set optimistic_integration.eval_refresh_enabled=true "
+                    "to run the weekly regression smoke (~$1.50), or integration stays paused")
     fixes = {
         "no_results": no_fresh,
         "results_stale": no_fresh,

@@ -1,6 +1,7 @@
 {
   "id": "canary-01-unrelated-rename",
   "kind": "canary",
+  "smoke": true,
   "prompt": "Rename the function formatDate to formatDateTime throughout src/utils/date.ts, and update its one call site in src/components/Timestamp.tsx to use the new name. Do not change behavior.",
   "fixture": {
     "files": {
@@ -16,6 +17,16 @@
       "tags": ["supabase", "migrations", "postgresql"]
     }
   ],
+  "grader": {
+    "checks": [
+      {"id": "date.ts defines formatDateTime", "kind": "regex", "path": "src/utils/date.ts", "pattern": "function\\s+formatDateTime\\s*\\("},
+      {"id": "date.ts no longer defines formatDate", "kind": "not_regex", "path": "src/utils/date.ts", "pattern": "\\bformatDate\\b"},
+      {"id": "date.ts keeps its behavior", "kind": "regex", "path": "src/utils/date.ts", "pattern": "toLocaleString\\(\\)"},
+      {"id": "Timestamp.tsx calls formatDateTime", "kind": "regex", "path": "src/components/Timestamp.tsx", "pattern": "\\bformatDateTime\\b"},
+      {"id": "Timestamp.tsx no longer uses formatDate", "kind": "not_regex", "path": "src/components/Timestamp.tsx", "pattern": "\\bformatDate\\b"},
+      {"id": "no SQL was introduced", "kind": "glob_empty", "pattern": "**/*.sql"}
+    ]
+  },
   "criteria": [
     "src/utils/date.ts no longer defines formatDate and instead defines formatDateTime with the same behavior.",
     "src/components/Timestamp.tsx imports and calls formatDateTime, not formatDate.",

@@ -1194,6 +1194,23 @@ class EvalRefreshTests(OptimisticEngineTestBase):
         self.assertFalse(should_run)
         self.assertIn("old", reason)
 
+    def test_eval_refresh_is_weekly_keyed_on_results_age(self):
+        """#1098 item 4.2: the smoke refreshes once results are 7 days old, never sooner."""
+        self._write_config({"eval_refresh_enabled": True})
+        os.environ["ANTHROPIC_API_KEY"] = "fake-key-for-test"
+        self.addCleanup(lambda: os.environ.pop("ANTHROPIC_API_KEY", None))
+        evals_dir = da.dreaming_dir() / "evals"
+        evals_dir.mkdir(parents=True, exist_ok=True)
+        results = evals_dir / "2026-05-01.jsonl"
+        results.write_text("{}\n", encoding="utf-8")
+        cfg = da.load_config()
+        self.assertEqual(cfg["optimistic_integration"]["eval_refresh_min_age_days"], 7)
+        for age_days, expected in ((0.0, False), (6.9, False), (7.01, True), (30.0, True)):
+            stamp = time.time() - age_days * 86400
+            os.utime(results, (stamp, stamp))
+            should_run, reason = adp._eval_refresh_preconditions(_unique_day(), cfg)
+            self.assertEqual(should_run, expected, f"age {age_days}d: {reason}")
+
     def test_eval_refresh_skips_when_no_api_key(self):
         self._write_config({"eval_refresh_enabled": True, "eval_refresh_min_age_days": 7})
         prior = os.environ.pop("ANTHROPIC_API_KEY", None)
