@@ -22,6 +22,8 @@ from __future__ import annotations
 import os
 import platform as _platform
 import plistlib
+import pwd
+import re
 import shutil
 import subprocess
 from typing import NoReturn
@@ -31,10 +33,39 @@ __all__ = [
     "uninstall_scheduled_job",
     "list_scheduled_jobs",
     "LAUNCH_AGENTS_DIR",
+    "ForeignHomeError",
 ]
 
 
 LAUNCH_AGENTS_DIR = os.path.expanduser("~/Library/LaunchAgents")
+
+
+class ForeignHomeError(RuntimeError):
+    """Raised when scheduling is attempted from a HOME that is not the real user's."""
+
+
+def _check_real_home(op: str) -> None:
+    """Refuse to touch the scheduler unless HOME is the real user's home.
+
+    launchd labels are the same in every HOME and bootout resolves by label,
+    so an installer run under a temp HOME unloads the real job and loads one
+    that points into the temp dir. The passwd entry cannot be redirected by
+    changing $HOME, so it decides what "real" means.
+
+    CCGM_SCHED_ALLOW_FOREIGN_HOME=1 skips the check. Use it only with a fake
+    `launchctl` first on PATH.
+    """
+    if os.environ.get("CCGM_SCHED_ALLOW_FOREIGN_HOME") == "1":
+        return
+    real_home = os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+    agents_dir = os.path.realpath(LAUNCH_AGENTS_DIR)
+    home = os.path.realpath(os.path.expanduser("~"))
+    if home != real_home or not (agents_dir == real_home or agents_dir.startswith(real_home + os.sep)):
+        raise ForeignHomeError(
+            f"refusing to {op}: HOME={home!r} is not the real home {real_home!r}. "
+            "launchd labels are shared across HOMEs, so this would replace the "
+            "real job. Re-run with --no-schedule to install files only."
+        )
 
 
 def _linux_v2(_op: str) -> NoReturn:
@@ -66,6 +97,7 @@ def install_scheduled_job(label: str, command: str, hour: int, minute: int) -> N
 
     sysname = _platform.system()
     if sysname == "Darwin":
+        _check_real_home("install_scheduled_job")
         _install_launchd(label, command, hour, minute)
         return
     if sysname == "Linux":
@@ -83,6 +115,7 @@ def uninstall_scheduled_job(label: str) -> None:
     """
     sysname = _platform.system()
     if sysname == "Darwin":
+        _check_real_home("uninstall_scheduled_job")
         _uninstall_launchd(label)
         return
     if sysname == "Linux":
@@ -142,11 +175,36 @@ def _install_launchd(label: str, command: str, hour: int, minute: int) -> None:
     if shutil.which("launchctl"):
         # bootstrap is the modern (Big Sur+) way; ignore non-zero on
         # already-loaded (launchctl is grumpy about idempotency).
-        subprocess.run(
+        boot = subprocess.run(
             ["launchctl", "bootstrap", _gui_target(), path],
             check=False,
             capture_output=True,
+            text=True,
         )
+        _verify_loaded_path(label, path, boot.stderr)
+
+
+def _verify_loaded_path(label: str, path: str, bootstrap_stderr: str = "") -> None:
+    """Fail unless launchd's loaded job for `label` comes from `path`."""
+    res = subprocess.run(
+        ["launchctl", "print", f"{_gui_target()}/{label}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    loaded = None
+    for line in res.stdout.splitlines():
+        m = re.match(r"\s*path = (.+?)\s*$", line)
+        if m:
+            loaded = m.group(1)
+            break
+    if loaded is not None and os.path.realpath(loaded) == os.path.realpath(path):
+        return
+    raise RuntimeError(
+        f"launchd job {label} is not loaded from {path} "
+        f"(loaded path: {loaded!r}; launchctl print rc={res.returncode}; "
+        f"bootstrap stderr: {bootstrap_stderr.strip()!r})"
+    )
 
 
 def _uninstall_launchd(label: str) -> None:

@@ -91,6 +91,11 @@ jobs:
             bash "$t"
           done
 
+      - name: Autoheal module tests
+        # Never ran in CI before. The tests stub launchctl and the API; none
+        # touches the real scheduler.
+        run: bash modules/autoheal/tests/run-all.sh
+
       - name: relevance-injection - pytest suites (issue #985)
         # The whole tests/ directory, not one file: test_loaded_log.py,
         # test_relevance_select.py and both test_version_floor*.py were
@@ -269,6 +274,11 @@ jobs:
             echo "=== Running $t ==="
             bash "$t"
           done
+
+      - name: Autoheal module tests
+        # Never ran in CI before. The tests stub launchctl and the API; none
+        # touches the real scheduler.
+        run: bash modules/autoheal/tests/run-all.sh
 
       - name: relevance-injection - pytest suites (issue #985)
         # The whole tests/ directory, not one file: test_loaded_log.py,
