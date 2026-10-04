@@ -41,6 +41,16 @@ Files installed globally to `~/.claude/`:
 /adrev plan.md mode:headless                 # skill-to-skill: JSON envelope, no prompts
 ```
 
+## Pre-commitment, Assumptions and Rollback
+
+Three steps shape the battery:
+
+- **Pre-commitment.** Before the full read, the reviewer writes down 3-5 predicted problem areas from the title, headings and goal alone, then checks each one against the full text. Each prediction ends `confirmed`, `refuted` or `unchecked`.
+- **Assumption table.** The premise attack rates each key assumption `VERIFIED`, `REASONABLE` or `FRAGILE`. Fragile assumptions are attacked first.
+- **Rollback analysis (plan targets).** For each state-changing step, what is the recovery path if it fails partway, and is it documented or assumed?
+
+Standalone output adds two arrays beside `findings` and `survived`: `predictions[]` (`id`, `area`, `reason`, `outcome`, optional `finding`) and `assumptions[]` (`id`, `assumption`, `rating`, `evidence`, optional `finding`). Nothing in CCGM parses these fields by name: `/adrev`, `/xplan` Phase 5.7 and `/etp` apply the battery from the agent file, and the cross-agent-review native schema supplies its own findings format. Consumers that read the standalone JSON should ignore unknown keys.
+
 ## The Attack Battery
 
 1. **Premise attack** - load-bearing assumptions the author has not realized they are making

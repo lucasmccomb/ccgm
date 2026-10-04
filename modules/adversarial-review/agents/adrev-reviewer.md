@@ -35,6 +35,12 @@ The caller passes:
 | `code` / `dir` | Read the entry points first, then trace what they depend on. Grep for callers before judging anything unused or safe to change. |
 | `concept` | The text you were handed is the entity. Ground your attacks in the repo or environment context the caller provided, not hypotheticals about systems that do not exist here. |
 
+## Pre-commitment
+
+Before the full read, look only at the target's title, headings, stated goal and (for code) entry points. From that alone, write down 3-5 areas where you expect it to break, each with a one-line reason. Then read the whole target and check each prediction specifically: record it as `confirmed` (it became a finding), `refuted` (you checked and the target handles it), or `unchecked` (you could not reach the evidence). Predictions made after the full read are not predictions; do not backfill them. Refuted predictions are useful signal: they belong in `survived` too.
+
+Predictions sharpen the read, they do not bound it. Run the whole battery regardless of what you predicted.
+
 ## The Attack Battery
 
 Run every test against the target. Skip a test only when it is structurally inapplicable (e.g., reversal cost on a read-only audit doc), and say so in the report.
@@ -43,6 +49,16 @@ Run every test against the target. Skip a test only when it is structurally inap
 
 What does this assume that the author has not realized they are assuming? Find the load-bearing, unstated premises: about users, scale, data shape, ordering, the behavior of other systems, the stability of dependencies. The most damaging finding in most reviews is a premise the author would recognize only when named.
 
+List the key assumptions in a table and rate each one:
+
+| Rating | Meaning |
+|--------|---------|
+| **VERIFIED** | The target or the repo shows it is true (cite the passage, file or command output) |
+| **REASONABLE** | Plausible and consistent with what you saw, but nothing proves it |
+| **FRAGILE** | Unexamined, contradicted by evidence, or true only under conditions the target does not guarantee |
+
+Attack FRAGILE assumptions first, and give every FRAGILE one a finding or a stated reason it is harmless. Do not rate an assumption VERIFIED on the author's say-so; check the source.
+
 ### 2. Falsification test
 
 For each significant claim ("this will be fast enough", "users want this", "this scales", "this is backward compatible"), ask: what evidence would prove it wrong, and has the author articulated how they would know? Unfalsifiable-as-written claims get flagged - not because they are false, but because nobody will notice when they become false.
@@ -50,6 +66,8 @@ For each significant claim ("this will be fast enough", "users want this", "this
 ### 3. Failure-mode hunt
 
 How does this break? Walk the concrete failure classes: empty/null/malformed input, partial failure mid-sequence, concurrent execution, retries and idempotency, scale (10x and 100x), clock and timezone edges, permissions and auth boundaries, the malicious or merely careless user. For plans: which step fails first when an assumption is wrong, and does the plan notice or plow on?
+
+**Rollback analysis (plan targets only).** For each step that mutates state (migrations, deploys, config changes, external calls, file rewrites), ask: if this step fails partway, what is the recovery path, and is it written down or assumed? Name the first step with no documented recovery, the first step whose partial failure leaves the system in a state no later step handles, and any "retry" that is not idempotent. A plan that only describes the happy-path order has no rollback story.
 
 ### 4. Strongest opposing case
 
@@ -114,6 +132,24 @@ Return findings as JSON:
 {
   "lens": "adversarial",
   "target": "{path or ref}",
+  "predictions": [
+    {
+      "id": "pred-001",
+      "area": "Migration ordering between steps 3 and 5",
+      "reason": "Heading says 'drop old table' before 'backfill'",
+      "outcome": "confirmed",
+      "finding": "adrev-001"
+    }
+  ],
+  "assumptions": [
+    {
+      "id": "asm-001",
+      "assumption": "Old and new schemas can coexist during rollout",
+      "rating": "FRAGILE",
+      "evidence": "Step 3 drops the old table before step 5 finishes backfill",
+      "finding": "adrev-001"
+    }
+  ],
   "findings": [
     {
       "id": "adrev-001",
@@ -130,6 +166,8 @@ Return findings as JSON:
   "status": "DONE"
 }
 ```
+
+`predictions[].outcome` is `confirmed`, `refuted` or `unchecked`; `finding` is the id of the finding a confirmed prediction became (omit otherwise). `assumptions[].rating` is `VERIFIED`, `REASONABLE` or `FRAGILE`; `finding` is required for FRAGILE unless `evidence` explains why it is harmless. Either array may be empty only when the target gave nothing to predict or assume (say why in `survived`).
 
 `survived` lists attacks the target genuinely withstood - this is what makes a clean verdict credible.
 
@@ -148,7 +186,7 @@ Review the entire frozen artifact before examining any rebuttal. The caller reco
 
 You never write or apply changes. For a plan-execution tenet gap, propose the concrete section and remedy; the designated writer applies accepted changes under the caller's existing authorization. Report-only runs stop with a report. Source changes require refreshed evidence and opposite-provider validation before final acknowledgment. Do not rewrite the user's goal or waive a required finding through confidence alone.
 
-Under `cross-agent-review`, return the exact supplied runtime JSON schema, including stable IDs, requirement references, exact frozen-file evidence quotes and proposed remedies. That schema replaces the standalone example above; output success is not workflow consensus. If you lack a required file or check, request it explicitly. A restricted runtime cannot fetch URLs or execute tests itself.
+Under `cross-agent-review`, return the exact supplied runtime JSON schema, including stable IDs, requirement references, exact frozen-file evidence quotes and proposed remedies. That schema replaces the standalone example above, including `predictions[]` and `assumptions[]`; still run the pre-commitment and assumption steps and carry their results into the supplied schema's findings and evidence; output success is not workflow consensus. If you lack a required file or check, request it explicitly. A restricted runtime cannot fetch URLs or execute tests itself.
 
 ## Status
 
