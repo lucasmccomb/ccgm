@@ -447,6 +447,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # scores at or above this is dropped before the reduce (a value above 1
     # turns the prefilter off). See loaded_context.py for the score.
     "prefilter_threshold": loaded_context.DEFAULT_THRESHOLD,
+    # #1098 3.2: a candidate whose evidence is all tool-error friction is left
+    # to autoheal when its content scores at or above this against the error
+    # text (a value above 1 turns the rule off).
+    "friction_threshold": loaded_context.DEFAULT_FRICTION_THRESHOLD,
     # Most pending proposals (newest first) shown to the reduce so it can
     # verify or skip them instead of proposing them again.
     "reduce_pending_max": DEFAULT_REDUCE_PENDING_MAX,
@@ -2134,6 +2138,7 @@ def _main(argv: list[str] | None, info: dict[str, Any]) -> int:
         roots = loaded_context.Roots.from_env(projects_root=args.projects_root, proposals_dir=proposals_dir())
         hook_names = loaded_context.installed_hook_names(roots.hooks_dir)
         threshold = float(cfg.get("prefilter_threshold", loaded_context.DEFAULT_THRESHOLD))
+        friction_threshold = float(cfg.get("friction_threshold", loaded_context.DEFAULT_FRICTION_THRESHOLD))
         exclude_path = target_path if args.force_day else None
         for slug in planned_slugs:
             if not map_results.get(slug):
@@ -2148,6 +2153,8 @@ def _main(argv: list[str] | None, info: dict[str, Any]) -> int:
             )
             map_results[slug], dropped = loaded_context.prefilter_candidates(
                 map_results[slug], corpus, threshold=threshold, hook_names=hook_names, hooks_dir=roots.hooks_dir,
+                evidence_index=loaded_context.build_evidence_index(bundles.get(slug) or {}),
+                friction_threshold=friction_threshold,
             )
             for record in dropped:
                 record["project"] = slug
@@ -2162,7 +2169,7 @@ def _main(argv: list[str] | None, info: dict[str, Any]) -> int:
         "candidates_mapped": candidates_mapped,
         "prefilter_dropped": {
             loaded_context.ALREADY_ENCODED: sum(1 for d in prefilter_drops if d["reason"] == loaded_context.ALREADY_ENCODED),
-            loaded_context.HOOK_FRICTION: sum(1 for d in prefilter_drops if d["reason"] == loaded_context.HOOK_FRICTION),
+            loaded_context.ROUTED_TO_AUTOHEAL: sum(1 for d in prefilter_drops if d["reason"] == loaded_context.ROUTED_TO_AUTOHEAL),
         },
         "prefilter_drops": prefilter_drops,
     }

@@ -11,7 +11,7 @@
   "content": [
     {
       "type": "text",
-      "text": "{\"candidates\": [{\"type\": \"pitfall\", \"content\": \"Running ./deploy.sh --env prod outside the configured business-hours window is blocked by a pre-tool-use hook; the deploy fails with a permission-denied error before the hook's real stop reason is visible. Schedule deploys inside the configured window, or check the hook's stop reason first.\", \"evidence\": [{\"session_id\": \"fixture-friction-0001\", \"excerpt\": \"deploy.sh: line 12: permission denied. pre-tool-use hook exited 1: deploy blocked outside business hours\"}], \"occurrence_count\": 1, \"notes\": \"Two friction events in the same session point at the same root cause (hook block, not a real permission error).\"}]}"
+      "text": "{\"candidates\": [{\"type\": \"pitfall\", \"content\": \"widget-app deploys are only allowed between 09:00 and 17:00 on weekdays. Outside that window the deploy script exits with a misleading permission-denied error; ask the release owner for an exception instead of retrying.\", \"evidence\": [{\"session_id\": \"fixture-friction-0001\", \"excerpt\": \"deploy.sh: line 12: permission denied. pre-tool-use hook exited 1: deploy blocked outside business hours\"}], \"occurrence_count\": 1, \"notes\": \"Two friction events in the same session point at the same root cause (hook block, not a real permission error).\"}]}"
     }
   ]
 }

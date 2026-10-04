@@ -249,7 +249,7 @@ class PrefilterTests(TmpTestCase):
         c = self.cand("Totally novel wording about squirrels and walnuts in the cache layer.", hook_err, hook_err + " again")
         kept, dropped = lc.prefilter_candidates([c], corpus, threshold=0.6, hook_names={"auto-approve-bash.py"})
         self.assertEqual(kept, [])
-        self.assertEqual(dropped[0]["reason"], lc.HOOK_FRICTION)
+        self.assertEqual(dropped[0]["reason"], lc.ROUTED_TO_AUTOHEAL)
 
     def test_mixed_evidence_or_foreign_hook_is_not_dropped_as_hook_friction(self):
         corpus = self.corpus()
@@ -262,6 +262,92 @@ class PrefilterTests(TmpTestCase):
         kept, dropped = lc.prefilter_candidates([mixed, foreign], corpus, threshold=0.6, hook_names={"auto-approve-bash.py"})
         self.assertEqual(len(kept), 2)
         self.assertEqual(dropped, [])
+
+
+READ_ERROR = "File content (31204 tokens) exceeds maximum allowed tokens (25000). Please use offset and limit parameters to read specific portions of the file."
+READ_RESTATEMENT = (
+    "The Read tool refuses files whose content exceeds the maximum allowed tokens (25000); "
+    "use the offset and limit parameters to read specific portions of the file."
+)
+CONCLUSION = "Root cause: the generated bundle is one 40k-token line, so offset and limit never split it. Grep the bundle instead."
+
+
+def _bundle(*, friction=(), signals=()):
+    return {
+        "signals": [{"kind": kind, "session_id": "s1", "excerpt": text} for kind, text in signals],
+        "clusters": [
+            {"event_kind": "tool_error", "is_friction": True, "count": 1, "sample_session_ids": ["s1"],
+             "exemplars": [{"session_id": "s1", "excerpt": text} for text in friction]},
+            {"event_kind": "routine", "is_friction": False, "count": 50, "sample_session_ids": [], "exemplars": []},
+        ],
+    }
+
+
+class FrictionRoutingTests(TmpTestCase):
+    """#1098 3.2: friction-only candidates whose error text states the fix are
+    left to autoheal's own failure log instead of becoming proposals."""
+
+    def run_prefilter(self, candidate, bundle, **kwargs):
+        corpus = lc.build_corpus("repo", cwds=[], roots=self.roots)
+        return lc.prefilter_candidates(
+            [candidate], corpus, threshold=0.6, hook_names=set(), evidence_index=lc.build_evidence_index(bundle), **kwargs,
+        )
+
+    def cand(self, content, *excerpts):
+        return {
+            "type": "pitfall", "content": content,
+            "evidence": [{"session_id": "s1", "excerpt": e} for e in excerpts],
+            "occurrence_count": 1, "notes": None,
+        }
+
+    def test_tool_error_only_candidate_restating_the_error_is_routed_to_autoheal(self):
+        kept, dropped = self.run_prefilter(self.cand(READ_RESTATEMENT, READ_ERROR), _bundle(friction=[READ_ERROR]))
+        self.assertEqual(kept, [])
+        self.assertEqual(dropped[0]["reason"], lc.ROUTED_TO_AUTOHEAL)
+        self.assertEqual(dropped[0]["category"], "tool_error")
+        self.assertGreaterEqual(dropped[0]["score"], lc.DEFAULT_FRICTION_THRESHOLD)
+
+    def test_same_error_plus_a_conclusion_signal_is_kept(self):
+        bundle = _bundle(friction=[READ_ERROR], signals=[("conclusion", CONCLUSION)])
+        kept, dropped = self.run_prefilter(self.cand(READ_RESTATEMENT, READ_ERROR, CONCLUSION), bundle)
+        self.assertEqual(dropped, [])
+        self.assertEqual(len(kept), 1)
+
+    def test_every_signal_kind_protects_a_candidate(self):
+        for kind in ("redirection", "struggle_arc", "conclusion", "abandoned_work", "rediscovery"):
+            with self.subTest(kind=kind):
+                bundle = _bundle(friction=[READ_ERROR], signals=[(kind, "we never read generated bundles whole in this repo")])
+                kept, dropped = self.run_prefilter(
+                    self.cand(READ_RESTATEMENT, READ_ERROR, "we never read generated bundles whole in this repo"), bundle,
+                )
+                self.assertEqual((len(kept), dropped), (1, []))
+
+    def test_friction_only_candidate_that_adds_a_cause_is_kept(self):
+        content = "dist/app.min.js is a single 40k-token line, so Read with offset and limit cannot split it; Grep the file for the symbol."
+        kept, dropped = self.run_prefilter(self.cand(content, READ_ERROR), _bundle(friction=[READ_ERROR]))
+        self.assertEqual(dropped, [])
+        self.assertEqual(len(kept), 1)
+
+    def test_evidence_that_matches_nothing_in_the_bundle_is_kept(self):
+        kept, dropped = self.run_prefilter(self.cand(READ_RESTATEMENT, READ_ERROR), _bundle())
+        self.assertEqual(dropped, [])
+        self.assertEqual(len(kept), 1)
+
+    def test_without_a_bundle_the_tool_error_rule_is_off(self):
+        corpus = lc.build_corpus("repo", cwds=[], roots=self.roots)
+        kept, dropped = lc.prefilter_candidates([self.cand(READ_RESTATEMENT, READ_ERROR)], corpus, threshold=0.6, hook_names=set())
+        self.assertEqual((len(kept), dropped), (1, []))
+
+    def test_truncated_quote_of_an_exemplar_still_classifies_as_friction(self):
+        quoted = "exceeds maximum allowed tokens (25000). Please use offset and limit parameters"
+        kept, dropped = self.run_prefilter(self.cand(READ_RESTATEMENT, quoted), _bundle(friction=[READ_ERROR]))
+        self.assertEqual(kept, [])
+        self.assertEqual(dropped[0]["reason"], lc.ROUTED_TO_AUTOHEAL)
+
+    def test_friction_threshold_is_configurable(self):
+        bundle = _bundle(friction=[READ_ERROR])
+        kept, _ = self.run_prefilter(self.cand(READ_RESTATEMENT, READ_ERROR), bundle, friction_threshold=1.1)
+        self.assertEqual(len(kept), 1)
 
 
 class FingerprintKeyTests(unittest.TestCase):

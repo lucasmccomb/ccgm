@@ -2024,7 +2024,7 @@ class LoadedContextChainTests(unittest.TestCase):
         self._set_candidates(_candidate(RULE_PARAPHRASE))
         rc, summary = self._run()
         self.assertEqual(rc, 0)
-        self.assertEqual(summary["prefilter_dropped"], {"already_encoded": 1, "installed_hook_friction": 0})
+        self.assertEqual(summary["prefilter_dropped"], {"already_encoded": 1, "routed_to_autoheal": 0})
         self.assertEqual(summary["prefilter_drops"][0]["source"], str(rule))
         self.assertEqual(summary["prefilter_drops"][0]["reason"], "already_encoded")
         self.assertEqual(summary["reduce_calls"], 0, "nothing survived, so the reduce is never paid for")
@@ -2037,7 +2037,7 @@ class LoadedContextChainTests(unittest.TestCase):
         self._set_candidates(_candidate(NOVEL_CANDIDATE))
         rc, summary = self._run()
         self.assertEqual(rc, 0)
-        self.assertEqual(summary["prefilter_dropped"], {"already_encoded": 0, "installed_hook_friction": 0})
+        self.assertEqual(summary["prefilter_dropped"], {"already_encoded": 0, "routed_to_autoheal": 0})
         self.assertEqual(summary["reduce_calls"], 1)
         self.assertTrue(self._rows())
 
@@ -2049,9 +2049,30 @@ class LoadedContextChainTests(unittest.TestCase):
         self._set_candidates(_candidate(NOVEL_CANDIDATE, hook_error))
         rc, summary = self._run()
         self.assertEqual(rc, 0)
-        self.assertEqual(summary["prefilter_dropped"], {"already_encoded": 0, "installed_hook_friction": 1})
+        self.assertEqual(summary["prefilter_dropped"], {"already_encoded": 0, "routed_to_autoheal": 1})
         self.assertEqual(summary["prefilter_drops"][0]["source"], str(hook))
         self.assertEqual(summary["reduce_calls"], 0)
+
+    def test_tool_error_only_candidate_restating_the_error_is_routed_to_autoheal(self):
+        restated = "deploy.sh fails at line 12 with permission denied, so the script needs execute permission before it runs."
+        self._set_candidates(_candidate(restated, "deploy.sh: line 12: permission denied"))
+        rc, summary = self._run()
+        self.assertEqual(rc, 0)
+        self.assertEqual(summary["prefilter_dropped"], {"already_encoded": 0, "routed_to_autoheal": 1})
+        self.assertEqual(summary["prefilter_drops"][0]["reason"], "routed_to_autoheal")
+        self.assertEqual(summary["reduce_calls"], 0)
+        self.assertEqual(self._rows(), [])
+
+    def test_friction_only_candidate_with_a_new_cause_survives(self):
+        cause = (
+            "Releases fail at the deploy step because the CI checkout drops the executable bit on shell scripts; "
+            "set core.fileMode or chmod in the workflow."
+        )
+        self._set_candidates(_candidate(cause, "deploy.sh: line 12: permission denied"))
+        rc, summary = self._run()
+        self.assertEqual(rc, 0)
+        self.assertEqual(summary["prefilter_dropped"], {"already_encoded": 0, "routed_to_autoheal": 0})
+        self.assertEqual(summary["reduce_calls"], 1)
 
     def test_reduce_marking_a_proposal_already_encoded_drops_and_counts_it(self):
         self._set_candidates(_candidate(NOVEL_CANDIDATE, "hook exited 1: blocked outside business hours"))
