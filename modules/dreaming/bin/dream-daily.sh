@@ -9,7 +9,7 @@
 #   1. bin/dream-analyze.sh       (Epic 3) — mine + map/reduce -> proposals
 #   2. eval-refresh                — OFF by default (`eval_refresh_enabled`
 #      must be true; #1098 item 0.1). When opted in: weekly, live eval
-#      refresh under a hard total-cost stop so dream-eval.sh --gate's 14-day
+#      refresh under a hard total-cost stop so dream-eval.sh --gate's 7-day
 #      freshness bound stays met (fix (b) for adrev-opt-001). Runs BEFORE
 #      optimistic-integrate so a freshly-refreshed result is available to
 #      the SAME night's gate check.

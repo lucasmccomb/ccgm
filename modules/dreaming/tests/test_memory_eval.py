@@ -1679,22 +1679,61 @@ class GateTests(unittest.TestCase):
             learnings_store.append_entry(entry, slug="proj-x")
         self.assertEqual(me.gate_check()["state"], "open")
 
-    def test_dreaming_auto_add_after_results_pauses(self):
-        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=3600)
+    def _auto_adds(self, n: int) -> None:
         learnings_dir = Path(os.environ["CCGM_LEARNINGS_DIR"])
         with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
-            entry = learnings_store.build_entry(type_="pattern", content="Dreamed fact.", project="proj-x")
-            learnings_store.append_entry(entry, slug="proj-x", auto=True)
-        gate = me.gate_check()
-        self.assertEqual(gate["state"], "paused")
-        self.assertEqual(gate["code"], "stale_own_writes")
+            for i in range(n):
+                entry = learnings_store.build_entry(type_="pattern", content=f"Dreamed fact {i}.", project="proj-x")
+                learnings_store.append_entry(entry, slug="proj-x", auto=True)
 
-    def test_dreaming_auto_add_before_results_stays_open(self):
-        learnings_dir = Path(os.environ["CCGM_LEARNINGS_DIR"])
-        with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
-            entry = learnings_store.build_entry(type_="pattern", content="Dreamed fact.", project="proj-x")
-            learnings_store.append_entry(entry, slug="proj-x", auto=True)
-        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=-60)  # written after the add
+    def _config(self, **opt) -> None:
+        path = me.dreaming_dir() / "config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"optimistic_integration": opt}), encoding="utf-8")
+
+    def test_one_dreaming_write_since_the_eval_stays_open(self):
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=3600)
+        self._auto_adds(1)
+        self.assertEqual(me.gate_check()["state"], "open")
+
+    def test_three_dreaming_writes_since_a_two_day_old_eval_stay_open(self):
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=2 * 86400)
+        self._auto_adds(3)
+        self.assertEqual(me.gate_check()["state"], "open")
+
+    def test_sixteen_dreaming_writes_since_the_eval_pause(self):
+        """Default max_unevaluated_writes is 15."""
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=2 * 86400)
+        self._auto_adds(16)
+        gate = me.gate_check()
+        self.assertEqual((gate["state"], gate["code"]), ("paused", "stale_own_writes"), gate)
+        self.assertIn("16", gate["reason"])
+
+    def test_fifteen_dreaming_writes_since_the_eval_stay_open(self):
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=2 * 86400)
+        self._auto_adds(15)
+        self.assertEqual(me.gate_check()["state"], "open")
+
+    def test_an_eight_day_old_eval_pauses_by_default(self):
+        """Default eval_freshness_days is 7, so a weekly smoke keeps it fresh."""
+        self._write("2026-09-26.jsonl", self._quiet_rows(), age_s=8 * 86400)
+        gate = me.gate_check()
+        self.assertEqual((gate["state"], gate["code"]), ("paused", "results_stale"), gate)
+
+    def test_a_six_day_old_eval_is_fresh_by_default(self):
+        self._write("2026-09-28.jsonl", self._quiet_rows(), age_s=6 * 86400)
+        self.assertEqual(me.gate_check()["state"], "open")
+
+    def test_both_bounds_come_from_config(self):
+        self._config(eval_freshness_days=30, max_unevaluated_writes=2)
+        self._write("2026-09-10.jsonl", self._quiet_rows(), age_s=20 * 86400)
+        self.assertEqual(me.gate_check()["state"], "open")
+        self._auto_adds(3)
+        self.assertEqual(me.gate_check()["code"], "stale_own_writes")
+
+    def test_dreaming_writes_before_the_eval_do_not_count(self):
+        self._auto_adds(20)
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=-60)  # written after the adds
         self.assertEqual(me.gate_check()["state"], "open")
 
     # -- CLI -------------------------------------------------------------------

@@ -252,14 +252,15 @@ class DreamEvalGateCliTests(unittest.TestCase):
 
 # ---------------------------------------------------------------------------
 # Staleness (#1098 item 2.1): only dreaming's own auto-integrated
-# content-shaping writes make the eval stale, and stale PAUSES the gate.
-# An agent's in-session (non-auto) write never counts.
+# content-shaping writes count toward `max_unevaluated_writes`, and past it
+# the gate PAUSES. An agent's in-session (non-auto) write never counts.
 # ---------------------------------------------------------------------------
 
 class StaleOnlyOnDreamingsOwnWritesTests(unittest.TestCase):
     """Dreaming's own writes since the last eval change what a re-run
-    would measure, so the results no longer describe the live store and
-    the gate pauses until the next eval. In-session writes through
+    would measure; past `max_unevaluated_writes` of them the gate pauses
+    until the next eval. These tests set the limit to 0 so a single write
+    of each auto op kind shows that it counts. In-session writes through
     `ccgm-learnings-log` have nothing to do with dreaming; before #1098
     they made the eval stale on 15 of 30 nights."""
 
@@ -267,6 +268,9 @@ class StaleOnlyOnDreamingsOwnWritesTests(unittest.TestCase):
         self.tmp = _isolate_env(self)
         self.evals_dir = me.evals_dir()
         self.evals_dir.mkdir(parents=True, exist_ok=True)
+        (me.dreaming_dir() / "config.json").write_text(
+            json.dumps({"optimistic_integration": {"max_unevaluated_writes": 0}}), encoding="utf-8",
+        )
 
     def _write_results(self, *, mtime_offset_s: float | None = None) -> Path:
         path = me.write_results(_healthy_rows(), date=me.today_iso())

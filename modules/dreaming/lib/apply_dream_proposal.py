@@ -115,8 +115,9 @@ Breaker classes (#1098 item 2.2): every anomaly is infra or content
 (lib/breaker.py). A night dream-daily.sh does not integrate (gate paused or
 closed, analyzer failed) is recorded through `record_anomaly()` (the
 `record-anomaly` CLI subcommand). Infra anomalies pause that night and never
-count toward a trip; content anomalies feed the windowed breaker, and a trip
-reverts the implicated batches with `ccgm-learnings-sync revert <sha>`.
+count toward a trip. A content anomaly reverts the batch it names at once
+with `ccgm-learnings-sync revert <sha>` and feeds the windowed breaker, which
+suspends integration at 2 content anomalies in 7 nights.
 Resume is `breaker_resume_check()` (the `breaker-check` subcommand), run at
 the top of every nightly chain, independent of the gate.
 """
@@ -515,7 +516,7 @@ def _apply_learning_add(
     ]
     if method == "auto_apply":
         # adrev-opt-008: tag the engine's own optimistic writes `auto: true`
-        # so memory_eval.py's freshness clock (Epic 4) can skip them --
+        # so memory_eval.py's gate counts them toward max_unevaluated_writes --
         # only reachable because Epic 1 extended `--auto` to every
         # ccgm-learnings-log subcommand, not just verify.
         args.append("--auto")
@@ -1339,8 +1340,9 @@ def _run_sync_revert(sha: str) -> dict[str, Any]:
 def _auto_revert_batches(batch_ids: list[str], *, trigger: str, context_id: str) -> list[str]:
     """Revert each implicated batch's commit, newest first, and audit every
     attempt. Returns the batch ids now reverted (including a batch whose
-    lines were already gone). Called only after a content trip, outside
-    `_apply_lock()` (the sync CLI takes its own store-wide lock)."""
+    lines were already gone). Called after any content anomaly that names a
+    batch, outside `_apply_lock()` (the sync CLI takes its own store-wide
+    lock)."""
     if not batch_ids:
         return []
     # The sync CLI refuses to revert on a dirty tree; snapshot whatever
@@ -1385,10 +1387,12 @@ def record_anomaly(
     happens (#1098 item 2.2):
 
     * infra   -- logged and audited, never evaluated against the breaker.
-    * content -- logged, audited, and evaluated against the windowed
-                 breaker. A trip reverts every not-yet-reverted batch the
-                 window's content anomalies name, via
-                 `ccgm-learnings-sync revert <sha>`.
+    * content -- logged and audited. The batches it names are reverted at
+                 once via `ccgm-learnings-sync revert <sha>` (with any other
+                 not-yet-reverted batch a content anomaly in the window
+                 names), and it is evaluated against the windowed breaker,
+                 which suspends integration at `circuit_breaker_max_anomalies`
+                 (default 2) within `circuit_breaker_window_nights` (7).
 
     `eval_regression` is content only when a batch can explain it: the
     batches named in `batch_ids` plus every batch committed at or after
@@ -1414,7 +1418,7 @@ def record_anomaly(
         state = _read_optimistic_state()
         _append_anomalies(state, [breaker.make_entry(_utc_now_iso(), reason, implicated)], cfg)
         tripped = cls == breaker.CONTENT and _evaluate_breaker_trip(state, cfg, batch_id=context_id)
-        if tripped:
+        if cls == breaker.CONTENT:
             to_revert = _implicated_batches(state, cfg)
         _write_optimistic_state_atomic(state)
         suspended_after = bool(state.get("suspended"))
@@ -1423,7 +1427,7 @@ def record_anomaly(
         "outcome": "anomaly_recorded", "batch_id": context_id, "reason": reason, "class": cls,
         "implicated_batches": implicated,
     })
-    reverted = _auto_revert_batches(to_revert, trigger="circuit_breaker_tripped", context_id=context_id)
+    reverted = _auto_revert_batches(to_revert, trigger="content_anomaly", context_id=context_id)
 
     return {
         "outcome": "anomaly_recorded", "reason": reason, "class": cls, "ok": True, "batch_id": context_id,
@@ -2285,11 +2289,13 @@ def run_optimistic_integrate(day: str, *, shadow: bool = False) -> dict[str, Any
 
     Breaker (#1098 item 2.2): this function only READS a suspension; resume
     is `breaker_resume_check()`, run at the top of the nightly chain. Every
-    anomaly it records carries a class. Content anomalies (eviction or
-    citation concentration, the cross-night add rate) name tonight's batch;
-    if they trip the breaker, the batch is committed and then reverted with
-    every other batch the window's content anomalies name. A dirty tree and
-    a timeout are infra and never count toward a trip.
+    anomaly it records carries a class. Citation concentration and the
+    cross-night add rate are content anomalies tonight's batch explains: the
+    batch is committed and then reverted at once, whether or not the breaker
+    trips. Eviction concentration is content too but names no batch: the
+    check runs before apply and withholds that slug's evictions, so nothing
+    written is implicated. A dirty tree and a timeout are infra and never
+    count toward a trip.
 
     Never raises; a single proposal's failure (or malformation) does not
     abort the batch -- see `_process_one_proposal()`.
@@ -2356,15 +2362,16 @@ def run_optimistic_integrate(day: str, *, shadow: bool = False) -> dict[str, Any
     anomaly_slugs: set[str] = set()
     run_anomalies: list[dict[str, Any]] = []
 
-    def _anomaly(reason: str) -> None:
+    def _anomaly(reason: str, *, implicates_batch: bool = True) -> None:
         cls = breaker.anomaly_class(reason)
-        run_anomalies.append(breaker.make_entry(_utc_now_iso(), reason, [batch_id] if cls == breaker.CONTENT else []))
+        names_batch = implicates_batch and cls == breaker.CONTENT
+        run_anomalies.append(breaker.make_entry(_utc_now_iso(), reason, [batch_id] if names_batch else []))
 
     for slug, slug_rows in by_slug.items():
         eviction_rows = [r for r in slug_rows if r.get("kind") in ("learning_contradict", "learning_deprecate")]
         if _batch_anomaly_fires(eviction_rows, heads_by_slug[slug], cfg):
             anomaly_slugs.add(slug)
-            _anomaly("batch_eviction_concentration")
+            _anomaly("batch_eviction_concentration", implicates_batch=False)  # its rows are withheld
             summary["anomalies"].append({"slug": slug, "kind": "batch_eviction_concentration"})
             audit({
                 "outcome": "batch_anomaly_eviction_concentration", "batch_id": batch_id,
@@ -2473,6 +2480,7 @@ def run_optimistic_integrate(day: str, *, shadow: bool = False) -> dict[str, Any
 
         if _evaluate_breaker_trip(state, cfg, batch_id=batch_id):
             summary["circuit_breaker"] = "tripped"
+        if any(e["class"] == breaker.CONTENT for e in run_anomalies):
             to_revert = _implicated_batches(state, cfg)
 
         _write_optimistic_state_atomic(state)
@@ -2495,12 +2503,13 @@ def run_optimistic_integrate(day: str, *, shadow: bool = False) -> dict[str, Any
         )
         summary["commit"] = commit_result
 
-    # A content trip reverts tonight's batch (now committed) and every other
-    # batch the window's content anomalies name (#1098 item 2.2). A batch that
-    # applied nothing made no commit, so there is nothing of it to revert.
+    # A content anomaly that names tonight's batch reverts it (now committed)
+    # at once, along with any other not-yet-reverted batch a content anomaly
+    # in the window names (#1098 item 2.2). A batch that applied nothing made
+    # no commit, so there is nothing of it to revert.
     if summary["applied"] == 0:
         to_revert = [b for b in to_revert if b != batch_id]
-    summary["reverted"] = _auto_revert_batches(to_revert, trigger="circuit_breaker_tripped", context_id=batch_id)
+    summary["reverted"] = _auto_revert_batches(to_revert, trigger="content_anomaly", context_id=batch_id)
 
     return summary
 
@@ -2590,7 +2599,7 @@ def run_eligibility_dry_run(day: str) -> dict[str, Any]:
 
 # ---------------------------------------------------------------------------
 # Weekly, cost-capped eval refresh (optimistic-memory plan.md Epic 3, "fix
-# (b) for adrev-opt-001"): keeps dream-eval.sh --gate's 14-day freshness
+# (b) for adrev-opt-001"): keeps dream-eval.sh --gate's 7-day freshness
 # bound met without manual intervention, without competing with the
 # nightly analyzer for the SAME daily_cost_cap_usd (adrev-opt-010).
 # ---------------------------------------------------------------------------
@@ -2681,10 +2690,10 @@ def _eval_refresh_preconditions(day: str, cfg: dict[str, Any]) -> tuple[bool, st
 
 def run_eval_refresh(day: str) -> dict[str, Any]:
     """Fix (b) for adrev-opt-001: runs the full live A/B eval
-    (memory_eval.py, no --offline) to keep dream-eval.sh --gate's 14-day
+    (memory_eval.py, no --offline) to keep dream-eval.sh --gate's 7-day
     freshness bound met -- but ONLY when `_eval_refresh_preconditions()`
     passes. If not eligible, logs the reason and returns without touching
-    anything (the 14-day bound then eventually fails the gate closed on
+    anything (the freshness bound then eventually pauses the gate on
     its own -- a surfaced, safe degradation, never a silent one;
     adrev-opt-009's named, accepted drift window).
 
@@ -2908,7 +2917,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     refresh_p = sub.add_parser(
         "eval-refresh",
-        help="weekly, cost-capped live eval refresh so dream-eval.sh --gate's 14-day freshness "
+        help="weekly, cost-capped live eval refresh so dream-eval.sh --gate's 7-day freshness "
              "bound stays met without manual intervention (fix (b) for adrev-opt-001)",
     )
     refresh_p.add_argument("--day", help="defaults to today (UTC, or CCGM_DREAMING_TODAY)")

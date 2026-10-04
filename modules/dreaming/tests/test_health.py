@@ -237,7 +237,7 @@ class HealthComputeTest(unittest.TestCase):
     def test_paused_gate_fix_names_each_infra_cause(self):
         build_green(self.root)
         expected = {
-            "stale_own_writes": "integrated since the last eval",
+            "stale_own_writes": "max_unevaluated_writes",
             "harness_broken": "harness-broken",
             "budget_abort": "cost cap",
             "unmeasured_rows": "failed launches or judge errors",

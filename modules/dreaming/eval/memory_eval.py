@@ -113,7 +113,10 @@ learnings_store = tm._import_sibling_module(  # noqa: SLF001
 DEFAULT_RUNS = 5
 DEFAULT_MAX_BUDGET_USD_PER_RUN = 0.50
 DEFAULT_RUN_TIMEOUT_S = 300
-DEFAULT_EVAL_FRESHNESS_DAYS = 14
+# Gate freshness defaults; config keys `eval_freshness_days` and
+# `max_unevaluated_writes` in `optimistic_integration` override them.
+DEFAULT_EVAL_FRESHNESS_DAYS = 7
+DEFAULT_MAX_UNEVALUATED_WRITES = 15
 # A verdict is two fields; 1024 is a backstop against a truncated response,
 # not a tuning knob (#1026). The judge request pins `thinking: disabled`, so
 # this cap covers the JSON answer alone even on a model that thinks by
@@ -1951,21 +1954,21 @@ def _read_results_file(path: Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def latest_auto_integration_epoch(learnings_root: Path) -> float | None:
-    """Max timestamp (epoch seconds) across dreaming's OWN content-shaping
-    writes: add/supersede/deprecate/contradict op-events tagged `auto: true`
-    (the optimistic engine tags every write it makes, learnings_store.py
-    `_build_op_row`). These are the only writes that change what a re-run of
-    the eval would measure about dreaming, so they are the only ones that
-    make the results stale (#1098 item 2.1).
+def count_auto_writes_since(learnings_root: Path, since_epoch: float) -> int:
+    """How many of dreaming's OWN content-shaping writes landed after
+    `since_epoch`: add/supersede/deprecate/contradict op-events tagged
+    `auto: true` (the optimistic engine tags every write it makes,
+    learnings_store.py `_build_op_row`). These change what a re-run of the
+    eval would measure; past `max_unevaluated_writes` of them the gate pauses
+    (#1098 item 2.1).
 
     Excluded on purpose: `verify` counter-ops (adrev-403), every non-auto
     op-event, and legacy v1 rows. An agent's in-session `ccgm-learnings-log`
     write has nothing to do with dreaming; before #1098 it made the eval
     stale on 15 of the last 30 nights."""
     if not learnings_root.is_dir():
-        return None
-    latest: float | None = None
+        return 0
+    count = 0
     for slug_dir in learnings_root.iterdir():
         if not slug_dir.is_dir() or slug_dir.name.startswith("."):
             continue
@@ -1992,9 +1995,21 @@ def latest_auto_integration_epoch(learnings_root: Path) -> float | None:
                 if obj.get("op") not in CONTENT_SHAPING_OPS or obj.get("auto") is not True:
                     continue
                 epoch = learnings_store._parse_iso(obj.get("timestamp") or "")  # noqa: SLF001 -- same-package internal reuse
-                if epoch and (latest is None or epoch > latest):
-                    latest = epoch
-    return latest
+                if epoch and epoch > since_epoch:
+                    count += 1
+    return count
+
+
+def _gate_bounds(freshness_days: int | None, max_unevaluated_writes: int | None) -> tuple[int, int]:
+    """The two freshness bounds: explicit arguments win, else config
+    (`optimistic_integration.eval_freshness_days`, default 7, and
+    `.max_unevaluated_writes`, default 15)."""
+    opt = da.load_config().get("optimistic_integration") or {}
+    if freshness_days is None:
+        freshness_days = int(opt.get("eval_freshness_days", DEFAULT_EVAL_FRESHNESS_DAYS))
+    if max_unevaluated_writes is None:
+        max_unevaluated_writes = int(opt.get("max_unevaluated_writes", DEFAULT_MAX_UNEVALUATED_WRITES))
+    return freshness_days, max_unevaluated_writes
 
 
 def seed_fingerprint(seed: Any) -> str:
@@ -2067,7 +2082,9 @@ def _gate(state: str, code: str, reason: str, *, since: str | None = None) -> di
     return {"state": state, "code": code, "reason": reason, "since": since}
 
 
-def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float | None = None) -> dict[str, Any]:
+def gate_check(
+    *, freshness_days: int | None = None, max_unevaluated_writes: int | None = None, now: float | None = None,
+) -> dict[str, Any]:
     """The integration gate (#1098 item 2.1). Returns
     `{"state", "code", "reason", "since"}` with state one of:
 
@@ -2082,9 +2099,13 @@ def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float 
                   breaker implicates batches integrated after it.
     * `paused` -- nothing usable was measured: a harness-broken marker or a
                   budget-abort marker at least as new as the newest results,
-                  no results, results past the freshness bound, results
-                  older than dreaming's own last auto-integrated write, an
-                  empty file, or a checked row that did not fully run. An
+                  no results, results older than `eval_freshness_days`
+                  (default 7), more than `max_unevaluated_writes` (default
+                  15) of dreaming's own auto writes since the results, an
+                  empty file, or a checked row that did not fully run.
+                  Below both bounds the results stay fresh: the next weekly
+                  eval checks the accumulated writes, and the nightly
+                  recurrence metric covers the time in between. An
                   infra state: it pauses integration and is never a breaker
                   content anomaly.
 
@@ -2092,6 +2113,7 @@ def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float 
     budget_abort, no_results, results_stale, stale_own_writes,
     results_empty, unmeasured_rows."""
     now = now if now is not None else time.time()
+    freshness_days, max_unevaluated_writes = _gate_bounds(freshness_days, max_unevaluated_writes)
     results = _results_files_by_mtime()
     latest = results[-1] if results else None
     latest_mtime = latest.stat().st_mtime if latest is not None else None
@@ -2117,11 +2139,12 @@ def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float 
             f"results file {latest.name} is older than the freshness bound ({freshness_days}d)",
         )
 
-    last_auto = latest_auto_integration_epoch(_learnings_root_for_gate())
-    if last_auto is not None and latest_mtime < last_auto:
+    unevaluated = count_auto_writes_since(_learnings_root_for_gate(), latest_mtime)
+    if unevaluated > max_unevaluated_writes:
         return _gate(
             "paused", "stale_own_writes",
-            f"dreaming integrated learnings after {latest.name} was written; the results no longer describe the store",
+            f"dreaming made {unevaluated} auto writes since {latest.name}, over max_unevaluated_writes "
+            f"({max_unevaluated_writes})",
         )
 
     rows = _read_results_file(latest)
@@ -2254,7 +2277,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--gate", action="store_true",
         help="check the latest results file against the integration gate; print JSON, exit 0 open / 1 closed / 3 paused",
     )
-    p.add_argument("--freshness-days", type=int, default=DEFAULT_EVAL_FRESHNESS_DAYS)
+    p.add_argument("--freshness-days", type=int, default=None,
+                   help="gate freshness bound in days (default: config eval_freshness_days, 7)")
     p.add_argument("--date", metavar="YYYY-MM-DD", help="override the results filename date (default: today)")
     p.add_argument("--claude-bin", default=os.environ.get("CCGM_EVAL_CLAUDE_BIN", "claude"))
     p.add_argument("--max-budget-usd", type=float, default=DEFAULT_MAX_BUDGET_USD_PER_RUN, help="per-session ceiling passed to claude -p")

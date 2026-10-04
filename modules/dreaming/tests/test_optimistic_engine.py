@@ -812,37 +812,98 @@ class ContentTripAutoRevertTests(BreakerTestBase):
     def _live_contents(self, slug: str) -> set[str]:
         return {h["content"] for h in ls.project_slug(slug, use_snapshot=False)["heads"]}
 
-    def test_trip_inside_integrate_reverts_tonights_batch(self):
+    def _revert_audit(self, batch_id: str) -> list[dict]:
+        return [a for a in self._read_audit()
+                if a.get("outcome") == "batch_auto_reverted" and a.get("batch_id") == batch_id]
+
+    def test_one_attributable_anomaly_reverts_its_batch_without_suspending(self):
+        """A single content anomaly a batch explains reverts that batch at
+        once; suspension still waits for the threshold (2 in 7 nights)."""
+        self._write_config({"rolling_add_rate_max": 1, "max_add_supersede_per_run": 100,
+                            "circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
+        slug = _unique_slug("revert-once-rate")
+        day = _unique_day()
+        self._write_day(day, self._add_rows(slug, 2, "rr-add"))
+
+        summary = adp.run_optimistic_integrate(day)
+
+        self.assertEqual(summary["applied"], 2, summary)
+        self.assertIsNone(summary["circuit_breaker"], summary)
+        self.assertEqual(summary["reverted"], [summary["batch_id"]], summary)
+        self.assertFalse(self._read_optimistic_state_file()["suspended"])
+        self.assertEqual(self._live_contents(slug), set(), "the batch's adds are gone from the store")
+        short_sha = summary["commit"]["sha"]
+        self.assertTrue(self._git_subjects()[0].startswith(f"Revert {short_sha}"), self._git_subjects()[:2])
+        reverted = self._revert_audit(summary["batch_id"])
+        self.assertEqual(len(reverted), 1, reverted)
+        self.assertTrue(reverted[0]["sha"].startswith(short_sha), reverted[0])
+        self.assertEqual(reverted[0]["trigger"], "content_anomaly")
+
+    def test_a_second_attributable_anomaly_within_the_window_also_suspends(self):
+        self._write_config({"rolling_add_rate_max": 1, "max_add_supersede_per_run": 100,
+                            "circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
         self._write_optimistic_state({
             "suspended": False, "suspended_at": None,
             "anomaly_log": [_content_entry(self._iso(time.time() - 86400))], "last_run": None,
         })
-        evict_slug = _unique_slug("revert-evict")
-        t0 = self._seed_learning(evict_slug, content="e0", confidence=8, tags=["x"])
-        t1 = self._seed_learning(evict_slug, content="e1", confidence=8, tags=["x"])
-        add_slug = _unique_slug("revert-add")
-        self._commit("seed")
+        slug = _unique_slug("revert-and-trip")
         day = _unique_day()
-        self._write_day(day, [
-            _proposal_row(pid="rv-e0", kind="learning_deprecate", project=evict_slug, target_id=t0, confidence=9),
-            _proposal_row(pid="rv-e1", kind="learning_deprecate", project=evict_slug, target_id=t1, confidence=9),
-            *self._add_rows(add_slug, 2, "rv-add"),
-        ])
+        self._write_day(day, self._add_rows(slug, 2, "rt-add"))
 
         summary = adp.run_optimistic_integrate(day)
 
         self.assertEqual(summary["circuit_breaker"], "tripped", summary)
-        self.assertEqual(summary["applied"], 2, summary)
         self.assertEqual(summary["reverted"], [summary["batch_id"]], summary)
-        self.assertEqual(self._live_contents(add_slug), set(), "the batch's adds are gone from the store")
-        short_sha = summary["commit"]["sha"]
-        self.assertTrue(self._git_subjects()[0].startswith(f"Revert {short_sha}"), self._git_subjects()[:2])
-        reverted = [a for a in self._read_audit() if a.get("outcome") == "batch_auto_reverted"
-                    and a.get("batch_id") == summary["batch_id"]]
-        self.assertEqual(len(reverted), 1, reverted)
-        self.assertTrue(reverted[0]["sha"].startswith(short_sha), reverted[0])
-        self.assertEqual(reverted[0]["trigger"], "circuit_breaker_tripped")
+        self.assertTrue(self._read_optimistic_state_file()["suspended"])
+        self.assertEqual(self._live_contents(slug), set())
 
+    def test_eviction_concentration_reverts_nothing(self):
+        """The eviction-concentration check runs before apply and withholds
+        that slug's evictions, so no written row is implicated. It still
+        counts toward suspension."""
+        evict_slug = _unique_slug("evict-norevert")
+        t0 = self._seed_learning(evict_slug, content="e0", confidence=8, tags=["x"])
+        t1 = self._seed_learning(evict_slug, content="e1", confidence=8, tags=["x"])
+        add_slug = _unique_slug("evict-norevert-add")
+        self._commit("seed")
+        day = _unique_day()
+        self._write_day(day, [
+            _proposal_row(pid="en-e0", kind="learning_deprecate", project=evict_slug, target_id=t0, confidence=9),
+            _proposal_row(pid="en-e1", kind="learning_deprecate", project=evict_slug, target_id=t1, confidence=9),
+            *self._add_rows(add_slug, 1, "en-add"),
+        ])
+
+        summary = adp.run_optimistic_integrate(day)
+
+        self.assertTrue(any(a["kind"] == "batch_eviction_concentration" for a in summary["anomalies"]), summary)
+        self.assertEqual(summary["reverted"], [], summary)
+        self.assertEqual(len(self._live_contents(add_slug)), 1)
+        log = self._read_optimistic_state_file()["anomaly_log"]
+        self.assertEqual([(e["class"], e["batch_ids"]) for e in log if e["reason"] == "batch_eviction_concentration"],
+                         [("content", [])])
+
+    def _fresh_since(self) -> str:
+        """A `since` no earlier test's batch commit can match: commit times
+        have whole-second resolution, so start on the next second."""
+        boundary = float(int(time.time()) + 1)
+        time.sleep(boundary - time.time() + 0.01)
+        return self._iso(boundary)
+
+    def test_one_attributable_regression_reverts_its_batch_without_suspending(self):
+        since = self._fresh_since()
+        slug = _unique_slug("regress-once")
+        day = _unique_day()
+        self._write_day(day, self._add_rows(slug, 2, "ro-add"))
+        batch = adp.run_optimistic_integrate(day)
+        self.assertEqual(batch["applied"], 2, batch)
+
+        result = adp.record_anomaly("eval_regression", since=since)
+
+        self.assertEqual((result["class"], result["circuit_breaker"]), ("content", None), result)
+        self.assertEqual(result["reverted"], [batch["batch_id"]])
+        self.assertFalse(self._read_optimistic_state_file()["suspended"])
+        self.assertEqual(self._live_contents(slug), set())
+        self.assertEqual(len(self._revert_audit(batch["batch_id"])), 1)
     def test_regression_trip_reverts_batches_integrated_since_the_last_green_run(self):
         since = self._iso(time.time() - 5)
         slug = _unique_slug("revert-regress")

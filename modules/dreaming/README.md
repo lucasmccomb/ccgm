@@ -381,8 +381,13 @@ that never opened. Both now work as follows.
   treatment fails it in at least 2 of 3, with at least 3 scored runs per arm.
 - No `high_value` row and no live dreamed row are required; the buckets are
   reporting only.
-- **Stale** means dreaming's own `auto: true` writes landed after the newest
-  results. An agent's in-session `ccgm-learnings-log` write never counts.
+- **Fresh** while both bounds hold: the newest results are at most
+  `eval_freshness_days` old (default 7, so a weekly smoke keeps them fresh),
+  and dreaming has made at most `max_unevaluated_writes` (default 15) of its
+  own `auto: true` writes since them. Past either bound the gate pauses
+  (`results_stale` or `stale_own_writes`). Writes below the bound are checked
+  by the next weekly eval, and in between by the nightly recurrence metric.
+  An agent's in-session `ccgm-learnings-log` write never counts.
 - A checked row with a failed launch or judge error pauses the gate unless it
   still shows a regression, so a harness flake never opens it.
 - `since` on a closed gate is the time of the results file before the newest
@@ -399,7 +404,7 @@ that never opened. Both now work as follows.
 | Class | Reasons | Effect |
 |---|---|---|
 | infra | `eval_gate_paused`, `harness_failure`, `analyze_failed`, `timeout`, `dirty_learnings_tree`, `eval_regression_unattributed` | no integration that night; never counts toward a trip |
-| content | `eval_regression` (a batch integrated since `since` explains it), `batch_eviction_concentration`, `session_citation_concentration`, `rolling_add_rate_exceeded`, `recurrence_spike` | counts toward the windowed trip (`circuit_breaker_max_anomalies` in `circuit_breaker_window_nights`); a trip reverts every implicated batch with `ccgm-learnings-sync revert <sha>` and audits `batch_auto_reverted` |
+| content | `eval_regression` (a batch integrated since `since` explains it), `batch_eviction_concentration`, `session_citation_concentration`, `rolling_add_rate_exceeded`, `recurrence_spike` | the batch it names is reverted at once with `ccgm-learnings-sync revert <sha>` and audited `batch_auto_reverted`; it also counts toward suspension (`circuit_breaker_max_anomalies`, default 2, in `circuit_breaker_window_nights`, default 7). `batch_eviction_concentration` names no batch: its rows are withheld before apply |
 
 - **Resume** runs first in every nightly chain (`apply_dream_proposal.py
   breaker-check`), before analyze and independent of the gate: after

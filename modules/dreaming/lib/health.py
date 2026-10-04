@@ -214,7 +214,8 @@ def _paused_fix(code: str, eval_refresh_enabled: bool) -> str:
     fixes = {
         "no_results": no_fresh,
         "results_stale": no_fresh,
-        "stale_own_writes": f"dreaming integrated since the last eval, so its results no longer describe the store; {no_fresh}",
+        "stale_own_writes": ("dreaming made more auto writes since the last eval than max_unevaluated_writes "
+                             f"allows (default 15); {no_fresh}"),
         "harness_broken": "the eval harness launched no agent run; read the first failure in ~/.claude/dreaming/evals/*.harness-broken",
         "budget_abort": "the last eval stopped on its cost cap; see grep eval_ ~/.claude/dreaming/config.json and tail ~/.claude/dreaming/cost.log",
         "unmeasured_rows": "the last eval had failed launches or judge errors on a checked task, so it cannot rule out a regression; re-run bash ~/.claude/bin/dream-eval.sh",
