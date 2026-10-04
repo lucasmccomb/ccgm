@@ -1,5 +1,5 @@
 {
-  "_description": "User-correction phrases that the UserPromptSubmit detector flags. Mirror the regex set inlined in hooks/user-correction-detector.py. The hook loads this file at module import; tests override the path via CCGM_CORRECTION_PATTERNS. Order matters only for disambiguation when two patterns could match the same string; the first match wins. Patterns are case-insensitive and word-bounded where it makes sense. False positives are acceptable -- the analyzer's threshold logic is the second line of defense.",
+  "_description": "User-correction phrases that the UserPromptSubmit detector flags. The detector applies them only to a short prompt (<= 300 chars) that follows a tool_failure or user_interrupt row within the last two turns of the session, so the patterns can stay loose. The hook loads this file at module import; tests override the path via CCGM_CORRECTION_PATTERNS. Order matters only for disambiguation when two patterns could match the same string; the first match wins. Patterns are case-insensitive.",
   "patterns": [
     {
       "name": "no_not_like_that",
@@ -33,8 +33,8 @@
     },
     {
       "name": "instead",
-      "regex": "\\b(?:do\\s+\\w+\\s+)?instead\\b",
-      "description": "User says '... instead' -- proposes an alternative to the agent's chosen approach."
+      "regex": "\\b(?:use|do|run|try|call|write)\\s+\\S+(?:\\s+\\S+){0,5}\\s+instead\\b",
+      "description": "User says 'use X instead' / 'do A instead' -- proposes an alternative to the agent's chosen approach. A bare 'instead' no longer matches: it fired on pasted specs."
     },
     {
       "name": "thats_wrong",
@@ -45,6 +45,11 @@
       "name": "undo",
       "regex": "\\b(?:undo|revert)\\s+(?:that|this|what\\s+you\\s+did)\\b",
       "description": "User says 'undo that' / 'revert this' / 'revert what you did' -- requests rollback."
+    },
+    {
+      "name": "leading_no",
+      "regex": "^\\s*no\\b[,.!:;-]?\\s+\\w+",
+      "description": "Prompt opens with 'no' followed by a redirect ('no, use X', 'no try Y') -- direct rejection plus a replacement."
     }
   ]
 }

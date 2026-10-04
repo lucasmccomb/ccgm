@@ -1,0 +1,61 @@
+{
+  "_description": "Ordered error classifiers for tool_failure rows. failure-logger.py runs each regex (case-sensitive, re.search) against the redacted error text and records the name of the first match as error_class. No match gives the default. Order matters: put specific shapes (hook denials, shell quirks) before broad ones (exit_code). Tests override the path via CCGM_ERROR_CLASSES.",
+  "default": "other",
+  "classes": [
+    {
+      "name": "hook_denial_branch_guard",
+      "regex": "BRANCH GUARD",
+      "description": "branch-guard.py blocked an edit or commit on the default branch."
+    },
+    {
+      "name": "hook_denial_advisor_guard",
+      "regex": "advisor mode:",
+      "description": "advisor-guard.py blocked a main-agent mutation."
+    },
+    {
+      "name": "hook_denial_git_workflow",
+      "regex": "Blocked: .* would destroy|protected branch|force-push",
+      "description": "enforce-git-workflow.py or check-careful.py blocked a git operation."
+    },
+    {
+      "name": "zsh_no_matches",
+      "regex": "no matches found",
+      "description": "zsh expanded an unquoted glob that matched nothing (for example --include=*.sh)."
+    },
+    {
+      "name": "command_not_found",
+      "regex": "command not found",
+      "description": "The program does not exist on PATH."
+    },
+    {
+      "name": "zsh_not_found",
+      "regex": "\\(eval\\):\\d+: \\S+ not found",
+      "description": "zsh =word expansion on an unquoted word that starts with = (for example echo ==== separators)."
+    },
+    {
+      "name": "pathspec_no_match",
+      "regex": "pathspec .* did not match",
+      "description": "git pathspec resolved from the wrong directory or names a missing file."
+    },
+    {
+      "name": "no_such_file",
+      "regex": "No such file or directory",
+      "description": "A path argument does not exist."
+    },
+    {
+      "name": "permission_denied",
+      "regex": "Permission denied|Operation not permitted",
+      "description": "The OS refused the operation."
+    },
+    {
+      "name": "timeout",
+      "regex": "[Tt]imed out|[Tt]imeout",
+      "description": "The command or request ran past its time limit."
+    },
+    {
+      "name": "exit_code",
+      "regex": "^Exit code \\d+",
+      "description": "Non-zero exit with no more specific shape recognised."
+    }
+  ]
+}

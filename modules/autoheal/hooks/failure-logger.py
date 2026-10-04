@@ -1,30 +1,57 @@
 #!/usr/bin/env python3
-"""Failure-specialized event logger for autoheal.
+"""Failure logger for autoheal. The only writer of failure rows.
 
-Registers on PostToolUseFailure (and runs alongside permission-event-logger.py
-on PostToolUse so that successful + failed runs both end up in the events
-JSONL with their respective kinds).
+Registers on PostToolUseFailure. Claude Code sends this input shape:
 
-This hook writes a tool_failure record with stderr and exit_code populated,
-in addition to the standard fields. permission-event-logger.py also writes a
-tool_failure record on the failure surface — that double-write is intentional:
-the analyzer dedupes on (session_id, timestamp, kind) and the redundancy
-guards against a single hook's bugs taking the whole signal down.
+    {hook_event_name, session_id, transcript_path, cwd, tool_name,
+     tool_input, tool_use_id, error, is_interrupt, duration_ms}
 
-Like permission-event-logger.py, this hook NEVER blocks the host tool call.
+`error` carries the failure text (for Bash it ends with "Exit code N").
+`is_interrupt` is true when the user stopped the tool. There are no
+top-level `stderr` or `exit_code` fields.
+
+One row per failure:
+  - kind "tool_failure": error (redacted, <= 400 chars), error_class
+    (lib/error_classes.json), cmd_head (first program of a Bash command,
+    redacted), exit_code (parsed from "Exit code N").
+  - kind "user_interrupt": the same fields, when is_interrupt is true.
+
+permission-event-logger.py no longer writes failure rows, so a failure is
+never logged twice.
+
+Like every autoheal hook, this one NEVER blocks the host tool call.
 """
 from __future__ import annotations
 
 import datetime as _dt
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
 import hook_utils  # noqa: E402
 
 _MAX_COMMAND_LEN = 500
-_MAX_STDERR_LEN = 200
+_MAX_ERROR_LEN = 400
+_MAX_HEAD_LEN = 60
+
+_DEFAULT_CLASSES_PATH = os.path.expanduser("~/.claude/lib/error_classes.json")
+
+# Programs whose second word is a subcommand worth keeping in cmd_head
+# ("git add", "wrangler d1"). For anything else the head is one word.
+_SUBCOMMAND_PROGRAMS = frozenset(
+    {
+        "git", "gh", "npm", "pnpm", "yarn", "npx", "bun", "wrangler",
+        "docker", "kubectl", "supabase", "cargo", "go", "brew", "launchctl",
+        "uv", "pip", "pip3", "xcrun", "xcodebuild", "claude", "make",
+    }
+)
+_SUBCOMMAND_RE = re.compile(r"^[a-z][a-z0-9_:-]*$")
+_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_SEGMENT_SPLIT_RE = re.compile(r"&&|\|\||;|\||\n")
+_SKIP_PROGRAMS = frozenset({"cd", "export", "set", "source", ".", "time", "sudo"})
+_EXIT_CODE_RE = re.compile(r"^Exit code (\d+)")
 
 
 def _autoheal_dir() -> str:
@@ -43,25 +70,62 @@ def _now_iso() -> str:
 
 
 def _truncate(text: str, limit: int) -> str:
-    if not text:
-        return text
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 5)] + "[...]"
 
 
-def _is_failure(data: dict) -> bool:
-    """A PostToolUseFailure event is the obvious failure case. Also treat
-    any event with exit_code != 0 as a failure for compatibility with
-    older clients that omit hook_event_name.
-    """
-    name = (data.get("hook_event_name") or "").strip()
-    if name == "PostToolUseFailure":
-        return True
-    exit_code = data.get("exit_code")
-    if isinstance(exit_code, int) and exit_code != 0:
-        return True
-    return False
+def _load_classes() -> tuple[list[tuple[str, "re.Pattern[str]"]], str]:
+    """Return ([(name, compiled)], default_name). Missing or malformed file
+    degrades to no classes and the default "other"."""
+    path = os.environ.get("CCGM_ERROR_CLASSES") or _DEFAULT_CLASSES_PATH
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return [], "other"
+    default = data.get("default") if isinstance(data, dict) else None
+    entries = data.get("classes") if isinstance(data, dict) else None
+    out: list[tuple[str, "re.Pattern[str]"]] = []
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        name, src = entry.get("name"), entry.get("regex")
+        if not isinstance(name, str) or not isinstance(src, str):
+            continue
+        try:
+            out.append((name, re.compile(src)))
+        except re.error:
+            continue
+    return out, default if isinstance(default, str) else "other"
+
+
+def classify_error(error: str) -> str:
+    classes, default = _load_classes()
+    for name, regex in classes:
+        if regex.search(error):
+            return name
+    return default
+
+
+def cmd_head(command: str) -> str | None:
+    """First program of a shell command, plus its subcommand for CLIs that
+    have them. Skips env assignments and leading `cd x &&` style segments."""
+    for segment in _SEGMENT_SPLIT_RE.split(command):
+        words = segment.split()
+        while words and _ENV_ASSIGN_RE.match(words[0]):
+            words.pop(0)
+        if not words or words[0] in _SKIP_PROGRAMS:
+            continue
+        head = words[0]
+        if (
+            head in _SUBCOMMAND_PROGRAMS
+            and len(words) > 1
+            and _SUBCOMMAND_RE.match(words[1])
+        ):
+            head = head + " " + words[1]
+        return _truncate(hook_utils.redact_secrets(head), _MAX_HEAD_LEN)
+    return None
 
 
 def _build_failure_record(data: dict) -> dict:
@@ -71,34 +135,35 @@ def _build_failure_record(data: dict) -> dict:
         redacted_command = _truncate(
             hook_utils.redact_secrets(command), _MAX_COMMAND_LEN
         )
+        head = cmd_head(command)
     else:
         redacted_command = None
+        head = None
 
-    stderr_text = data.get("stderr") or ""
-    if isinstance(stderr_text, str) and stderr_text:
-        stderr_excerpt = _truncate(
-            hook_utils.redact_secrets(stderr_text), _MAX_STDERR_LEN
-        )
+    error_raw = data.get("error")
+    if isinstance(error_raw, str) and error_raw:
+        error_class = classify_error(error_raw)
+        match = _EXIT_CODE_RE.match(error_raw)
+        exit_code = int(match.group(1)) if match else None
+        # Redact before truncating so the cut cannot split a marker.
+        error = _truncate(hook_utils.redact_secrets(error_raw), _MAX_ERROR_LEN)
     else:
-        stderr_excerpt = None
-
-    exit_code = data.get("exit_code")
-    if not isinstance(exit_code, int):
-        exit_code = None
+        error_class, exit_code, error = None, None, None
 
     transcript_path = data.get("transcript_path")
     if not isinstance(transcript_path, str):
         transcript_path = None
 
     return {
-        "kind": "tool_failure",
+        "kind": "user_interrupt" if data.get("is_interrupt") is True else "tool_failure",
         "timestamp": _now_iso(),
         "session_id": str(data.get("session_id", "")),
         "tool_name": str(data.get("tool_name", "")),
         "redacted_command": redacted_command,
+        "cmd_head": head,
+        "error": error,
+        "error_class": error_class,
         "exit_code": exit_code,
-        "stderr_excerpt": stderr_excerpt,
-        "permission_decision": None,
         "cwd": data.get("cwd"),
         "clone_path": data.get("cwd"),
         "transcript_path": transcript_path,
@@ -108,11 +173,7 @@ def _build_failure_record(data: dict) -> dict:
 def main() -> None:
     try:
         data = hook_utils.read_hook_input()
-        if not _is_failure(data):
-            # Failure logger fires on both PostToolUse and PostToolUseFailure
-            # (registered on both surfaces). On PostToolUse with no failure
-            # signal, do nothing — permission-event-logger handles the
-            # tool_use record.
+        if (data.get("hook_event_name") or "").strip() != "PostToolUseFailure":
             sys.exit(0)
         record = _build_failure_record(data)
         target = os.path.join(_autoheal_dir(), "events", _today_iso() + ".jsonl")

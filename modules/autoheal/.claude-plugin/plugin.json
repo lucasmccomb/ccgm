@@ -3,7 +3,7 @@
   "author": {
     "name": "CCGM"
   },
-  "description": "Captures permission events, tool failures, and user-correction signals; runs a daily analyzer via direct Anthropic API call; produces a local digest + opt-in Resend email; opt-in real-time security alerts and opt-in confidence-gated auto-apply. Cross-clone-safe via fcntl file locks. Webhook publisher seam is dormant by default.",
+  "description": "Captures permission requests, tool failures (with error text and class), interrupts, and user-correction signals, plus a daily per-tool call counter; runs a daily analyzer via direct Anthropic API call; produces a local digest + opt-in Resend email; opt-in real-time security alerts and opt-in confidence-gated auto-apply. Cross-clone-safe via fcntl file locks. Webhook publisher seam is dormant by default.",
   "displayName": "Autoheal: Self-Healing Observability Loop",
   "keywords": [
     "autoheal",
