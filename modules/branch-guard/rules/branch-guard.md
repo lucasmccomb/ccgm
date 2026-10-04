@@ -43,6 +43,7 @@ where `<type>` is `feature | fix | chore | docs`.
 | `<workflow-reminder>` (enforce-issue-workflow.py) | Advisory context injection | On work-request prompts |
 | branch-guard.py | Hard block, exit 2 | Before the first edit, stage, or apply on the default branch |
 | enforce-git-workflow.py | Hard block, exit 2 | `git commit` and `git push` on any protected branch (including dev/staging), commit-message format |
+| enforce-git-workflow.py | Hard block, exit 2 | `reset --hard`, `clean -f`, `checkout .`/`-- <path>`, `restore`, `branch -D` only when they would destroy unsaved work (dirty tree, untracked files, or a branch no remote has); bypass with `ALLOW_DESTRUCTIVE_GIT=1` |
 
 ## Known Gaps
 

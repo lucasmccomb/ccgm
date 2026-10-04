@@ -8,7 +8,7 @@ This module installs fourteen Python hooks, several Python libraries, and a sett
 
 | Hook | Event | Purpose |
 |------|-------|---------|
-| `enforce-git-workflow.py` | PreToolUse (Bash) | Blocks commits on protected branches and enforces `#issue: description` commit message format |
+| `enforce-git-workflow.py` | PreToolUse (Bash) | Blocks commits on protected branches, enforces `#issue: description` commit message format, and blocks `reset --hard`, `clean -f`, `checkout .`/`-- <path>`, `restore` and `branch -D` only when they would destroy unsaved work (`ALLOW_DESTRUCTIVE_GIT=1` bypasses) |
 | `enforce-issue-workflow.py` | UserPromptSubmit | Injects a workflow reminder when Claude detects a work request (create issue first, create branch, then implement) |
 | `auto-approve-bash.py` | PreToolUse (Bash) | Reads allow/deny patterns from settings.json and auto-approves matching Bash commands |
 | `auto-approve-file-ops.py` | PreToolUse (Read/Edit/Write) | Reads path patterns from settings.json and auto-approves file operations on allowed paths |

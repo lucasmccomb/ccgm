@@ -11,6 +11,9 @@ BLOCKS (via hard_block, bypass-proof):
 1. Commits on protected branches (must use feature branch)
 2. Commit messages without issue number prefix (^#\\d+:)
 3. Direct pushes to protected branches (must use PR workflow)
+4. Destructive git commands that would lose unsaved work (reset --hard,
+   clean -f, checkout . / -- <path>, restore, branch -D). Allowed whenever
+   nothing unsaved is at risk. Escape hatch: ALLOW_DESTRUCTIVE_GIT=1
 
 ALLOWS:
 - sync: prefix for log/coordination commits (no issue number needed)
@@ -24,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 
@@ -330,6 +334,216 @@ def check_push(command: str, branch: str) -> None:
     )
 
 
+# ─── Destructive git commands ────────────────────────────────────────
+# `reset --hard`, `clean -f`, `checkout .` / `checkout -- <path>`, `restore`
+# and `branch -D` are blocked only when they would destroy unsaved work:
+# tracked modifications, untracked files, or commits no remote has. On a
+# clean tree they pass, so `git fetch && git reset --hard origin/main` works.
+# Every git error fails open (allow), matching the rest of this hook.
+# Escape hatch: ALLOW_DESTRUCTIVE_GIT=1 (env or inline on the command).
+_DESTRUCTIVE_HATCH = "ALLOW_DESTRUCTIVE_GIT"
+_SEGMENT_SPLIT = re.compile(r"&&|\|\||[;|\n]")
+
+
+def _git_out(args: list[str], cwd: str | None) -> str | None:
+    """Run git, return stdout, or None on any error (caller fails open)."""
+    try:
+        result = subprocess.run(
+            ["git", *args], capture_output=True, text=True, timeout=5, cwd=cwd
+        )
+    except Exception:
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def _parse_git_segment(segment: str, cwd: str | None):
+    """Return (subcommand, args, repo_dir, hatch) for a git segment, else None."""
+    try:
+        tokens = shlex.split(segment)
+    except ValueError:
+        tokens = segment.split()
+    hatch = False
+    while tokens and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[0]):
+        if tokens[0] == f"{_DESTRUCTIVE_HATCH}=1":
+            hatch = True
+        tokens.pop(0)
+    if not tokens or tokens[0] != "git":
+        return None
+    repo = cwd
+    i = 1
+    while i < len(tokens) and tokens[i].startswith("-"):
+        if tokens[i] == "-C" and i + 1 < len(tokens):
+            repo = os.path.join(repo, tokens[i + 1]) if repo else tokens[i + 1]
+            i += 2
+        elif tokens[i] == "-c" and i + 1 < len(tokens):
+            i += 2
+        else:
+            i += 1
+    if i >= len(tokens):
+        return None
+    return tokens[i], tokens[i + 1:], repo, hatch
+
+
+def _tracked_changes(paths: list[str], repo: str | None) -> bool:
+    """True if tracked files (limited to `paths` if given) have modifications."""
+    out = _git_out(
+        ["status", "--porcelain", "--untracked-files=no", "--", *paths], repo
+    )
+    return bool(out and out.strip())
+
+
+def _default_ref(repo: str | None) -> str | None:
+    head = _git_out(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], repo)
+    if head and head.strip():
+        return head.strip()
+    for ref in ("origin/main", "origin/master"):
+        if _git_out(["rev-parse", "--verify", "--quiet", ref], repo) is not None:
+            return ref
+    return None
+
+
+def _squash_absorbed(branch: str, repo: str | None) -> bool:
+    """True if the default branch already holds this branch's work as a squash.
+
+    Same method as git-worktrees' worktree-sweep.sh: replay the branch's tree
+    as one commit on the merge base; `git cherry` marks it upstream ("-") when
+    the default branch contains an equivalent patch.
+    """
+    ref = _default_ref(repo)
+    if not ref:
+        return False
+    base = _git_out(["merge-base", ref, f"refs/heads/{branch}"], repo)
+    tree = _git_out(["rev-parse", f"refs/heads/{branch}^{{tree}}"], repo)
+    if not base or not tree:
+        return False
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "guard", "GIT_AUTHOR_EMAIL": "guard@localhost",
+        "GIT_COMMITTER_NAME": "guard", "GIT_COMMITTER_EMAIL": "guard@localhost",
+    }
+    try:
+        syn = subprocess.run(
+            ["git", "commit-tree", tree.strip(), "-p", base.strip(), "-m", "_"],
+            capture_output=True, text=True, timeout=5, cwd=repo, env=env,
+        )
+    except Exception:
+        return False
+    if syn.returncode != 0 or not syn.stdout.strip():
+        return False
+    cherry = _git_out(["cherry", ref, syn.stdout.strip()], repo)
+    return bool(cherry) and cherry.startswith("-")
+
+
+def _unpushed_branches(names: list[str], repo: str | None) -> list[str]:
+    """Branches whose tip no remote-tracking ref contains and no squash absorbed."""
+    bad = []
+    for name in names:
+        tip = _git_out(["rev-parse", "--verify", "--quiet", f"refs/heads/{name}"], repo)
+        if tip is None:
+            continue  # no such branch: git will error on its own
+        remotes = _git_out(["branch", "-r", "--contains", tip.strip()], repo)
+        if remotes is None or remotes.strip():
+            continue  # git error (fail open) or pushed somewhere
+        if not _squash_absorbed(name, repo):
+            bad.append(name)
+    return bad
+
+
+def _flag_letters(args: list[str]) -> set[str]:
+    """Short flag letters (clusters expanded) and long flags, up to `--`."""
+    letters: set[str] = set()
+    for a in args:
+        if a == "--":
+            break
+        if a.startswith("--"):
+            letters.add(a)
+        elif a.startswith("-") and len(a) > 1:
+            letters.update(a[1:])
+    return letters
+
+
+def _destructive_reason(sub: str, args: list[str], repo: str | None) -> str | None:
+    """Return why this git command would destroy unsaved work, else None."""
+    flags = _flag_letters(args)
+    positional = [a for a in args if not a.startswith("-")]
+
+    if sub == "reset" and "--hard" in flags:
+        if _tracked_changes([], repo):
+            return "the working tree has uncommitted changes to tracked files"
+    elif sub == "checkout" and ("--" in args or positional == ["."]):
+        paths = args[args.index("--") + 1:] if "--" in args else positional
+        if _tracked_changes(paths, repo):
+            return "it would overwrite uncommitted changes in the given paths"
+    elif sub == "restore":
+        staged_only = ("--staged" in flags or "S" in flags) and not (
+            "--worktree" in flags or "W" in flags
+        )
+        if staged_only:
+            return None
+        # collect paths, skipping the value of --source / -s
+        paths, skip = [], False
+        for a in args:
+            if skip:
+                skip = False
+            elif a in ("-s", "--source"):
+                skip = True
+            elif not a.startswith("-"):
+                paths.append(a)
+        if paths and _tracked_changes(paths, repo):
+            return "it would overwrite uncommitted changes in the given paths"
+    elif sub == "clean":
+        forced = "f" in flags or "--force" in flags
+        if not forced or "n" in flags or "--dry-run" in flags or "i" in flags:
+            return None
+        # A dry run with the same flags lists exactly what -f would delete.
+        dry = []
+        for a in args:
+            if a == "--force":
+                continue
+            if re.match(r"^-[^-]", a):
+                a = "-" + a[1:].replace("f", "")
+                if a == "-":
+                    continue
+            dry.append(a)
+        out = _git_out(["clean", "-n", *dry], repo)
+        if out and out.strip():
+            return "it would delete untracked files:\n" + out.strip()
+    elif sub == "branch":
+        delete = "D" in flags or "d" in flags or "--delete" in flags
+        force = "D" in flags or "f" in flags or "--force" in flags
+        if delete and force:
+            bad = _unpushed_branches(positional, repo)
+            if bad:
+                return (
+                    "these branches hold commits no remote-tracking ref contains "
+                    "and no squash merge absorbed: " + ", ".join(bad)
+                )
+    return None
+
+
+def check_destructive_git(command: str, cwd: str | None) -> None:
+    """Hard-block destructive git commands that would lose unsaved work."""
+    if os.environ.get(_DESTRUCTIVE_HATCH) == "1":
+        return
+    for segment in _SEGMENT_SPLIT.split(command):
+        parsed = _parse_git_segment(segment.strip(), cwd)
+        if not parsed:
+            continue
+        sub, args, repo, hatch = parsed
+        if hatch:
+            continue
+        try:
+            reason = _destructive_reason(sub, args, repo)
+        except Exception:
+            continue  # fail open
+        if reason:
+            deny(
+                f"Blocked: `{segment.strip()}` would destroy unsaved work: {reason}.\n"
+                "Commit (a WIP commit is fine) or push it first.\n\n"
+                f"If you really mean it: {_DESTRUCTIVE_HATCH}=1 <command>"
+            )
+
+
 def main() -> None:
     input_data = hook_utils.read_hook_input()
 
@@ -342,6 +556,9 @@ def main() -> None:
     command = tool_input.get("command", "").strip()
     if not command:
         sys.exit(0)
+
+    # Destructive git commands: blocked only when they would lose unsaved work
+    check_destructive_git(command, input_data.get("cwd"))
 
     # Only check git commit and git push commands
     if not (is_commit_command(command) or is_push_command(command)):

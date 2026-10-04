@@ -57,7 +57,9 @@ assert_contains() {
 
 # ── Hermetic HOME: ~/.claude/{lib,hooks} = the worktree code under test ──
 FAKE_HOME="$(mktemp -d -t ccgm704_home.XXXXXX)"
-trap 'rm -rf "${FAKE_HOME}"' EXIT
+CLEAN_REPO="$(mktemp -d -t ccgm704_repo.XXXXXX)"
+git init -q "${CLEAN_REPO}"
+trap 'rm -rf "${FAKE_HOME}" "${CLEAN_REPO}"' EXIT
 mkdir -p "${FAKE_HOME}/.claude/lib" "${FAKE_HOME}/.claude/hooks"
 cp "${SRC_LIB}"/*.py "${FAKE_HOME}/.claude/lib/"
 cp "${SRC_HOOKS}"/*.py "${FAKE_HOME}/.claude/hooks/"
@@ -74,7 +76,9 @@ run_dispatch() {
     payload=$(HOME="${FAKE_HOME}" python3 -c \
         'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.argv[1]},"permission_mode":sys.argv[2]}))' \
         "${cmd}" "${mode}")
-    out=$(printf '%s' "${payload}" | HOME="${FAKE_HOME}" python3 "${DISPATCH}" 2>/dev/null)
+    # Run from a clean repo: the destructive-git guard (#1081) blocks
+    # `reset --hard` on a dirty tree, and this checkout may be dirty.
+    out=$(cd "${CLEAN_REPO}" && printf '%s' "${payload}" | HOME="${FAKE_HOME}" python3 "${DISPATCH}" 2>/dev/null)
     rc=$?
     decision="none"
     if [ -n "${out}" ]; then
@@ -162,6 +166,20 @@ assert_eq "$(run_dispatch "${RESET_REMOTE}" "default")" "0|allow" \
     "smart-rule allows reset to remote ref"
 assert_eq "$(run_dispatch "${RESET_BARE}" "default")" "2|none" \
     "smart-rule hard-blocks bare reset (exit 2)"
+# #1081: reset to a remote ref passes the smart-rule but must still hard-block
+# on a dirty tree, even though the smart-rule's allow short-circuits.
+git -C "${CLEAN_REPO}" config user.email a@b
+git -C "${CLEAN_REPO}" config user.name a
+git -C "${CLEAN_REPO}" config core.hooksPath /dev/null
+echo a > "${CLEAN_REPO}/f.txt"
+git -C "${CLEAN_REPO}" add f.txt
+git -C "${CLEAN_REPO}" commit -q -m init
+echo b >> "${CLEAN_REPO}/f.txt"
+assert_eq "$(run_dispatch "${RESET_REMOTE}" "default")" "2|none" \
+    "#1081 dirty tree: reset to remote ref hard-blocks through the dispatcher"
+assert_eq "$(run_dispatch "${RESET_REMOTE}" "bypassPermissions")" "2|none" \
+    "#1081 dirty tree: reset to remote ref hard-blocks in bypass mode"
+git -C "${CLEAN_REPO}" checkout -q -- f.txt
 assert_eq "$(run_dispatch "${RESET_BARE}" "bypassPermissions")" "2|none" \
     "smart-rule hard-blocks bare reset even in bypass mode"
 assert_eq "$(run_dispatch "rm -rf /tmp/scratch" "default")" "0|ask" \

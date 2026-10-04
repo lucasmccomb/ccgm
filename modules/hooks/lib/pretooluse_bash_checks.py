@@ -78,19 +78,20 @@ def git_workflow_check(data: dict) -> "hd.Result":
     command = _command(data).strip()
     if data.get("tool_name", "") != "Bash" or not command:
         return hd.Result()
-    if not (egw.is_commit_command(command) or egw.is_push_command(command)):
-        return hd.Result()
-    branch = egw.get_current_branch()
-    if not branch:
-        return hd.Result()
+    is_commit_or_push = egw.is_commit_command(command) or egw.is_push_command(command)
+    branch = egw.get_current_branch() if is_commit_or_push else None
 
-    # check_commit / check_push call hook_utils.hard_block() (→ SystemExit 2)
-    # on a violation, writing the reason to stderr. Run them with stderr
-    # captured so we can lift the reason into a Result rather than letting the
-    # process die here — the dispatcher decides when to exit.
+    # check_destructive_git / check_commit / check_push call
+    # hook_utils.hard_block() (→ SystemExit 2) on a violation, writing the
+    # reason to stderr. Run them with stderr captured so we can lift the reason
+    # into a Result rather than letting the process die here — the dispatcher
+    # decides when to exit.
     buf = io.StringIO()
     try:
         with redirect_stderr(buf):
+            egw.check_destructive_git(command, data.get("cwd"))
+            if not branch:
+                return hd.Result()
             if egw.is_commit_command(command):
                 egw.check_commit(command, branch)
             elif egw.is_push_command(command):

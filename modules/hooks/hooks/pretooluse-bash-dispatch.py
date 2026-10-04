@@ -21,7 +21,7 @@ short_circuit so it is emitted the instant it fires, nothing can soften it.
 
   priority  check                       decision kinds       bypass-safe  short
   --------  --------------------------  -------------------  -----------  -----
-  10        git_workflow_check          hard_block / adv     yes          no
+  10        git_workflow_check          hard_block / adv     yes          YES
   20        destructive_check           hard_block           yes          YES
   25        force_branch_delete_check   hard_block           yes          YES
   30        smart_rules_check           hard_block / allow   yes          YES
@@ -52,7 +52,7 @@ def build_manifest() -> "hd.Manifest":
     bash_only = hd.tool_matcher("Bash")
     m = hd.Manifest(event="PreToolUse")
     m.add(hd.Check(10, "git_workflow", bash_only, checks.git_workflow_check,
-                   runs_in_bypass=True, short_circuit=False))
+                   runs_in_bypass=True, short_circuit=True))
     m.add(hd.Check(20, "destructive", bash_only, checks.destructive_check,
                    runs_in_bypass=True, short_circuit=True))
     m.add(hd.Check(25, "force_branch_delete", bash_only, checks.force_branch_delete_check,
