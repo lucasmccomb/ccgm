@@ -21,6 +21,13 @@ file does everything that is plain computation:
           generates the unified diff. A failed check drops the answer with a
           counted reason (anchor_missing, path_not_candidate, ...).
 
+  validate  Before a row is stored as ready, the gate in apply-proposal.py
+          (validate) checks that the diff applies to the source repo's
+          origin/main, that its personal-data and module tests pass, and that
+          always-loaded rules stay inside the weekly line budget. A failing row
+          is stored with state "dropped" and a drop_reason, counted with the
+          other drops, and never shown.
+
 Rows go to proposals/<today>.jsonl, where the digest and apply commands read
 them until the single ledger of a later unit replaces that directory.
 """
@@ -555,6 +562,13 @@ def cmd_finish(args) -> int:
         row, why = None, "answer_not_json"
     else:
         row, why = make_row(meta["signature"], answer, meta["candidates"], meta["repo_root"], ctx)
+    if row is not None and row["kind"] == "rule_insert":
+        gate = _load(os.path.join(_HERE, "apply-proposal.py"), "autoheal_apply")
+        ok, reason = gate.validate(row, repo_root=meta["repo_root"])
+        if not ok:
+            row["state"], row["drop_reason"] = "dropped", reason
+            append_jsonl(_proposals_path(agg), row)
+            row, why = None, reason
     if row is None:
         if args.rejected_log:
             append_jsonl(args.rejected_log, {

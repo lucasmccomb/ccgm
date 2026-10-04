@@ -77,9 +77,14 @@ EOF
 
 ALLOW_MAIN_COMMIT=1 only when asked.
 EOF
+    # The validation gate runs the repo's own checks against origin/main.
+    mkdir -p "${dir}/tests"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "${dir}/tests/test-no-personal-data.sh"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "${dir}/tests/test-modules.sh"
     git -C "${dir}" init -q -b main
     git -C "${dir}" add -A
     git -C "${dir}" -c core.hooksPath=/dev/null -c user.email=t@example.com -c user.name=t commit -q -m fixture
+    git -C "${dir}" update-ref refs/remotes/origin/main HEAD
 }
 
 fx_home() {
