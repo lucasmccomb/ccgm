@@ -878,6 +878,10 @@ def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
     friction_field_presence's existing idiom.
     """
     path = Path(path)
+    # <project>/<session-id>/subagents/agent-*.jsonl: every "user" turn there
+    # is the dispatching agent talking, never a human.
+    is_subagent = path.parent.name == "subagents"
+    parent_session_id = path.parent.parent.name if is_subagent else None
 
     if start_offset > path.stat().st_size:
         start_offset = 0
@@ -1007,7 +1011,7 @@ def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
                     "lineno": lineno,
                     "text": user_text,
                     "timestamp": ts,
-                    "human_origin": _is_human_origin_turn(obj),
+                    "human_origin": _is_human_origin_turn(obj) and not is_subagent,
                     "is_meta": bool(obj.get("isMeta")),
                 }
             )
@@ -1153,7 +1157,7 @@ def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
     denom = cache_read + cache_creation + base_input
     cache_read_ratio = round(cache_read / denom, 4) if denom > 0 else 0.0
 
-    resolved_slug = detect_project_slug(cwd) if cwd else detect_project_slug()
+    resolved_slug = slug_for_cwd(cwd)
 
     return {
         "session_id": session_id,
@@ -1161,6 +1165,7 @@ def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
         "cwd": cwd,
         "git_branch": git_branch,
         "transcript_path": str(path),
+        "parent_session_id": parent_session_id,
         "start_offset": start_offset,
         "end_offset": end_offset,
         "transcript_version": transcript_version,
@@ -1481,6 +1486,25 @@ def _iso_to_epoch(iso: str) -> float | None:
     return None
 
 
+_WORKTREE_SEGMENT = "/.claude/worktrees/"
+
+
+def slug_for_cwd(cwd: str | None) -> str:
+    """detect_project_slug(), made safe for removed agent worktrees.
+
+    Subagents run in `<repo>/.claude/worktrees/agent-*` checkouts that are
+    torn down when their PR merges. A transcript outlives its worktree, and
+    detect_project_slug() on a missing directory falls back to the directory
+    name ("agent-a1b2..."), a slug no learning belongs to. Resolve from the
+    repo the worktree hung off instead; a live worktree gives the same slug
+    through the shared git remote."""
+    if cwd and _WORKTREE_SEGMENT in cwd:
+        repo = cwd.split(_WORKTREE_SEGMENT, 1)[0]
+        if repo:
+            return detect_project_slug(repo)
+    return detect_project_slug(cwd) if cwd else detect_project_slug()
+
+
 def _peek_slug(path: Path) -> str | None:
     """Read just enough of a transcript to resolve its owning slug.
 
@@ -1505,7 +1529,7 @@ def _peek_slug(path: Path) -> str | None:
                 except json.JSONDecodeError:
                     continue
                 if isinstance(obj, dict) and isinstance(obj.get("cwd"), str):
-                    return detect_project_slug(obj["cwd"])
+                    return slug_for_cwd(obj["cwd"])
     except OSError:
         return None
     return None
@@ -1513,7 +1537,7 @@ def _peek_slug(path: Path) -> str | None:
 
 def _iter_slug_transcripts(slugs: Iterable[str], projects_root: str | Path | None):
     """Yield (path, resolved_slug) for every transcript under the projects
-    root whose owning slug is in `slugs`."""
+    root, subagent transcripts included, whose owning slug is in `slugs`."""
     root = Path(projects_root) if projects_root else Path.home() / ".claude" / "projects"
     if not root.is_dir():
         return
@@ -1521,7 +1545,11 @@ def _iter_slug_transcripts(slugs: Iterable[str], projects_root: str | Path | Non
     for project_dir in sorted(root.iterdir()):
         if not project_dir.is_dir():
             continue
-        for transcript_path in sorted(project_dir.glob("*.jsonl")):
+        # Top-level sessions, then each session's subagent transcripts
+        # (<session-id>/subagents/agent-*.jsonl). The .meta.json siblings and
+        # tool-results are not transcripts.
+        candidates = sorted(project_dir.glob("*.jsonl")) + sorted(project_dir.glob("*/subagents/agent-*.jsonl"))
+        for transcript_path in candidates:
             resolved_slug = _peek_slug(transcript_path)
             if resolved_slug is not None and resolved_slug in wanted:
                 yield transcript_path, resolved_slug
@@ -1903,6 +1931,7 @@ def mine_to_evidence_bundle(
             "token_totals": s["token_totals"],
             "cache_read_ratio": s["cache_read_ratio"],
             "user_corrections": s["user_corrections"],
+            "parent_session_id": s["parent_session_id"],
             "pr_links": s["pr_links"],
             "malformed_line_count": s["malformed_line_count"],
             "tool_use_count": s["tool_use_count"],

@@ -231,9 +231,19 @@ The **deterministic transcript miner** -- pure Python stdlib, no network
 calls, no LLM calls, no scheduling:
 
 - `discover(slugs, cursors=...)` -- enumerate transcript files under
-  `~/.claude/projects/*/` whose owning learnings-store slug (re-derived from
-  each transcript's own `cwd` field) is in the wanted set and that hold
-  bytes past their per-file cursor (`state/mining-cursors.json`, byte
+  `~/.claude/projects/*/`, including each session's subagent transcripts
+  (`<session-id>/subagents/agent-*.jsonl`; where most failures, struggles
+  and stated findings happen -- the `.meta.json` siblings and
+  `tool-results/` are not transcripts). A subagent file resolves its slug
+  from its own `cwd`; a `cwd` under `<repo>/.claude/worktrees/` resolves
+  from the repo, so a torn-down worktree still maps to the repo's slug
+  instead of `agent-<hash>`. `mine()` reports `parent_session_id` for them,
+  and no user turn in a subagent transcript is ever a human turn (it is the
+  dispatcher). Cursors are per file, so the watermark-to-cursor migration
+  seeds subagent files like any other, and an unseeded file stays inside
+  the `lookback_days` mtime window. Only files whose owning learnings-store
+  slug (re-derived from each transcript's own `cwd` field) is in the
+  wanted set and that hold bytes past their per-file cursor are returned (`state/mining-cursors.json`, byte
   offsets). A timestamp-less append (`file-history-snapshot`) is not new
   content, and a file shorter than its cursor is re-read from 0. Slugs
   dreamed before cursors existed are seeded once from `last-dreamed.json`.

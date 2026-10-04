@@ -49,6 +49,10 @@
         "properties": {
           "session_id": { "type": ["string", "null"] },
           "slug": { "type": "string" },
+          "parent_session_id": {
+            "type": ["string", "null"],
+            "description": "For a subagent transcript (<project>/<session-id>/subagents/agent-*.jsonl), the session that dispatched it; null for a top-level session. A subagent line's own sessionId is already the parent's, so session_id and parent_session_id agree there."
+          },
           "git_branch": { "type": ["string", "null"] },
           "started_at": { "type": ["string", "null"] },
           "ended_at": { "type": ["string", "null"] },
