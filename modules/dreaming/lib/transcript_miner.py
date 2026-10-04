@@ -14,14 +14,17 @@ Pipeline: discover() -> mine() -> cluster() -> budget() -> evidence bundle.
 the function both `--self-check` and Epic 3 are expected to call.
 
 Locked API (Epic 3 depends on these signatures):
-    discover(slugs, since_watermark=None, *, projects_root=None) -> list[str]
-    mine(path) -> dict                       # MinedSession
+    discover(slugs, *, cursors=None, projects_root=None) -> list[str]
+    discover_with_offsets(...) -> dict[str, int]   # path -> byte offset to mine from
+    mine(path, start_offset=0) -> dict       # MinedSession
     cluster(events) -> list[dict]            # list[Cluster]
     budget(clusters, max_input_tokens) -> dict
     validate_structure(mined_sessions) -> list[dict]  # pure; list[finding]
     schema_canary(mined_sessions) -> dict    # {observed_versions}; raises SchemaDriftError on drift
-    mine_to_evidence_bundle(paths, *, max_input_tokens=200_000) -> dict
-    read_watermark() / write_watermark(slug, iso_timestamp)
+    mine_to_evidence_bundle(paths, *, max_input_tokens=200_000, start_offsets=None, end_offsets_out=None) -> dict
+    read_watermark() / write_watermark(slug, iso_timestamp)   # LRU ordering only
+    read_cursors() / write_cursors(slug, {path: offset})      # what has been mined
+    migrate_watermarks_to_cursors(slugs, *, projects_root=None)
     redact_pii(text) -> str
     make_excerpt(text) -> str
     validate_against_schema(instance, schema) -> list[str]
@@ -367,27 +370,62 @@ def _bash_exit_code(
 # ---------------------------------------------------------------------------
 
 
-def _iter_jsonl(path: str | Path):
-    """Yield (line_number, parsed_dict_or_None) for every non-blank line.
+def _iter_jsonl(path: str | Path, start_offset: int = 0):
+    """Yield (line_number, parsed_dict_or_None, start_byte, end_byte) for
+    every non-blank line at or after byte `start_offset`.
 
     None means the line was present but failed to parse as a JSON object
     (malformed JSON, or valid JSON that is not a dict). Callers count
     these and skip them -- never crash on a corrupt transcript.
+
+    line_number is absolute (it counts the lines before `start_offset`), so
+    evidence line references mean the same thing whether a file is mined
+    whole or from a cursor. A final line with no trailing newline is
+    yielded only if it parses; otherwise the writer is mid-append, and the
+    line is left for the next read (end_byte never passes it).
+
+    Lazy and linear: lines are read one at a time, so a caller that stops
+    early (_head_metadata, _has_new_content) never reads the rest of the file.
     """
-    with open(path, "r", encoding="utf-8") as fh:
-        for lineno, raw in enumerate(fh, start=1):
-            line = raw.strip()
+    with open(path, "rb") as fh:
+        # Count the lines before the cursor in chunks (never held in memory).
+        head_lines = 0
+        remaining = start_offset
+        while remaining > 0:
+            chunk = fh.read(min(1 << 20, remaining))
+            if not chunk:
+                break
+            head_lines += chunk.count(b"\n")
+            remaining -= len(chunk)
+
+        pos = start_offset
+        lineno = head_lines
+        while True:
+            raw_line = fh.readline()
+            if not raw_line:
+                return
+            terminated = raw_line.endswith(b"\n")
+            lineno += 1
+            line_start, pos = pos, pos + len(raw_line)
+            line = raw_line.decode("utf-8", errors="replace").strip()
             if not line:
                 continue
             try:
                 obj = json.loads(line)
             except json.JSONDecodeError:
-                yield lineno, None
+                if not terminated:
+                    return
+                yield lineno, None, line_start, pos
                 continue
-            if not isinstance(obj, dict):
-                yield lineno, None
-                continue
-            yield lineno, obj
+            yield lineno, (obj if isinstance(obj, dict) else None), line_start, pos
+
+
+def _file_end_offset(path: str | Path, start_offset: int = 0) -> int:
+    """Byte offset just past the last line _iter_jsonl() would consume."""
+    end = start_offset
+    for _lineno, _obj, _start, line_end in _iter_jsonl(path, start_offset):
+        end = line_end
+    return end
 
 
 # ---------------------------------------------------------------------------
@@ -395,8 +433,35 @@ def _iter_jsonl(path: str | Path):
 # ---------------------------------------------------------------------------
 
 
-def mine(path: str | Path) -> dict[str, Any]:
+def _head_metadata(path: Path) -> dict[str, str]:
+    """First sessionId / cwd / gitBranch / version in the file head (bounded
+    by _PEEK_LINE_LIMIT lines), for mining a range that starts mid-file."""
+    found: dict[str, str] = {}
+    try:
+        for i, (_n, obj, _s, _e) in enumerate(_iter_jsonl(path)):
+            if i >= _PEEK_LINE_LIMIT:
+                break
+            if obj is None:
+                continue
+            for key in ("sessionId", "cwd", "gitBranch", "version"):
+                if key not in found and isinstance(obj.get(key), str):
+                    found[key] = obj[key]
+            if len(found) == 4:
+                break
+    except OSError:
+        pass
+    return found
+
+
+def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
     """Mine one session-transcript JSONL into a MinedSession dict.
+
+    start_offset: mine only the bytes at or after this offset (the
+    per-file cursor from read_cursors()). An offset past the end of the
+    file means it was truncated or rotated, so it is re-read from 0. When
+    the mined range has no `cwd` / `sessionId` / `gitBranch` / `version` of
+    its own, they come from the file head, so the slug stays correct.
+    The result carries `start_offset` and `end_offset` for the cursor.
 
     Deterministic, forward-only. Extracts:
       - friction events: tool_result.is_error, non-zero Bash exit codes,
@@ -431,9 +496,14 @@ def mine(path: str | Path) -> dict[str, Any]:
     """
     path = Path(path)
 
+    if start_offset > path.stat().st_size:
+        start_offset = 0
+
     lines: list[tuple[int, dict[str, Any]]] = []
     malformed_line_count = 0
-    for lineno, obj in _iter_jsonl(path):
+    end_offset = start_offset
+    for lineno, obj, _line_start, line_end in _iter_jsonl(path, start_offset):
+        end_offset = line_end
         if obj is None:
             malformed_line_count += 1
             continue
@@ -443,6 +513,12 @@ def mine(path: str | Path) -> dict[str, Any]:
     cwd: str | None = None
     git_branch: str | None = None
     transcript_version: str | None = None
+    if start_offset > 0:
+        head = _head_metadata(path)
+        session_id = head.get("sessionId")
+        cwd = head.get("cwd")
+        git_branch = head.get("gitBranch")
+        transcript_version = head.get("version")
     started_at: str | None = None
     ended_at: str | None = None
     tool_use_count = 0
@@ -647,6 +723,8 @@ def mine(path: str | Path) -> dict[str, Any]:
         "cwd": cwd,
         "git_branch": git_branch,
         "transcript_path": str(path),
+        "start_offset": start_offset,
+        "end_offset": end_offset,
         "transcript_version": transcript_version,
         "started_at": started_at,
         "ended_at": ended_at,
@@ -948,15 +1026,43 @@ def _peek_slug(path: Path) -> str | None:
     return None
 
 
-def discover(
+def _iter_slug_transcripts(slugs: Iterable[str], projects_root: str | Path | None):
+    """Yield (path, resolved_slug) for every transcript under the projects
+    root whose owning slug is in `slugs`."""
+    root = Path(projects_root) if projects_root else Path.home() / ".claude" / "projects"
+    if not root.is_dir():
+        return
+    wanted = set(slugs)
+    for project_dir in sorted(root.iterdir()):
+        if not project_dir.is_dir():
+            continue
+        for transcript_path in sorted(project_dir.glob("*.jsonl")):
+            resolved_slug = _peek_slug(transcript_path)
+            if resolved_slug is not None and resolved_slug in wanted:
+                yield transcript_path, resolved_slug
+
+
+def _has_new_content(path: Path, offset: int) -> bool:
+    """True if the bytes at or after `offset` hold at least one complete
+    line with a timestamp. Claude Code appends timestamp-less bookkeeping
+    lines (file-history-snapshot) to old transcripts; those are not new
+    evidence and must not make a mined file due again (R6)."""
+    for _lineno, obj, _start, _end in _iter_jsonl(path, offset):
+        if obj is not None and isinstance(obj.get("timestamp"), str):
+            return True
+    return False
+
+
+def discover_with_offsets(
     slugs: Iterable[str],
-    since_watermark: dict[str, str] | None = None,
     *,
+    cursors: dict[str, dict[str, Any]] | None = None,
     projects_root: str | Path | None = None,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
-) -> list[str]:
+) -> dict[str, int]:
     """Enumerate transcript files under ~/.claude/projects/*/ whose owning
-    learnings-store slug is in `slugs`.
+    learnings-store slug is in `slugs` and that hold unmined content.
+    Returns {path: byte offset to start mining from}.
 
     Slug identity is re-derived from EACH transcript's own `cwd` field via
     detect_project_slug() (arch-1) -- never from a ~/.claude/projects/
@@ -965,50 +1071,55 @@ def discover(
     share ONE learnings-store slug via git-remote resolution, so
     directory-name matching would silently miss sibling-clone evidence).
 
-    since_watermark: optional {slug: ISO8601} map, the same shape as
-    ~/.claude/dreaming/state/last-dreamed.json. A file is skipped only
-    when its mtime is NOT newer than the watermark recorded for its
-    resolved slug; files whose slug has no prior watermark fall back to
-    the `lookback_days` cutoff (bounds the FIRST run so a machine with
-    years of transcript history is not mined in one pass -- matches Epic
-    3's `lookback_days` config key, plan.md §3.3).
+    cursors: {path: {"slug", "offset"}} from read_cursors(). A file is due
+    when the bytes after its cursor hold a complete, timestamped line.
+    A file whose current size is below its cursor was truncated or rotated
+    and is re-read from 0. A file with no cursor starts at 0, bounded by
+    the `lookback_days` mtime cutoff (so a machine with years of history is
+    not mined in one pass -- Epic 3's `lookback_days`, plan.md §3.3).
+    Slugs dreamed before cursors existed are seeded by
+    migrate_watermarks_to_cursors() first.
 
     `projects_root` defaults to ~/.claude/projects; tests pass a temp dir
     so real transcripts are never touched.
     """
-    root = Path(projects_root) if projects_root else Path.home() / ".claude" / "projects"
-    if not root.is_dir():
-        return []
-
-    wanted = set(slugs)
-    since_watermark = since_watermark or {}
+    cursors = cursors or {}
     cutoff = time.time() - lookback_days * 86400
 
-    matches: list[str] = []
-    for project_dir in sorted(root.iterdir()):
-        if not project_dir.is_dir():
+    due: dict[str, int] = {}
+    for transcript_path, _slug in _iter_slug_transcripts(slugs, projects_root):
+        try:
+            stat = transcript_path.stat()
+        except OSError:
             continue
-        for transcript_path in sorted(project_dir.glob("*.jsonl")):
-            try:
-                mtime = transcript_path.stat().st_mtime
-            except OSError:
+        key = str(transcript_path)
+        cursor = cursors.get(key)
+        if cursor is not None:
+            offset = int(cursor.get("offset", 0))
+            if stat.st_size < offset:
+                offset = 0
+            elif stat.st_size == offset:
                 continue
-
-            resolved_slug = _peek_slug(transcript_path)
-            if resolved_slug is None or resolved_slug not in wanted:
+        else:
+            if stat.st_mtime < cutoff:
                 continue
+            offset = 0
+        if _has_new_content(transcript_path, offset):
+            due[key] = offset
+    return due
 
-            watermark_iso = since_watermark.get(resolved_slug)
-            if watermark_iso:
-                watermark_epoch = _iso_to_epoch(watermark_iso)
-                if watermark_epoch is not None and mtime <= watermark_epoch:
-                    continue
-            elif mtime < cutoff:
-                continue
 
-            matches.append(str(transcript_path))
-
-    return matches
+def discover(
+    slugs: Iterable[str],
+    *,
+    cursors: dict[str, dict[str, Any]] | None = None,
+    projects_root: str | Path | None = None,
+    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+) -> list[str]:
+    """discover_with_offsets() without the offsets: just the due paths."""
+    return list(discover_with_offsets(
+        slugs, cursors=cursors, projects_root=projects_root, lookback_days=lookback_days,
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -1137,6 +1248,121 @@ def write_watermark(slug: str, iso_timestamp: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Mining cursors (~/.claude/dreaming/state/mining-cursors.json)
+#
+# {"version": 1, "files": {transcript_path: {"slug": ..., "offset": N}}}
+# `offset` is the byte position just past the last line mined from that
+# file. The watermark (above) still orders slugs least-recently-dreamed
+# first; it no longer decides what is new.
+# ---------------------------------------------------------------------------
+
+
+def cursors_path() -> Path:
+    return _dreaming_dir() / "state" / "mining-cursors.json"
+
+
+def read_cursors() -> dict[str, dict[str, Any]]:
+    """{transcript_path: {"slug", "offset"}}; {} if absent or corrupt.
+    Unlocked read -- write_cursors() swaps the file atomically."""
+    path = cursors_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    files = data.get("files") if isinstance(data, dict) else None
+    if not isinstance(files, dict):
+        return {}
+    return {
+        k: v for k, v in files.items()
+        if isinstance(v, dict) and isinstance(v.get("offset"), int) and not isinstance(v.get("offset"), bool)
+    }
+
+
+def write_cursors(slug: str, offsets: dict[str, int]) -> None:
+    """Set the cursor for each {path: offset} under `slug`, keeping every
+    other entry and dropping entries whose file no longer exists. Unlike
+    write_watermark() it can lower an offset: a rotated file starts over.
+    Same locking discipline as write_watermark(): flock on a stable sidecar,
+    then tempfile + os.replace()."""
+    if not offsets:
+        return
+    path = cursors_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_fd = os.open(path.with_name(path.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        try:
+            files = {k: v for k, v in read_cursors().items() if os.path.exists(k)}
+            for transcript_path, offset in offsets.items():
+                files[transcript_path] = {"slug": slug, "offset": int(offset)}
+            payload = json.dumps({"version": 1, "files": files}, indent=2, sort_keys=True)
+            tmp_fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+            try:
+                os.fchmod(tmp_fd, 0o644)
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_fh:
+                    tmp_fh.write(payload)
+                os.replace(tmp_name, path)
+            except Exception:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    finally:
+        os.close(lock_fd)
+
+
+def _offset_after_watermark(path: Path, watermark_epoch: float) -> int:
+    """Byte offset of the first line timestamped after the watermark, or
+    the end of the consumable file if there is none."""
+    end = 0
+    for _lineno, obj, line_start, line_end in _iter_jsonl(path):
+        ts = obj.get("timestamp") if obj is not None else None
+        epoch = _iso_to_epoch(ts) if isinstance(ts, str) else None
+        if epoch is not None and epoch > watermark_epoch:
+            return line_start
+        end = line_end
+    return end
+
+
+def plan_watermark_migration(
+    slugs: Iterable[str], *, projects_root: str | Path | None = None,
+) -> dict[str, dict[str, int]]:
+    """{slug: {path: offset}} cursors that migrate_watermarks_to_cursors()
+    would write. Pure: reads state, writes nothing (--dry-run uses it).
+
+    Only slugs that have a last-dreamed.json watermark and no cursor
+    entries yet are planned. Every transcript of such a slug gets an offset
+    at its first line timestamped after the watermark (or end of file),
+    including files that are not due, so a later night never mistakes them
+    for new."""
+    watermark = read_watermark()
+    seeded = {c.get("slug") for c in read_cursors().values()}
+    todo = [s for s in slugs if s in watermark and s not in seeded]
+    plan: dict[str, dict[str, int]] = {}
+    if not todo:
+        return plan
+    for transcript_path, slug in _iter_slug_transcripts(todo, projects_root):
+        epoch = _iso_to_epoch(watermark[slug])
+        if epoch is None:
+            continue
+        plan.setdefault(slug, {})[str(transcript_path)] = _offset_after_watermark(transcript_path, epoch)
+    return plan
+
+
+def migrate_watermarks_to_cursors(
+    slugs: Iterable[str], *, projects_root: str | Path | None = None,
+) -> None:
+    """One-time, per slug: persist plan_watermark_migration(), so the first
+    night after the upgrade does not re-mine history. Idempotent: a slug
+    with cursors is never planned again."""
+    for slug, per_file in plan_watermark_migration(slugs, projects_root=projects_root).items():
+        write_cursors(slug, per_file)
+
+
 def _utc_now_iso() -> str:
     now = datetime.now(timezone.utc)
     return now.strftime("%Y-%m-%dT%H:%M:%S") + f".{now.microsecond // 1000:03d}Z"
@@ -1146,17 +1372,28 @@ def mine_to_evidence_bundle(
     transcript_paths: Iterable[str | Path],
     *,
     max_input_tokens: int = DEFAULT_MAX_INPUT_TOKENS,
+    start_offsets: dict[str, int] | None = None,
+    end_offsets_out: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """End-to-end: mine() every path, run schema_canary(), cluster() the
     friction events, budget() them, assemble the evidence bundle.
 
     Returns the evidence-bundle dict (schema: lib/evidence-bundle-schema.json).
+    start_offsets: {path: byte offset} to mine from (default 0 for every
+    path). end_offsets_out: if given, filled with {path: offset just past the
+    last line mined} -- the value to store as that file's cursor once the
+    run consumes the bundle. Offsets stay out of the bundle itself because
+    the bundle is sent to the model.
     Raises SchemaDriftError via schema_canary() if the transcript schema
     appears to have drifted (adrev-002) -- callers should NOT catch this
     silently; an empty evidence bundle from a drifted parser is worse
     than a loud failure.
     """
-    mined_sessions = [mine(p) for p in transcript_paths]
+    start_offsets = start_offsets or {}
+    mined_sessions = [mine(p, start_offsets.get(str(p), 0)) for p in transcript_paths]
+    if end_offsets_out is not None:
+        for mined in mined_sessions:
+            end_offsets_out[mined["transcript_path"]] = mined["end_offset"]
     canary = schema_canary(mined_sessions)
 
     all_friction_events = [ev for s in mined_sessions for ev in s["friction_events"]]

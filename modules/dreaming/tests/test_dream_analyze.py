@@ -1625,6 +1625,121 @@ class MainIntegrationTests(unittest.TestCase):
 # active_incidents recording (structural-canary plan.md Epic 2).
 # ---------------------------------------------------------------------------
 
+class MiningCursorIntegrationTests(unittest.TestCase):
+    """#1098 0.4 / 0.5: the same transcripts are never re-mined, and a reduce
+    failure banner clears once that slug's reduce succeeds."""
+
+    def _run(self, projects_root, day, fixtures=OFFLINE_FIXTURES):
+        with mock.patch.object(da, "run_map", wraps=da.run_map) as spy:
+            rc = da.main([
+                "--offline", str(fixtures), "--force-day", day,
+                "--slugs", "widget-app", "--projects-root", str(projects_root),
+            ])
+        return rc, spy
+
+    def test_second_run_over_unchanged_transcripts_sends_nothing_to_map(self):
+        _isolate_env(self)
+        root = _make_projects_root("cursor-same")
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+
+        rc1, spy1 = self._run(root, "2026-01-01")
+        self.assertEqual(rc1, 0)
+        self.assertEqual(spy1.call_count, 1)
+
+        rc2, spy2 = self._run(root, "2026-01-02")
+        self.assertEqual(rc2, 0)
+        self.assertEqual(spy2.call_count, 0, "unchanged transcripts must produce zero map input")
+
+    def test_untimestamped_append_between_runs_sends_nothing_to_map(self):
+        _isolate_env(self)
+        root = _make_projects_root("cursor-snap")
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        self._run(root, "2026-01-01")
+        transcript = next(root.glob("*/*.jsonl"))
+        with open(transcript, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"type": "file-history-snapshot", "messageId": "m", "snapshot": {}}) + "\n")
+        _rc, spy = self._run(root, "2026-01-02")
+        self.assertEqual(spy.call_count, 0)
+
+    def test_real_append_sends_only_the_new_bytes_to_map(self):
+        _isolate_env(self)
+        root = _make_projects_root("cursor-real")
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        self._run(root, "2026-01-01")
+        transcript = next(root.glob("*/*.jsonl"))
+        with open(transcript, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "type": "user", "sessionId": "fixture-friction-0001", "timestamp": "2026-02-01T10:00:00.000Z",
+                "cwd": "/Users/fixtureuser/code/widget-app",
+                "message": {"role": "user", "content": [{"type": "text", "text": "one more thing"}]},
+            }) + "\n")
+        _rc, spy = self._run(root, "2026-01-02")
+        self.assertEqual(spy.call_count, 1)
+        bundle = spy.call_args.args[1]
+        self.assertEqual(bundle["sessions"][0]["turn_count"], 1)
+        self.assertEqual(bundle["clusters"], [], "the friction already mined on night one is not re-sent")
+
+    def test_failed_reduce_holds_the_cursor_so_the_evidence_is_re_mined(self):
+        dreaming_dir = _isolate_env(self)
+        root = _make_projects_root("cursor-hold")
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        rc, _ = self._run(root, "2026-01-01", BROKEN_REDUCE_FIXTURES)
+        self.assertNotEqual(rc, 0)
+        self.assertFalse((dreaming_dir / "state" / "mining-cursors.json").exists())
+        rc2, spy = self._run(root, "2026-01-02")
+        self.assertEqual(rc2, 0)
+        self.assertEqual(spy.call_count, 1)
+
+    def test_reduce_failure_followed_by_success_leaves_no_failure_record(self):
+        dreaming_dir = _isolate_env(self)
+        root = _make_projects_root("banner-clear")
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        canary_file = dreaming_dir / "state" / "canary.json"
+
+        rc, _ = self._run(root, "2026-01-01", BROKEN_REDUCE_FIXTURES)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("widget-app", json.loads(canary_file.read_text())["reduce_failures"])
+
+        rc2, _ = self._run(root, "2026-01-02")
+        self.assertEqual(rc2, 0)
+        self.assertEqual(json.loads(canary_file.read_text())["reduce_failures"], {})
+
+    def test_truncated_map_followed_by_success_leaves_no_truncation_record(self):
+        dreaming_dir = _isolate_env(self)
+        root = _make_projects_root("trunc-clear")
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        canary_file = dreaming_dir / "state" / "canary.json"
+
+        rc, _ = self._run(root, "2026-01-01", TRUNCATED_MAP_FIXTURES)
+        self.assertEqual(rc, 0)
+        self.assertIn("widget-app", json.loads(canary_file.read_text())["truncated_calls"])
+
+        rc2, _ = self._run(root, "2026-01-02")
+        self.assertEqual(rc2, 0)
+        self.assertEqual(json.loads(canary_file.read_text())["truncated_calls"], {})
+
+    def test_clear_truncated_call_only_touches_its_slug(self):
+        dreaming_dir = _isolate_env(self)
+        da.record_truncated_call_incident("other-slug", "2026-01-01", "x")
+        da.record_truncated_call_incident("widget-app", "2026-01-01", "x")
+        da.clear_truncated_call_incident("widget-app")
+        state = json.loads((dreaming_dir / "state" / "canary.json").read_text())
+        self.assertEqual(list(state["truncated_calls"]), ["other-slug"])
+
+    def test_success_clears_only_its_own_slug(self):
+        dreaming_dir = _isolate_env(self)
+        da.record_reduce_failure_incident("other-slug", "2026-01-01", "x")
+        da.record_reduce_failure_incident("widget-app", "2026-01-01", "x")
+        da.clear_reduce_failure_incident("widget-app")
+        state = json.loads((dreaming_dir / "state" / "canary.json").read_text())
+        self.assertEqual(list(state["reduce_failures"]), ["other-slug"])
+
+    def test_clear_without_a_canary_file_writes_nothing(self):
+        dreaming_dir = _isolate_env(self)
+        da.clear_reduce_failure_incident("widget-app")
+        self.assertFalse((dreaming_dir / "state" / "canary.json").exists())
+
+
 class CanaryStateTests(unittest.TestCase):
     def test_default_canary_state_has_no_untested_versions_key(self):
         # Epic 2: the version-allowlist toil signal (untested_versions_

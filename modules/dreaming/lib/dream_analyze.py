@@ -24,7 +24,8 @@ Pipeline shape:
        learnings_store.list_project_slugs() auto-discovery). `_global` is
        never a mining target -- it has no transcripts of its own.
     2. For each candidate slug, discover() + mine_to_evidence_bundle() any
-       transcripts newer than that slug's watermark (state/last-dreamed.json).
+       bytes appended after each transcript's mining cursor
+       (state/mining-cursors.json).
        Mining is free (deterministic, offline) -- done for every due slug
        up front so the cost preflight (next step) has real bundle sizes to
        plan against. schema_canary() firing for a slug excludes it from
@@ -742,6 +743,31 @@ def record_reduce_failure_incident(slug: str, date: str, detail: str) -> None:
     _write_json_atomic(canary_state_path(), state)
 
 
+def clear_reduce_failure_incident(slug: str) -> None:
+    """Drop `slug` from canary.json's reduce_failures once its evidence has
+    been consumed by a successful run (#1098 0.5, R8). Without this the
+    marker outlives the failure and the digest banner reports a stale one
+    every night. Writes nothing if there is nothing to clear."""
+    state = _read_json(canary_state_path(), _default_canary_state())
+    if slug not in (state.get("reduce_failures") or {}):
+        return
+    del state["reduce_failures"][slug]
+    state["last_updated"] = _utc_now_iso()
+    _write_json_atomic(canary_state_path(), state)
+
+
+def clear_truncated_call_incident(slug: str) -> None:
+    """Drop `slug` from canary.json's truncated_calls once its evidence has
+    been consumed (same never-cleared shape as R8). Writes nothing if there
+    is nothing to clear."""
+    state = _read_json(canary_state_path(), _default_canary_state())
+    if slug not in (state.get("truncated_calls") or {}):
+        return
+    del state["truncated_calls"][slug]
+    state["last_updated"] = _utc_now_iso()
+    _write_json_atomic(canary_state_path(), state)
+
+
 def record_truncated_call_incident(slug: str, date: str, detail: str) -> None:
     """Durable marker for a map call that stopped at the output cap
     (#1026). The slug's mined evidence was paid for but never extracted,
@@ -788,29 +814,46 @@ def mine_due_slugs(
     cfg: dict[str, Any],
     projects_root: str | None,
     today: str,
+    offsets_out: dict[str, dict[str, int]] | None = None,
+    persist_migration: bool = True,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
-    """Mine every candidate slug that has new transcripts since its
-    watermark. Returns (bundles_by_slug, skip_reasons) -- skip_reasons maps
+    """Mine every candidate slug that has bytes past its transcripts' mining
+    cursors. offsets_out, if given, is filled with {slug: {path: end offset}}
+    -- the cursors to store once the run consumes that slug's bundle.
+    persist_migration=False (--dry-run) plans the one-time watermark-to-
+    cursor migration in memory instead of writing it.
+    Returns (bundles_by_slug, skip_reasons) -- skip_reasons maps
     a slug to a human-readable reason it was excluded (no due transcripts,
     or a schema_canary firing). Mining itself never costs money -- this
     runs for every candidate slug up front so the cost preflight has real
     bundle sizes to plan against."""
-    watermark = tm.read_watermark()
     lookback_days = int(cfg.get("lookback_days", DEFAULT_LOOKBACK_DAYS))
     max_input_tokens = int(cfg.get("max_input_tokens", DEFAULT_MAX_INPUT_TOKENS))
+
+    # Slugs dreamed before cursors existed carry only a watermark; seed their
+    # cursors from it so the first night does not re-mine their history.
+    cursors = tm.read_cursors()
+    for slug, per_file in tm.plan_watermark_migration(slugs, projects_root=projects_root).items():
+        if persist_migration:
+            tm.write_cursors(slug, per_file)
+        cursors.update({path: {"slug": slug, "offset": off} for path, off in per_file.items()})
 
     bundles: dict[str, dict[str, Any]] = {}
     skipped: dict[str, str] = {}
 
     for slug in slugs:
-        paths = tm.discover(
-            [slug], since_watermark=watermark, projects_root=projects_root, lookback_days=lookback_days,
+        due = tm.discover_with_offsets(
+            [slug], cursors=cursors, projects_root=projects_root, lookback_days=lookback_days,
         )
-        if not paths:
+        if not due:
             skipped[slug] = "no due transcripts"
             continue
+        end_offsets: dict[str, int] = {}
         try:
-            bundle = tm.mine_to_evidence_bundle(paths, max_input_tokens=max_input_tokens)
+            bundle = tm.mine_to_evidence_bundle(
+                list(due), max_input_tokens=max_input_tokens,
+                start_offsets=due, end_offsets_out=end_offsets,
+            )
         except SchemaDriftError as exc:
             detail = str(exc)
             print(f"dream_analyze: schema_canary fired for slug {slug!r}: {detail}", file=sys.stderr)
@@ -831,6 +874,8 @@ def mine_due_slugs(
             continue
 
         bundles[slug] = bundle
+        if offsets_out is not None:
+            offsets_out[slug] = end_offsets
 
     return bundles, skipped
 
@@ -1796,8 +1841,10 @@ def main(argv: list[str] | None = None) -> int:
         print("dream_analyze: no candidate project slugs (nothing configured, nothing auto-discovered); nothing to do.", file=sys.stderr)
         return 0
 
+    mined_offsets: dict[str, dict[str, int]] = {}
     bundles, skip_reasons = mine_due_slugs(
         candidate_slugs, cfg=cfg, projects_root=args.projects_root, today=today,
+        offsets_out=mined_offsets, persist_migration=not args.dry_run,
     )
     if not bundles:
         print(f"dream_analyze: no due transcripts across {len(candidate_slugs)} candidate slug(s); nothing to do.", file=sys.stderr)
@@ -1871,7 +1918,7 @@ def main(argv: list[str] | None = None) -> int:
             truncated_slugs.add(slug)
             record_truncated_call_incident(
                 slug, today,
-                "map call stopped at the output cap; evidence NOT consumed, watermark NOT advanced",
+                "map call stopped at the output cap; evidence NOT consumed, cursor NOT advanced",
             )
         total_input_tokens += usage["input_tokens"]
         total_output_tokens += usage["output_tokens"]
@@ -2010,6 +2057,13 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             continue
+        # The slug's evidence is consumed: move its cursors past what was
+        # mined, drop any stale reduce-failure marker, and advance the
+        # watermark (which now only orders slugs least-recently-dreamed
+        # first).
+        tm.write_cursors(slug, mined_offsets.get(slug, {}))
+        clear_reduce_failure_incident(slug)
+        clear_truncated_call_incident(slug)
         sessions = bundles[slug].get("sessions", [])
         timestamps = [s.get("ended_at") or s.get("started_at") for s in sessions]
         timestamps = [t for t in timestamps if t]

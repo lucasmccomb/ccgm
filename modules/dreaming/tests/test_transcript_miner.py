@@ -801,7 +801,7 @@ class DiscoverTests(unittest.TestCase):
             os.utime(p, (ts_epoch, ts_epoch))
         return p
 
-    def test_filters_by_resolved_slug_and_respects_watermark(self):
+    def test_filters_by_resolved_slug(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             wanted_cwd = "/Users/fixtureuser/code/discover-target"
@@ -816,19 +816,249 @@ class DiscoverTests(unittest.TestCase):
             found = tm.discover([wanted_slug], projects_root=root, lookback_days=365)
             self.assertEqual(found, [str(p_wanted)])
 
-    def test_watermark_excludes_unchanged_file(self):
+    def test_old_file_without_a_cursor_is_outside_the_lookback_window(self):
         import datetime as _dt
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            cwd = "/Users/fixtureuser/code/discover-watermark"
+            cwd = "/Users/fixtureuser/code/discover-lookback"
             slug = detect_project_slug(cwd)
-            old_epoch = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc).timestamp()
+            old_epoch = _dt.datetime(2020, 1, 1, tzinfo=_dt.timezone.utc).timestamp()
             self._write_transcript(root, "proj-c", "s3.jsonl", cwd, ts_epoch=old_epoch)
+            self.assertEqual(tm.discover([slug], projects_root=root, lookback_days=30), [])
 
-            watermark = {slug: "2026-06-01T00:00:00.000Z"}
-            found = tm.discover([slug], since_watermark=watermark, projects_root=root, lookback_days=365)
-            self.assertEqual(found, [])
+
+class CursorTests(unittest.TestCase):
+    """Per-file byte-offset cursors (#1098 0.4, R6): only bytes appended after
+    the last mined offset are new, and an untimestamped append (Claude Code's
+    file-history-snapshot lines) never makes a mined file due again."""
+
+    CWD = "/Users/fixtureuser/code/cursor-target"
+
+    def setUp(self):
+        self._prev = {k: os.environ.pop(k, None) for k in ("CCGM_LEARNINGS_PROJECT", "CCGM_LEARNINGS_DIR")}
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.root = Path(self._td.name) / "projects"
+        self.dreaming = Path(self._td.name) / "dreaming"
+        self._prev_dir = os.environ.get("CCGM_DREAMING_DIR")
+        os.environ["CCGM_DREAMING_DIR"] = str(self.dreaming)
+        self.slug = detect_project_slug(self.CWD)
+        d = self.root / "proj"
+        d.mkdir(parents=True)
+        self.path = d / "s1.jsonl"
+        self._append(self._msg("2026-01-01T10:00:00.000Z", "first"))
+
+    def tearDown(self):
+        for k, v in self._prev.items():
+            if v is not None:
+                os.environ[k] = v
+        if self._prev_dir is None:
+            os.environ.pop("CCGM_DREAMING_DIR", None)
+        else:
+            os.environ["CCGM_DREAMING_DIR"] = self._prev_dir
+
+    def _msg(self, ts, text):
+        return json.dumps({
+            "type": "user", "sessionId": "s1", "cwd": self.CWD, "timestamp": ts,
+            "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+        }) + "\n"
+
+    def _append(self, line):
+        with open(self.path, "a", encoding="utf-8") as fh:
+            fh.write(line)
+
+    def _mine_and_record(self):
+        """What dream_analyze does after a successful run."""
+        cursors = tm.read_cursors()
+        due = tm.discover_with_offsets([self.slug], cursors=cursors, projects_root=self.root, lookback_days=365)
+        ends: dict[str, int] = {}
+        bundle = tm.mine_to_evidence_bundle(list(due), start_offsets=due, end_offsets_out=ends)
+        tm.write_cursors(self.slug, ends)
+        return bundle, ends
+
+    def test_untimestamped_append_does_not_make_a_mined_file_due(self):
+        self._mine_and_record()
+        self._append(json.dumps({"type": "file-history-snapshot", "messageId": "m1", "snapshot": {}}) + "\n")
+        # mtime is now newer than anything mined -- the old clock would fire.
+        self.assertEqual(
+            tm.discover([self.slug], cursors=tm.read_cursors(), projects_root=self.root, lookback_days=365), [],
+        )
+
+    def test_unchanged_file_is_not_due_after_mining(self):
+        self._mine_and_record()
+        self.assertEqual(
+            tm.discover_with_offsets([self.slug], cursors=tm.read_cursors(), projects_root=self.root, lookback_days=365), {},
+        )
+
+    def test_real_append_mines_only_the_new_bytes(self):
+        self._mine_and_record()
+        old_size = self.path.stat().st_size
+        self._append(json.dumps({"type": "file-history-snapshot", "snapshot": {}}) + "\n")
+        self._append(self._msg("2026-01-02T10:00:00.000Z", "second"))
+        due = tm.discover_with_offsets([self.slug], cursors=tm.read_cursors(), projects_root=self.root, lookback_days=365)
+        self.assertEqual(list(due), [str(self.path)])
+        self.assertEqual(due[str(self.path)], old_size)
+        ends: dict[str, int] = {}
+        bundle = tm.mine_to_evidence_bundle(list(due), start_offsets=due, end_offsets_out=ends)
+        session = bundle["sessions"][0]
+        self.assertEqual(session["turn_count"], 1, "only the appended user message is mined")
+        self.assertEqual(session["started_at"], "2026-01-02T10:00:00.000Z")
+        self.assertEqual(ends[str(self.path)], self.path.stat().st_size)
+
+    def test_mine_from_offset_keeps_absolute_line_numbers_and_head_metadata(self):
+        err = json.dumps({
+            "type": "user", "sessionId": "s1", "timestamp": "2026-01-02T10:00:00.000Z",
+            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "is_error": True, "content": "boom"}]},
+        }) + "\n"
+        self._append(err)  # line 2, carries no cwd of its own
+        mined = tm.mine(self.path, start_offset=len(self._msg("2026-01-01T10:00:00.000Z", "first").encode()))
+        self.assertEqual(mined["cwd"], self.CWD, "cwd falls back to the file head so the slug stays correct")
+        self.assertEqual(mined["slug"], self.slug)
+        self.assertEqual([e["line"] for e in mined["friction_events"]], [2])
+
+    def test_truncated_file_is_re_read_from_zero(self):
+        self._mine_and_record()
+        self.path.write_text(self._msg("2026-01-03T10:00:00.000Z", "x"), encoding="utf-8")  # shorter than before
+        cursors = tm.read_cursors()
+        self.assertGreater(cursors[str(self.path)]["offset"], self.path.stat().st_size)
+        due = tm.discover_with_offsets([self.slug], cursors=cursors, projects_root=self.root, lookback_days=365)
+        self.assertEqual(due, {str(self.path): 0})
+
+    def test_incomplete_trailing_line_is_not_consumed(self):
+        self._mine_and_record()
+        full = self._msg("2026-01-02T10:00:00.000Z", "second")
+        cut = len(full) // 2
+        self._append(full[:cut])
+        due = tm.discover_with_offsets([self.slug], cursors=tm.read_cursors(), projects_root=self.root, lookback_days=365)
+        self.assertEqual(due, {}, "a half-written line is not new content yet")
+        self._append(full[cut:])
+        due = tm.discover_with_offsets([self.slug], cursors=tm.read_cursors(), projects_root=self.root, lookback_days=365)
+        self.assertEqual(list(due), [str(self.path)])
+
+    def test_new_file_for_a_cursored_slug_is_mined_from_zero(self):
+        self._mine_and_record()
+        other = self.root / "proj" / "s2.jsonl"
+        other.write_text(self._msg("2026-01-05T10:00:00.000Z", "new session"), encoding="utf-8")
+        due = tm.discover_with_offsets([self.slug], cursors=tm.read_cursors(), projects_root=self.root, lookback_days=365)
+        self.assertEqual(due, {str(other): 0})
+
+    def test_migration_from_watermark_does_not_re_mine_history(self):
+        self._append(self._msg("2026-01-02T10:00:00.000Z", "second"))
+        self._append(json.dumps({"type": "file-history-snapshot", "snapshot": {}}) + "\n")
+        tm.write_watermark(self.slug, "2026-01-02T10:00:00.000Z")
+        self.assertEqual(tm.read_cursors(), {})
+        tm.migrate_watermarks_to_cursors([self.slug], projects_root=self.root)
+        self.assertEqual(
+            tm.discover([self.slug], cursors=tm.read_cursors(), projects_root=self.root, lookback_days=365),
+            [], "everything at or before the watermark counts as mined",
+        )
+        # Second call is a no-op and a post-watermark message is due, alone.
+        tm.migrate_watermarks_to_cursors([self.slug], projects_root=self.root)
+        pre = self.path.stat().st_size
+        self._append(self._msg("2026-01-03T10:00:00.000Z", "third"))
+        due = tm.discover_with_offsets([self.slug], cursors=tm.read_cursors(), projects_root=self.root, lookback_days=365)
+        self.assertEqual(due, {str(self.path): pre})
+
+    def test_migration_leaves_a_file_with_post_watermark_content_due_from_that_line(self):
+        self._append(self._msg("2026-01-02T10:00:00.000Z", "second"))
+        first_len = len(self._msg("2026-01-01T10:00:00.000Z", "first").encode())
+        tm.write_watermark(self.slug, "2026-01-01T10:00:00.000Z")
+        tm.migrate_watermarks_to_cursors([self.slug], projects_root=self.root)
+        due = tm.discover_with_offsets([self.slug], cursors=tm.read_cursors(), projects_root=self.root, lookback_days=365)
+        self.assertEqual(due, {str(self.path): first_len})
+
+
+class LargeTranscriptPerformanceTests(unittest.TestCase):
+    """_iter_jsonl must be lazy and linear: a ~20 MB / 40k-line transcript
+    mines in seconds, and callers that stop early never read the rest."""
+
+    CWD = "/Users/fixtureuser/code/perf-target"
+    LINES = 40_000
+
+    @classmethod
+    def setUpClass(cls):
+        cls._td = tempfile.TemporaryDirectory()
+        cls.path = Path(cls._td.name) / "big.jsonl"
+        pad = "x" * 440
+        with open(cls.path, "w", encoding="utf-8") as fh:
+            for i in range(cls.LINES):
+                fh.write(json.dumps({
+                    "type": "user", "sessionId": "big", "cwd": cls.CWD, "gitBranch": "main", "version": "2.1.198",
+                    "timestamp": f"2026-01-01T10:{(i // 60) % 60:02d}:{i % 60:02d}.000Z",
+                    "message": {"role": "user", "content": [{"type": "text", "text": f"{i} {pad}"}]},
+                }) + "\n")
+        assert cls.path.stat().st_size > 20_000_000
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._td.cleanup()
+
+    def test_mine_from_zero_and_from_a_mid_file_cursor_is_linear(self):
+        start = time.monotonic()
+        full = tm.mine(self.path)
+        self.assertEqual(full["turn_count"], self.LINES)
+        mid = tm.mine(self.path, start_offset=self.path.stat().st_size // 2)
+        self.assertEqual(mid["end_offset"], self.path.stat().st_size)
+        self.assertEqual(mid["cwd"], self.CWD)
+        self.assertGreater(mid["turn_count"], 0)
+        self.assertLess(mid["turn_count"], self.LINES)
+        self.assertLess(time.monotonic() - start, 10.0)
+
+    def _bytes_read_by(self, fn):
+        """Total bytes handed back by read()/readline() on files fn opens."""
+        import builtins
+
+        real_open = builtins.open
+        total = [0]
+
+        class Counting:
+            def __init__(self, fh):
+                self._fh = fh
+
+            def read(self, *a):
+                data = self._fh.read(*a)
+                total[0] += len(data)
+                return data
+
+            def readline(self, *a):
+                data = self._fh.readline(*a)
+                total[0] += len(data)
+                return data
+
+            def __getattr__(self, name):
+                return getattr(self._fh, name)
+
+            def __enter__(self):
+                self._fh.__enter__()
+                return self
+
+            def __exit__(self, *exc):
+                return self._fh.__exit__(*exc)
+
+        def counting_open(*a, **kw):
+            return Counting(real_open(*a, **kw))
+
+        builtins.open = counting_open
+        try:
+            fn()
+        finally:
+            builtins.open = real_open
+        return total[0]
+
+    def test_head_metadata_does_not_read_past_the_head(self):
+        read = self._bytes_read_by(lambda: tm._head_metadata(self.path))  # noqa: SLF001
+        self.assertLess(read, 100_000, "only the first few lines should be read, not the 20 MB file")
+
+    def test_has_new_content_stops_at_the_first_timestamped_line(self):
+        read = self._bytes_read_by(lambda: tm._has_new_content(self.path, 0))  # noqa: SLF001
+        self.assertLess(read, 100_000)
+
+    def test_generator_is_lazy(self):
+        gen = tm._iter_jsonl(self.path)  # noqa: SLF001
+        first = next(gen)
+        self.assertEqual(first[0], 1)
+        gen.close()
 
 
 class SchemaValidationTests(unittest.TestCase):

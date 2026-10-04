@@ -179,7 +179,7 @@ out.append("")
 # --- Durable canary banner (adrev-014 + #753 handoff) ----------------------
 active_incidents = canary.get("active_incidents") or {}
 # Reduce-phase failures (#769 Stage-2 P1 #1): main() aborts without
-# writing proposals or advancing watermarks when the reduce call never
+# writing proposals or advancing cursors when the reduce call never
 # returns a usable proposal array. That abort is
 # otherwise only a stderr line an unattended launchd job will not
 # surface -- record_reduce_failure_incident() writes it into this SAME
@@ -188,7 +188,7 @@ active_incidents = canary.get("active_incidents") or {}
 reduce_failures = canary.get("reduce_failures") or {}
 # Map calls that stopped at the output cap (#1026). Same contract as a
 # reduce failure, scoped to one slug: its evidence was paid for but never
-# extracted, so its watermark was held and it is re-mined next run.
+# extracted, so its cursor was held and it is re-mined next run.
 truncated_call_incidents = canary.get("truncated_calls") or {}
 if active_incidents or reduce_failures or truncated_call_incidents:
     out.append("## ⚠️ Canary banner (durable — shown until acknowledged)")
@@ -200,16 +200,16 @@ if active_incidents or reduce_failures or truncated_call_incidents:
             out.append(f"- `{slug}` (first seen {info.get('date', '?')}): {info.get('detail', '')}")
         out.append("")
     if reduce_failures:
-        out.append("**Reduce-phase failures (mined evidence NOT consumed, watermark NOT advanced):**")
+        out.append("**Reduce-phase failures, still unresolved (mined evidence NOT consumed; the slug is re-mined each night and this clears when that slug's next reduce succeeds):**")
         out.append("")
         for slug, info in sorted(reduce_failures.items()):
-            out.append(f"- `{slug}` (last failed {info.get('date', '?')}): {info.get('detail', '')}")
+            out.append(f"- `{slug}` (failed {info.get('date', '?')}, still unresolved): {info.get('detail', '')}")
         out.append("")
     if truncated_call_incidents:
-        out.append("**Map calls that stopped at the output cap (mined evidence NOT consumed, watermark NOT advanced):**")
+        out.append("**Map calls that stopped at the output cap, still unresolved (mined evidence NOT consumed; the slug is re-mined each night and this clears when its evidence is next consumed):**")
         out.append("")
         for slug, info in sorted(truncated_call_incidents.items()):
-            out.append(f"- `{slug}` (last failed {info.get('date', '?')}): {info.get('detail', '')}")
+            out.append(f"- `{slug}` (failed {info.get('date', '?')}, still unresolved): {info.get('detail', '')}")
         out.append("")
 
 # --- Run summary -------------------------------------------------------------
