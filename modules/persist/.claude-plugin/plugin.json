@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Opt-in Stop hook that keeps the main agent working on a declared task until it is marked done. /persist starts, finishes, or cancels the loop; the hook blocks a stop only while a fresh, active, same-session state file exists, and fails open on context-limit stops, high transcript context, user aborts, auth errors, stale state, the iteration cap, a cancel signal, another session or project, re-entrancy, and any parse or IO error.",
+  "displayName": "Persist",
+  "keywords": [
+    "fail-open",
+    "hooks",
+    "persistence",
+    "run-to-completion",
+    "stop-hook"
+  ],
+  "license": "MIT",
+  "name": "persist"
+}

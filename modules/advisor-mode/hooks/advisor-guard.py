@@ -1310,6 +1310,61 @@ def review_policy_segment_allowed(words, after_cd=False):
     return True
 
 
+PERSIST_OPTIONS = {"start": {"--task", "--criteria", "--max"}, "status": set(), "done": set(), "cancel": set()}
+PERSIST_SESSION_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def persist_segment_allowed(words):
+    """Permit only the installed `ccgm-persist` CLI, in its exact grammar.
+
+    The persist module's CLI writes only ~/.claude/persist/<session_id>.json
+    (and a .cancel signal beside it): orchestration state. It is trusted only
+    by its full installed path, never by basename, and only while the script
+    and the interpreter its shebang resolves are not main-agent-writable, the
+    same trust check the review policy gets. Grammar:
+    ccgm-persist [--session ID] start|status|done|cancel [that verb's flags].
+    """
+    if any(w.unresolved for w in words):
+        return False
+    script = os.path.expanduser(os.path.expandvars(words[0].text))
+    expected = os.path.join(os.path.expanduser("~"), ".claude", "bin", "ccgm-persist")
+    if script != expected or not os.path.isfile(script) or not os.access(script, os.X_OK):
+        return False
+    python = shutil.which("python3")
+    if not python or path_allowed(os.path.realpath(python)) or path_allowed(os.path.realpath(script)):
+        return False
+    if any(os.environ.get(name) for name in
+           ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE", "PYTHONINSPECT", "PYTHONSTARTUP")):
+        return False
+    args = [w.text for w in words[1:]]
+    if args[:1] == ["--session"]:
+        if len(args) < 3 or not PERSIST_SESSION_RE.fullmatch(args[1]) or args[1] in (".", ".."):
+            return False
+        args = args[2:]
+    if not args or args[0] not in PERSIST_OPTIONS:
+        return False
+    options = PERSIST_OPTIONS[args[0]]
+    rest = args[1:]
+    seen = set()
+    index = 0
+    while index < len(rest):
+        option, equal, value = rest[index].partition("=")
+        if option not in options or option in seen:
+            return False
+        seen.add(option)
+        if not equal:
+            index += 1
+            if index >= len(rest):
+                return False
+            value = rest[index]
+        if not value or value.startswith("-") or SUBST_PLACEHOLDER in value:
+            return False
+        if option == "--max" and not value.isdigit():
+            return False
+        index += 1
+    return args[0] != "start" or "--task" in seen
+
+
 def bash_segment_allowed(segment, after_cd=False):
     words = segment_words(segment)
     if not words:
@@ -1318,6 +1373,10 @@ def bash_segment_allowed(segment, after_cd=False):
     args = [w.text for w in words[1:]]
     if argument_blocker(segment) is not None:
         return False
+    if first == "ccgm-persist":
+        # Raw words: a command-local PATH or PYTHON* assignment must not be
+        # erased before the script's interpreter is trusted.
+        return persist_segment_allowed([normalize_word(w) for w in split_words(strip_grouping(segment))])
     if first == "python3":
         # Do not erase command-local PATH/HOME/PYTHONPATH assignments before
         # trusting the interpreter and imports. Other command grammars retain

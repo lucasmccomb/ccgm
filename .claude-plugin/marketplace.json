@@ -707,6 +707,19 @@
       ]
     },
     {
+      "category": "workflow",
+      "description": "Opt-in Stop hook that keeps the main agent working on a declared task until it is marked done. /persist starts, finishes, or cancels the loop; the hook blocks a stop only while a fresh, active, same-session state file exists, and fails open on context-limit stops, high transcript context, user aborts, auth errors, stale state, the iteration cap, a cancel signal, another session or project, re-entrancy, and any parse or IO error.",
+      "name": "persist",
+      "source": "./persist",
+      "tags": [
+        "fail-open",
+        "hooks",
+        "persistence",
+        "run-to-completion",
+        "stop-hook"
+      ]
+    },
+    {
       "category": "core",
       "description": "Maintainer tooling that projects CCGM's modules into a native Claude Code plugin marketplace (.claude-plugin/marketplace.json + per-module plugin.json), additively. The bash installer stays the canonical full-fidelity path. Ships the generator, a JSON-schema validator, and the SessionStart rule-injection hook that bridges the plugin-CLAUDE.md-not-loaded gap.",
       "keywords": [

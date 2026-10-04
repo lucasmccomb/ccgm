@@ -460,6 +460,8 @@ A plan run: mark the progress file `COMPLETE`, or `BLOCKED - WAITING ON HUMAN` w
 
 **Resumability.** Persist each unit's private policy run pointer in the progress record; issue/batch units retain a stable local pointer keyed by repository and issue/unit, in addition to live GitHub state. Restore producer provenance, stage, selected checks, evidence hashes, counters and deadlines on continuation. Never rebuild review state from an open PR alone or reset budgets when fixes change its head. A plan run checkpoints to the progress file beside the plan; an issue/batch run also reconciles live GitHub state. Either way, re-invoking `/etp` on the same target continues rather than restarts.
 
+**Run to completion.** With the `persist` module installed, wrap a run in `/persist` (for example `/persist run /etp <target>`) and a Stop hook blocks the session from stopping until `/persist done`. The hook fails open on context limits, aborts, auth errors, and its iteration cap.
+
 ---
 
 ## Relationship to xplan
