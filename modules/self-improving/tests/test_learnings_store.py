@@ -1055,6 +1055,46 @@ class OriginBindingTests(unittest.TestCase):
 # v2: _global promotion guard (sec-1, §3.3 adrev-405)
 # ---------------------------------------------------------------------------
 
+class SubagentTranscriptResolutionTests(unittest.TestCase):
+    """#1098: a subagent's transcript lives at
+    <project>/<session-id>/subagents/agent-*.jsonl and carries its parent's
+    sessionId, so resolving the session must also name those files."""
+
+    def setUp(self):
+        self._orig_projects_root = ls.CLAUDE_PROJECTS_ROOT
+        self._tmp_projects = Path(tempfile.mkdtemp(prefix="ccgm-transcripts-sub-"))
+        ls.CLAUDE_PROJECTS_ROOT = self._tmp_projects
+
+    def tearDown(self):
+        ls.CLAUDE_PROJECTS_ROOT = self._orig_projects_root
+        shutil.rmtree(self._tmp_projects, ignore_errors=True)
+
+    def _subagent(self, session_id: str, name: str) -> Path:
+        path = self._tmp_projects / "some-transcript-slug" / session_id / "subagents" / f"{name}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"type": "user", "sessionId": session_id, "cwd": "/tmp/x"}) + "\n", encoding="utf-8")
+        return path
+
+    def test_resolve_lists_the_sessions_subagent_files(self):
+        parent = _make_transcript(self._tmp_projects, "sess-with-subs", "/tmp/sub/cwd")
+        b = self._subagent("sess-with-subs", "agent-b")
+        a = self._subagent("sess-with-subs", "agent-a")
+        (a.parent / "agent-a.meta.json").write_text("{}", encoding="utf-8")
+        info = ls.resolve_session_transcript("sess-with-subs")
+        self.assertEqual(info["path"], parent)
+        self.assertEqual(info["cwd"], "/tmp/sub/cwd")
+        self.assertEqual(info["subagent_paths"], [a, b])
+
+    def test_resolve_without_subagents_has_an_empty_list(self):
+        _make_transcript(self._tmp_projects, "sess-no-subs", "/tmp/sub/cwd")
+        self.assertEqual(ls.resolve_session_transcript("sess-no-subs")["subagent_paths"], [])
+
+    def test_another_sessions_subagents_are_not_listed(self):
+        _make_transcript(self._tmp_projects, "sess-one", "/tmp/sub/cwd")
+        self._subagent("sess-two", "agent-z")
+        self.assertEqual(ls.resolve_session_transcript("sess-one")["subagent_paths"], [])
+
+
 class GlobalPromotionGuardTests(unittest.TestCase):
     def setUp(self):
         os.environ.pop("CCGM_LEARNINGS_ADMIN", None)
@@ -1118,6 +1158,39 @@ class GlobalPromotionGuardTests(unittest.TestCase):
         # TrustedWriterOriginBindingTests below for the forged-env-var
         # variant that actually exercises that distinction).
         self.assertEqual(heads[new["id"]]["writer"], "solo")
+
+    def test_promote_to_global_auto_with_dwell_marks_the_op_event(self):
+        # #1098 2.3: the optimistic engine promotes a breadth-verified `_global`
+        # add itself, so the write is unattended (`auto`) and dwells like any
+        # other optimistic add.
+        _make_transcript(self._tmp_projects, "sess-promo-auto", "/tmp/promo/cwd")
+        before = time.time()
+        new = ls.promote_to_global(
+            {"type": "pattern", "content": "promoted by the engine", "confidence": 8},
+            evidence_sessions=["sess-promo-auto"],
+            reviewed_by="optimistic-integrate",
+            auto=True,
+            dwell_hours=24,
+        )
+        rows = [r for p in ls.list_agent_shards(ls.GLOBAL_SLUG) for r in ls._read_jsonl_file(p)]
+        event = next(r for r in rows if r["id"] == new["id"])
+        self.assertIs(event.get("auto"), True)
+        dwell = ls._parse_iso(event["dwell_until"])
+        self.assertGreater(dwell, before + 23 * 3600)
+        head = {h["id"]: h for h in ls.load_all(ls.GLOBAL_SLUG)}[new["id"]]
+        self.assertIsNotNone(head.get("dwell_until"))
+
+    def test_promote_to_global_default_is_live_and_not_auto(self):
+        _make_transcript(self._tmp_projects, "sess-promo-human", "/tmp/promo/cwd")
+        new = ls.promote_to_global(
+            {"type": "pattern", "content": "promoted by a human", "confidence": 8},
+            evidence_sessions=["sess-promo-human"],
+            reviewed_by="lucas",
+        )
+        rows = [r for p in ls.list_agent_shards(ls.GLOBAL_SLUG) for r in ls._read_jsonl_file(p)]
+        event = next(r for r in rows if r["id"] == new["id"])
+        self.assertNotIn("auto", event)
+        self.assertNotIn("dwell_until", event)
 
     # -----------------------------------------------------------------
     # Finding A (Stage-1 review, PR #763): update_entry_by_id() -- which

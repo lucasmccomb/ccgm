@@ -23,6 +23,9 @@
 #      entirely ahead of it (the pre-Epic-3 order ran auto-apply AFTER
 #      digest, which meant a batch was never reported until its own dwell
 #      had already expired).
+#   3b. expire-pending             — active mode only, whatever the gate said:
+#      pending proposals older than 48h are discarded `expired` (#1098 2.3).
+#      With integration off or in shadow nothing is discarded.
 #   4. bin/dream-digest.sh        (Epic 3) — render today's digest
 #   5. bin/dream-reconcile.sh     (Epic 8) — read-only auto-memory reconciliation.
 #      Does not exist yet; run_step's "missing -> skip, return 0" makes this
@@ -32,6 +35,8 @@
 #      writes scorecards/<date>.md (#1098 item 1.3).
 #   7. retention                   — gzip >30d, delete >60d (mirrors
 #      modules/autoheal/bin/autoheal-retention.sh, scoped to dreaming's dirs).
+#      A proposals file with pending rows is deleted only in active mode,
+#      after its rows are audited `expired`; otherwise it is kept.
 #   EXIT trap (always, even after a crash or SIGTERM): lib/health.py rewrites
 #      state/health.json from scratch (#1098 item 1.1), so a broken chain
 #      announces itself in the next session via hooks/dreaming-health.py.
@@ -382,7 +387,30 @@ run_optimistic_integrate_step() {
 }
 
 # ---------------------------------------------------------------------
+# Step 3b: expiry sweep (#1098 item 2.3). Active mode only, whatever the gate
+# said tonight: a pending proposal older than pending_max_age_hours (48) is
+# discarded `expired`, so no backlog forms behind a paused gate or a
+# suspended breaker. Off and shadow hold everything. Always returns 0.
+# ---------------------------------------------------------------------
+
+run_expire_step() {
+    if [ "$(_optimistic_integration_active)" != "true" ]; then
+        log "expire-pending: optimistic integration not active; holding every pending proposal"
+        return 0
+    fi
+    local out rc
+    out="$(python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" expire-pending 2>&1)"
+    rc=$?
+    log "expire-pending: exit=${rc} ${out}"
+    return 0
+}
+
+# ---------------------------------------------------------------------
 # Step 5: retention sweep — gzip >30d, delete >60d.
+#
+# A proposals file is deleted only through `retention-check` (#1098 2.3): in
+# active mode its pending rows are audited `expired` first; in off or shadow
+# mode a file that still holds a pending row is kept.
 #
 # Scoped to date-named, safely-sweepable artifacts only: proposals/*.jsonl,
 # digests/*.md, state/runs/*.json. Deliberately EXCLUDES the perpetual,
@@ -442,11 +470,31 @@ print(cfg.get('retention_delete_days', 60))
         done < <(find "${dir}" -maxdepth 1 -type f \( -name '*.jsonl' -o -name '*.md' -o -name '*.json' \) -mtime "+${gzip_days}" 2>/dev/null)
     done
 
+    local held=0 expired=0
     for sub in "${subdirs[@]}"; do
         local dir="${DREAMING_DIR}/${sub}"
         [ -d "${dir}" ] || continue
         while IFS= read -r path; do
             [ -z "${path}" ] && continue
+            if [ "${sub}" = "proposals" ]; then
+                # Never delete a pending proposal unrecorded (#1098 2.3): in
+                # active mode its rows are audited `expired` first; off and
+                # shadow keep the file.
+                local check verdict
+                check="$(python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" retention-check "${path}" 2>>"${DAILY_LOG}")"
+                verdict="$(printf '%s\n' "${check}" | python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.stdin.read().strip().splitlines()[-1])
+except (IndexError, ValueError):
+    d = {}
+print("delete" if d.get("delete") is True else "keep", int(d.get("expired") or 0))
+' 2>/dev/null)"
+                case "${verdict}" in
+                    delete*) expired=$((expired + ${verdict#delete })) ;;
+                    *) held=$((held + 1)); continue ;;
+                esac
+            fi
             if rm -f -- "${path}" 2>/dev/null; then
                 deleted=$((deleted + 1))
             else
@@ -455,7 +503,7 @@ print(cfg.get('retention_delete_days', 60))
         done < <(find "${dir}" -maxdepth 1 -type f -name '*.gz' -mtime "+${delete_days}" 2>/dev/null)
     done
 
-    log "retention: gzipped=${gzipped} deleted=${deleted} errors=${errors} (gzip>${gzip_days}d, delete>${delete_days}d)"
+    log "retention: gzipped=${gzipped} deleted=${deleted} expired=${expired} held=${held} errors=${errors} (gzip>${gzip_days}d, delete>${delete_days}d)"
     return 0
 }
 
@@ -526,6 +574,9 @@ run_eval_refresh_step || steps_failed=$((steps_failed + 1))
 
 steps_total=$((steps_total + 1))
 run_optimistic_integrate_step || steps_failed=$((steps_failed + 1))
+
+steps_total=$((steps_total + 1))
+run_expire_step || steps_failed=$((steps_failed + 1))
 
 # digest runs AFTER optimistic-integrate (chain order revised by
 # optimistic-memory plan.md Epic 3) so tonight's just-integrated batch is

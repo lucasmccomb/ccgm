@@ -633,7 +633,7 @@ class TargetBehaviorMatrixTests(ParityBase):
             adp.run_optimistic_integrate(day)
         self.assertEqual(spy.call_count, 0, "evictions must never route through the composite")
         self.assertEqual(self._status(day, hi), "auto_applied")
-        self.assertEqual(self._status(day, lo), "pending")
+        self.assertEqual(self._status(day, lo), "discarded")  # under the legacy floor (#1098 2.3)
 
     # --- supersede (h)/(i): novelty-vs-target drives the split ---
 

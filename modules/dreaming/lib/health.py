@@ -15,8 +15,14 @@ modules agree on it without importing each other):
     reasons        [{code, message, fix}], red first, most actionable first
 
 Dreaming adds: analyze_rc, gate, breaker, nights_since_last_integration,
-pending_count, oldest_pending, spend_7d, spend_30d, budget_30d, eval_last_run,
+pending_count, oldest_pending, expired_last_night, discarded_last_night,
+recent_changes, spend_7d, spend_30d, budget_30d, eval_last_run,
 eval_last_cost, eval_budget_abort, consecutive_red_nights.
+
+`recent_changes` lists the engine's own integrations and retirements from the
+last 7 days ({ts, change, project, content}); hooks/dreaming-health.py turns
+it into the once-a-day notice. `expired_last_night` and `discarded_last_night`
+count today's `discarded` audit records (#1098 2.3).
 
 Two small ledgers sit beside it and are inputs, not status: `last-success.json`
 (the time the analyze step last exited 0, so a quiet night with nothing to mine
@@ -100,6 +106,28 @@ PRIORITY = [
 GATE_NIGHT_REASONS = frozenset({
     "red_eval_gate", "eval_gate_paused", "harness_failure", "eval_regression", "eval_regression_unattributed",
 })
+
+# The daily session notice (#1098 2.3/3.3) reads `recent_changes`: the
+# optimistic engine's own integrations and retirements over the last week,
+# newest last, each with the learning's slug and opening words.
+RECENT_CHANGES_DAYS = 7
+RECENT_CHANGES_MAX = 50
+NOTICE_CONTENT_CHARS = 120
+_INTEGRATED_KINDS = frozenset({"learning_add", "learning_supersede"})
+_RETIRED_KINDS = frozenset({"learning_contradict", "learning_deprecate"})
+
+
+def _change_of(row: "dict[str, Any]") -> "str | None":
+    """"integrated", "retired" or None for one apply-audit row. Only the
+    engine's own writes count: a human's /dream-apply accept is news to no one."""
+    if row.get("outcome") != "applied" or row.get("method") != "auto_apply":
+        return None
+    if row.get("kind") in _INTEGRATED_KINDS:
+        return "integrated"
+    if row.get("kind") in _RETIRED_KINDS:
+        return "retired"
+    return None
+
 
 # Returns {"state": "open"|"closed"|"paused", "code", "reason", ...}; see
 # memory_eval.gate_check().
@@ -328,11 +356,24 @@ def compute(
     applied_in_window = False
     gate_days: set[date] = set()
     window_start = today - timedelta(days=TERMINAL_WINDOW_NIGHTS - 1)
+    expired_last_night = discarded_last_night = 0
+    recent_changes: list[dict[str, Any]] = []
+    changes_since = now - timedelta(days=RECENT_CHANGES_DAYS)
     for row in audit:
         stamp = _parse(row.get("ts"))
         if stamp is None:
             continue
         d = stamp.date()
+        if row.get("outcome") == "discarded" and d == today:
+            discarded_last_night += 1
+            if row.get("reason") == "expired":
+                expired_last_night += 1
+        change = _change_of(row)
+        if change and stamp >= changes_since:
+            recent_changes.append({
+                "ts": row["ts"], "change": change, "project": row.get("project"),
+                "content": (row.get("content") or "")[:NOTICE_CONTENT_CHARS] or None,
+            })
         if row.get("outcome") == "applied":
             if last_applied is None or d > last_applied:
                 last_applied = d
@@ -475,6 +516,9 @@ def compute(
         "breaker": breaker_info,
         "pending_count": pending,
         "oldest_pending": oldest_pending.isoformat() if oldest_pending else None,
+        "expired_last_night": expired_last_night,
+        "discarded_last_night": discarded_last_night,
+        "recent_changes": recent_changes[-RECENT_CHANGES_MAX:],
         "spend_7d": spend_7d,
         "spend_30d": spend_30d,
         "budget_30d": budget,

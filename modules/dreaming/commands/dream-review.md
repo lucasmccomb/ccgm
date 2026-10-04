@@ -10,6 +10,13 @@ job (posture policy, blast-radius caps, the windowed circuit breaker).
 `/dream-review` is strictly retrospective: everything it lists already
 landed in the store.
 
+Since #1098 item 2.3 there is no human queue: every proposal ends integrated
+or `discarded` with a reason, and the first session of each day prints one
+line (`dreaming: integrated N learnings last night (...) · /dream-review to
+veto`) when anything integrated or retired. That line points here. Nothing
+needs acknowledging; open this only to veto. Integrated `_global` rows
+(automatic when breadth holds) dwell and are listed like any other.
+
 ## Usage
 
 ```
@@ -32,11 +39,11 @@ landed in the store.
 
 ## When NOT to invoke
 
-- To act on a `pending` proposal that the optimistic engine itself gated
-  (`gated` posture — always true for any `_global` target — or, for an
-  operator who keeps `optimistic_integration.enabled: false`, every
-  proposal) — use **`/dream-apply <id>`** instead; those never reach this
-  command's listing because they never auto-applied.
+- To act on a proposal that has not integrated (still `pending`, which
+  with integration `off` or `shadow` is every proposal) — use
+  **`/dream-apply <id>`**, the manual override; those never reach this
+  command's listing because they never auto-applied. A `discarded` row is
+  terminal; its reason is in `state/apply-audit.jsonl`.
 - To read a full day's rendered digest — use `/dream-digest [date]`.
 - To change config (dwell hours, blast caps, breaker thresholds) — edit
   `~/.claude/dreaming/config.json`'s `optimistic_integration` block

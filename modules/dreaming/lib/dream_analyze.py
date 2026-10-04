@@ -145,6 +145,9 @@ EVAL_COST_LABEL_PREFIX = "eval:"
 DEFAULT_LOOKBACK_DAYS = 7
 DEFAULT_PROMOTION_MIN_SESSIONS = 3
 DEFAULT_PROMOTION_MIN_AGENTS = 2
+# Automatic `_global` promotion (#1098 2.3): transcript-verified evidence must
+# span at least promotion_min_sessions sessions over this many project slugs.
+DEFAULT_PROMOTION_MIN_SLUGS = 2
 DEFAULT_REDUCE_PENDING_MAX = 100
 
 DEFAULT_API_URL = "https://api.anthropic.com/v1/messages"
@@ -421,6 +424,9 @@ DEFAULT_OPTIMISTIC_INTEGRATION: dict[str, Any] = {
     "circuit_breaker_auto_resume_nights": 7,
     "rolling_add_rate_window_nights": 14,
     "rolling_add_rate_max": 40,
+    # No human queue (#1098 2.3): in active mode a proposal still pending
+    # this long is discarded as `expired` by the nightly sweep.
+    "pending_max_age_hours": 48,
     # Eval freshness for the integration gate (#1098 item 2.1): results stay
     # fresh while they are at most `eval_freshness_days` old AND dreaming
     # has made at most `max_unevaluated_writes` auto writes since them.
@@ -449,6 +455,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "auto_apply_counters": False,
     "promotion_min_sessions": DEFAULT_PROMOTION_MIN_SESSIONS,
     "promotion_min_agents": DEFAULT_PROMOTION_MIN_AGENTS,
+    "promotion_min_slugs": DEFAULT_PROMOTION_MIN_SLUGS,
     # #1098 3.3: a map candidate whose best match in the loaded-context corpus
     # scores at or above this is dropped before the reduce (a value above 1
     # turns the prefilter off). See loaded_context.py for the score.
@@ -656,16 +663,20 @@ def integration_mode(cfg: dict[str, Any] | None = None) -> str:
     return rollout_mode.resolve_mode(opt.get("enabled") if isinstance(opt, dict) else None)
 
 
-def resolve_posture(kind: str, project: str) -> dict[str, Any]:
+def resolve_posture(kind: str, project: str, *, breadth_verified: bool = False) -> dict[str, Any]:
     """Pure lookup -- the single source of truth for per-op-kind posture
-    (optimistic-memory plan.md §3.3). `_global` always resolves to `gated`
-    regardless of kind: defense-in-depth over promote_to_global()'s existing
-    human-accept gate (VF9), not a replacement for it. An unrecognized kind
-    also resolves to `gated` (fail-safe -- an op-kind this table does not
-    know must never be treated as auto-integrable). Returns a fresh copy so
-    callers can never mutate the shared policy table.
+    (optimistic-memory plan.md §3.3). `_global` resolves to `gated` unless
+    the caller has verified breadth from the transcripts for a
+    `learning_add` (#1098 2.3: apply_dream_proposal._resolve_global_add);
+    then it takes the ordinary add posture, dwell and floor included. Any
+    other `_global` op stays `gated`. An unrecognized kind also resolves to
+    `gated` (fail-safe -- an op-kind this table does not know must never be
+    treated as auto-integrable). Returns a fresh copy so callers can never
+    mutate the shared policy table.
     """
     if project == GLOBAL_SLUG:
+        if breadth_verified and kind == "learning_add":
+            return dict(OPTIMISTIC_POSTURE["learning_add"])
         return dict(GATED_POSTURE)
     entry = OPTIMISTIC_POSTURE.get(kind)
     if entry is None:

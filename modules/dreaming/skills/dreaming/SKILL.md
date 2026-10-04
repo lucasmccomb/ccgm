@@ -6,7 +6,7 @@ description: >
 
 # Dreaming: Nightly Durable-Memory Mining
 
-Dreaming is CCGM's nightly, cost-capped, out-of-band pipeline that mines Claude Code session transcripts for cross-session failure patterns and turns them into **evidence-tagged proposals** against the `self-improving` learnings store — behind a human gate. It is `autoheal`'s capture-analyze-propose pipeline, retargeted at session transcripts instead of permission events. See `modules/self-improving/skills/learnings-store/SKILL.md` for the store this module proposes changes to.
+Dreaming is CCGM's nightly, cost-capped, out-of-band pipeline that mines Claude Code session transcripts for cross-session failure patterns and turns them into **evidence-tagged proposals** against the `self-improving` learnings store. With optimistic integration active, every proposal ends integrated or discarded with a reason; nothing waits on a person (#1098 2.3). It is `autoheal`'s capture-analyze-propose pipeline, retargeted at session transcripts instead of permission events. See `modules/self-improving/skills/learnings-store/SKILL.md` for the store this module proposes changes to.
 
 ## What dreaming does
 
@@ -14,22 +14,22 @@ Dreaming is CCGM's nightly, cost-capped, out-of-band pipeline that mines Claude 
 2. **Map-reduce analysis** (`lib/dream_analyze.py`, `bin/dream-analyze.sh`). One map call per due project slug (evidence bundle → candidate learnings), then one reduce call across every planned slug's candidates plus a current store projection (candidates → per-change proposals). Every model call goes over `curl` to the Anthropic Messages API directly — no nested Claude Code agent runtime, no exec-escape surface, runs headless under launchd. Both calls set `thinking`, effort, and an output schema explicitly in the request body (map: thinking disabled at `effort: low`; reduce: thinking disabled at the default effort; both: `output_config.format` with the JSON schema the response must satisfy), so a model bump cannot change behaviour by omission and the response shape is enforced rather than requested. `max_tokens` is a backstop at 16000, paired with a 300s curl timeout so the cap is reachable. A call that stops at the cap is a failed extraction, never a short answer: the slug's watermark is held so its evidence is re-mined next run, a durable incident is recorded, and the digest banner names it. Every `learning_add` / `learning_supersede` proposal must carry a deterministic `trigger` (`lib/triggers.py`: regex, command prefix, path glob, or phrase set); the finalizer rejects one that fires on none of the proposal's own evidence as `trigger_unverified`. `--offline <dir>` replaces every curl call with a canned fixture response for fully deterministic, no-network testing.
 3. **Digest** (`bin/dream-digest.sh`). Renders `~/.claude/dreaming/digests/{date}.md`: today's proposals grouped by project/kind with evidence excerpts, a run summary, a durable canary banner for schema-drift/reduce-failure incidents, and yesterday's applied/rejected tally.
 4. **Reconciliation** (`lib/reconcile_automemory.py`, `bin/dream-reconcile.sh`). Read-only comparison between Claude Code's own harness auto-memory (`~/.claude/projects/*/memory/`) and the learnings store, appended to the same digest as a "## Reconciliation" section. Never writes to either store — see "Reconciliation is read-only" below.
-5. **Apply, two ways** (`lib/apply_dream_proposal.py`). **Human-gated** (`/dream-apply`) is always available, for any op-kind at any confidence, and is the only write path a `_global` proposal can ever be promoted through (`learnings_store.promote_to_global()`, invoked after your accept). **Optimistic auto-integration** (`optimistic_integration.enabled`, opt-in, default `false`) runs a per-op-kind posture engine instead — see "Optimistic auto-integration" below.
+5. **Apply, two ways** (`lib/apply_dream_proposal.py`). **Optimistic auto-integration** (`optimistic_integration.enabled`, opt-in, default `false`) runs a per-op-kind posture engine that drives every proposal to a terminal state — see "Optimistic auto-integration" and "No human queue" below. **`/dream-apply`** stays as a manual override for any op-kind at any confidence.
 6. **Scheduler** (`bin/dream-daily.sh`, `bin/dream-install.sh`). A macOS `launchd` LaunchAgent chains analyze → eval-refresh (off unless `optimistic_integration.eval_refresh_enabled` is true; a full live eval cost about $21) → optimistic-integrate → digest → reconcile → retention once nightly (digest runs AFTER optimistic-integrate so tonight's just-integrated batch is reported while its dwell window is still entirely ahead of it, not after it has already expired). Each step is exit-tolerant — one step's failure never kills the rest of the chain or trips a launchd cooldown.
 7. **Eval harness** (`eval/memory_eval.py`, `bin/dream-eval.sh`). With/without-memory A/B on a seed task suite (including one task that exercises the pipeline's own mined output end-to-end) with four-bucket outcome classification. `dream-eval.sh --gate` is the regression gate optimistic auto-integration must pass every night before it is allowed to act at all — missing or red fails closed. The harness resolves the `claude` binary to an absolute path before any task runs (a LaunchAgent's PATH is not a login shell's), and a run where **every** agent run failed to execute aborts with the first failure's raw output on stderr and a non-zero exit instead of writing a results file — see "The eval harness fails loud" below. The judge is a single Messages API call per run: no sampling parameters, `thinking: {"type": "disabled"}`, and `output_config.format` pinning the `{pass, score}` verdict schema. Spend is capped hard: the harness keeps a running total over every `claude -p` session, judge call and in-eval mining call, writes each to `cost.log` (`eval:arm:`, `eval:judge:`, `eval:mine:` rows), refuses to start when a preflight estimate exceeds `--max-total-usd`, and stops before the call that would cross it, writing `evals/<date>.budget-abort` and leaving the gate state untouched. A rolling 30-day `module_budget_usd_30d` (default 25.0) over `cost.log` stops both the analyzer and the eval.
 8. **Post-hoc review + rollback** (`/dream-review`, `ccgm-learnings-sync revert`). Surfaces auto-integrated and still-dwelling rows for a human veto, and reverts a bad batch by commit sha — see "Post-hoc review + rollback" below.
 
 ## The proposal/evidence/gate contract
 
-Every proposal (`~/.claude/dreaming/proposals/{date}.jsonl`) is a per-change delta against the learnings store — `learning_add|verify|contradict|supersede|deprecate` — never a whole-store swap. Each carries: the evidence sessions that support it (redacted, ≤400-char excerpts), a prevalence count (sessions/agents), a confidence score, and a justification. Nothing is ever applied silently: a proposal starts `pending` and stays that way until a human runs `/dream-apply <id>` (or the opt-in optimistic auto-integration engine below acts on it, subject to its own posture/cap/anomaly/breaker gates). Untrusted content — proposal text, evidence excerpts, justifications — is sanitized (`learnings_store.sanitize_content()`) before it ever reaches a digest a human or agent reads, and before it is ever handed to a live agent session.
+Every proposal (`~/.claude/dreaming/proposals/{date}.jsonl`) is a per-change delta against the learnings store — `learning_add|verify|contradict|supersede|deprecate` — never a whole-store swap. Each carries: the evidence sessions that support it (redacted, ≤400-char excerpts), a prevalence count (sessions/agents), a confidence score, and a justification. A proposal starts `pending`. With integration `active` it ends `auto_applied` or `discarded` (with `discard_reason`) within about 48 hours; with integration `off` or `shadow` it stays `pending` untouched until `/dream-apply` acts on it. Untrusted content — proposal text, evidence excerpts, justifications — is sanitized (`learnings_store.sanitize_content()`) before it ever reaches a digest a human or agent reads, and before it is ever handed to a live agent session.
 
 ## Poisoning defenses
 
 The "promote what's prevalent" heuristic dreaming is built on is its own top attack surface (MemoryGraft/MINJA-class memory poisoning). Three defenses, in the order they matter for a solo/single-clone user:
 
 - **Origin binding is transcript-verified, not caller-supplied.** A proposal's cited evidence sessions must resolve to real transcript files under `~/.claude/projects/**`; `writer` is derived from that transcript's own recorded `cwd`, never from a freely-exportable env var like `CCGM_AGENT_ID`. A supersede can never *raise* an entry's `source` tier (e.g. `inferred` → `user-stated`) without an independently-verified new session backing it.
-- **Breadth is informational, not a bypass.** `promotion_min_sessions`/`promotion_min_agents` gate what the *digest* labels `needs_manual_promotion` for an under-prevalence `_global` proposal — it is never dropped, and it never becomes a silent, automated write. Per the plan's own honesty note (plan.md §1.4): the `agents ≥ 2` breadth condition is realistically unsatisfiable for a solo, single-clone user (every transcript inside one project slug carries exactly one writer), so treat "fleet-wide automated promotion" as a latent capability for genuine multi-agent usage, not a V1 solo-user outcome.
-- **`_global` is promotion-only, through exactly one path.** `learnings_store.promote_to_global()`, invoked only by `apply_dream_proposal.py` after a recorded human accept in `/dream-apply`. No automated `_global` add exists anywhere in this module. The `CCGM_LEARNINGS_ADMIN=1` hatch (see the `learnings-store` skill) is a terminal-only manual one-off, never the intended accept path — a digest never points a human at it.
+- **Breadth is transcript-verified, never claimed.** A `_global` learning_add integrates in `_global` only when its cited sessions resolve to real transcripts, their excerpts corroborate there (subagent files included), and they span `promotion_min_sessions` (3) sessions over `promotion_min_slugs` (2) project slugs, each slug derived from the transcript's own cwd. Short of that it is rescoped into the slug most of its verified evidence comes from (`rescoped_from: "_global"`) and judged like any project add; with no verified session it is discarded `failed_corroboration`. The model's `prevalence` claim plays no part. `needs_manual_promotion` remains a digest label only.
+- **`_global` is written through exactly one path.** `learnings_store.promote_to_global()`, called by `apply_dream_proposal.py` after a `/dream-apply` accept or a breadth-verified engine decision (marked `auto`, with the usual dwell). Ops on an existing `_global` row (verify, contradict, supersede, deprecate) are never automated; the engine discards them `global_manual_only` and `/dream-apply` remains their path. The `CCGM_LEARNINGS_ADMIN=1` hatch (see the `learnings-store` skill) is a terminal-only manual one-off; nothing in this module sets it.
 
 ## Optimistic auto-integration: posture, dwell, caps, breaker
 
@@ -44,9 +44,34 @@ When enabled, every pending proposal is resolved to a **posture** (`dream_analyz
 | `learning_supersede` | `optimistic-dwell` | yes | composite eligibility gate (see below); **default OFF → flat floor 8** + compaction guard must pass | shared with `learning_add` |
 | `learning_contradict` | `dwell-quarantine` | yes (mandatory) | 8 | `min(max_eviction_absolute, fraction × live slug heads)` |
 | `learning_deprecate` | `dwell-quarantine` | yes (mandatory) | 8 | shared with `learning_contradict` |
-| any → `_global` | `gated` | n/a | n/a | n/a — `promote_to_global()` human accept stays required, unchanged |
+| `learning_add` → `_global`, breadth verified | `optimistic-dwell` | yes | 8 | `max_add_supersede_per_run` for `_global` |
+| other op → existing `_global` row | `gated` | n/a | n/a | never automated; discarded `global_manual_only` |
 
-Anything that misses its posture's floor/cap, targets `_global`, or arrives on a run where the batch-anomaly check or circuit breaker fired **falls back to `pending`** — never silently dropped, always surfaced in the digest for a human `/dream-apply`.
+### No human queue (#1098 2.3)
+
+Every proposal the active engine decides reaches a terminal state the same night, recorded on the row (`status`, `discard_reason`, `discarded_at`) and as a `discarded` apply-audit record (no `ok` field):
+
+| Outcome | Status | Reason |
+|---|---|---|
+| integrated | `auto_applied` | dwell, then live |
+| under the confidence floor | `discarded` | `low_confidence` |
+| add with too few sessions | `discarded` | `low_prevalence` |
+| eligibility origin gate / composite | `discarded` | `failed_corroboration` / `low_composite_score` |
+| per-run cap reached | `discarded` | `cap_exceeded` |
+| eviction concentration | `discarded` | `batch_anomaly` |
+| supersede drops fact tokens | `discarded` | `compaction_guard_failed` |
+| op on a `_global` row; unknown kind | `discarded` | `global_manual_only`; `unsupported_kind` |
+| target gone, invalid row, failed promotion | `discarded` | `target_gone`, `invalid`, `promotion_failed` |
+| malformed row | `discarded` | `malformed` |
+| still pending after `pending_max_age_hours` (48) | `discarded` | `expired` |
+
+Infra hiccups (`internal_error`, CAS exhaustion, an unexpected exit, a suspended breaker, a mid-batch timeout) leave the row `pending`: the engine also re-reads yesterday's pending rows each night, and the nightly `expire-pending` step ends anything older than 48 hours, whatever the gate said. Retention deletes a proposals file only after its pending rows are audited `expired`.
+
+**Off means hold.** With integration `off` or `shadow`, nothing is discarded: the engine does not run (shadow writes nothing), `expire-pending` and `retention-check` read the on-disk flag the way `dream-daily.sh` does and hold, and retention keeps any proposals file that still holds a pending row.
+
+**The one-off backlog close** (`bin/dream-close-backlog.sh`, #1098 2.4) replays every pending row, gz included, through the loaded-context prefilter (`already_encoded`), hook-error routing (`routed_to_autoheal`) and trigger validation (`trigger_invalid`, `trigger_unverified`); the rest are discarded `expired` with detail `pre-redesign`. Dry run by default; `--apply` writes. Run by hand at bring-up only.
+
+**The daily notice.** `lib/health.py` writes the engine's integrations and retirements from the last week to `health.json`'s `recent_changes`; `hooks/dreaming-health.py` prints one line in the first session of the day when anything changed since the last notice (`state/notice.json` is the sentinel), as `systemMessage` for the user and `additionalContext` for the model. No question, nothing to acknowledge. A red health notice takes precedence.
 
 ### Eligibility composite (add/supersede only, default OFF)
 
@@ -126,7 +151,7 @@ cat ~/.claude/dreaming/config.json
 |---------|---------|
 | `/dream` | Status overview + subcommand surface. Read-only. |
 | `/dream-digest [date]` | Render today's (or a specific date's) digest. |
-| `/dream-apply [id\|list]` | List pending proposals, or accept/reject one by id — the always-available, human-gated write path into the store. |
+| `/dream-apply [id\|list]` | List pending proposals, or accept/reject one by id — the manual override. Nothing waits for it when integration is active. |
 | `/dream-review [id\|list]` | Post-hoc review of auto-integrated and still-dwelling rows; veto one before or shortly after it goes live. |
 | `/dream-scorecard [week]` | Read-only weekly observability scorecard (captured / injected / reused / applied, plus auto-integrated / mid-dwell / reverted / breaker-trips + store health). Renders to `~/.claude/dreaming/scorecards/{date}.md`. |
 

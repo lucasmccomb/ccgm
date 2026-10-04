@@ -601,15 +601,17 @@ PY
     local rc=$?
     assert_eq "${rc}" "0" "dream-daily.sh (${label}) exits 0"
 
+    # Never applied. The row is months old, so tonight's active-mode expiry
+    # sweep ends it `expired` whatever the gate said (#1098 2.3).
     local status
     status="$(python3 -c "
 import json
 for line in open('${file}'):
     row = json.loads(line)
     if row['id'] == 'closed-verify':
-        print(row['status'])
+        print(row['status'], row.get('discard_reason'))
 ")"
-    assert_eq "${status}" "pending" "auto_apply_counters=true, ${label}: proposal NEVER auto-applied"
+    assert_eq "${status}" "discarded expired" "auto_apply_counters=true, ${label}: proposal NEVER auto-applied (expired instead)"
 
     local log_file="${LOGS_DIR}/dreaming-daily-${day}.log"
     assert_file_exists "${log_file}" "dream-daily.sh log written (${label})"

@@ -285,7 +285,9 @@ class PostureTests(OptimisticEngineTestBase):
         results = ls.search(slug=slug, query="contradicted")
         self.assertNotIn(target_id, [r["id"] for r in results])
 
-    def test_global_add_stays_pending(self):
+    def test_global_add_without_verifiable_breadth_is_discarded(self):
+        # #1098 2.3: the claimed sessions=5 is not evidence; none of the cited
+        # sessions resolves to a transcript, so nothing backs the promotion.
         self._write_config()
         day = _unique_day()
         self._write_day(day, [_proposal_row(pid="g1", kind="learning_add", project=ls.GLOBAL_SLUG,
@@ -293,7 +295,8 @@ class PostureTests(OptimisticEngineTestBase):
                                              confidence=10, sessions=5)])
         summary = adp.run_optimistic_integrate(day)
         self.assertEqual(summary["applied"], 0, summary)
-        self.assertEqual(self._status_of(day, "g1"), "pending")
+        self.assertEqual(self._status_of(day, "g1"), "discarded")
+        self.assertEqual(self._row_by_id(day, "g1")["discard_reason"], "failed_corroboration")
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +305,7 @@ class PostureTests(OptimisticEngineTestBase):
 
 
 class FloorTests(OptimisticEngineTestBase):
-    def test_add_below_confidence_floor_stays_pending(self):
+    def test_add_below_confidence_floor_is_discarded(self):
         slug = _unique_slug("add-floor")
         self._write_config()  # confidence_floor_content default 8
         day = _unique_day()
@@ -311,9 +314,10 @@ class FloorTests(OptimisticEngineTestBase):
                                              confidence=7, sessions=5)])
         summary = adp.run_optimistic_integrate(day)
         self.assertEqual(summary["applied"], 0, summary)
-        self.assertEqual(self._status_of(day, "af1"), "pending")
+        self.assertEqual(self._status_of(day, "af1"), "discarded")
+        self.assertEqual(self._row_by_id(day, "af1")["discard_reason"], "low_confidence")
 
-    def test_verify_below_confidence_floor_stays_pending(self):
+    def test_verify_below_confidence_floor_is_discarded(self):
         slug = _unique_slug("verify-floor")
         self._write_config()  # confidence_floor_verify default 7
         target_id = self._seed_learning(slug)
@@ -322,7 +326,8 @@ class FloorTests(OptimisticEngineTestBase):
                                              target_id=target_id, confidence=6)])
         summary = adp.run_optimistic_integrate(day)
         self.assertEqual(summary["applied"], 0, summary)
-        self.assertEqual(self._status_of(day, "vf1"), "pending")
+        self.assertEqual(self._status_of(day, "vf1"), "discarded")
+        self.assertEqual(self._row_by_id(day, "vf1")["discard_reason"], "low_confidence")
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +348,7 @@ class PerSlugCapTests(OptimisticEngineTestBase):
         self.assertEqual(summary["applied"], 2, summary)
         statuses = [self._status_of(day, f"cap{i}") for i in range(5)]
         self.assertEqual(statuses.count("auto_applied"), 2)
-        self.assertEqual(statuses.count("pending"), 3)
+        self.assertEqual(statuses.count("discarded"), 3)
 
     def test_per_slug_cap_is_not_cross_project(self):
         self._write_config({"max_add_supersede_per_run": 2})
@@ -374,7 +379,7 @@ class PerSlugCapTests(OptimisticEngineTestBase):
         self.assertEqual(summary["applied"], 3, summary)
         statuses = [self._status_of(day, f"dep{i}") for i in range(5)]
         self.assertEqual(statuses.count("auto_applied"), 3)
-        self.assertEqual(statuses.count("pending"), 2)
+        self.assertEqual(statuses.count("discarded"), 2)
 
     def test_fixed_denominator_same_run_adds_do_not_inflate_eviction_cap(self):
         # Numbers chosen so a "recompute live_head_count fresh on every
@@ -451,7 +456,8 @@ class BatchAnomalyTests(OptimisticEngineTestBase):
         summary = adp.run_optimistic_integrate(day)
 
         for i in range(5):
-            self.assertEqual(self._status_of(day, f"a-dep{i}"), "pending", f"a-dep{i}")
+            self.assertEqual(self._status_of(day, f"a-dep{i}"), "discarded", f"a-dep{i}")
+            self.assertEqual(self._row_by_id(day, f"a-dep{i}")["discard_reason"], "batch_anomaly")
         for i in range(3):
             self.assertEqual(self._status_of(day, f"b-dep{i}"), "auto_applied", f"b-dep{i}")
 
@@ -1148,7 +1154,7 @@ class MalformedInputTests(OptimisticEngineTestBase):
         self.assertEqual(summary["applied"], 0)
         self.assertEqual(summary["evaluated"], 0)
 
-    def test_malformed_project_field_is_skipped_not_crashed(self):
+    def test_malformed_project_field_is_discarded_not_crashed(self):
         self._write_config()
         day = _unique_day()
         row = _proposal_row(pid="bad1", kind="learning_add", project="placeholder",
@@ -1157,7 +1163,8 @@ class MalformedInputTests(OptimisticEngineTestBase):
         self._write_day(day, [row])
         summary = adp.run_optimistic_integrate(day)  # must not raise
         self.assertEqual(summary["applied"], 0, summary)
-        self.assertEqual(self._status_of(day, "bad1"), "pending")
+        self.assertEqual(self._status_of(day, "bad1"), "discarded")
+        self.assertEqual(self._row_by_id(day, "bad1")["discard_reason"], "malformed")
 
 
 # ---------------------------------------------------------------------------

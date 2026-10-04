@@ -54,9 +54,11 @@ second attempt is made; otherwise one retry is attempted with a freshly
 re-read sha. Exhausting that retry still on a mismatch marks the outcome
 `failed_cas` (audited, proposal LEFT pending -- never silently dropped).
 
-Status discipline: the proposals file's `status` field is part of Epic 3's
-FROZEN proposal-schema.json enum (`pending|accepted|rejected|auto_applied`).
-This module writes `accepted`/`auto_applied`/`rejected` ONLY on an outcome
+Status discipline: the proposals file's `status` field is proposal-schema.json's
+enum (`pending|accepted|rejected|auto_applied|discarded`). The optimistic
+engine, the expiry sweep and retention also write `discarded` with a
+`discard_reason` (#1098 item 2.3, "Terminal states" below); `apply_proposal()`
+itself writes `accepted`/`auto_applied`/`rejected` ONLY on an outcome
 that actually landed a store change (or, for reject, a deliberate no-store-
 write refusal); every failure/refusal outcome (refused_not_pending,
 target_no_longer_live, failed_cas, failed_promotion, validation_error,
@@ -127,6 +129,7 @@ import argparse
 import contextlib
 import datetime as _dt
 import fcntl
+import gzip
 import json
 import math
 import os
@@ -432,11 +435,37 @@ def _rewrite_status_locked(
     (caller's problem to report -- this function never raises on a
     not-found).
     """
+    def _set(row: dict[str, Any]) -> bool:
+        if row.get("id") != proposal_id:
+            return False
+        row["status"] = new_status
+        if extra_fields:
+            row.update(extra_fields)
+        return True
+
+    updated = _mutate_rows_locked(path, _set)
+    return updated[0] if updated else None
+
+
+def _mutate_rows_locked(path: Path, mutate: Callable[[dict[str, Any]], bool]) -> list[dict[str, Any]]:
+    """Rewrite a proposals file (plain or gzipped) with `mutate` applied to
+    every parseable row; `mutate` edits the row in place and returns True
+    when it changed it. Returns the changed rows; the file is left untouched
+    when none changed. Caller holds `_apply_lock()`.
+
+    Every parseable row is re-serialized with sorted keys; a corrupt or
+    non-object line is preserved verbatim, so one bad sibling line can never
+    stop a status from being recorded. The write is temp-file + rename."""
+    is_gz = path.name.endswith(".gz")
     try:
-        raw_lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return None
-    updated: dict[str, Any] | None = None
+        if is_gz:
+            with gzip.open(path, "rt", encoding="utf-8") as fh:
+                raw_lines = fh.read().splitlines()
+        else:
+            raw_lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, EOFError, gzip.BadGzipFile):
+        return []
+    changed: list[dict[str, Any]] = []
     out_lines: list[str] = []
     for line in raw_lines:
         line = line.strip()
@@ -450,18 +479,183 @@ def _rewrite_status_locked(
         if not isinstance(row, dict):
             out_lines.append(line)  # valid JSON but not an object -- preserve verbatim (mirrors _read_jsonl)
             continue
-        if row.get("id") == proposal_id:
-            row["status"] = new_status
-            if extra_fields:
-                row.update(extra_fields)
-            updated = row
+        if mutate(row):
+            changed.append(row)
         out_lines.append(json.dumps(row, sort_keys=True))
-    if updated is None:
-        return None
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+    if not changed:
+        return []
+    text = "\n".join(out_lines) + "\n"
+    tmp = path.with_name(path.name + ".tmp")
+    if is_gz:
+        with gzip.open(tmp, "wt", encoding="utf-8") as fh:
+            fh.write(text)
+    else:
+        tmp.write_text(text, encoding="utf-8")
+    # Keep the file's age: retention gzips and deletes by mtime, and a status
+    # change must not restart a proposals file's 30/60-day clock.
+    try:
+        st = path.stat()
+        os.utime(tmp, (st.st_atime, st.st_mtime))
+    except OSError:
+        pass
     tmp.replace(path)
-    return updated
+    return changed
+
+
+# ---------------------------------------------------------------------------
+# Terminal states (#1098 item 2.3). A proposal ends `accepted`/`auto_applied`
+# (integrated) or `discarded` with a reason. Nothing waits on a person.
+# ---------------------------------------------------------------------------
+
+DISCARDED = "discarded"
+REASON_EXPIRED = "expired"
+DEFAULT_PENDING_MAX_AGE_HOURS = 48
+
+# Engine skip outcome -> discard reason. Each is a decision about the
+# proposal's content, so it is final.
+_SKIP_DISCARD_REASONS = {
+    "skipped_floor": "low_confidence",
+    "skipped_prevalence": "low_prevalence",
+    "skipped_origin": "failed_corroboration",
+    "skipped_composite": "low_composite_score",
+    "skipped_compaction_guard": "compaction_guard_failed",
+    "skipped_anomaly": "batch_anomaly",
+    "skipped_over_cap": "cap_exceeded",
+    "skipped_malformed": "malformed",
+}
+
+# apply_proposal() failure outcome -> discard reason, for the failures that
+# would repeat on every retry. The rest (internal_error, failed_cas,
+# unexpected_exit_code) are infra hiccups: the row stays pending for the
+# next night, and the expiry sweep ends it if they persist.
+_APPLY_FAILURE_DISCARD_REASONS = {
+    "target_no_longer_live": "target_gone",
+    "target_not_found": "target_gone",
+    "validation_error": "invalid",
+    "failed_promotion": "promotion_failed",
+    "unsupported_kind": "unsupported_kind",
+}
+
+
+def _discard_rows(
+    path: Path, decisions: dict[str, tuple[str, str | None]], *, method: str, batch_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Mark each still-pending row in `decisions` ({id: (reason, detail)})
+    `discarded` and write one `discarded` audit record per row. A row that is
+    no longer pending is left alone (a human or an earlier run decided it).
+    The audit record carries no `ok` field: a discard is never an apply."""
+    if not decisions:
+        return []
+    stamp = _utc_now_iso()
+
+    def _mark(row: dict[str, Any]) -> bool:
+        decision = decisions.get(row.get("id"))
+        if decision is None or row.get("status") != "pending":
+            return False
+        reason, detail = decision
+        row["status"] = DISCARDED
+        row["discard_reason"] = reason
+        row["discarded_at"] = stamp
+        if detail:
+            row["discard_detail"] = detail
+        return True
+
+    with _apply_lock():
+        changed = _mutate_rows_locked(path, _mark)
+    for row in changed:
+        record: dict[str, Any] = {
+            "outcome": "discarded", "reason": row["discard_reason"], "proposal_id": row.get("id"),
+            "kind": row.get("kind"), "project": row.get("project"), "method": method,
+        }
+        if row.get("discard_detail"):
+            record["detail"] = row["discard_detail"]
+        if batch_id is not None:
+            record["batch_id"] = batch_id
+        _write_audit(record)
+    return changed
+
+
+def _on_disk_mode() -> str:
+    """The rollout mode from config.json's own `optimistic_integration.enabled`,
+    read the way dream-daily.sh reads it (rollout_mode.py on the raw file, no
+    legacy-flag bridge). Only "active" may discard anything."""
+    try:
+        cfg = json.loads(da.config_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return da.rollout_mode.MODE_OFF
+    opt = cfg.get("optimistic_integration") if isinstance(cfg, dict) else None
+    return da.rollout_mode.resolve_mode(opt.get("enabled") if isinstance(opt, dict) else None)
+
+
+def _pending_max_age_hours() -> float:
+    cfg = da.load_config().get("optimistic_integration") or {}
+    try:
+        return float(cfg.get("pending_max_age_hours", DEFAULT_PENDING_MAX_AGE_HOURS))
+    except (TypeError, ValueError):
+        return float(DEFAULT_PENDING_MAX_AGE_HOURS)
+
+
+def _row_age_hours(row: dict[str, Any], path: Path, now: float) -> float | None:
+    """Hours since the row was generated: its `generated_at`, else the file's
+    date. None when neither is readable (the row is then left alone)."""
+    stamp = learnings_store._parse_iso(row.get("generated_at") or "")  # noqa: SLF001
+    if not stamp:
+        try:
+            stamp = _dt.datetime.combine(
+                _dt.date.fromisoformat(path.name[:10]), _dt.time(), tzinfo=_dt.timezone.utc,
+            ).timestamp()
+        except ValueError:
+            return None
+    return (now - stamp) / 3600.0
+
+
+def expire_pending(*, now: float | None = None) -> dict[str, Any]:
+    """Discard every pending proposal older than `pending_max_age_hours`
+    (default 48) as `expired`, in every proposals file, plain and gzipped.
+
+    Active mode only: off and shadow hold everything and change nothing. The
+    nightly chain runs this after optimistic-integrate whatever the gate
+    said, so a run of paused or closed nights cannot grow a backlog."""
+    mode = _on_disk_mode()
+    if mode != da.rollout_mode.MODE_ACTIVE:
+        return {"outcome": "held", "mode": mode, "expired": 0}
+    now_ts = now if now is not None else time.time()
+    max_age = _pending_max_age_hours()
+    expired = 0
+    for path in da.loaded_context.proposal_files(proposals_dir()):
+        decisions: dict[str, tuple[str, str | None]] = {}
+        for row in da.loaded_context.read_proposal_rows(path):
+            if row.get("status") != "pending" or not row.get("id"):
+                continue
+            age = _row_age_hours(row, path, now_ts)
+            if age is not None and age > max_age:
+                decisions[row["id"]] = (REASON_EXPIRED, f"pending {age:.0f}h, over the {max_age:g}h limit")
+        expired += len(_discard_rows(path, decisions, method="expire-sweep"))
+    return {"outcome": "ok", "mode": mode, "expired": expired, "max_age_hours": max_age}
+
+
+def retention_check(path: Path) -> dict[str, Any]:
+    """May the retention step delete this aged proposals file?
+
+    Yes when it holds no pending row. In active mode its pending rows are
+    first discarded `expired` (audited), so nothing disappears unrecorded.
+    In off or shadow mode a file with pending rows is kept: off means hold
+    everything."""
+    path = Path(path)
+    pending = [
+        r["id"] for r in da.loaded_context.read_proposal_rows(path)
+        if r.get("status") == "pending" and r.get("id")
+    ]
+    if not pending:
+        return {"delete": True, "pending": 0, "expired": 0}
+    mode = _on_disk_mode()
+    if mode != da.rollout_mode.MODE_ACTIVE:
+        return {"delete": False, "held": len(pending), "mode": mode}
+    changed = _discard_rows(
+        path, {pid: (REASON_EXPIRED, "retention: the file aged out while the row was pending") for pid in pending},
+        method="retention",
+    )
+    return {"delete": True, "pending": len(pending), "expired": len(changed)}
 
 
 def _rewrite_status(path: Path, proposal_id: str, new_status: str) -> dict[str, Any] | None:
@@ -505,7 +699,7 @@ def _apply_learning_add(
     dwell_hours: float | None = None,
 ) -> dict[str, Any]:
     if row.get("project") == GLOBAL_SLUG:
-        return _apply_global_add(row, reviewed_by=reviewed_by)
+        return _apply_global_add(row, reviewed_by=reviewed_by, method=method, dwell_hours=dwell_hours)
 
     args = [
         "--type", row["type"],
@@ -547,11 +741,18 @@ def _apply_learning_add(
     return {"outcome": "unexpected_exit_code", "detail": f"exit={proc.returncode}: {proc.stderr.strip()}"}
 
 
-def _apply_global_add(row: dict[str, Any], *, reviewed_by: str) -> dict[str, Any]:
+def _apply_global_add(
+    row: dict[str, Any], *, reviewed_by: str, method: str = "human_accept", dwell_hours: float | None = None,
+) -> dict[str, Any]:
     """adrev-405 net contract: the ONE write path to `_global` is
     `learnings_store.promote_to_global()`, called in-process here -- NEVER
     via the general CLI, which is ADMIN-gated and must never see
-    CCGM_LEARNINGS_ADMIN exported by an automated script (sec-8)."""
+    CCGM_LEARNINGS_ADMIN exported by an automated script (sec-8).
+
+    Two callers reach it: a human accept (`/dream-apply`), and the
+    optimistic engine once `_resolve_global_add()` has verified breadth from
+    the transcripts (#1098 2.3). The engine's write is marked `auto` and
+    dwells like any other optimistic add."""
     evidence_sessions = [
         e.get("session_id") for e in (row.get("evidence") or [])
         if isinstance(e, dict) and e.get("session_id")
@@ -567,6 +768,7 @@ def _apply_global_add(row: dict[str, Any], *, reviewed_by: str) -> dict[str, Any
     try:
         new_entry = learnings_store.promote_to_global(
             entry, evidence_sessions=evidence_sessions, reviewed_by=reviewed_by,
+            auto=(method == "auto_apply"), dwell_hours=dwell_hours,
         )
     except learnings_store.GlobalPromotionError as exc:
         return {"outcome": "failed_promotion", "detail": str(exc)}
@@ -785,6 +987,9 @@ _HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
 # ---------------------------------------------------------------------------
 
 
+_AUDIT_CONTENT_CHARS = 300
+
+
 def apply_proposal(
     proposal_id: str, *, method: str = "human_accept", reviewed_by: str | None = None,
     dwell_hours: float | None = None, batch_id: str | None = None, posture: str | None = None,
@@ -884,6 +1089,9 @@ def apply_proposal(
             "target_id": row.get("target_id"), "method": method, "reviewed_by": reviewed_by,
             "ok": ok, **result,
         }
+        if ok and isinstance(row.get("content"), str):
+            # The SessionStart notice quotes integrated learnings from here.
+            record["content"] = row["content"][:_AUDIT_CONTENT_CHARS]
         if batch_id is not None:
             record["batch_id"] = batch_id
         if posture is not None:
@@ -1561,6 +1769,11 @@ class SessionVerification:
     oversized: bool                 # > max_transcript_bytes: tier inferred, recency 0
     path: str | None
     normalized_text: str | None     # cached normalized transcript text (None if oversized/unresolved)
+    # The session's subagent transcripts (<session>/subagents/agent-*.jsonl):
+    # their lines carry the parent's sessionId, so an excerpt quoted from one
+    # corroborates this session. Texts are None when oversized/unresolved.
+    subagent_paths: tuple = ()
+    subagent_texts: tuple | None = None
 
 
 @dataclass(frozen=True)
@@ -1758,10 +1971,14 @@ def _excerpt_corroborated(excerpt: str, sv: SessionVerification, elig_cfg: dict[
         window_len += n_placeholders * _MAX_REDACTED_SECRET_LEN
     threshold = float(elig_cfg["excerpt_match_min"])
     required = max(_EXCERPT_GUARD_MIN_ABS_TOKENS, math.ceil(_EXCERPT_GUARD_FRACTION * len(tokens)))
+    # The parent transcript first, then each subagent transcript on its own:
+    # a window never spans two files.
     if sv.normalized_text is not None:
-        return _corroborate_in_text(prepped, tokens, window_len, threshold, required, sv.normalized_text)
+        texts = (sv.normalized_text, *(sv.subagent_texts or ()))
+        return any(_corroborate_in_text(prepped, tokens, window_len, threshold, required, t) for t in texts)
     if sv.path is not None:
-        return _corroborate_streaming(prepped, tokens, window_len, threshold, required, sv.path)
+        paths = (sv.path, *sv.subagent_paths)
+        return any(_corroborate_streaming(prepped, tokens, window_len, threshold, required, p) for p in paths)
     return False
 
 
@@ -1781,23 +1998,29 @@ def _build_session_verification(session_id: str, elig_cfg: dict[str, Any]) -> Se
     path = str(resolved["path"])
     cwd = resolved.get("cwd")
     slug = learnings_store.detect_project_slug(cwd) if cwd else None
+    subagent_paths = tuple(str(p) for p in resolved.get("subagent_paths") or ())
 
     max_bytes = int(elig_cfg["max_transcript_bytes"])
-    try:
-        size = os.path.getsize(path)
-    except OSError:
-        size = 0
+    size = 0
+    for p in (path, *subagent_paths):
+        try:
+            size += os.path.getsize(p)
+        except OSError:
+            pass
     if size > max_bytes:
         # Oversized: tier forced "inferred", recency 0, no cached text
         # (the excerpt check still streams on demand) -- fail toward weakest.
         return SessionVerification(
             session_id=session_id, resolved=True, cwd=cwd, slug=slug,
             tier="inferred", tier_source=None, newest_ts_epoch=None,
-            oversized=True, path=path, normalized_text=None,
+            oversized=True, path=path, normalized_text=None, subagent_paths=subagent_paths,
         )
 
     normalized_text = _read_transcript_normalized(path)
+    subagent_texts = tuple(_read_transcript_normalized(p) for p in subagent_paths)
 
+    # Tier and recency come from the parent alone: a subagent's "user" turns
+    # are the parent agent's prompts, never a human's correction.
     tier = "inferred"
     tier_source: dict | None = None
     newest_ts: float | None = None
@@ -1820,6 +2043,7 @@ def _build_session_verification(session_id: str, elig_cfg: dict[str, Any]) -> Se
         session_id=session_id, resolved=True, cwd=cwd, slug=slug,
         tier=tier, tier_source=tier_source, newest_ts_epoch=newest_ts,
         oversized=False, path=path, normalized_text=normalized_text,
+        subagent_paths=subagent_paths, subagent_texts=subagent_texts,
     )
 
 
@@ -2018,6 +2242,7 @@ def _process_one_proposal(
     session_cache: dict[str, SessionVerification] | None = None,
     session_citation_counts: dict[str, int] | None = None,
     shadow: bool = False,
+    breadth_verified: bool = False,
 ) -> dict[str, Any]:
     """Per-proposal posture/floor/cap/anomaly gate, then apply via the SAME
     `apply_proposal()` human accepts use (so the human-race lock and
@@ -2044,7 +2269,7 @@ def _process_one_proposal(
         kind = row.get("kind")
         project = row.get("project")
 
-        posture = da.resolve_posture(kind, project)
+        posture = da.resolve_posture(kind, project, breadth_verified=breadth_verified)
         if posture["posture"] == "gated":
             audit({
                 "outcome": "skipped_gated", "batch_id": batch_id, "proposal_id": proposal_id,
@@ -2060,7 +2285,11 @@ def _process_one_proposal(
         # at all on the legacy path (spy-testable, plan.md §5 E3).
         elig_cfg = cfg.get("eligibility")
         eligibility_on = isinstance(elig_cfg, dict) and elig_cfg.get("enabled") is True
-        if eligibility_on and kind in ("learning_add", "learning_supersede"):
+        # A breadth-verified `_global` add already passed a stronger,
+        # transcript-verified origin check (_resolve_global_add), and the
+        # composite scores sessions against one project slug, which `_global`
+        # is not; it takes the legacy floor below.
+        if eligibility_on and kind in ("learning_add", "learning_supersede") and not breadth_verified:
             cache = session_cache if session_cache is not None else {}
             ev = evaluate_proposal_eligibility(
                 row, slug=slug, cache=cache, heads=heads or {}, cfg=cfg, elig_cfg=elig_cfg,
@@ -2074,8 +2303,8 @@ def _process_one_proposal(
                 batch_id=batch_id, proposal_id=proposal_id, kind=kind, project=project, row=row, ev=ev,
             ))
             if not ev.decision.eligible:
-                # skipped_floor / skipped_origin / skipped_composite: the row
-                # stays `pending` (reachable via /dream-apply), never dropped.
+                # skipped_floor / skipped_origin / skipped_composite: the caller
+                # discards the row with the matching reason (#1098 2.3).
                 return {"outcome": ev.decision.outcome, "proposal_id": proposal_id}
             # ELIGIBLE: fall through to the SHARED downstream (compaction guard,
             # per-run cap, dwell, apply) -- §3.2 step 7 "downstream unchanged".
@@ -2234,6 +2463,96 @@ def _sigterm_soft_stop():
                 pass
 
 
+def _integration_paths(day: str) -> list[Path]:
+    """Yesterday's proposals file (when `day` is a date) and tonight's."""
+    paths = []
+    try:
+        yesterday = (_dt.date.fromisoformat(day) - _dt.timedelta(days=1)).isoformat()
+        paths.append(proposals_dir() / f"{yesterday}.jsonl")
+    except ValueError:
+        pass
+    paths.append(proposals_dir() / f"{day}.jsonl")
+    return [p for p in paths if p.is_file()]
+
+
+def _discard_reason_for(result: dict[str, Any], row: dict[str, Any]) -> str | None:
+    """The discard reason for one engine result, or None when the row was
+    integrated or should stay pending (an infra hiccup)."""
+    if result.get("applied") or result.get("would_integrate"):
+        return None
+    outcome = result.get("outcome")
+    if outcome == "skipped_gated":
+        # Breadth-unverified `_global` adds never get here (rescoped or
+        # discarded upstream). What remains is an op on an existing `_global`
+        # row, which only a human may write, or a kind nothing knows.
+        return "global_manual_only" if row.get("kind") in da.OPTIMISTIC_POSTURE else "unsupported_kind"
+    if result.get("attempted"):
+        return _APPLY_FAILURE_DISCARD_REASONS.get(outcome)
+    return _SKIP_DISCARD_REASONS.get(outcome)
+
+
+def _resolve_global_add(
+    row: dict[str, Any], *, cache: dict[str, SessionVerification], elig_cfg: dict[str, Any], cfg: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """Decide a `_global` learning_add from its transcript-verified breadth
+    (#1098 2.3). A cited session counts when it resolves to a real
+    transcript and its excerpt corroborates there (subagent files included);
+    its slug comes from that transcript's cwd, never from the proposal.
+
+      ("promote", {...})  >= promotion_min_sessions sessions over
+                          >= promotion_min_slugs slugs: integrate in `_global`
+      ("rescope", {...})  otherwise, into the slug with the most verified
+                          sessions (ties: alphabetical)
+      ("discard", {...})  no cited session verifies: failed_corroboration
+    """
+    by_slug: dict[str, set] = {}
+    for ev in row.get("evidence") or []:
+        if not isinstance(ev, dict) or not ev.get("session_id"):
+            continue
+        sv = _verify_session(ev["session_id"], cache, elig_cfg)
+        if not sv.resolved or not sv.slug or sv.slug == GLOBAL_SLUG:
+            continue
+        if _excerpt_corroborated(ev.get("excerpt") or "", sv, elig_cfg):
+            by_slug.setdefault(sv.slug, set()).add(ev["session_id"])
+    sessions = set().union(*by_slug.values()) if by_slug else set()
+    min_sessions = int(cfg.get("promotion_min_sessions", da.DEFAULT_PROMOTION_MIN_SESSIONS))
+    min_slugs = int(cfg.get("promotion_min_slugs", da.DEFAULT_PROMOTION_MIN_SLUGS))
+    breadth = f"{len(sessions)} verified session(s) over {len(by_slug)} slug(s)"
+    if not by_slug:
+        return "discard", {"reason": "failed_corroboration", "detail": f"_global add: {breadth}"}
+    if len(sessions) >= min_sessions and len(by_slug) >= min_slugs:
+        return "promote", {"detail": breadth}
+    slug = min(by_slug, key=lambda s: (-len(by_slug[s]), s))
+    return "rescope", {
+        "project": slug, "sessions": len(by_slug[slug]),
+        "detail": f"breadth not met ({breadth}; need {min_sessions} over {min_slugs}); kept in {slug!r}",
+    }
+
+
+def _rescope_global_add(
+    row: dict[str, Any], info: dict[str, Any], *, path: Path, persist: bool,
+) -> dict[str, Any]:
+    """Move a breadth-short `_global` add into its evidence's own slug. The
+    row's prevalence becomes the verified session count in that slug, so the
+    project-scoped floors judge what the transcripts show, not the model's
+    claim. Persisted (still pending) before apply, which re-reads the row
+    from disk; shadow mode changes nothing on disk."""
+    fields = {
+        "project": info["project"], "rescoped_from": GLOBAL_SLUG,
+        "prevalence": {"sessions": info["sessions"], "agents": 1},
+    }
+    if persist:
+        def _set(r: dict[str, Any]) -> bool:
+            if r.get("id") != row.get("id") or r.get("status") != "pending":
+                return False
+            r.update(fields)
+            return True
+
+        with _apply_lock():
+            _mutate_rows_locked(path, _set)
+    return {**row, **fields}
+
+
 def shadow_log_path() -> Path:
     return state_dir() / "shadow-optimistic.jsonl"
 
@@ -2300,33 +2619,67 @@ def run_optimistic_integrate(day: str, *, shadow: bool = False) -> dict[str, Any
     Never raises; a single proposal's failure (or malformation) does not
     abort the batch -- see `_process_one_proposal()`.
     """
-    path = proposals_dir() / f"{day}.jsonl"
     summary: dict[str, Any] = {
         "day": day, "batch_id": None, "evaluated": 0, "applied": 0, "skipped": 0,
-        "failed": 0, "results": [], "anomalies": [], "circuit_breaker": None, "reverted": [],
+        "failed": 0, "discarded": 0, "results": [], "anomalies": [], "circuit_breaker": None, "reverted": [],
     }
     if shadow:
         summary["would_integrate"] = 0
     audit = (lambda _record: None) if shadow else _write_audit
-    if not path.is_file():
-        return summary
 
-    rows = _read_jsonl(path)
-    summary["evaluated"] = len(rows)
-    pending = [r for r in rows if r.get("status") == "pending"]
+    # Tonight's file, plus the pending rows of yesterday's: a proposal written
+    # on a night the gate did not open gets one more chance before the expiry
+    # sweep ends it (#1098 2.3).
+    tonight_name = f"{day}.jsonl"
+    pending: list[dict[str, Any]] = []
+    row_paths: dict[Any, Path] = {}
+    for path in _integration_paths(day):
+        rows = _read_jsonl(path)
+        if path.name == tonight_name:
+            summary["evaluated"] += len(rows)
+        for row in rows:
+            if row.get("status") != "pending":
+                continue
+            if path.name != tonight_name:
+                summary["evaluated"] += 1
+            pending.append(row)
+            row_paths[row.get("id")] = path
     if not pending:
         return summary
 
-    cfg = da.load_config().get("optimistic_integration") or {}
+    full_cfg = da.load_config()
+    cfg = full_cfg.get("optimistic_integration") or {}
 
     batch_id = f"optbatch_{uuid.uuid4().hex[:12]}"
 
     # Circuit-breaker read: OWN, non-nested critical section (adrev-opt-011).
+    # A suspended breaker holds every row; the expiry sweep ends them.
     with _apply_lock():
         suspended = bool(_read_optimistic_state().get("suspended"))
     if suspended:
         summary["circuit_breaker"] = "suspended"
         return summary
+
+    # Rows decided without an apply, written at the end in one rewrite per
+    # file: {path: {id: (reason, detail)}}.
+    discards: dict[Path, dict[str, tuple[str, str | None]]] = {}
+
+    def _discard(row: dict[str, Any], reason: str, detail: str | None = None) -> None:
+        pid, path = row.get("id"), row_paths.get(row.get("id"))
+        if pid and path is not None:
+            discards.setdefault(path, {})[pid] = (reason, detail)
+
+    def _flush_discards() -> int:
+        return sum(
+            len(_discard_rows(p, d, method="optimistic-integrate", batch_id=batch_id)) for p, d in discards.items()
+        )
+
+    # Per-batch session-verification cache (§3.4), shared by the `_global`
+    # breadth check below and the eligibility composite, so a session cited
+    # by N proposals is resolved/read/mined exactly ONCE.
+    session_cache: dict[str, SessionVerification] = {}
+    elig_cfg = cfg.get("eligibility") if isinstance(cfg.get("eligibility"), dict) else eligibility.default_eligibility()
+    promote_ids: set = set()
 
     by_slug: dict[str, list[dict[str, Any]]] = {}
     for row in pending:
@@ -2334,18 +2687,43 @@ def run_optimistic_integrate(day: str, *, shadow: bool = False) -> dict[str, Any
         if not isinstance(project, str) or not project:
             # Defensive (never expected from a schema-valid proposal row,
             # but a malformed/hand-edited row must not crash the whole
-            # batch's slug-keyed bookkeeping below): treat like any other
-            # proposal this engine declines to touch.
+            # batch's slug-keyed bookkeeping below).
+            detail = f"invalid project field: {project!r}"
             audit({
                 "outcome": "skipped_malformed", "batch_id": batch_id, "proposal_id": row.get("id"),
-                "kind": row.get("kind"), "detail": f"invalid project field: {project!r}",
+                "kind": row.get("kind"), "detail": detail,
             })
+            _discard(row, _SKIP_DISCARD_REASONS["skipped_malformed"], detail)
             summary["skipped"] += 1
             summary["results"].append({"outcome": "skipped_malformed", "proposal_id": row.get("id")})
             continue
+        if project == GLOBAL_SLUG and row.get("kind") == "learning_add":
+            # `_global` is automatic when breadth holds; otherwise the learning
+            # stays project-scoped (#1098 2.3). Never parked for a person.
+            verdict, info = _resolve_global_add(row, cache=session_cache, elig_cfg=elig_cfg, cfg=full_cfg)
+            if verdict == "discard":
+                audit({
+                    "outcome": "skipped_global_unverified", "batch_id": batch_id, "proposal_id": row.get("id"),
+                    "kind": row.get("kind"), "project": project, "detail": info["detail"],
+                })
+                _discard(row, info["reason"], info["detail"])
+                summary["skipped"] += 1
+                summary["results"].append({"outcome": "skipped_global_unverified", "proposal_id": row.get("id")})
+                continue
+            if verdict == "rescope":
+                row = _rescope_global_add(row, info, path=row_paths[row.get("id")], persist=not shadow)
+                audit({
+                    "outcome": "global_rescoped", "batch_id": batch_id, "proposal_id": row.get("id"),
+                    "kind": row.get("kind"), "project": row["project"], "detail": info["detail"],
+                })
+                project = row["project"]
+            else:
+                promote_ids.add(row.get("id"))
         by_slug.setdefault(project, []).append(row)
 
     if not by_slug:
+        if not shadow:
+            summary["discarded"] = _flush_discards()
         return summary
 
     summary["batch_id"] = batch_id
@@ -2392,10 +2770,7 @@ def run_optimistic_integrate(day: str, *, shadow: bool = False) -> dict[str, Any
     add_supersede_counts: dict[str, int] = {slug: 0 for slug in by_slug}
     eviction_counts: dict[str, int] = {slug: 0 for slug in by_slug}
 
-    # Per-batch session-verification cache (§3.4) + citation counter
-    # (decisions.md #37), shared across every proposal so a session cited by N
-    # proposals is resolved/read/mined exactly ONCE.
-    session_cache: dict[str, SessionVerification] = {}
+    # Citation counter (decisions.md #37), keyed on each cited session id.
     session_citation_counts: dict[str, int] = {}
 
     timed_out = False
@@ -2416,9 +2791,12 @@ def run_optimistic_integrate(day: str, *, shadow: bool = False) -> dict[str, Any
                     eviction_counts=eviction_counts, batch_id=batch_id,
                     heads=heads_by_slug[slug], session_cache=session_cache,
                     session_citation_counts=session_citation_counts,
-                    shadow=shadow,
+                    shadow=shadow, breadth_verified=row.get("id") in promote_ids,
                 )
                 summary["results"].append(outcome)
+                reason = _discard_reason_for(outcome, row)
+                if reason:
+                    _discard(row, reason, outcome.get("detail"))
                 if outcome.get("would_integrate"):
                     summary["would_integrate"] += 1
                 elif outcome.get("applied"):
@@ -2471,6 +2849,8 @@ def run_optimistic_integrate(day: str, *, shadow: bool = False) -> dict[str, Any
     if shadow:
         _log_shadow_decisions(day, batch_id, by_slug, summary["results"])
         return summary
+
+    summary["discarded"] = _flush_discards()
 
     to_revert: list[str] = []
     with _apply_lock():
@@ -2669,7 +3049,10 @@ def _eval_refresh_preconditions(day: str, cfg: dict[str, Any]) -> tuple[bool, st
     """
     opt_cfg = cfg.get("optimistic_integration") or {}
     if not opt_cfg.get("eval_refresh_enabled", False):
-        return False, "eval_refresh_enabled is false (default off until the Phase 4 smoke test); skipping"
+        return False, (
+            "eval_refresh_enabled is false; set optimistic_integration.eval_refresh_enabled=true "
+            "to run the weekly regression smoke (~$1.50)"
+        )
     min_age_days = float(opt_cfg.get("eval_refresh_min_age_days", 7))
     cost_cap = float(opt_cfg.get("eval_refresh_cost_cap_usd", 2.0))
 
@@ -2817,6 +3200,16 @@ def _cmd_record_revert(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_expire_pending(args: argparse.Namespace) -> int:
+    print(json.dumps(expire_pending(), sort_keys=True))
+    return 0
+
+
+def _cmd_retention_check(args: argparse.Namespace) -> int:
+    print(json.dumps(retention_check(Path(args.path)), sort_keys=True))
+    return 0
+
+
 def _cmd_eval_refresh(args: argparse.Namespace) -> int:
     day = args.day or today_iso()
     summary = run_eval_refresh(day)
@@ -2914,6 +3307,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
     record_revert_p.add_argument("--batch-id", help="the reverted batch/commit id (for a revert)")
     record_revert_p.add_argument("--reason", help="short machine-readable reason (optional)")
     record_revert_p.set_defaults(func=_cmd_record_revert)
+
+    expire_p = sub.add_parser(
+        "expire-pending",
+        help="discard pending proposals older than optimistic_integration.pending_max_age_hours "
+             "(default 48) as `expired`, plain and gzipped files; active mode only, off and "
+             "shadow hold everything (#1098 2.3)",
+    )
+    expire_p.set_defaults(func=_cmd_expire_pending)
+
+    retention_p = sub.add_parser(
+        "retention-check",
+        help="print {\"delete\": bool, ...} for one aged proposals file: deletable when it holds no "
+             "pending row; in active mode its pending rows are first discarded `expired`; off and "
+             "shadow keep a file with pending rows (#1098 2.3)",
+    )
+    retention_p.add_argument("path")
+    retention_p.set_defaults(func=_cmd_retention_check)
 
     refresh_p = sub.add_parser(
         "eval-refresh",
