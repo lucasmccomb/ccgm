@@ -164,7 +164,7 @@ The **nightly map->reduce analyzer**, on top of Epic 2's miner:
   at the model's default effort, and each sends the JSON schema its
   response must satisfy. `max_tokens` (16000) is a backstop, paired with
   a 300s curl timeout so the cap is reachable -- a map call that stops at
-  it holds that slug's watermark (its evidence is re-mined next run),
+  it holds that slug's mining cursors (its evidence is re-mined next run),
   records a durable incident, and is counted in the run summary.
 - `lib/dreaming-prompt-map.md` / `lib/dreaming-prompt-reduce.md` -- the two
   system prompts, both opening with an untrusted-input threat-model block
@@ -194,10 +194,14 @@ auto-applies yet; that is a later epic, gated separately and default OFF.
 The **deterministic transcript miner** -- pure Python stdlib, no network
 calls, no LLM calls, no scheduling:
 
-- `discover(slugs, since_watermark)` -- enumerate transcript files under
+- `discover(slugs, cursors=...)` -- enumerate transcript files under
   `~/.claude/projects/*/` whose owning learnings-store slug (re-derived from
-  each transcript's own `cwd` field) is in the wanted set.
-- `mine(path)` -- extract friction events (tool errors, hook errors,
+  each transcript's own `cwd` field) is in the wanted set and that hold
+  bytes past their per-file cursor (`state/mining-cursors.json`, byte
+  offsets). A timestamp-less append (`file-history-snapshot`) is not new
+  content, and a file shorter than its cursor is re-read from 0. Slugs
+  dreamed before cursors existed are seeded once from `last-dreamed.json`.
+- `mine(path, start_offset=0)` -- extract friction events (tool errors, hook errors,
   prevented-continuation), user-correction sequences, PR links, token
   totals + cache-read ratio, and session identity from one transcript.
 - `cluster(events)` -- group events by `(event_kind, tool_name,

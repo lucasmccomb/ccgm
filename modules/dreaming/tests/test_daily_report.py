@@ -498,6 +498,19 @@ class CanaryBannerTests(DailyReportTestBase):
             "an empty active_incidents + reduce_failures alongside a legacy-only key must render no banner at all",
         )
 
+    def test_reduce_failure_banner_says_when_it_failed_and_that_it_is_current(self) -> None:
+        date = "2026-04-05"
+        self._write_canary({
+            "active_incidents": {},
+            "reduce_failures": {"widget-app": {"date": "2026-03-30", "detail": "reduce phase produced no usable proposal array"}},
+        })
+        proc = self._run_digest(date)
+        self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
+        body = self._digest_path(date).read_text(encoding="utf-8")
+        self.assertIn("`widget-app` (failed 2026-03-30, still unresolved)", body)
+        self.assertIn("clears when that slug's next reduce succeeds", body)
+        self.assertNotIn("watermark NOT advanced", body.split("Map calls")[0])
+
 
 if __name__ == "__main__":
     unittest.main()
