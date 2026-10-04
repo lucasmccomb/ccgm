@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""ccgm-verify-baseline: gate on NEW check failures only, by exit code.
+
+  ccgm-verify-baseline --write-baseline   run the checks, record the results
+  ccgm-verify-baseline                    re-run, diff against the baseline
+
+Exit codes: 0 nothing new, 1 new failures, 2 usage or setup error.
+
+Checks come from, in order of precedence:
+  1. repeatable --check NAME=COMMAND flags
+  2. package.json scripts: lint, type-check|typecheck, test:run|test, build
+  3. .ccgm-verify.json at the repo root: {"name": "command", ...}
+
+The baseline lives in $(git rev-parse --git-dir)/ccgm-verify-baseline.json:
+per worktree, never committed.
+
+Failure identity. Per check, the exit code decides pass or fail. When the
+output matches a known runner format (vitest/jest FAIL and the x marks,
+pytest FAILED, bats "not ok", generic "FAIL:"), failing test identifiers are
+recorded too, after stripping ANSI codes, timestamps and durations.
+Limits:
+  - A check that fails in both runs with identifiers on the current run is
+    compared by identifier: any identifier absent from the baseline is NEW.
+  - A check that fails in both runs and prints no identifiers counts as the
+    same pre-existing failure, even if the cause changed.
+  - A check missing from the baseline is treated as having passed.
+  - Output of unknown runners yields no identifiers, so only exit codes count.
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+BASELINE_NAME = "ccgm-verify-baseline.json"
+
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+TIMESTAMP = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
+    r"|\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b"
+)
+DURATION = re.compile(
+    r"[\(\[]\s*\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds?|m)\s*[\)\]]"
+    r"|\b\d+(?:\.\d+)?\s*(?:ms|secs?|seconds?)\b"
+)
+# Order matters: first match wins.
+FAIL_LINE = [
+    re.compile(r"^FAIL(?:ED)?:?\s+(.+)$"),        # pytest FAILED, jest/vitest FAIL, FAIL:
+    re.compile(r"^[✗✕×]\s*(.+)$"),                # jest/vitest/mocha marks
+    re.compile(r"^not ok\s+(?:\d+\s+)?(?:-\s+)?(.+)$"),  # bats/TAP
+]
+PYTEST_MSG = re.compile(r"\s+-\s+.*$")
+
+
+def normalize(text):
+    text = ANSI.sub("", text)
+    text = TIMESTAMP.sub("", text)
+    text = DURATION.sub("", text)
+    return " ".join(text.split())
+
+
+def extract_failures(output):
+    ids = set()
+    for raw in output.splitlines():
+        line = raw.strip()
+        line = normalize(line)  # also strips a leading timestamp
+        for pat in FAIL_LINE:
+            m = pat.match(line)
+            if m:
+                ident = PYTEST_MSG.sub("", m.group(1)).strip()
+                if ident:
+                    ids.add(ident)
+                break
+    return sorted(ids)
+
+
+def die(msg):
+    print(f"ccgm-verify-baseline: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def git(*args):
+    r = subprocess.run(["git", *args], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def detect_checks(root):
+    pkg = os.path.join(root, "package.json")
+    if os.path.isfile(pkg):
+        try:
+            scripts = json.load(open(pkg)).get("scripts", {})
+        except (OSError, ValueError):
+            scripts = {}
+        checks = {}
+        for group in (["lint"], ["type-check", "typecheck"], ["test:run", "test"], ["build"]):
+            for name in group:
+                if name in scripts:
+                    checks[name] = f"npm run {name}"
+                    break
+        if checks:
+            return checks
+    cfg = os.path.join(root, ".ccgm-verify.json")
+    if os.path.isfile(cfg):
+        try:
+            data = json.load(open(cfg))
+        except (OSError, ValueError) as e:
+            die(f".ccgm-verify.json is not valid JSON: {e}")
+        if not isinstance(data, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in data.items()
+        ):
+            die('.ccgm-verify.json must be an object of {"name": "command"} strings')
+        return data
+    return {}
+
+
+def parse_check_flags(flags):
+    checks = {}
+    for f in flags:
+        name, sep, cmd = f.partition("=")
+        if not sep or not name or not cmd:
+            die(f"--check expects NAME=COMMAND, got: {f}")
+        checks[name] = cmd
+    return checks
+
+
+def run_checks(root, checks):
+    results = {}
+    for name, cmd in checks.items():
+        p = subprocess.run(cmd, shell=True, cwd=root, capture_output=True, text=True)
+        out = (p.stdout or "") + "\n" + (p.stderr or "")
+        results[name] = {
+            "exit": p.returncode,
+            "failures": extract_failures(out) if p.returncode != 0 else [],
+        }
+    return results
+
+
+def label(name, ident=None):
+    return f"{name}: {ident}" if ident else name
+
+
+def diff(baseline, current):
+    new, fixed, pre = [], [], []
+    for name, cur in current.items():
+        base = baseline.get(name, {"exit": 0, "failures": []})
+        base_failed = base["exit"] != 0
+        cur_failed = cur["exit"] != 0
+        if cur_failed:
+            if cur["failures"]:
+                known = set(base["failures"]) if base_failed else set()
+                for ident in cur["failures"]:
+                    (pre if ident in known else new).append(label(name, ident))
+                for ident in sorted(known - set(cur["failures"])):
+                    fixed.append(label(name, ident))
+            elif base_failed:
+                pre.append(label(name))
+            else:
+                new.append(label(name))
+        elif base_failed:
+            if base["failures"]:
+                fixed.extend(label(name, i) for i in base["failures"])
+            else:
+                fixed.append(label(name))
+    return new, fixed, pre
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Record check failures once, then gate on new failures only."
+    )
+    ap.add_argument("--write-baseline", action="store_true", help="run checks and store the baseline")
+    ap.add_argument("--check", action="append", default=[], metavar="NAME=COMMAND")
+    ap.add_argument("--json", action="store_true", help="machine-readable output")
+    args = ap.parse_args()
+
+    root = git("rev-parse", "--show-toplevel")
+    git_dir = git("rev-parse", "--absolute-git-dir")
+    if not root or not git_dir:
+        die("not inside a git repository")
+    path = os.path.join(git_dir, BASELINE_NAME)
+
+    checks = parse_check_flags(args.check) or detect_checks(root)
+    if not checks:
+        die(
+            "no checks found. Pass --check NAME=COMMAND, add lint/type-check/test/build "
+            'scripts to package.json, or create .ccgm-verify.json ({"name": "command"}).'
+        )
+
+    if not args.write_baseline and not os.path.isfile(path):
+        die(f"no baseline at {path}. Run with --write-baseline first, before starting work.")
+
+    current = run_checks(root, checks)
+
+    if args.write_baseline:
+        with open(path, "w") as f:
+            json.dump({"checks": current}, f, indent=2)
+        failing = [n for n, r in current.items() if r["exit"] != 0]
+        if args.json:
+            print(json.dumps({"status": "baseline-written", "path": path, "checks": current}))
+        else:
+            print(f"Baseline written to {path}")
+            for n, r in current.items():
+                print(f"  {n}: {'FAIL' if r['exit'] else 'pass'} ({len(r['failures'])} identified)")
+            if failing:
+                print(f"{len(failing)} check(s) already fail; they will count as PRE-EXISTING.")
+        return 0
+
+    try:
+        baseline = json.load(open(path))["checks"]
+    except (OSError, ValueError, KeyError) as e:
+        die(f"baseline at {path} is unreadable ({e}). Re-run with --write-baseline.")
+
+    new, fixed, pre = diff(baseline, current)
+    status = "new-failures" if new else "pass"
+    if args.json:
+        print(json.dumps({"status": status, "new": new, "fixed": fixed, "pre_existing": pre}))
+    else:
+        for title, items in (("NEW", new), ("FIXED", fixed), ("PRE-EXISTING", pre)):
+            print(f"{title} ({len(items)})")
+            for i in items:
+                print(f"  {i}")
+        if new:
+            print("Result: new failures. Fix them.")
+        elif pre:
+            print("Result: pass. Warning: pre-existing failures remain.")
+        else:
+            print("Result: pass.")
+    return 1 if new else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

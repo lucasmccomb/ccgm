@@ -245,6 +245,7 @@ Spawn one `implementer` agent per unit (model sonnet), each in its own **worktre
 
 > **Concurrency — avoid the 429 throttle.** `implementer` agents run on `sonnet` (light), so a wave of up to ~8 is safe. But the default `--max-agents` (widest wave, clamped to isolation slots) can exceed that in a workspace with many clones — **cap the live wave at 8 light agents, or 4 if you raise `implementer` to a heavier model / higher effort**. If a wave has more units than the cap, split it into sub-waves. Bursting too many heavy agents trips a server-side rate limit (`Server is temporarily limiting requests · Rate limited`) that fails the whole wave; if you hit it, wait 30–60s and re-spawn only the unfinished units in smaller sub-waves. See `~/.claude/rules/subagent-patterns.md` (Concurrency and Rate Limits).
 - Branches from `origin/main` (`git checkout -b {issue#}-{desc} origin/main` for an issue unit, `{slug}-{desc}` for a plan unit).
+- Runs `ccgm-verify-baseline --write-baseline` right after branching, before any edit, to record which checks already fail. Before opening the PR it runs `ccgm-verify-baseline` and fixes every NEW failure (exit 1); pre-existing failures are reported, not fixed.
 - Implements the unit with tests, following the existing project patterns.
 - **Verifies the work actually functions** - unit tests passing is the floor, not the finish line. Run the real path where feasible.
 - Pushes and opens a PR. For an issue unit the PR body **closes the issue** (`Closes #N`); for a plan unit it references the plan unit and closes its tracking issue if one exists.
@@ -284,6 +285,8 @@ The lead may separately evaluate delivery with personal review and normal checks
 ### 4.35 Drive the PR to CI-green (bounded post-PR loop)
 
 The finish line is not "PR opened" - it is "CI green and mergeable." Adversarial review (4.2-4.3) judges the diff; this step makes the *pipeline* agree. Run it for every PR after it passes adversarial review and before it can merge (4.4). It applies to inherited in-flight PRs too.
+
+**The gate's exit code is the merge evidence for "no new failures."** Have a verifier subagent run `ccgm-verify-baseline` in the unit's worktree and report its exit code and NEW section verbatim. Exit 0 passes; exit 1 means new failures to fix; exit 2 means the baseline is missing, so write it from `origin/main` first. A prose claim that failures "were already there" is not evidence.
 
 **Read CI fresh, never assume.** Poll the actual checks - do not infer state from "the implementer said tests passed":
 
