@@ -9,6 +9,10 @@
 # throughout; see that file's comments for the fuller "why" on the
 # scoped-.env / shim-entrypoint pattern this reuses.
 #
+# Flags:
+#   --no-schedule            Install files only; never touch the scheduler
+#                             (launchctl). Use this for any run under a test HOME.
+#
 # Env overrides (tests):
 #   CCGM_DREAMING_DIR        Root of dreaming state.
 #   CCGM_DREAMING_USERNAME   Override the $USER value used for the
@@ -18,6 +22,18 @@
 
 set -u
 set -o pipefail
+
+NO_SCHEDULE=0
+for arg in "$@"; do
+    case "${arg}" in
+        --no-schedule) NO_SCHEDULE=1 ;;
+        *)
+            echo "dream-install: unknown argument: ${arg}" >&2
+            echo "usage: dream-install.sh [--no-schedule]" >&2
+            exit 2
+            ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -184,7 +200,7 @@ for candidate in \
     fi
 done
 
-if [ -z "${SCHED_LIB_DIR}" ]; then
+if [ "${NO_SCHEDULE}" = "0" ] && [ -z "${SCHED_LIB_DIR}" ]; then
     echo "dream-install: cannot locate sched_platform.py; install the hooks module first." >&2
     exit 1
 fi
@@ -212,8 +228,13 @@ except Exception as exc:
 PY
 )
 
-python3 -c "${INSTALL_PY}"
-RC=$?
+if [ "${NO_SCHEDULE}" = "1" ]; then
+    echo "dream-install: --no-schedule: files installed, scheduler untouched"
+    RC=0
+else
+    python3 -c "${INSTALL_PY}"
+    RC=$?
+fi
 
 if [ "${RC}" -ne 0 ]; then
     echo "dream-install: scheduling step failed (rc=${RC})" >&2
@@ -230,7 +251,11 @@ echo "  state dir:     ${DREAMING_DIR}"
 echo "  config:        ${DREAMING_DIR}/config.json"
 echo "  daily script:  ${DAILY_PATH}"
 echo "  job label:     ${LABEL}"
-echo "  schedule:      ${HOUR}:$(printf '%02d' "${MINUTE}") local"
+if [ "${NO_SCHEDULE}" = "1" ]; then
+    echo "  schedule:      not scheduled (--no-schedule)"
+else
+    echo "  schedule:      ${HOUR}:$(printf '%02d' "${MINUTE}") local"
+fi
 echo ""
 echo "Add an API key to ${ENV_FILE} (mode 0600) — NOT to ~/.zshrc."
 echo "  ANTHROPIC_API_KEY=...   (analyzer; falls back to ~/.claude/autoheal/.env)"

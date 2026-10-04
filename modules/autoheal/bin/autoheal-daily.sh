@@ -23,6 +23,12 @@
 #                            match the event/proposal/digest file naming
 #                            written by the hooks (issue #520).
 #   CCGM_AUTOHEAL_BIN_DIR    default to dirname of this script
+#   CCGM_AUTOHEAL_CONFIG     default ~/.claude/autoheal/config.json
+#
+# Off switch: `paused: true` in the user config (or in the nearest per-repo
+# .autoheal/config.json, which wins when it sets the key) makes the wrapper
+# log "paused" and exit 0 before any step runs. No step runs, so nothing is
+# appended to cost.log and no API call is made.
 
 set -u
 
@@ -30,6 +36,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${CCGM_AUTOHEAL_BIN_DIR:-${SCRIPT_DIR}}"
 LOGS_DIR="${CCGM_AUTOHEAL_LOGS_DIR:-${HOME}/.claude/logs}"
 TODAY="${CCGM_AUTOHEAL_TODAY:-$(date -u +%Y-%m-%d)}"
+CONFIG_FILE="${CCGM_AUTOHEAL_CONFIG:-${HOME}/.claude/autoheal/config.json}"
+# hook_utils.py lives in the module tree, or under ~/.claude/lib once installed.
+HOOK_LIB_DIR="${CCGM_AUTOHEAL_HOOK_LIB:-${SCRIPT_DIR}/../../hooks/lib:${HOME}/.claude/lib}"
 
 mkdir -p "${LOGS_DIR}"
 DAILY_LOG="${LOGS_DIR}/autoheal-daily-${TODAY}.log"
@@ -81,6 +90,38 @@ steps_total=0
 steps_failed=0
 
 log "autoheal-daily start (${TODAY})"
+
+# Preflight: honour `paused`. The user config is the base; a per-repo
+# .autoheal/config.json found by walking up from the cwd overrides it
+# (hook_utils.load_repo_config). Anything unreadable counts as not paused.
+is_paused() {
+    python3 - "${CONFIG_FILE}" "${HOOK_LIB_DIR}" <<'PY'
+import json
+import sys
+
+config_path, hook_lib = sys.argv[1], sys.argv[2]
+cfg = {}
+try:
+    with open(config_path, encoding="utf-8") as fh:
+        loaded = json.load(fh)
+    if isinstance(loaded, dict):
+        cfg = loaded
+except (OSError, ValueError):
+    pass
+try:
+    sys.path[:0] = hook_lib.split(":")
+    import hook_utils
+    cfg = {**cfg, **hook_utils.load_repo_config()}
+except Exception:
+    pass
+sys.exit(0 if cfg.get("paused") is True else 1)
+PY
+}
+
+if is_paused; then
+    log "paused (paused=true in ${CONFIG_FILE} or a per-repo override); skipping all steps"
+    exit 0
+fi
 
 # Step 1: analyzer (Epic 6).
 steps_total=$((steps_total + 1))

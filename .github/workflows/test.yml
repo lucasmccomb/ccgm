@@ -270,6 +270,20 @@ jobs:
             bash "$t"
           done
 
+      - name: Install a current bash for the autoheal tests
+        # macOS ships bash 3.2; the autoheal test scripts use bash 4+ syntax.
+        run: |
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: Autoheal module tests
+        # Autoheal is macOS-only (launchd), so it runs here and not on the
+        # Linux job: autoheal-auto-apply.sh greps for a tab with `\t` in ERE,
+        # which GNU grep reads as a literal t, so three auto-apply suites
+        # fail on Linux. The tests stub launchctl and the API; none touches
+        # the real scheduler.
+        run: bash modules/autoheal/tests/run-all.sh
+
       - name: relevance-injection - pytest suites (issue #985)
         # The whole tests/ directory, not one file: test_loaded_log.py,
         # test_relevance_select.py and both test_version_floor*.py were

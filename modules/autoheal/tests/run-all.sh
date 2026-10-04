@@ -24,10 +24,12 @@ PASS_COUNT=0
 FAIL_COUNT=0
 FAILED_SCRIPTS=()
 
-# Collect tests deterministically: sorted lexically.
-mapfile -t TEST_SCRIPTS < <(
-    find "${SCRIPT_DIR}" -maxdepth 1 -type f -name 'test-*.sh' | sort
-)
+# Collect tests deterministically: sorted lexically. A read loop rather than
+# `mapfile`, which macOS's /bin/bash 3.2 lacks.
+TEST_SCRIPTS=()
+while IFS= read -r test_script; do
+    TEST_SCRIPTS+=("${test_script}")
+done < <(find "${SCRIPT_DIR}" -maxdepth 1 -type f -name 'test-*.sh' | sort)
 
 if [ "${#TEST_SCRIPTS[@]}" -eq 0 ]; then
     echo "No tests found in ${SCRIPT_DIR}"

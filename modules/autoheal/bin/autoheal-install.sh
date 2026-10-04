@@ -6,6 +6,10 @@
 # ensures the autoheal state directory layout exists, and writes a
 # default `config.json` if none is present.
 #
+# Flags:
+#   --no-schedule            Install files only; never touch the scheduler
+#                             (launchctl). Use this for any run under a test HOME.
+#
 # Env overrides (tests):
 #   CCGM_AUTOHEAL_DIR        Root of autoheal state.
 #   CCGM_AUTOHEAL_USERNAME   Override the $USER value used for the
@@ -15,6 +19,18 @@
 
 set -u
 set -o pipefail
+
+NO_SCHEDULE=0
+for arg in "$@"; do
+    case "${arg}" in
+        --no-schedule) NO_SCHEDULE=1 ;;
+        *)
+            echo "autoheal-install: unknown argument: ${arg}" >&2
+            echo "usage: autoheal-install.sh [--no-schedule]" >&2
+            exit 2
+            ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -302,7 +318,7 @@ for candidate in \
     fi
 done
 
-if [ -z "${SCHED_LIB_DIR}" ]; then
+if [ "${NO_SCHEDULE}" = "0" ] && [ -z "${SCHED_LIB_DIR}" ]; then
     echo "autoheal-install: cannot locate sched_platform.py; install the hooks module first." >&2
     exit 1
 fi
@@ -332,8 +348,13 @@ except Exception as exc:
 PY
 )
 
-python3 -c "${INSTALL_PY}"
-RC=$?
+if [ "${NO_SCHEDULE}" = "1" ]; then
+    echo "autoheal-install: --no-schedule: files installed, scheduler untouched"
+    RC=0
+else
+    python3 -c "${INSTALL_PY}"
+    RC=$?
+fi
 
 if [ "${RC}" -ne 0 ]; then
     echo "autoheal-install: scheduling step failed (rc=${RC})" >&2
@@ -350,7 +371,11 @@ echo "  state dir:     ${AUTOHEAL_DIR}"
 echo "  config:        ${AUTOHEAL_DIR}/config.json"
 echo "  daily script:  ${DAILY_PATH}"
 echo "  job label:     ${LABEL}"
-echo "  schedule:      ${HOUR}:$(printf '%02d' "${MINUTE}") local"
+if [ "${NO_SCHEDULE}" = "1" ]; then
+    echo "  schedule:      not scheduled (--no-schedule)"
+else
+    echo "  schedule:      ${HOUR}:$(printf '%02d' "${MINUTE}") local"
+fi
 echo ""
 echo "Add API keys to ${ENV_FILE} (mode 0600) — NOT to ~/.zshrc."
 echo "  ANTHROPIC_API_KEY=...   (analyzer)"
