@@ -729,6 +729,19 @@ def module_budget_status(cfg: dict[str, Any], today: str) -> tuple[float, float]
     return read_cost_spent_30d(cost_log_path(), today), budget
 
 
+def remaining_run_budget_usd(cfg: dict[str, Any], today: str, *, offline: bool = False) -> float:
+    """What one analyzer run may still spend: the smaller of today's daily-cap
+    headroom and what is left of the rolling 30-day module budget. plan_run()
+    shrinks or refuses against this, so a run that starts near the budget
+    cannot end above it. Offline runs bill nothing and get the full cap."""
+    daily_cap = float(cfg.get("daily_cost_cap_usd", DEFAULT_DAILY_COST_CAP_USD))
+    if offline:
+        return daily_cap
+    daily_left = daily_cap - _read_cost_spent_today(cost_log_path(), today)
+    spent_30d, module_budget = module_budget_status(cfg, today)
+    return min(daily_left, module_budget - spent_30d)
+
+
 def _append_cost(path: Path, today: str, in_tok: int, out_tok: int, cost_usd: float, model: str) -> None:
     line = f"{today}\t{in_tok}\t{out_tok}\t{cost_usd:.6f}\t{model}"
     learnings_store.file_locked_append(str(path), line)
@@ -1906,7 +1919,7 @@ def main(argv: list[str] | None = None) -> int:
 
     daily_cap = float(cfg.get("daily_cost_cap_usd", DEFAULT_DAILY_COST_CAP_USD))
     spent_today = 0.0 if offline_dir is not None else _read_cost_spent_today(cost_log_path(), today)
-    remaining_budget = daily_cap - spent_today
+    remaining_budget = remaining_run_budget_usd(cfg, today, offline=offline_dir is not None)
 
     map_system_prompt = (_HERE / "dreaming-prompt-map.md").read_text(encoding="utf-8")
     reduce_system_prompt = (_HERE / "dreaming-prompt-reduce.md").read_text(encoding="utf-8")
@@ -1923,7 +1936,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if not planned_slugs:
         print(
-            f"dream_analyze: daily cost cap reached (spent ${spent_today:.4f} of ${daily_cap:.4f}; "
+            f"dream_analyze: cost cap reached (spent ${spent_today:.4f} today of ${daily_cap:.4f} daily cap, "
+            f"30-day module budget also applies; "
             f"even the cheapest due slug's estimated cost exceeds the remaining ${remaining_budget:.4f} budget); "
             "skipping this run.",
             file=sys.stderr,

@@ -130,6 +130,40 @@ class ModuleBudgetWindowTests(unittest.TestCase):
             da.main(["--force-day", DAY])
         self.assertNotIn("30-day module budget", stderr.getvalue())
 
+    def test_run_budget_is_what_is_left_of_the_module_budget(self):
+        _seed_ledger("2026-08-20", 24.0)  # $1 left of $25; daily cap is $10
+        cfg = da.load_config()
+        self.assertAlmostEqual(da.remaining_run_budget_usd(cfg, DAY), 1.0, places=6)
+
+    def test_run_budget_is_daily_headroom_when_that_is_smaller(self):
+        _seed_ledger(DAY, 9.0)  # $1 left today; plenty of module budget
+        cfg = da.load_config()
+        self.assertAlmostEqual(da.remaining_run_budget_usd(cfg, DAY), 1.0, places=6)
+
+    def test_offline_run_budget_is_the_full_daily_cap(self):
+        _seed_ledger("2026-08-20", 24.9)
+        cfg = da.load_config()
+        self.assertAlmostEqual(da.remaining_run_budget_usd(cfg, DAY, offline=True), 10.0, places=6)
+
+    def test_analyzer_plans_against_the_module_budget_left(self):
+        _seed_ledger("2026-08-20", 24.0)
+        seen = {}
+        real_plan = da.plan_run
+
+        def spy(bundles, **kw):
+            seen["remaining"] = kw["remaining_budget_usd"]
+            return real_plan(bundles, **kw)
+
+        with mock.patch.object(da, "plan_run", side_effect=spy), \
+                mock.patch.object(da, "mine_due_slugs", return_value=([{"slug": "s"}], {})), \
+                mock.patch.object(da, "resolve_candidate_slugs", return_value=["s"]), \
+                contextlib.redirect_stderr(io.StringIO()):
+            try:
+                da.main(["--force-day", DAY, "--dry-run"])
+            except Exception:
+                pass  # the fake bundle may not survive planning; only the budget handed in matters
+        self.assertAlmostEqual(seen["remaining"], 1.0, places=6)
+
     def test_offline_analyzer_ignores_budget(self):
         _seed_ledger("2026-08-20", 99.0)
         stderr = io.StringIO()
