@@ -24,6 +24,11 @@ Rules that govern subagent work point at the four-state status protocol in `suba
 
 Imperative or infinitive, no second-person "you" in body prose (a rationalizations table quotes the agent in first person by design). Name the specific failure mode, not the category: "agents under pressure skip verification" is usable; "ensure quality" is not. Never include AI-attribution trailers or "generated with" footers in rule content.
 
+- Make every rule checkable: state the observable condition so pass or fail follows from the text, and put the reason beside it.
+- Omit what the agent can look up (a file's contents, a command's `--help`, the repo layout); document only what looking cannot reveal.
+- State the target behavior. Reserve prohibitions for hard guardrails and pair each with what to do instead.
+- Delete any sentence the model already obeys by default; it costs load on every request and changes nothing.
+
 ## Contradictions
 
 Before shipping, grep the other always-loaded rules and the harness's own behavior for the same topic. Two instructions that disagree are followed arbitrarily, and a rule that claims to "override system defaults" cannot: it only adds noise. Resolve the conflict by deleting one side or by changing the setting the harness exposes.
