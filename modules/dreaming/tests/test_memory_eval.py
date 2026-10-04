@@ -22,6 +22,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -1535,9 +1536,10 @@ class GateTests(unittest.TestCase):
         self.assertEqual(me.gate_check()["state"], "open")
 
     def test_replayed_live_results_open(self):
-        """RCA acceptance: the 2026-10-04 and 2026-09-10 result files, which
-        the old gate kept closed, open the new one."""
-        for name in ("2026-10-04.jsonl", "2026-09-10.jsonl"):
+        """RCA acceptance: live result files the old gate kept closed (no
+        high_value row) open the new one. The 2026-10-04 live file was lost
+        to an offline smoke run, so 2026-09-26 stands in for it."""
+        for name in ("2026-09-26.jsonl", "2026-09-10.jsonl"):
             with self.subTest(name=name):
                 for stale in self.evals_dir.glob("*"):
                     stale.unlink()
@@ -1716,6 +1718,69 @@ class GateTests(unittest.TestCase):
     def test_main_gate_exit_3_when_paused(self):
         rc, payload = self._main_gate()
         self.assertEqual((rc, payload["gate"], payload["code"]), (3, "paused", "no_results"))
+
+
+class OfflineSmokeNeverTouchesTheRealDirTests(unittest.TestCase):
+    """`dream-eval.sh --offline` is a plumbing smoke (CI step d). Run with no
+    override it used to write the real ~/.claude/dreaming/evals/<today>.jsonl:
+    one run overwrote the output of a paid live eval, and an offline file
+    there also makes the live gate look fresh. It must leave the real dir
+    alone unless --allow-real-dir is given."""
+
+    DAY = "2026-10-04"
+    SENTINEL = b'{"sentinel": "a paid live eval row"}\n'
+    SCRIPT = HERE.parent / "bin" / "dream-eval.sh"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="ccgm-eval-offline-guard-"))
+        self.home = self.tmp / "home"
+        self.real_evals = self.home / ".claude" / "dreaming" / "evals"
+        self.real_evals.mkdir(parents=True)
+        self.sentinel = self.real_evals / f"{self.DAY}.jsonl"
+        self.sentinel.write_bytes(self.SENTINEL)
+
+    def _run(self, *extra: str, dreaming_dir: Path | None = None) -> subprocess.CompletedProcess:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CCGM_") and k != "ANTHROPIC_API_KEY"}
+        env.update({
+            "HOME": str(self.home), "CCGM_DREAMING_TODAY": self.DAY,
+            "CCGM_LEARNINGS_DIR": str(self.tmp / "learnings"),
+            "CCGM_CLAUDE_PROJECTS_DIR": str(self.tmp / "projects"),
+        })
+        if dreaming_dir is not None:
+            env["CCGM_DREAMING_DIR"] = str(dreaming_dir)
+        return subprocess.run(
+            ["bash", str(self.SCRIPT), "--offline", str(OFFLINE_FIXTURES), *extra],
+            capture_output=True, text=True, env=env, timeout=120,
+        )
+
+    def _real_dir_files(self) -> list[str]:
+        root = self.home / ".claude" / "dreaming"
+        return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+
+    def test_default_run_leaves_the_real_evals_file_byte_identical(self):
+        proc = self._run()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.sentinel.read_bytes(), self.SENTINEL)
+        self.assertEqual(self._real_dir_files(), [f"evals/{self.DAY}.jsonl"])
+        self.assertIn("--allow-real-dir", proc.stderr)
+
+    def test_override_writes_only_under_the_override(self):
+        target = self.tmp / "dreaming-override"
+        proc = self._run(dreaming_dir=target)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue((target / "evals" / f"{self.DAY}.jsonl").is_file())
+        self.assertEqual(self.sentinel.read_bytes(), self.SENTINEL)
+        self.assertEqual(self._real_dir_files(), [f"evals/{self.DAY}.jsonl"])
+
+    def test_override_pointing_at_the_real_dir_is_still_refused(self):
+        proc = self._run(dreaming_dir=self.home / ".claude" / "dreaming")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.sentinel.read_bytes(), self.SENTINEL)
+
+    def test_allow_real_dir_is_the_explicit_opt_in(self):
+        proc = self._run("--allow-real-dir")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotEqual(self.sentinel.read_bytes(), self.SENTINEL)
 
 
 class SeedFingerprintTests(unittest.TestCase):

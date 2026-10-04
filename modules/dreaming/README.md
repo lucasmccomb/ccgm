@@ -7,8 +7,8 @@ out-of-band analyzer -- `autoheal`'s capture-analyze-propose pipeline,
 retargeted at session transcripts instead of permission events. Every
 proposal is human-reviewed via `/dream-apply` by default; an opt-in
 `optimistic_integration` mode (default off) auto-integrates instead, behind
-a per-op-kind posture engine, a dwell window, blast-radius caps, and a
-circuit breaker -- see "Optimistic auto-integration" below.
+a per-op-kind posture engine, a dwell window, blast-radius caps, an eval
+gate, and a circuit breaker -- see "The gate and the breaker" below.
 
 Status: **beta**. This module ships incrementally; see "What's implemented
 so far" below.
@@ -159,8 +159,8 @@ session), `eval:judge:<model>` and `eval:mine:<model>` rows, manual
   `eval_run_cost_cap_usd`, 5.0, and never more than what is left of the
   30-day budget). A preflight estimate (sessions x $0.08, a judge call per
   session, $0.50 per dreamed task) refuses to start when it exceeds the cap.
-  A stopped run writes `evals/<date>.budget-abort`, restores the results
-  file it found, and leaves `--gate` exactly as it was.
+  A stopped run writes `evals/<date>.budget-abort` and restores the results
+  file it found; the marker pauses `--gate` until a later run writes results.
 
 The **nightly map->reduce analyzer**, on top of Epic 2's miner:
 
@@ -359,6 +359,66 @@ Epics 4-8 and are built today (`/dream-apply`, `bin/dream-daily.sh`,
 auto-integration engine on top of all of it is covered in its own section
 above.
 
+## The gate and the breaker
+
+From 2026-07-09 to the redesign (#1098 Phase 2) nothing integrated: the gate
+demanded a `high_value` row no live eval produced (#1037), any in-session
+learning made the eval stale, and the breaker could only resume after a gate
+that never opened. Both now work as follows.
+
+**Gate** (`dream-eval.sh --gate`, `memory_eval.gate_check()`). Prints
+`{"gate", "code", "reason", "since"}`.
+
+| State | Exit | When | Codes |
+|---|---|---|---|
+| `open` | 0 | no supported regression | `ok` |
+| `closed` | 1 | a supported regression, or the live dreamed task's noise-only corpus yielded a proposal | `regression`, `noise_contamination` |
+| `paused` | 3 | nothing usable was measured | `harness_broken`, `budget_abort`, `no_results`, `results_stale`, `stale_own_writes`, `results_empty`, `unmeasured_rows` |
+
+- A **supported regression**: on a canary task, or a task whose seed learning
+  changed since the previous run (`seed_fingerprint`; a row without one counts
+  as changed), the baseline passes a check in at least 2 of 3 runs and the
+  treatment fails it in at least 2 of 3, with at least 3 scored runs per arm.
+- No `high_value` row and no live dreamed row are required; the buckets are
+  reporting only.
+- **Stale** means dreaming's own `auto: true` writes landed after the newest
+  results. An agent's in-session `ccgm-learnings-log` write never counts.
+- A checked row with a failed launch or judge error pauses the gate unless it
+  still shows a regression, so a harness flake never opens it.
+- `since` on a closed gate is the time of the results file before the newest
+  one, the last run that could have been green.
+- `dream-eval.sh --offline` (a plumbing smoke with canned scores) never writes
+  the live `~/.claude/dreaming`: with no `CCGM_DREAMING_DIR`, or one that
+  points at the live dir, it writes to a fresh temp dir and says so.
+  `--allow-real-dir` is the explicit opt-in. An offline run once overwrote a
+  paid live eval's results, and offline results there would make the gate
+  read a fresh file.
+
+**Breaker** (`state/optimistic.json`, `lib/breaker.py`). Every anomaly has a class.
+
+| Class | Reasons | Effect |
+|---|---|---|
+| infra | `eval_gate_paused`, `harness_failure`, `analyze_failed`, `timeout`, `dirty_learnings_tree`, `eval_regression_unattributed` | no integration that night; never counts toward a trip |
+| content | `eval_regression` (a batch integrated since `since` explains it), `batch_eviction_concentration`, `session_citation_concentration`, `rolling_add_rate_exceeded`, `recurrence_spike` | counts toward the windowed trip (`circuit_breaker_max_anomalies` in `circuit_breaker_window_nights`); a trip reverts every implicated batch with `ccgm-learnings-sync revert <sha>` and audits `batch_auto_reverted` |
+
+- **Resume** runs first in every nightly chain (`apply_dream_proposal.py
+  breaker-check`), before analyze and independent of the gate: after
+  `circuit_breaker_auto_resume_nights` (default 7) with no content anomaly
+  since the suspension, it resumes and clears the content anomalies only.
+  Integration still needs that night's gate to be open.
+- `optimistic-resume` stays as the manual override.
+- `recurrence_spike` is the seam for the Phase 4 recurrence metric:
+  `apply_dream_proposal.py record-anomaly --reason recurrence_spike
+  --batch-id <optbatch_id>`.
+
+**Existing history.** Before #1098, `anomaly_log` held bare timestamps, and
+the 89 `red_eval_gate` audit rows were nights the gate did not open. Nothing
+is migrated on disk: `_read_optimistic_state()` re-classifies on every read.
+A bare timestamp with an `anomaly_recorded` audit row for an infra reason
+within 2 seconds after it is infra; any other bare timestamp may have been a
+batch anomaly and stays content. On the 2026-07-09 suspension every entry is
+infra, so the first `breaker-check` resumes it.
+
 ## A broken pipeline announces itself (health)
 
 Dreaming once sat broken for 87 days with every signal in a file nobody opens.
@@ -387,8 +447,9 @@ per date).
 |------|-----|--------|
 | `no_recent_success` / `success_aging` | no good run in 36h, or ever | last good run 26 to 36h ago |
 | `analyze_failed` | analyze step exited non-zero this run | |
-| `breaker_suspended` | suspended 3+ nights | suspended 0 to 2 nights |
-| `gate_closed` | closed 3+ nights in a row | closed 1 to 2 nights |
+| `breaker_suspended` | suspended 3+ nights | suspended 0 to 2 nights. The fix says what clears it (7 nights with no content anomaly) and the date that falls on |
+| `gate_closed` | closed (a supported regression) 3+ nights in a row | closed 1 to 2 nights |
+| `gate_paused` | | the gate is paused; the fix names the cause, e.g. "no fresh eval: eval-refresh is disabled until the Phase 4 smoke test lands" |
 | `no_terminal_outcomes` / `pending_backlog` | oldest pending 7+ nights, nothing integrated or discarded in 7 nights | oldest pending 3+ nights |
 | `spend_near_budget` | 30-day spend over 80% of budget (below 100%) | over 60% |
 | `budget_paused` | | 30-day spend at or above budget (from `cost.log`). Replaces `spend_near_budget`; the message gives the resume date. It hides nothing by itself |
@@ -451,10 +512,10 @@ failed launches in a five-run baseline arm are enough to classify a row
 `high_value`. Cost is the exception: a run stopped against
 `--max-budget-usd` spent real money, and spend is not a quality metric. A
 row is only as good as its worst arm, so any arm holding a failed run
-downgrades the row to `error` -- except a `regression`, which is preserved,
-because the gate selects regressions by bucket name and relabelling one
-would delete it from the gate's view. `downgrade_bucket_for_launch_failures()`
-is the single place that decides this.
+downgrades the row to `error` (a `regression` keeps its label;
+`downgrade_bucket_for_launch_failures()` decides). The gate itself reads pass
+rates: a checked row with a failed launch shows its regression or pauses the
+gate, never opens it.
 
 The judge call is one Messages API request per run: no sampling parameters
 (every judge model from Opus 4.7 / Sonnet 5 on returns 400 for one),

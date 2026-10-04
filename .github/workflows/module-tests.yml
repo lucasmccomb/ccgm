@@ -75,4 +75,8 @@ jobs:
         run: bash modules/dreaming/tests/test-eligibility-enabled-chain.sh
 
       - name: "(d) offline eval harness"
-        run: bash modules/dreaming/bin/dream-eval.sh --offline modules/dreaming/tests/fixtures/offline-responses
+        # A temp dreaming dir: an offline run must never write a live
+        # ~/.claude/dreaming/evals (#1098; the harness also refuses by default).
+        run: |
+          CCGM_DREAMING_DIR="$(mktemp -d)" CCGM_LEARNINGS_DIR="$(mktemp -d)" \
+            bash modules/dreaming/bin/dream-eval.sh --offline modules/dreaming/tests/fixtures/offline-responses

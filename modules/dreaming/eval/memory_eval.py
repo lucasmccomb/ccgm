@@ -260,6 +260,26 @@ def evals_dir() -> Path:
     return dreaming_dir() / "evals"
 
 
+def real_dreaming_dir() -> Path:
+    """The operator's live dreaming dir: the default when no override is set."""
+    return Path(os.path.expanduser("~/.claude/dreaming"))
+
+
+def _isolate_offline_run(*, allow_real_dir: bool) -> Path | None:
+    """An --offline run is a plumbing smoke; its results are canned. Written
+    into the live dreaming dir they overwrite a paid eval's results (it
+    happened on 2026-10-04), clear its harness-broken markers, and make the
+    live gate read a fresh-looking file. Unless `allow_real_dir`, a run whose
+    dreaming dir resolves to the live one is moved to a fresh temp dir by
+    pointing CCGM_DREAMING_DIR at it, so every path below follows. Returns
+    that temp dir, or None when nothing moved."""
+    if allow_real_dir or dreaming_dir().resolve() != real_dreaming_dir().resolve():
+        return None
+    tmp = Path(tempfile.mkdtemp(prefix="ccgm-eval-offline-"))
+    os.environ["CCGM_DREAMING_DIR"] = str(tmp)
+    return tmp
+
+
 # ---------------------------------------------------------------------------
 # Cost tracking: one running total over every billed call, mirrored to the
 # shared cost.log ledger (#1098 items 0.2, 0.3)
@@ -2227,6 +2247,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--judge-model", metavar="MODEL", help="default: configured reduce_model")
     p.add_argument("--offline", metavar="DIR", help="canned judge/arm scores + analyzer responses; no network, no API key")
     p.add_argument(
+        "--allow-real-dir", action="store_true",
+        help="let an --offline run write into the live ~/.claude/dreaming (default: a temp dir)",
+    )
+    p.add_argument(
         "--gate", action="store_true",
         help="check the latest results file against the integration gate; print JSON, exit 0 open / 1 closed / 3 paused",
     )
@@ -2284,6 +2308,15 @@ def main(argv: list[str] | None = None) -> int:
         gate = gate_check(freshness_days=args.freshness_days)
         print(json.dumps({"gate": gate["state"], "code": gate["code"], "reason": gate["reason"], "since": gate["since"]}))
         return GATE_EXIT_CODES[gate["state"]]
+
+    if args.offline:
+        moved_to = _isolate_offline_run(allow_real_dir=args.allow_real_dir)
+        if moved_to is not None:
+            print(
+                f"memory_eval: --offline never writes the live dreaming dir; writing to {moved_to} instead "
+                "(set CCGM_DREAMING_DIR to choose a dir, or pass --allow-real-dir to write the live one)",
+                file=sys.stderr,
+            )
 
     da.load_env()
     cfg = da.load_config()
