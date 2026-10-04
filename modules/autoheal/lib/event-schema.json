@@ -9,13 +9,13 @@
     "kind": {
       "type": "string",
       "enum": [
-        "tool_use",
         "tool_failure",
+        "user_interrupt",
         "permission_request",
         "user_correction",
         "realtime_security_alert"
       ],
-      "description": "Event family. Determines which other fields are populated."
+      "description": "Event family. Determines which other fields are populated. tool_failure and user_interrupt come only from failure-logger.py (user_interrupt when PostToolUseFailure carries is_interrupt: true). Routine successful tool calls are not logged as rows; see counts/{date}.json."
     },
     "timestamp": {
       "type": "string",
@@ -36,12 +36,25 @@
     },
     "exit_code": {
       "type": ["integer", "null"],
-      "description": "Exit code from PostToolUseFailure events; null for non-failure events."
+      "description": "Exit code parsed from the leading 'Exit code N' line of a Bash failure's error text; null when absent."
+    },
+    "error": {
+      "type": ["string", "null"],
+      "maxLength": 400,
+      "description": "For tool_failure and user_interrupt rows: the PostToolUseFailure `error` text after redact_secrets(), cut to 400 chars."
+    },
+    "error_class": {
+      "type": ["string", "null"],
+      "description": "For tool_failure and user_interrupt rows: name of the first lib/error_classes.json entry that matched `error` (default 'other'); null when there was no error text."
+    },
+    "cmd_head": {
+      "type": ["string", "null"],
+      "description": "For Bash failures: first program of the command, plus its subcommand for CLIs that have them ('git add', 'wrangler d1'), redacted. Null for other tools."
     },
     "stderr_excerpt": {
       "type": ["string", "null"],
       "maxLength": 200,
-      "description": "Up to 200 redacted chars of stderr for tool_failure events."
+      "description": "Legacy: up to 200 redacted chars of stderr. Rows written before the `error` field existed carry it (always null in practice); nothing writes it now."
     },
     "permission_decision": {
       "type": ["string", "null"],
@@ -66,7 +79,7 @@
     "context_event_ids": {
       "type": ["array", "null"],
       "items": {"type": "string"},
-      "description": "For user_correction events: the prior tool_use event ids (recent) that the correction is about."
+      "description": "For user_correction events: timestamps of the session's recent tool_failure and user_interrupt rows that the correction follows."
     },
     "security_pattern_matched": {
       "type": ["string", "null"],

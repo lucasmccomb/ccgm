@@ -1,7 +1,7 @@
 {
   "name": "autoheal",
   "displayName": "Autoheal: Self-Healing Observability Loop",
-  "description": "Captures permission events, tool failures, and user-correction signals; runs a daily analyzer via direct Anthropic API call; produces a local digest + opt-in Resend email; opt-in real-time security alerts and opt-in confidence-gated auto-apply. Cross-clone-safe via fcntl file locks. Webhook publisher seam is dormant by default.",
+  "description": "Captures permission requests, tool failures (with error text and class), interrupts, and user-correction signals, plus a daily per-tool call counter; runs a daily analyzer via direct Anthropic API call; produces a local digest + opt-in Resend email; opt-in real-time security alerts and opt-in confidence-gated auto-apply. Cross-clone-safe via fcntl file locks. Webhook publisher seam is dormant by default.",
   "category": "workflow",
   "scope": [
     "global"
@@ -32,11 +32,6 @@
     },
     "hooks/permission-request-suppress.py": {
       "target": "hooks/permission-request-suppress.py",
-      "type": "hook",
-      "template": false
-    },
-    "hooks/post-prompt-introspect.py": {
-      "target": "hooks/post-prompt-introspect.py",
       "type": "hook",
       "template": false
     },
@@ -137,6 +132,11 @@
     },
     "lib/event-schema.json": {
       "target": "lib/event-schema.json",
+      "type": "lib",
+      "template": false
+    },
+    "lib/error_classes.json": {
+      "target": "lib/error_classes.json",
       "type": "lib",
       "template": false
     },

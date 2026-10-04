@@ -10,11 +10,6 @@
           },
           {
             "type": "command",
-            "command": "python3 $HOME/.claude/hooks/failure-logger.py",
-            "timeout": 5000
-          },
-          {
-            "type": "command",
             "command": "python3 $HOME/.claude/hooks/realtime-security-scanner.py",
             "timeout": 5000,
             "async": true,
@@ -61,17 +56,6 @@
           {
             "type": "command",
             "command": "python3 $HOME/.claude/hooks/user-correction-detector.py",
-            "timeout": 5000
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 $HOME/.claude/hooks/post-prompt-introspect.py",
             "timeout": 5000
           }
         ]

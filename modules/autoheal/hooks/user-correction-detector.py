@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """Detect user-correction patterns in UserPromptSubmit input and log them.
 
-Registers on UserPromptSubmit (no matcher). When the user's prompt matches a
-correction pattern (e.g. "no, not like that", "stop doing X", "I told you"),
-log a user_correction event linking to the most recent tool_use events from
-today's JSONL. The analyzer uses these as supervised signals that the agent's
-recent actions were wrong.
+Registers on UserPromptSubmit (no matcher). A prompt is logged as a
+user_correction only when ALL hold:
+
+  1. it matches a pattern in lib/correction-patterns.json,
+  2. it is short (<= 300 chars), so a pasted brief or spec never counts,
+  3. the session logged a tool_failure or user_interrupt row after the
+     prompt two turns back (a correction follows something that went wrong
+     within the last two turns).
+
+The user_correction row links to the failure/interrupt rows it follows.
+Per-session prompt times live in $CCGM_AUTOHEAL_DIR/state/prompts/ to
+count turns.
 
 This hook NEVER blocks the prompt, NEVER modifies the prompt, and never asks
 for clarification. exit 0 always.
@@ -17,6 +24,7 @@ import json
 import os
 import re
 import sys
+import time
 
 sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
 import hook_utils  # noqa: E402
@@ -76,7 +84,11 @@ def _load_correction_patterns() -> list[tuple[str, "re.Pattern[str]"]]:
 
 _CORRECTION_PATTERNS: list[tuple[str, "re.Pattern[str]"]] = _load_correction_patterns()
 
-_MAX_RECENT_CONTEXT = 3  # how many recent tool_use events to attach as context
+_MAX_RECENT_CONTEXT = 3  # how many failure/interrupt rows to attach as context
+_MAX_PROMPT_LEN = 300  # longer prompts are briefs, not corrections
+_TURN_WINDOW = 2  # a failure must come after the prompt this many turns back
+_FRICTION_KINDS = ("tool_failure", "user_interrupt")
+_STATE_RETENTION_SECONDS = 2 * 24 * 3600
 
 
 def _autoheal_dir() -> str:
@@ -104,11 +116,10 @@ def _match_pattern(text: str) -> str | None:
     return None
 
 
-def _recent_tool_use_ids(events_path: str) -> list[str]:
-    """Read up to _MAX_RECENT_CONTEXT trailing tool_use timestamps from
-    today's events JSONL. Returns the timestamps (used as light-weight
-    event ids — the event-schema allows but doesn't require an explicit
-    id field).
+def _recent_friction(events_path: str, session_id: str, since: str) -> list[str]:
+    """Timestamps (newest first, at most _MAX_RECENT_CONTEXT) of this
+    session's tool_failure/user_interrupt rows stamped after `since`.
+    Events are append-ordered, so scanning from the end is enough.
     """
     if not os.path.isfile(events_path):
         return []
@@ -127,13 +138,47 @@ def _recent_tool_use_ids(events_path: str) -> list[str]:
             rec = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if rec.get("kind") == "tool_use":
-            ts = rec.get("timestamp") or rec.get("id")
-            if isinstance(ts, str):
-                out.append(ts)
-                if len(out) >= _MAX_RECENT_CONTEXT:
-                    break
+        if rec.get("kind") not in _FRICTION_KINDS or rec.get("session_id") != session_id:
+            continue
+        ts = rec.get("timestamp")
+        if not isinstance(ts, str) or ts <= since:
+            continue
+        out.append(ts)
+        if len(out) >= _MAX_RECENT_CONTEXT:
+            break
     return out
+
+
+def _prompt_state_path(session_id: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session_id) or "unknown"
+    return os.path.join(_autoheal_dir(), "state", "prompts", safe + ".json")
+
+
+def _load_prompt_times(path: str) -> list[str]:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            times = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    return [t for t in times if isinstance(t, str)] if isinstance(times, list) else []
+
+
+def _save_prompt_times(path: str, times: list[str]) -> None:
+    """Keep the last _TURN_WINDOW prompt times; prune stale session files."""
+    state_dir = os.path.dirname(path)
+    os.makedirs(state_dir, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(times[-_TURN_WINDOW:], fh)
+    os.replace(tmp, path)
+    cutoff = time.time() - _STATE_RETENTION_SECONDS
+    for name in os.listdir(state_dir):
+        full = os.path.join(state_dir, name)
+        try:
+            if os.path.getmtime(full) < cutoff:
+                os.remove(full)
+        except OSError:
+            pass
 
 
 def _extract_prompt(data: dict) -> str:
@@ -161,14 +206,29 @@ def main() -> None:
     try:
         data = hook_utils.read_hook_input()
         prompt_text = _extract_prompt(data)
+        session_id = str(data.get("session_id", ""))
+        now = _now_iso()
+
+        # Turn bookkeeping runs for every prompt so the window is real.
+        state_path = _prompt_state_path(session_id)
+        prior = _load_prompt_times(state_path)
+        _save_prompt_times(state_path, prior + [now])
+
+        if len(prompt_text) > _MAX_PROMPT_LEN:
+            sys.exit(0)
         pattern = _match_pattern(prompt_text)
         if pattern is None:
             sys.exit(0)
 
+        # Failure must come after the prompt _TURN_WINDOW turns back; with
+        # fewer prior prompts, any failure in the session qualifies.
+        since = prior[-_TURN_WINDOW] if len(prior) >= _TURN_WINDOW else ""
         events_path = os.path.join(
             _autoheal_dir(), "events", _today_iso() + ".jsonl"
         )
-        context_ids = _recent_tool_use_ids(events_path)
+        context_ids = _recent_friction(events_path, session_id, since)
+        if not context_ids:
+            sys.exit(0)
 
         transcript_path = data.get("transcript_path")
         if not isinstance(transcript_path, str):
@@ -176,8 +236,8 @@ def main() -> None:
 
         record = {
             "kind": "user_correction",
-            "timestamp": _now_iso(),
-            "session_id": str(data.get("session_id", "")),
+            "timestamp": now,
+            "session_id": session_id,
             "tool_name": "UserPrompt",
             "redacted_command": None,
             "exit_code": None,

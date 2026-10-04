@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 # Test suite for modules/autoheal/hooks/user-correction-detector.py
 #
+# A prompt counts as a correction only when ALL hold (#1099 Phase 1.3):
+#   - it matches a lib/correction-patterns.json pattern,
+#   - it is short (<= 300 characters),
+#   - the session had a tool_failure or user_interrupt row after the prompt
+#     two turns back (so: within the last two turns).
+#
 # Covers:
-#   - Prompts matching each correction pattern produce a user_correction
-#     event with the right correction_pattern_matched value.
-#   - Benign prompts do NOT produce an event.
-#   - The context_event_ids field captures up to 3 recent tool_use
-#     timestamps from today's events JSONL.
+#   - Each pattern fires after a failure and logs the right pattern name.
+#   - The same prompts do nothing without a prior failure.
+#   - A long multi-paragraph brief containing "instead" does not fire.
+#   - An interrupt followed by "no, use X" fires.
+#   - A failure more than two turns back does not count.
+#   - context_event_ids lists the failure/interrupt rows the prompt follows.
 
 set -u
 
@@ -41,10 +48,6 @@ cp "${HOOK_LIB}/hook_utils.py" "${TMP_HOME}/.claude/lib/hook_utils.py"
 
 export HOME="${TMP_HOME}"
 export CCGM_AUTOHEAL_DIR="${TMP_HOME}/autoheal"
-# Point the hook at the in-repo patterns JSON. The hook normally reads
-# ~/.claude/lib/correction-patterns.json after the module installer
-# copies the file; the env override mirrors the realtime-security
-# scanner's CCGM_REALTIME_PATTERNS hook.
 export CCGM_CORRECTION_PATTERNS="${PATTERNS_FILE}"
 
 today() {
@@ -55,26 +58,33 @@ events_file() {
     echo "${CCGM_AUTOHEAL_DIR}/events/$(today).jsonl"
 }
 
-last_record() {
-    # Print the last record matching the given filter using jq-free
-    # Python — keeps the test portable on machines without jq.
-    python3 -c "
-import json
-recs = [json.loads(line) for line in open('$(events_file)') if line.strip()]
-recs = [r for r in recs if r.get('kind') == 'user_correction']
-print(json.dumps(recs[-1]) if recs else '{}')
+# seed_row KIND SESSION: append a tool_failure or user_interrupt row, now.
+seed_row() {
+    SEED_KIND="$1" SEED_SESSION="$2" python3 -c "
+import json, os, datetime
+path = os.path.join(os.environ['CCGM_AUTOHEAL_DIR'], 'events', datetime.datetime.now(datetime.timezone.utc).date().isoformat() + '.jsonl')
+os.makedirs(os.path.dirname(path), exist_ok=True)
+rec = {
+    'kind': os.environ['SEED_KIND'],
+    'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    'session_id': os.environ['SEED_SESSION'],
+    'tool_name': 'Bash',
+    'redacted_command': 'echo ==',
+    'error': 'Exit code 1',
+    'error_class': 'exit_code',
+}
+with open(path, 'a') as fh:
+    fh.write(json.dumps(rec) + '\n')
 "
 }
 
+# run_correction SESSION PROMPT
 run_correction() {
-    local prompt="$1"
-    # Build the JSON in Python to avoid bash-side quoting hell.
-    PROMPT_TEXT="${prompt}" python3 -c "
+    SESSION="$1" PROMPT_TEXT="$2" python3 -c "
 import json, os, subprocess, sys
 payload = {
     'hook_event_name': 'UserPromptSubmit',
-    'session_id': 'corr-session',
-    'tool_name': 'UserPrompt',
+    'session_id': os.environ['SESSION'],
     'prompt': os.environ['PROMPT_TEXT'],
     'cwd': '/tmp/repo',
 }
@@ -84,28 +94,39 @@ sys.exit(p.returncode)
     return $?
 }
 
-# Helper: count user_correction events in today's file.
+# correction_count [SESSION]: user_correction rows, optionally for one session.
 correction_count() {
     if [ ! -f "$(events_file)" ]; then
         echo 0
         return
     fi
-    python3 -c "
-import json
+    CSESSION="${1:-}" python3 -c "
+import json, os
 n = 0
 for line in open('$(events_file)'):
     line = line.strip()
     if not line: continue
     try:
-        if json.loads(line).get('kind') == 'user_correction':
-            n += 1
+        r = json.loads(line)
     except Exception:
-        pass
+        continue
+    if r.get('kind') != 'user_correction': continue
+    if os.environ['CSESSION'] and r.get('session_id') != os.environ['CSESSION']: continue
+    n += 1
 print(n)
 "
 }
 
-# 1. Each correction pattern fires.
+last_correction() {  # $1 = key
+    python3 -c "
+import json
+recs = [json.loads(l) for l in open('$(events_file)') if l.strip()]
+recs = [r for r in recs if r.get('kind') == 'user_correction']
+print(recs[-1].get('$1') if recs else 'NONE')
+"
+}
+
+# 1. Each correction pattern fires after a failure, with the right name.
 declare -a PATTERNS=(
     "no, not like that"
     "stop doing that"
@@ -113,11 +134,11 @@ declare -a PATTERNS=(
     "I told you we use Tailwind"
     "wait, no"
     "actually, that's wrong"
-    "do A instead"
+    "use pnpm instead"
     "that's wrong"
     "undo that"
+    "no, use pnpm"
 )
-
 declare -a EXPECTED_NAMES=(
     "no_not_like_that"
     "stop_doing"
@@ -128,116 +149,98 @@ declare -a EXPECTED_NAMES=(
     "instead"
     "thats_wrong"
     "undo"
+    "leading_no"
 )
 
-# Pre-seed two tool_use events so context_event_ids gets populated.
-mkdir -p "${CCGM_AUTOHEAL_DIR}/events"
-python3 <<'PY'
-import json, os, datetime
-path = os.path.join(os.environ['CCGM_AUTOHEAL_DIR'], 'events', datetime.datetime.now(datetime.timezone.utc).date().isoformat() + '.jsonl')
-os.makedirs(os.path.dirname(path), exist_ok=True)
-with open(path, 'a') as fh:
-    for cmd in ['git diff', 'git status']:
-        rec = {
-            'kind': 'tool_use',
-            'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            'session_id': 'corr-session',
-            'tool_name': 'Bash',
-            'redacted_command': cmd,
-            'exit_code': None,
-            'stderr_excerpt': None,
-            'permission_decision': None,
-            'cwd': '/tmp/repo',
-            'clone_path': '/tmp/repo',
-        }
-        fh.write(json.dumps(rec) + '\n')
-PY
-
 for i in "${!PATTERNS[@]}"; do
-    run_correction "${PATTERNS[$i]}"
-    rc=$?
-    assert_eq "${rc}" "0" "correction hook exits 0 for '${PATTERNS[$i]}'"
+    sess="pat-$i"
+    seed_row tool_failure "${sess}"
+    run_correction "${sess}" "${PATTERNS[$i]}"
+    assert_eq "$?" "0" "hook exits 0 for '${PATTERNS[$i]}'"
+    assert_eq "$(correction_count "${sess}")" "1" "'${PATTERNS[$i]}' fires after a failure"
+    assert_eq "$(last_correction correction_pattern_matched)" "${EXPECTED_NAMES[$i]}" "pattern name for '${PATTERNS[$i]}'"
 done
 
-# 2. Each emitted event carries the expected pattern name.
-python3 <<'PY' > /tmp/correction_names.txt
-import json, os, datetime
-path = os.path.join(os.environ['CCGM_AUTOHEAL_DIR'], 'events', datetime.datetime.now(datetime.timezone.utc).date().isoformat() + '.jsonl')
-for line in open(path):
-    line = line.strip()
-    if not line: continue
-    try:
-        rec = json.loads(line)
-    except Exception:
-        continue
-    if rec.get('kind') == 'user_correction':
-        print(rec.get('correction_pattern_matched', ''))
-PY
-
-# The 9 expected pattern names should appear in the same order in the
-# emitted log.
-declare -a got
-mapfile -t got < /tmp/correction_names.txt
-for i in "${!EXPECTED_NAMES[@]}"; do
-    assert_eq "${got[$i]}" "${EXPECTED_NAMES[$i]}" "pattern $i matches ${EXPECTED_NAMES[$i]}"
+# 2. The same phrases do nothing without a prior failure or interrupt.
+for i in "${!PATTERNS[@]}"; do
+    run_correction "cold-$i" "${PATTERNS[$i]}"
 done
+total=0
+for i in "${!PATTERNS[@]}"; do total=$((total + $(correction_count "cold-$i"))); done
+assert_eq "${total}" "0" "no failure in session: no correction rows"
 
-# 3. Benign prompts produce NO new user_correction event.
-before=$(correction_count)
-run_correction "let me check the docs and report back"
-run_correction "looks good to me"
-run_correction "running tests now"
-after=$(correction_count)
-assert_eq "${before}" "${after}" "benign prompts add 0 events"
+# A failure in a DIFFERENT session does not count.
+seed_row tool_failure "other-session"
+run_correction "lonely" "no, not like that"
+assert_eq "$(correction_count lonely)" "0" "failure in another session does not count"
 
-# 4. context_event_ids captures up to 3 recent tool_use entries.
-ctx=$(python3 -c "
-import json, os, datetime
-path = os.path.join(os.environ['CCGM_AUTOHEAL_DIR'], 'events', datetime.datetime.now(datetime.timezone.utc).date().isoformat() + '.jsonl')
-recs = [json.loads(line) for line in open(path) if line.strip()]
-last = [r for r in recs if r.get('kind') == 'user_correction'][-1]
-print(len(last.get('context_event_ids', [])))
+# 3. A long multi-paragraph brief does not fire, even after a failure and
+#    even though it contains "instead" and "I told you".
+seed_row tool_failure "brief"
+BRIEF=$(python3 -c "
+para = 'Please write the report to a file instead of printing it, and I told you last week that the format must stay stable. ' * 3
+print(para + '\n\n' + para + '\n\n' + para)
 ")
-# We seeded 2 tool_use records, so we expect <= 2 context ids.
-case "${ctx}" in
-    0|1|2)
-        PASS=$((PASS + 1))
-        ;;
-    *)
-        FAIL=$((FAIL + 1))
-        echo "FAIL: context_event_ids count <= 2"
-        echo "  actual: ${ctx}"
-        ;;
-esac
+run_correction "brief" "${BRIEF}"
+assert_eq "$(correction_count brief)" "0" "long brief after a failure does not fire"
 
-# 5. Malformed stdin exits 0.
+# Length boundary: 300 chars fires, 301 does not.
+seed_row tool_failure "len300"
+P300=$(python3 -c "s='no, not like that '; print((s + 'x' * 300)[:300])")
+run_correction "len300" "${P300}"
+assert_eq "$(correction_count len300)" "1" "300-char prompt fires"
+seed_row tool_failure "len301"
+P301=$(python3 -c "s='no, not like that '; print((s + 'x' * 301)[:301])")
+run_correction "len301" "${P301}"
+assert_eq "$(correction_count len301)" "0" "301-char prompt does not fire"
+
+# 4. Interrupt, then "no, use X" fires.
+seed_row user_interrupt "intr"
+run_correction "intr" "no, use rg"
+assert_eq "$(correction_count intr)" "1" "interrupt then 'no, use X' fires"
+assert_eq "$(last_correction correction_pattern_matched)" "leading_no" "interrupt correction pattern"
+
+# 5. Benign short prompts after a failure do not fire.
+seed_row tool_failure "benign"
+run_correction "benign" "let me check the docs and report back"
+run_correction "benign" "looks good to me"
+run_correction "benign" "running tests now"
+assert_eq "$(correction_count benign)" "0" "benign prompts add 0 events"
+
+# 6. Turn window: a failure more than two prompts back does not count.
+seed_row tool_failure "stale"
+run_correction "stale" "ok, continue"
+run_correction "stale" "thanks, go on"
+run_correction "stale" "that's wrong"
+assert_eq "$(correction_count stale)" "0" "failure two prompts back is out of window"
+
+# One intervening prompt is still inside the window.
+seed_row tool_failure "fresh"
+run_correction "fresh" "ok, continue"
+run_correction "fresh" "that's wrong"
+assert_eq "$(correction_count fresh)" "1" "failure one prompt back is in window"
+
+# 7. context_event_ids lists the failure/interrupt rows (at most 3).
+seed_row tool_failure "ctx"
+seed_row user_interrupt "ctx"
+seed_row tool_failure "ctx"
+seed_row tool_failure "ctx"
+run_correction "ctx" "no, not like that"
+assert_eq "$(last_correction context_event_ids | python3 -c "import sys,ast; print(len(ast.literal_eval(sys.stdin.read().strip())))")" "3" "context_event_ids holds the 3 most recent failure/interrupt rows"
+
+# 8. Malformed stdin exits 0.
 echo 'not json {{{' | python3 "${HOOK}"
-rc=$?
-assert_eq "${rc}" "0" "malformed stdin exits 0"
+assert_eq "$?" "0" "malformed stdin exits 0"
 
-# 6. correction-patterns.json exists and is the source of truth.
-[ -f "${PATTERNS_FILE}" ] && PASS=$((PASS + 1)) || {
-    FAIL=$((FAIL + 1))
-    echo "FAIL: ${PATTERNS_FILE} does not exist"
-}
-
-# 7. The hook loads patterns from JSON (not inlined). Verify the JSON
-#    pattern count matches the number of distinct correction events the
-#    hook emitted for the 9 test prompts above. If the hook silently fell
-#    back to an empty list (file not loaded), only 0 events would have
-#    been emitted and assertion 1 would already have failed -- but we
-#    also assert the count here for explicitness.
+# 9. correction-patterns.json is the source of truth and holds 10 patterns.
+[ -f "${PATTERNS_FILE}" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: ${PATTERNS_FILE} does not exist"; }
 JSON_COUNT=$(python3 -c "
 import json
-with open('${PATTERNS_FILE}') as fh:
-    data = json.load(fh)
-print(len(data['patterns']))
+print(len(json.load(open('${PATTERNS_FILE}'))['patterns']))
 ")
-assert_eq "${JSON_COUNT}" "9" "correction-patterns.json contains 9 patterns"
+assert_eq "${JSON_COUNT}" "10" "correction-patterns.json contains 10 patterns"
 
-# 8. The hook source loads patterns from the JSON file (no inlined
-#    regex list). Grep for the load function name and the env override
-#    to lock in the contract.
+# 10. The hook loads patterns from the JSON file (no inlined regex list).
 if grep -q '_load_correction_patterns' "${HOOK}" && \
    grep -q 'CCGM_CORRECTION_PATTERNS' "${HOOK}" && \
    ! grep -q 'no_not_like_that.*re\.compile' "${HOOK}"; then
@@ -247,17 +250,14 @@ else
     echo "FAIL: hook source must load patterns from JSON, not inline them"
 fi
 
-# 9. Graceful degradation: when the patterns file is missing, the hook
-#    becomes a no-op (no event written) instead of crashing.
-CCGM_CORRECTION_PATTERNS_BACKUP="${CCGM_CORRECTION_PATTERNS}"
+# 11. Missing patterns file: hook is a no-op and exits 0.
+BACKUP="${CCGM_CORRECTION_PATTERNS}"
 export CCGM_CORRECTION_PATTERNS="/nonexistent/path/never-here.json"
-before_missing=$(correction_count)
-run_correction "no, not like that"
-rc=$?
-after_missing=$(correction_count)
-assert_eq "${rc}" "0" "missing patterns file: hook still exits 0"
-assert_eq "${before_missing}" "${after_missing}" "missing patterns file: no event emitted"
-export CCGM_CORRECTION_PATTERNS="${CCGM_CORRECTION_PATTERNS_BACKUP}"
+seed_row tool_failure "nopat"
+run_correction "nopat" "no, not like that"
+assert_eq "$?" "0" "missing patterns file: hook exits 0"
+assert_eq "$(correction_count nopat)" "0" "missing patterns file: no event emitted"
+export CCGM_CORRECTION_PATTERNS="${BACKUP}"
 
 echo ""
 echo "test-correction-detection.sh: ${PASS} passed, ${FAIL} failed"

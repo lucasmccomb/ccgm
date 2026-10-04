@@ -530,15 +530,15 @@ Installed by the **autoheal** module. They are registered alongside the core hoo
 **Module**: autoheal
 **Can block**: No (observational)
 
-Appends one JSONL record per event to `~/.claude/autoheal/events/{date}.jsonl`, cross-clone safe via `hook_utils.file_locked_append`. Commands are redacted via the 17-pattern set BEFORE truncation, so secrets never enter the log even when the truncation point falls mid-token.
+On `PermissionRequest`, appends one `permission_request` record to `~/.claude/autoheal/events/{date}.jsonl`, cross-clone safe via `hook_utils.file_locked_append`. Commands are redacted via the 17-pattern set BEFORE truncation, so secrets never enter the log even when the truncation point falls mid-token. On `PostToolUse` and `PostToolUseFailure` it writes no row; it only bumps the per-tool counter in `~/.claude/autoheal/counts/{date}.json` under an fcntl lock.
 
 ### failure-logger.py
 
-**Type**: PostToolUse + PostToolUseFailure (no matcher)
+**Type**: PostToolUseFailure (no matcher)
 **Module**: autoheal
 **Can block**: No
 
-Specialization of the event logger for tool failures — captures `exit_code` and a redacted `stderr_excerpt` (≤200 chars) for analyzer context. Registered on both surfaces so a client that omits `hook_event_name` is still caught: on `PostToolUseFailure` it always logs, and on plain `PostToolUse` it logs only if `exit_code` is a nonzero int; otherwise it exits silently and leaves the success record to `permission-event-logger.py`.
+The only writer of failure rows. Reads the `error` and `is_interrupt` fields Claude Code sends on `PostToolUseFailure` and writes one row per failure with the redacted error text (≤400 chars), `error_class` (first match in `lib/error_classes.json`), `cmd_head` (first program of a Bash command, plus its subcommand for CLIs like `git add`), and `exit_code` parsed from the leading `Exit code N`. When `is_interrupt` is true the row has kind `user_interrupt`.
 
 ### user-correction-detector.py
 
@@ -546,7 +546,7 @@ Specialization of the event logger for tool failures — captures `exit_code` an
 **Module**: autoheal
 **Can block**: No
 
-Pattern-matches 9 user-correction phrases ("no, not like that", "stop doing", "actually", "wait, no", etc.) in the submitted prompt. On match: logs a `user_correction` event with the last 3 tool-use event IDs as context. Never modifies the prompt.
+Pattern-matches 10 user-correction phrases ("no, not like that", "stop doing", "actually", "wait, no", a leading "no, ...", etc.) in the submitted prompt. It logs a `user_correction` event only for a short prompt (≤300 chars) when the session had a `tool_failure` or `user_interrupt` row after the prompt two turns back; the event carries those rows' timestamps as context. Never modifies the prompt.
 
 ### permission-request-suppress.py
 
@@ -555,14 +555,6 @@ Pattern-matches 9 user-correction phrases ("no, not like that", "stop doing", "a
 **Can block**: Yes (auto-allow only)
 
 Conservative auto-allow gate: fires only when ALL hold — `is_bypass_mode()` is True, the `(tool, command-prefix)` signature has ≥3 prior approvals across ≥2 distinct sessions, and the signature is not in `~/.claude/autoheal/snoozed.json`. Otherwise exits silently.
-
-### post-prompt-introspect.py
-
-**Type**: Stop
-**Module**: autoheal
-**Can block**: No (emits suggestion to stderr)
-
-Session-level dedup'd Stop hook. When ≥2 same-signature `permission_request` or `tool_failure` events fire in the current session, emits an `<autoheal-suggestion>` block on stderr suggesting `/permission-fix latest`. One suggestion per signature per session.
 
 ### realtime-security-scanner.py
 

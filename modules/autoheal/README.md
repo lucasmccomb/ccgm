@@ -4,8 +4,8 @@ Self-healing observability loop for Claude Code. Captures permission events, too
 
 ## What this module installs
 
-- **6 hooks** across `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `UserPromptSubmit`, and `Stop`:
-  - **4 event-capture hooks**: `permission-event-logger.py` (PostToolUse / PostToolUseFailure / PermissionRequest), `failure-logger.py` (PostToolUseFailure), `user-correction-detector.py` (UserPromptSubmit), `post-prompt-introspect.py` (Stop).
+- **5 hooks** across `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, and `UserPromptSubmit`:
+  - **3 event-capture hooks**: `permission-event-logger.py` (PermissionRequest rows; PostToolUse / PostToolUseFailure bump the daily per-tool counter `counts/{date}.json`), `failure-logger.py` (PostToolUseFailure: the only writer of failure rows, with `error`, `error_class`, `cmd_head`), `user-correction-detector.py` (UserPromptSubmit: a short prompt after a failure or interrupt).
   - **2 response hooks**: `permission-request-suppress.py` (PermissionRequest contextual auto-allow) and `realtime-security-scanner.py` (PostToolUse opt-in mid-session alerts).
 - **7 slash commands**: `/permission-fix`, `/permission-audit`, `/autoheal`, `/autoheal-digest`, `/autoheal-toggle`, `/autoheal-snooze`, `/autoheal-apply`.
 - **Daily LaunchAgent** (macOS) calling `bin/autoheal-daily.sh` at 08:00 local. Linux scheduling is an architectural seam, not built in v1.

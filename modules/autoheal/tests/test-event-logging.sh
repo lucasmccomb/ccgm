@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # Test suite for modules/autoheal/hooks/permission-event-logger.py
 #
+# Since #1099 the logger writes event rows only for PermissionRequest.
+# PostToolUse and PostToolUseFailure only bump counts/{date}.json (see
+# test-failure-logging.sh for the counter and the failure rows).
+#
 # Covers:
-#   - A synthetic PostToolUse stdin produces one row with kind=tool_use,
-#     the correct redacted command, and a timestamp.
-#   - 3 successive tool calls produce 3 rows.
-#   - A command with embedded secrets has REDACTED markers in the
-#     stored event (not the raw token).
+#   - A PermissionRequest produces one permission_request row with the
+#     redacted command, cwd, and a timestamp.
+#   - PostToolUse and PostToolUseFailure write no event rows.
+#   - A command with embedded secrets has REDACTED markers in the stored row.
+#   - transcript_path is captured when present, null when absent or not a
+#     string.
+#   - Malformed stdin exits 0.
 #
 # Each test points CCGM_AUTOHEAL_DIR at a fresh temp dir so the real
 # ~/.claude/autoheal is never touched.
@@ -70,9 +76,8 @@ assert_not_contains() {
     esac
 }
 
-# Symlink ~/.claude/lib to the in-repo hook_utils so the hook can import
-# it without requiring a CCGM install on the test machine. We do this in
-# a private $HOME so we never touch the user's real ~/.claude.
+# Private $HOME so the hook imports the in-repo hook_utils and we never
+# touch the user's real ~/.claude.
 TMP_HOME=$(mktemp -d -t autoheal_test.XXXXXX)
 trap 'rm -rf "${TMP_HOME}"' EXIT
 mkdir -p "${TMP_HOME}/.claude/lib"
@@ -96,53 +101,45 @@ events_file() {
     echo "${CCGM_AUTOHEAL_DIR}/events/$(today).jsonl"
 }
 
-# 1. Single tool_use append produces 1 line with kind=tool_use.
-rm -f "$(events_file)"
-run_hook '{"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git diff"},"cwd":"/tmp/repo","permission_mode":"default"}'
-rc=$?
-assert_eq "${rc}" "0" "logger exits 0 on PostToolUse"
-[ -f "$(events_file)" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: events file created"; }
+row_field() {  # $1 = key of the first row
+    python3 -c "
+import json
+print(json.loads(open('$(events_file)').readline()).get('$1'))
+"
+}
 
-line_count=$(wc -l < "$(events_file)" | tr -d ' ')
-assert_eq "${line_count}" "1" "logger writes 1 line"
-
-line=$(head -1 "$(events_file)")
-kind=$(python3 -c "import json,sys; print(json.loads('''${line}''')['kind'])")
-assert_eq "${kind}" "tool_use" "kind=tool_use"
-
-cmd=$(python3 -c "import json; print(json.loads(open('$(events_file)').readline())['redacted_command'])")
-assert_eq "${cmd}" "git diff" "redacted_command preserved benign value"
-
-# Timestamp must parse as ISO 8601.
-ts_ok=$(python3 -c "
+# 1. A PermissionRequest appends one permission_request row.
+rm -rf "${CCGM_AUTOHEAL_DIR}"
+run_hook '{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git push --force feat-x"},"cwd":"/tmp/repo"}'
+assert_eq "$?" "0" "logger exits 0 on PermissionRequest"
+assert_eq "$(wc -l < "$(events_file)" | tr -d ' ')" "1" "PermissionRequest writes 1 line"
+assert_eq "$(row_field kind)" "permission_request" "kind is permission_request"
+assert_eq "$(row_field redacted_command)" "git push --force feat-x" "redacted_command preserved benign value"
+assert_eq "$(row_field cwd)" "/tmp/repo" "cwd captured"
+assert_eq "$(python3 -c "
 import json, datetime
-rec = json.loads(open('$(events_file)').readline())
-ts = rec['timestamp']
+ts = json.loads(open('$(events_file)').readline())['timestamp']
 datetime.datetime.fromisoformat(ts.replace('Z', '+00:00'))
 print('ok')
-" 2>&1)
-assert_eq "${ts_ok}" "ok" "timestamp parses as ISO 8601"
+" 2>&1)" "ok" "timestamp parses as ISO 8601"
 
-# 2. Three calls produce three lines.
-rm -f "$(events_file)"
+# 2. PostToolUse and PostToolUseFailure write no event rows.
+rm -rf "${CCGM_AUTOHEAL_DIR}"
 run_hook '{"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp/repo"}'
-run_hook '{"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git log -1"},"cwd":"/tmp/repo"}'
-run_hook '{"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git diff --staged"},"cwd":"/tmp/repo"}'
-line_count=$(wc -l < "$(events_file)" | tr -d ' ')
-assert_eq "${line_count}" "3" "3 tool calls produce 3 rows"
+run_hook '{"hook_event_name":"PostToolUseFailure","session_id":"s1","tool_name":"Bash","tool_input":{"command":"false"},"error":"Exit code 1","is_interrupt":false,"cwd":"/tmp/repo"}'
+[ ! -f "$(events_file)" ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: PostToolUse/PostToolUseFailure must not write event rows"; }
 
-# 3. Secret-bearing command is redacted in the stored event.
+# 3. Secret-bearing command is redacted in the stored row.
 #
 # Build the fake token at runtime so no literal token form ever appears
-# in this file. We assemble the JSON in Python (not bash) to avoid
-# double-escaping the embedded quote chars.
-rm -f "$(events_file)"
+# in this file.
+rm -rf "${CCGM_AUTOHEAL_DIR}"
 PAYLOAD=$(python3 <<'PY'
 import json
 S = 'A' * 40
 cmd = 'curl -H "Authorization: Bearer ' + S + '" https://api.example.com'
 print(json.dumps({
-    "hook_event_name": "PostToolUse",
+    "hook_event_name": "PermissionRequest",
     "session_id": "s1",
     "tool_name": "Bash",
     "tool_input": {"command": cmd},
@@ -151,140 +148,43 @@ print(json.dumps({
 PY
 )
 echo "${PAYLOAD}" | python3 "${HOOK}"
-stored=$(python3 -c "
-import json
-print(json.loads(open('$(events_file)').readline())['redacted_command'])
-")
-assert_contains "${stored}" "[REDACTED:authorization_bearer]" "secret redacted in stored event"
+stored=$(row_field redacted_command)
+assert_contains "${stored}" "[REDACTED:authorization_bearer]" "secret redacted in stored row"
 assert_not_contains "${stored}" "AAAAAAAA" "raw secret bytes not present"
 
-# 4. PermissionRequest event is classified correctly.
-rm -f "$(events_file)"
-run_hook '{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git push --force feat-x"},"cwd":"/tmp/repo"}'
-kind=$(python3 -c "
-import json
-print(json.loads(open('$(events_file)').readline())['kind'])
-")
-assert_eq "${kind}" "permission_request" "PermissionRequest event has kind permission_request"
+# 4. transcript_path: captured, null when omitted, null when not a string.
+rm -rf "${CCGM_AUTOHEAL_DIR}"
+run_hook '{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/tmp/repo","transcript_path":"/tmp/fake/transcript-abc.jsonl"}'
+assert_eq "$(row_field transcript_path)" "/tmp/fake/transcript-abc.jsonl" "transcript_path captured"
+rm -rf "${CCGM_AUTOHEAL_DIR}"
+run_hook '{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/tmp/repo"}'
+assert_eq "$(row_field transcript_path)" "None" "transcript_path null when omitted"
+rm -rf "${CCGM_AUTOHEAL_DIR}"
+run_hook '{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/tmp/repo","transcript_path":42}'
+assert_eq "$(row_field transcript_path)" "None" "transcript_path null when not a string"
 
-# 5. PostToolUseFailure event is classified correctly.
-rm -f "$(events_file)"
-run_hook '{"hook_event_name":"PostToolUseFailure","session_id":"s1","tool_name":"Bash","tool_input":{"command":"false"},"exit_code":1,"stderr":"something failed","cwd":"/tmp/repo"}'
-kind=$(python3 -c "
-import json
-print(json.loads(open('$(events_file)').readline())['kind'])
-")
-assert_eq "${kind}" "tool_failure" "PostToolUseFailure event has kind tool_failure"
-
-ec=$(python3 -c "
-import json
-print(json.loads(open('$(events_file)').readline())['exit_code'])
-")
-assert_eq "${ec}" "1" "exit_code captured"
-
-# 6. cwd and clone_path are populated.
-cwd=$(python3 -c "
-import json
-print(json.loads(open('$(events_file)').readline())['cwd'])
-")
-assert_eq "${cwd}" "/tmp/repo" "cwd captured"
-
-# 7. Malformed JSON stdin does not crash the hook (must still exit 0).
+# 5. Malformed JSON stdin does not crash the hook (must still exit 0).
 echo 'not even valid json {{{' | python3 "${HOOK}"
-rc=$?
-assert_eq "${rc}" "0" "malformed stdin exits 0"
+assert_eq "$?" "0" "malformed stdin exits 0"
 
-# 8. transcript_path is captured when present in stdin envelope.
-rm -f "$(events_file)"
-run_hook '{"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp/repo","transcript_path":"/tmp/fake/transcript-abc.jsonl"}'
-tp=$(python3 -c "
-import json
-print(json.loads(open('$(events_file)').readline())['transcript_path'])
-")
-assert_eq "${tp}" "/tmp/fake/transcript-abc.jsonl" "transcript_path captured from stdin"
-
-# 9. transcript_path is null when stdin omits it (backward compatible).
-rm -f "$(events_file)"
-run_hook '{"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp/repo"}'
-tp=$(python3 -c "
-import json
-rec = json.loads(open('$(events_file)').readline())
-print('present' if 'transcript_path' in rec else 'absent', rec.get('transcript_path'))
-")
-assert_eq "${tp}" "present None" "transcript_path is null when stdin omits it"
-
-# 10. transcript_path is null when stdin provides a non-string (defensive).
-rm -f "$(events_file)"
-run_hook '{"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp/repo","transcript_path":42}'
-tp=$(python3 -c "
-import json
-rec = json.loads(open('$(events_file)').readline())
-print(rec['transcript_path'])
-")
-assert_eq "${tp}" "None" "transcript_path is null when stdin provides non-string"
-
-# 11. transcript_path is captured by the PostToolUseFailure path too.
-rm -f "$(events_file)"
-run_hook '{"hook_event_name":"PostToolUseFailure","session_id":"s1","tool_name":"Bash","tool_input":{"command":"false"},"exit_code":1,"stderr":"boom","cwd":"/tmp/repo","transcript_path":"/tmp/fake/transcript-fail.jsonl"}'
-tp=$(python3 -c "
-import json
-print(json.loads(open('$(events_file)').readline())['transcript_path'])
-")
-assert_eq "${tp}" "/tmp/fake/transcript-fail.jsonl" "transcript_path captured on PostToolUseFailure"
-
-# 12. transcript_path is captured by the PermissionRequest path too.
-rm -f "$(events_file)"
-run_hook '{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"git push --force feat-x"},"cwd":"/tmp/repo","transcript_path":"/tmp/fake/transcript-perm.jsonl"}'
-tp=$(python3 -c "
-import json
-print(json.loads(open('$(events_file)').readline())['transcript_path'])
-")
-assert_eq "${tp}" "/tmp/fake/transcript-perm.jsonl" "transcript_path captured on PermissionRequest"
-
-# 13. Schema accepts records with transcript_path string, null, and absent.
-#
-# Minimal hand-rolled validator: read the schema and verify that
-# (a) transcript_path is a declared property, (b) it accepts string|null,
-# (c) records produced above satisfy the additionalProperties constraint.
+# 6. Schema declares transcript_path as string|null and every permission_request
+#    row key is declared (additionalProperties is false).
 SCHEMA_PATH="${MODULE_ROOT}/lib/event-schema.json"
+rm -rf "${CCGM_AUTOHEAL_DIR}"
+run_hook '{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/tmp/repo","transcript_path":"/tmp/x.jsonl"}'
 validate_ok=$(python3 <<PY
 import json
-with open("${SCHEMA_PATH}") as fh:
-    schema = json.load(fh)
-
-props = schema.get("properties", {})
-add_props = schema.get("additionalProperties", True)
-
-# (a) transcript_path declared.
-assert "transcript_path" in props, "transcript_path missing from schema properties"
-# (b) accepts string|null.
-tp_type = props["transcript_path"].get("type")
-assert tp_type == ["string", "null"] or set(tp_type) == {"string", "null"}, \
-    f"transcript_path type unexpected: {tp_type!r}"
-
-# (c) Verify three on-disk record shapes are structurally schema-conforming.
-declared = set(props.keys())
-required = set(schema.get("required", []))
-
-# Build three sample records:
-samples = [
-    # transcript_path = string
-    {"kind":"tool_use","timestamp":"2026-05-18T00:00:00+00:00","session_id":"s","tool_name":"Bash","transcript_path":"/tmp/x.jsonl"},
-    # transcript_path = null
-    {"kind":"tool_use","timestamp":"2026-05-18T00:00:00+00:00","session_id":"s","tool_name":"Bash","transcript_path":None},
-    # transcript_path absent (backward compat)
-    {"kind":"tool_use","timestamp":"2026-05-18T00:00:00+00:00","session_id":"s","tool_name":"Bash"},
-]
-for rec in samples:
-    missing = required - set(rec.keys())
-    assert not missing, f"required fields missing: {missing}"
-    if add_props is False:
-        extra = set(rec.keys()) - declared
-        assert not extra, f"undeclared fields present: {extra}"
+schema = json.load(open("${SCHEMA_PATH}"))
+props = schema["properties"]
+assert set(props["transcript_path"]["type"]) == {"string", "null"}, props["transcript_path"]
+row = json.loads(open("$(events_file)").readline())
+extra = set(row) - set(props)
+assert not extra, f"undeclared fields: {extra}"
+assert not (set(schema["required"]) - set(row)), "required field missing"
 print("ok")
 PY
 )
-assert_eq "${validate_ok}" "ok" "schema accepts transcript_path string|null|absent"
+assert_eq "${validate_ok}" "ok" "permission_request row conforms to schema"
 
 echo ""
 echo "test-event-logging.sh: ${PASS} passed, ${FAIL} failed"

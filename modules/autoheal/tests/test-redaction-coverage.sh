@@ -109,7 +109,7 @@ missed = []
 for name, fake in fakes:
     cmd = 'echo ' + fake
     payload = {
-        'hook_event_name': 'PostToolUse',
+        'hook_event_name': 'PermissionRequest',
         'session_id': 's-' + name,
         'tool_name': 'Bash',
         'tool_input': {'command': cmd},

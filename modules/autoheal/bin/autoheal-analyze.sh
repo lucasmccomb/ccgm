@@ -872,7 +872,7 @@ def is_friction(ev):
     permission requests are friction (this matches the contract
     documented in analyzer-prompt.md §Event shape)."""
     kind = ev.get("kind")
-    if kind in ("tool_failure", "user_correction", "realtime_security_alert"):
+    if kind in ("tool_failure", "user_interrupt", "user_correction", "realtime_security_alert"):
         return True
     exit_code = ev.get("exit_code")
     if isinstance(exit_code, int) and exit_code != 0:
