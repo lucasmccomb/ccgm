@@ -23,8 +23,13 @@
 #      Does not exist yet; run_step's "missing -> skip, return 0" makes this
 #      a harmless no-op until Epic 8 lands it (mirrors autoheal-daily.sh's
 #      own "steps that land in later epics" tolerance).
-#   6. retention                   — gzip >30d, delete >60d (mirrors
+#   6. scorecard                   — Sundays only (UTC): bin/dream-scorecard.sh
+#      writes scorecards/<date>.md (#1098 item 1.3).
+#   7. retention                   — gzip >30d, delete >60d (mirrors
 #      modules/autoheal/bin/autoheal-retention.sh, scoped to dreaming's dirs).
+#   EXIT trap (always, even after a crash or SIGTERM): lib/health.py rewrites
+#      state/health.json from scratch (#1098 item 1.1), so a broken chain
+#      announces itself in the next session via hooks/dreaming-health.py.
 #
 # Each step is exit-tolerant: a failure of one step does not kill the rest.
 # The wrapper exits 0 unless EVERY step failed (mirrors autoheal-daily.sh's
@@ -384,6 +389,45 @@ print(cfg.get('retention_delete_days', 60))
 }
 
 # ---------------------------------------------------------------------
+# Weekly scorecard: Sundays (UTC), for the day this run is for.
+# Always returns 0 -- a scorecard failure never fails the chain.
+# ---------------------------------------------------------------------
+
+run_scorecard_step() {
+    local dow
+    dow="$(python3 -c 'import datetime, sys; print(datetime.date.fromisoformat(sys.argv[1]).isoweekday())' "${TODAY}" 2>/dev/null)"
+    if [ "${dow}" != "7" ]; then
+        return 0
+    fi
+    run_step "scorecard" "${BIN_DIR}/dream-scorecard.sh" "${TODAY}" || true
+    return 0
+}
+
+# ---------------------------------------------------------------------
+# Health file (EXIT trap). Runs on normal exit, on `exit 1`, on a set -u
+# abort, and on SIGTERM/SIGINT/SIGHUP (the signal traps turn the signal into
+# an exit so the EXIT trap fires). Never changes the chain's exit status.
+# ---------------------------------------------------------------------
+
+ANALYZE_RC=""
+
+write_health() {
+    local rc=$?
+    trap - EXIT
+    local rc_args=()
+    if [ -n "${ANALYZE_RC}" ]; then
+        rc_args=(--analyze-rc "${ANALYZE_RC}")
+    fi
+    python3 "${MODULE_ROOT}/lib/health.py" --dreaming-dir "${DREAMING_DIR}" "${rc_args[@]+"${rc_args[@]}"}" >>"${DAILY_LOG}" 2>&1 || true
+    exit "${rc}"
+}
+
+trap write_health EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+
+# ---------------------------------------------------------------------
 # Chain.
 # ---------------------------------------------------------------------
 
@@ -393,7 +437,11 @@ steps_failed=0
 log "dream-daily start (${TODAY})"
 
 steps_total=$((steps_total + 1))
-run_step "analyze" "${BIN_DIR}/dream-analyze.sh" "$@" || steps_failed=$((steps_failed + 1))
+run_step "analyze" "${BIN_DIR}/dream-analyze.sh" "$@"
+ANALYZE_RC=$?
+if [ "${ANALYZE_RC}" -ne 0 ]; then
+    steps_failed=$((steps_failed + 1))
+fi
 
 # eval-refresh, optimistic-integrate, and retention always return 0 (see
 # comments above) -- their own internal stand-down/failure reasons are
@@ -412,6 +460,9 @@ run_step "digest" "${BIN_DIR}/dream-digest.sh" "${TODAY}" || steps_failed=$((ste
 
 steps_total=$((steps_total + 1))
 run_step "reconcile" "${BIN_DIR}/dream-reconcile.sh" || steps_failed=$((steps_failed + 1))
+
+steps_total=$((steps_total + 1))
+run_scorecard_step || steps_failed=$((steps_failed + 1))
 
 steps_total=$((steps_total + 1))
 run_retention_step || steps_failed=$((steps_failed + 1))

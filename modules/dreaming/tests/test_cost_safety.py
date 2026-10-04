@@ -172,6 +172,67 @@ class ModuleBudgetWindowTests(unittest.TestCase):
         self.assertNotIn("30-day module budget", stderr.getvalue())
 
 
+class LastRunRecordTests(unittest.TestCase):
+    """state/last-run.json says how each analyzer run ended, so health.py never
+    infers a refusal from the exit code (rc 2 is shared)."""
+
+    def setUp(self):
+        _isolate_env(self)
+
+    def run_main(self, *argv):
+        with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+            return da.main(["--force-day", DAY, *argv])
+
+    def record(self):
+        return json.loads(da.last_run_path().read_text(encoding="utf-8"))
+
+    def test_budget_refusal_is_recorded_with_spend_and_budget(self):
+        _seed_ledger("2026-08-20", 80.0)
+        self.assertEqual(self.run_main(), 2)
+        self.assertEqual(self.record(), {
+            "date": DAY, "rc": 2, "outcome": "budget_refused", "spent_30d": 80.0, "budget": 25.0})
+
+    def test_daily_cap_refusal_is_recorded_distinctly(self):
+        with mock.patch.object(da, "resolve_candidate_slugs", return_value=["s"]), \
+                mock.patch.object(da, "mine_due_slugs", return_value=({"s": {}}, {})), \
+                mock.patch.object(da, "plan_run", return_value=([], {})):
+            self.assertEqual(self.run_main(), 2)
+        rec = self.record()
+        self.assertEqual((rec["rc"], rec["outcome"]), (2, "daily_cap_refused"))
+
+    def test_other_exit_2_is_failed_not_a_refusal(self):
+        with mock.patch.object(da, "_main", return_value=2):
+            self.assertEqual(self.run_main(), 2)
+        self.assertEqual(self.record()["outcome"], "failed")
+
+    def test_exception_is_recorded_as_failed_and_reraised(self):
+        with mock.patch.object(da, "resolve_candidate_slugs", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                self.run_main()
+        rec = self.record()
+        self.assertEqual((rec["rc"], rec["outcome"]), (1, "failed"))
+
+    def test_argparse_error_is_recorded_as_failed(self):
+        with self.assertRaises(SystemExit):
+            self.run_main("--no-such-flag")
+        rec = self.record()
+        self.assertEqual((rec["rc"], rec["outcome"]), (2, "failed"))
+
+    def test_successful_run_is_recorded_ok(self):
+        self.assertEqual(self.run_main("--offline", str(HERE / "fixtures" / "offline-responses")), 0)
+        rec = self.record()
+        self.assertEqual((rec["rc"], rec["outcome"]), (0, "ok"))
+
+    def test_dry_run_writes_no_record(self):
+        self.run_main("--dry-run")
+        self.assertFalse(da.last_run_path().exists())
+
+    def test_record_write_is_atomic(self):
+        _seed_ledger("2026-08-20", 80.0)
+        self.run_main()
+        self.assertEqual(list(da.last_run_path().parent.glob("last-run.json.tmp*")), [])
+
+
 class FakeClaudeEvalTests(unittest.TestCase):
     """Drives me.main() against a shell-script `claude` that reports $1.00
     per session."""

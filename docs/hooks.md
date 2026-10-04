@@ -24,7 +24,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. Nine other modules add the rest: **advisor-mode** 4, **self-improving** 3, **subagent-patterns** 2, **relevance-injection** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, **commands-preamble**, and **persist**. Total: 31 hooks across 10 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 37).
+The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. Nine other modules add the rest: **advisor-mode** 4, **self-improving** 3, **subagent-patterns** 2, **relevance-injection** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, **commands-preamble**, and **persist**. Total: 31 hooks across 10 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 37). The **dreaming** module adds one more, `dreaming-health.py`, documented in the last section.
 
 This count excludes `hooks/plugin-rule-inject.py`, which brings the true `"type": "hook"` file total to 38. It is the **plugin-marketplace** module's own hook, copied into every other rules-bearing module's `hooks/` directory so each module's generated Claude Code plugin manifest can register it independently - see [plugin-marketplace](../modules/plugin-marketplace/README.md) for what it does.
 
@@ -563,6 +563,18 @@ Conservative auto-allow gate: fires only when ALL hold — `is_bypass_mode()` is
 **Can block**: Yes (`exit 2` wakes Claude mid-session)
 
 Strictly opt-in. Reads `~/.claude/autoheal/config.json` → if `realtime_alerts_enabled` is false or missing, exits 0 immediately without touching the patterns file. When enabled: applies 7 regexes (GitHub/AWS/Anthropic tokens in commit/echo; force-push-to-main without `ALLOW_MAIN_COMMIT`; `rm -rf /…`; `sudo` destructive; `DROP TABLE` against prod-tagged connection strings). On match: logs `realtime_security_alert` event and `exit 2` with an `<autoheal-security-alert>` envelope.
+
+---
+
+## Dreaming hooks
+
+### dreaming-health.py
+
+**Type**: SessionStart (`startup|resume|clear`)
+**Module**: dreaming
+**Can block**: No (always exits 0)
+
+Pure file read of `~/.claude/dreaming/state/health.json`, with no network and no subprocess. When status is red, or `last_success_at` is older than 36 hours, it injects `<dreaming-health status="red">` with the top 2 reasons and a fix command for each. After 3 consecutive red nights it also tells the agent to mention the problem to the user once. Green and yellow inject nothing. If dreaming is enabled but no `health.json` exists, it says the pipeline has never run.
 
 ---
 

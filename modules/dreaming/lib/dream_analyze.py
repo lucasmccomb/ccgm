@@ -1920,8 +1920,53 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
+def last_run_path() -> Path:
+    return state_dir() / "last-run.json"
+
+
+def _write_last_run(info: dict[str, Any], rc: int, outcome: str) -> None:
+    """state/last-run.json: how this run ended, for health.py. A refusal is
+    recorded by the code that refuses, never inferred from the exit code
+    (rc 2 is shared by the budget refusal, the daily-cap stop and failures)."""
+    record = {
+        "date": info.get("date") or today_iso(),
+        "rc": rc,
+        "outcome": outcome,
+        "spent_30d": info.get("spent_30d"),
+        "budget": info.get("budget"),
+    }
+    try:
+        _write_json_atomic(last_run_path(), record)
+    except OSError:
+        pass  # a bookkeeping write must not change the run's own result
+
+
 def main(argv: list[str] | None = None) -> int:
+    """Run the analyzer and record how it ended in state/last-run.json:
+    `ok` (exit 0), `budget_refused` and `daily_cap_refused` (set only at those
+    two refusals), or `failed` (any other non-zero exit or an exception).
+    A dry run changes no state."""
+    info: dict[str, Any] = {}
+    try:
+        rc = _main(argv, info)
+    except SystemExit as exc:  # argparse errors and explicit exits
+        code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+        if not info.get("dry_run"):
+            _write_last_run(info, code, "ok" if code == 0 else "failed")
+        raise
+    except Exception:
+        if not info.get("dry_run"):
+            _write_last_run(info, 1, "failed")
+        raise
+    if not info.get("dry_run"):
+        outcome = info.get("outcome") if rc == 2 and info.get("outcome") else ("ok" if rc == 0 else "failed")
+        _write_last_run(info, rc, outcome)
+    return rc
+
+
+def _main(argv: list[str] | None, info: dict[str, Any]) -> int:
     args = build_arg_parser().parse_args(argv)
+    info["dry_run"] = bool(args.dry_run)
 
     load_env()
     cfg = load_config()
@@ -1937,9 +1982,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     today = args.force_day or today_iso()
+    info["date"] = today
     if offline_dir is None:
         spent_30d, module_budget = module_budget_status(cfg, today)
         if spent_30d >= module_budget:
+            info.update(outcome="budget_refused", spent_30d=round(spent_30d, 4), budget=module_budget)
             print(
                 f"dream_analyze: 30-day module budget reached (spent ${spent_30d:.4f} of ${module_budget:.4f} "
                 "in cost.log, analyzer and eval together); refusing to start.",
@@ -1980,6 +2027,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if not planned_slugs:
+        info["outcome"] = "daily_cap_refused"
         print(
             f"dream_analyze: cost cap reached (spent ${spent_today:.4f} today of ${daily_cap:.4f} daily cap, "
             f"30-day module budget also applies; "
