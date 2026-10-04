@@ -158,4 +158,4 @@ After installation, invoke with:
 - `/xplan <concept> --repo <existing-repo-path>` - plan work against an existing repo
 - `/xplan <concept> --light` - fast path, minimal interaction
 - `/xplan <concept> --autonomous` or `/xplana <concept>` - full-depth pipeline with zero mid-flow prompts after the upfront count choice; completed plan presented at the end
-- `/etp <plan-file-or-dir | #issue …>` - execute a plan or investigated GitHub issue(s) end-to-end; `/etp #42 #43` batches independent issues (`--dry-run` to preview, `--confirm` for a go/no-go gate, `--max-agents N` to cap parallelism, `--light-review` to opt out of Stage 2 on trivial diffs)
+- `/etp <plan-file-or-dir | #issue …>` - execute a plan or investigated GitHub issue(s) end-to-end; `/etp #42 #43` batches independent issues (`--dry-run` to preview, `--confirm` for a go/no-go gate, `--max-agents N` to cap parallelism, `--light-review` to opt out of Stage 2 on trivial diffs, `--no-clean` to skip the cleanup stage)

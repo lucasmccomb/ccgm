@@ -1,7 +1,7 @@
 ---
 description: Execute a ready plan OR GitHub issue(s) end-to-end with parallel agents, adversarial PR review, and follow-up completion. Runs to completion, stopping only for absolute blockers.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <plan-file-or-dir | #issue [#issue ...] | issue-url> [--dry-run] [--confirm] [--max-agents N] [--light-review] [--cross-provider]
+argument-hint: <plan-file-or-dir | #issue [#issue ...] | issue-url> [--dry-run] [--confirm] [--max-agents N] [--light-review] [--no-clean] [--cross-provider]
 ---
 
 # etp - Execute the Plan or Issue(s)
@@ -58,6 +58,7 @@ Parse from `$ARGUMENTS`:
 - **`--confirm`**: pause for one explicit go/no-go gate after the pre-flight analysis (Phase 3). Off by default - the directive says don't stop, so the default is to proceed once the target is resolved unambiguously.
 - **`--max-agents N`**: cap concurrent implementation agents (default: the width of the widest wave, clamped to the available isolation slots).
 - **`--cross-provider`**: opt into the optional native Claude/Codex review run. An explicit natural-language request is equivalent; execution authorization or `--light-review` alone is not opt-in.
+- **`--no-clean`**: skip the cleanup stage (4.2) between Stage 1 and Stage 2.
 - **`--light-review`**: downgrade the adversarial review to a single spec-compliance pass (skip the Stage-2 code-quality pass). For trivial diffs only. **The default is the full two-stage review regardless of diff size** - this flag is an explicit opt-out, never the default.
 
 ---
@@ -257,6 +258,13 @@ The lead personally reviews every new or inherited PR and follow-up against its 
 
 **Stage 1: spec compliance.** Check every deliverable, constraint and scope boundary. Resolve failures and verify the updated artifact before Stage 2.
 
+**Cleanup stage (between Stage 1 and Stage 2).** After Stage 1 passes, the lead dispatches a fresh agent on the PR branch to remove before it adds: `pr-review-toolkit:code-simplifier` when available, otherwise an `implementer` given this recipe.
+- Order: dead code, then duplicates, then naming.
+- Touch only files the unit changed. No functional change; no new features or abstractions.
+- The unit's existing tests and verification pass before and after, with no new failures.
+- The lead inspects the cleanup diff, rejects anything that exceeds the recipe, and Stage 2 reviews the cleaned diff.
+- Skip it with `--no-clean` or `--light-review`, or when the unit's diff is docs or rules only (no code).
+
 **Stage 2: code quality.** Check correctness, security, silent failures, edge cases, project conventions and needless complexity. These stages are sequential. `--light-review` explicitly selects only Stage 1 for a trivial diff; full spec then quality is the default. Record the lead's evidence-backed result for each required stage. Advisor mode delegates builds/tests and all source changes; the lead reads their actual outputs.
 
 **Optional cross-provider mode:** only with explicit opt-in, follow `~/.claude/skills/cross-agent-review/references/workflow.md`. Initialize one private unit run with `init --cross-provider --mode etp` and its required request/check/writer options; add `--light-review` only when selected. Use `~/.claude/cross-agent-review/<run-id>/`. Record the actual implementing provider/session from dispatch evidence; each reviewer routes opposite that producer. Unknown or materially mixed contributions require both perspectives, never guessed Git authorship.
@@ -407,7 +415,7 @@ A plan run: mark the progress file `COMPLETE`, or `BLOCKED - WAITING ON HUMAN` w
 
 **Integrity - evidence-backed lead judgment.** Personal lead review is the default, including when the lead also authored planning or coordinator work. Read the actual artifact/spec/checks critically and record concrete evidence; do not present self-review as an independent agent's judgment. Explicit cross-provider review adds attributable native reports, but its stopped/incomplete state stays separate from any lead release decision. No review mode replaces tests, CI or ordinary release authorization.
 
-**Two-stage order is fixed.** Spec-compliance gates code-quality. Never run them in parallel, never quality-review a spec-failing PR. `--light-review` drops Stage 2; it never reorders or parallelizes the stages.
+**Two-stage order is fixed.** Spec-compliance gates code-quality. Never run them in parallel, never quality-review a spec-failing PR. The optional cleanup stage sits between them and runs after Stage 1 passes. `--light-review` drops Stage 2 (and cleanup); it never reorders or parallelizes the stages.
 
 **Verify, don't trust.** A subagent's DONE is a claim. Read the diff, run the tests, check the artifact before treating a unit as complete. Fresh evidence before every completion claim.
 
