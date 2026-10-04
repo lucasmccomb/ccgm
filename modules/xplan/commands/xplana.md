@@ -1,7 +1,7 @@
 ---
 description: Autonomous xplan - full-depth research + planning + reviews after one upfront review-count choice, with no mid-flow prompts. Presents the completed plan as a single artifact at the end.
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, WebSearch, WebFetch
-argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--deepen [<plan-dir>]] [--adversarial-reviews <1|2|3>] [--ambiguity <0.05-0.5>] [--unattended] [--cross-provider]
+argument-hint: <project concept or idea> [--repo <existing-repo-path>] [--deepen [<plan-dir>]] [--adversarial-reviews <1|2|3>] [--unattended] [--cross-provider]
 ---
 
 # xplana - Autonomous xplan
