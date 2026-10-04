@@ -251,6 +251,144 @@ class StruggleArcTests(unittest.TestCase):
         self.assertLessEqual(len(arcs[0]["excerpt"]), tm.EXCERPT_MAX_CHARS)
 
 
+def _after_failure(*assistant_texts, error="boom: exit status 1", gap=0):
+    """A session where one tool call fails, then the assistant talks.
+    `gap` inserts that many quiet assistant turns before the first text."""
+    turns = [
+        tf.user_turn("Run the build."),
+        tf.assistant_turn("", tool_uses=[_bash("f0", "make build")]),
+        tf.friction_turn(tool_use_id="f0", content=error, exit_code=2),
+    ]
+    turns += [tf.assistant_turn("ok")] * gap
+    turns += [tf.assistant_turn(t) for t in assistant_texts]
+    return _mine(turns)
+
+
+class ConclusionTests(unittest.TestCase):
+    FINDING = "The root cause is that the lockfile pins an older compiler than the CI image uses."
+
+    def test_finding_after_a_tool_failure_is_a_conclusion(self):
+        found = _kinds(_after_failure(self.FINDING), "conclusion")
+        self.assertEqual(len(found), 1)
+        self.assertIn("root cause is that the lockfile", found[0]["excerpt"])
+        self.assertIn("boom: exit status 1", found[0]["context"])
+        self.assertEqual(found[0]["session_id"], tf.DEFAULT_SESSION_ID)
+
+    def test_finding_after_a_human_redirection_is_a_conclusion(self):
+        turns = [
+            tf.user_turn("Add the feature."),
+            tf.assistant_turn("Added it with a global cache."),
+            tf.user_turn("No, never use a global cache here."),
+            tf.assistant_turn("Understood. It turns out the request scope already isolates the data per tenant."),
+        ]
+        found = _kinds(_mine(turns), "conclusion")
+        self.assertEqual(len(found), 1)
+        self.assertIn("never use a global cache", found[0]["context"])
+
+    def test_finding_after_a_hook_denial_is_a_conclusion(self):
+        turns = [
+            tf.user_turn("Push it."),
+            tf.assistant_turn("Pushing."),
+            {"type": "system", "hookErrors": ["pre-push hook exited 1"]},
+            tf.assistant_turn("The reason it was denied is that the branch name lacks an issue number prefix."),
+        ]
+        found = _kinds(_mine(turns), "conclusion")
+        self.assertEqual(len(found), 1)
+        self.assertIn("pre-push hook exited 1", found[0]["context"])
+
+    def test_narration_with_no_anchor_is_not_a_conclusion(self):
+        turns = [tf.user_turn("Explain the design."), tf.assistant_turn(self.FINDING)]
+        self.assertEqual(_kinds(_mine(turns), "conclusion"), [])
+
+    def test_gate_is_eight_turns_after_the_anchor(self):
+        self.assertEqual(len(_kinds(_after_failure(self.FINDING, gap=7), "conclusion")), 1)
+        self.assertEqual(_kinds(_after_failure(self.FINDING, gap=8), "conclusion"), [])
+
+    def test_sentence_before_the_anchor_does_not_count(self):
+        turns = [
+            tf.user_turn("go"),
+            tf.assistant_turn(self.FINDING, tool_uses=[_bash("f0", "make build")]),
+            tf.friction_turn(tool_use_id="f0", content="boom", exit_code=2),
+        ]
+        self.assertEqual(_kinds(_mine(turns), "conclusion"), [])
+
+    def test_sentence_that_restates_the_error_is_excluded(self):
+        error = "ERROR: lockfile pins an older compiler than the CI image uses, aborting build"
+        text = "The lockfile pins an older compiler than the CI image uses because the build aborted."
+        self.assertEqual(_kinds(_after_failure(text, error=error), "conclusion"), [])
+
+    def test_short_sentences_are_excluded(self):
+        self.assertEqual(_kinds(_after_failure("Turns out it was the cache."), "conclusion"), [])
+
+    def test_sentence_without_a_marker_is_not_a_conclusion(self):
+        self.assertEqual(_kinds(_after_failure("Let me try running the whole build once more from scratch."), "conclusion"), [])
+
+    def test_each_marker_family_is_recognised(self):
+        for text in (
+            "It turns out the deploy script reads the region from a stale environment file.",
+            "The fix was to export the variable before the subshell starts, not after it.",
+            "The problem is that the watcher holds the file handle open on this platform.",
+            "The actual limit is 25000 tokens per read, regardless of the configured maximum.",
+            "The reason for the failure is a missing trailing newline in the generated header.",
+            "The migration failed because the reserved keyword was not quoted in the schema.",
+            "The client doesn't support streaming responses over this proxy configuration at all.",
+            "This approach only works when the cache is warmed before the first request arrives.",
+            "So the exporter requires the credentials file to exist before the first flush call.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(len(_kinds(_after_failure(text), "conclusion")), 1)
+
+    def test_excerpt_is_the_sentence_plus_one_neighbour_as_a_contiguous_span(self):
+        text = (
+            "Let me look at the logs now. The root cause is a stale lockfile in the cache directory. "
+            "Deleting it fixes the build. Then I reran everything one more time."
+        )
+        found = _kinds(_after_failure(text), "conclusion")
+        self.assertEqual(len(found), 1)
+        excerpt = found[0]["excerpt"]
+        self.assertIn(excerpt, text)
+        self.assertIn("The root cause is a stale lockfile", excerpt)
+        self.assertNotIn("Then I reran", excerpt)
+        self.assertNotIn("Let me look at the logs", excerpt)
+
+    def test_text_blocks_only_never_tool_inputs(self):
+        turns = [
+            tf.user_turn("go"),
+            tf.assistant_turn("", tool_uses=[_bash("f0", "make build")]),
+            tf.friction_turn(tool_use_id="f0", content="boom", exit_code=2),
+            tf.assistant_turn("", tool_uses=[_bash("n0", "echo 'the root cause is a stale lockfile in the cache dir'")]),
+        ]
+        self.assertEqual(_kinds(_mine(turns), "conclusion"), [])
+
+    def test_near_duplicate_sentences_are_deduped_and_the_session_is_capped(self):
+        dup = "The root cause is that the lockfile pins an older compiler than the CI image uses."
+        mined = _after_failure(dup, dup + " ", "The root cause is that the lockfile pins an older compiler than the CI image uses!")
+        self.assertEqual(len(_kinds(mined, "conclusion")), 1)
+        pairs = [("scheduler", "retries"), ("parser", "truncates"), ("exporter", "buffers"), ("watcher", "forgets"),
+                 ("renderer", "caches"), ("uploader", "stalls"), ("resolver", "loops")]
+        distinct = [f"It turns out the {a} silently {b} everything before the warmup phase completes." for a, b in pairs]
+        mined = _after_failure(*distinct)
+        self.assertEqual(len(_kinds(mined, "conclusion")), tm.MAX_CONCLUSIONS_PER_SESSION)
+
+    def test_excerpt_is_redacted_and_bounded(self):
+        text = "The root cause is the token ghp_" + "a" * 36 + " " + "expiring because " * 40
+        found = _kinds(_after_failure(text), "conclusion")
+        self.assertEqual(len(found), 1)
+        self.assertNotIn("ghp_" + "a" * 36, found[0]["excerpt"])
+        self.assertLessEqual(len(found[0]["excerpt"]), tm.EXCERPT_MAX_CHARS)
+
+    def test_a_struggle_arc_conclusion_is_not_emitted_twice(self):
+        final = "The root cause was a stale fixture path in the snapshot directory for this suite."
+        mined = _mine(_fail_then_success_turns("pytest tests/test_x.py -q", 3, final))
+        self.assertEqual(len(_kinds(mined, "struggle_arc")), 1)
+        self.assertEqual(_kinds(mined, "conclusion"), [])
+
+    def test_budget_priority_order(self):
+        self.assertEqual(
+            tm.SIGNAL_KINDS, ("redirection", "struggle_arc", "conclusion", "abandoned_work", "rediscovery")
+        )
+
+
 class AbandonedWorkTests(unittest.TestCase):
     def _run_command(self, command, *, error=False):
         turns = [
@@ -362,6 +500,17 @@ class BundleSignalTests(unittest.TestCase):
         self.assertEqual([s["kind"] for s in bundle["signals"]], ["redirection"])
         errors = tm.validate_against_schema(bundle, json.loads((HERE.parent / "lib" / "evidence-bundle-schema.json").read_text()))
         self.assertEqual(errors, [])
+
+    def test_conclusion_signal_validates_against_the_bundle_schema(self):
+        bundle = self._bundle([
+            tf.user_turn("Run the build."),
+            tf.assistant_turn("", tool_uses=[_bash("f0", "make build")]),
+            tf.friction_turn(tool_use_id="f0", content="boom: exit status 1", exit_code=2),
+            tf.assistant_turn("The root cause is that the lockfile pins an older compiler than the CI image uses."),
+        ])
+        self.assertEqual([s["kind"] for s in bundle["signals"]], ["conclusion"])
+        schema = json.loads((HERE.parent / "lib" / "evidence-bundle-schema.json").read_text())
+        self.assertEqual(tm.validate_against_schema(bundle, schema), [])
 
     def test_quiet_session_has_empty_signals(self):
         bundle = self._bundle([tf.user_turn("hello"), tf.assistant_turn("hi")])

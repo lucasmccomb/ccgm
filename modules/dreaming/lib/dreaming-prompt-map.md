@@ -43,6 +43,15 @@ exact contract):
     (`signature`, `failure_count`), then a success. `excerpt` is what the
     assistant concluded afterward. The lesson is the conclusion (the root
     cause, the fix), not the failed attempts.
+  - `conclusion` -- a sentence of the assistant's own prose that states a
+    finding ("the root cause is ...", "it turns out ...", "X only works
+    when ...") within 8 turns of a tool failure, hook denial or human
+    redirection. `excerpt` is the sentence plus a neighbour; `context` is
+    the failure or redirection that opened the window. This is where most
+    hard-won technical findings live: the agent worked out why something
+    failed and said so. A conclusion is a candidate when it states a cause,
+    a limit or a requirement that would help in a future session; skip it
+    when it describes only this task's one-off state.
   - `abandoned_work` -- a `git revert` / `git reset --hard`, or the human
     asking to undo or revert. `excerpt` is the command or the request;
     `context` is what was being abandoned. The lesson is what not to do and
@@ -64,7 +73,7 @@ exact contract):
 
 Mine `signals` first. They are where durable learnings come from. A
 redirection that states a preference or a fact about the project, a
-struggle that ended in a stated root cause, or work abandoned for a stated
+struggle or conclusion that states a root cause, or work abandoned for a stated
 reason is worth a candidate even when it appears once. A signal repeated
 across distinct sessions is stronger still.
 

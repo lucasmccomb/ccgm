@@ -457,19 +457,25 @@ def _head_metadata(path: Path) -> dict[str, str]:
 
 # ---------------------------------------------------------------------------
 # Signal extractors (#1098 Phase 3.1): knowledge the agent does not already
-# carry. Four deterministic extractors -- human redirections, resolved
-# struggle arcs, rediscovery, abandoned work. Each emits a "signal" dict:
-#   kind        redirection | struggle_arc | abandoned_work | rediscovery
+# carry. Five deterministic extractors -- human redirections, resolved
+# struggle arcs, conclusions, rediscovery, abandoned work. Each emits a
+# "signal" dict:
+#   kind        redirection | struggle_arc | conclusion | abandoned_work |
+#               rediscovery
 #   session_id, timestamp, line
 #   excerpt     the cited text: redacted, <= EXCERPT_MAX_CHARS, and a single
 #               contiguous span of the transcript so the apply-time
 #               corroboration check can find it
-#   context     (redirection, abandoned_work) the assistant turn before it
+#   context     (redirection, conclusion, abandoned_work) what came before:
+#               the assistant turn, or for a conclusion the friction event or
+#               human redirection that opened its window
 # Hook friction stays in the friction clusters; corrections no longer need a
 # nearby tool error to count.
 # ---------------------------------------------------------------------------
 
-SIGNAL_KINDS = ("redirection", "struggle_arc", "abandoned_work", "rediscovery")
+# Budget priority, highest first. A strict 3-failure arc is rare but strong,
+# so it outranks the broader conclusion extractor that subsumes its idea.
+SIGNAL_KINDS = ("redirection", "struggle_arc", "conclusion", "abandoned_work", "rediscovery")
 # Signals may use at most this share of the token budget; friction gets the
 # rest. When signals alone exceed it, later kinds in SIGNAL_KINDS drop first.
 SIGNAL_BUDGET_FRACTION = 0.8
@@ -657,6 +663,139 @@ def _struggle_arcs(
             }
         )
     return arcs
+
+
+# Conclusions: sentences of assistant prose that state a finding. Narration
+# ("let me check", "I'll run") is kept out by two gates -- the sentence must
+# land within CONCLUSION_WINDOW_TURNS turns after a friction event or a human
+# redirection, and it must carry a finding marker. The marker set is
+# deliberate and small:
+#   strong  root cause | turns out | the fix is/was | the problem is/was |
+#           the actual | the reason
+#   weak    because | doesn't/does not support | only works when |
+#           "so ... requires/needs/must"
+# Strong markers rank first when the per-session cap bites.
+MAX_CONCLUSIONS_PER_SESSION = 6
+CONCLUSION_WINDOW_TURNS = 8
+CONCLUSION_MIN_CHARS = 40
+# A sentence is a restatement of the error (already in the friction cluster)
+# when this share of its content tokens appears in a friction excerpt of the
+# same window.
+CONCLUSION_RESTATE_OVERLAP = 0.6
+CONCLUSION_DEDUPE_JACCARD = 0.8
+_CONCLUSION_STRONG_RE = re.compile(
+    r"root cause|turns out|the fix (?:is|was)\b|the problem (?:is|was)\b|the actual\b|the reason\b", re.IGNORECASE
+)
+_CONCLUSION_WEAK_RE = re.compile(
+    r"\bbecause\b|doesn'?t support|does not support|only works when|\bso\b[^.!?]{0,60}\b(?:requires?|needs?|must)\b",
+    re.IGNORECASE,
+)
+_SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+_CONTENT_TOKEN_RE = re.compile(r"[a-z][a-z0-9_\-]{3,}")
+
+
+def _sentence_spans(text: str) -> list[tuple[int, int]]:
+    """(start, end) offsets of each sentence of `text`, so a run of
+    sentences can be cut back out as one contiguous span."""
+    spans: list[tuple[int, int]] = []
+    pos = 0
+    for m in _SENTENCE_BREAK_RE.finditer(text):
+        if m.start() > pos:
+            spans.append((pos, m.start()))
+        pos = m.end()
+    if pos < len(text):
+        spans.append((pos, len(text)))
+    return [(a, b) for a, b in spans if text[a:b].strip()]
+
+
+def _content_tokens(text: str) -> set[str]:
+    return set(_CONTENT_TOKEN_RE.findall(text.lower()))
+
+
+def _conclusion_signals(
+    turn_sequence: list[dict[str, Any]],
+    friction_events: list[dict[str, Any]],
+    redirections: list[dict[str, Any]],
+    arcs: list[dict[str, Any]],
+    session_id: str | None,
+) -> list[dict[str, Any]]:
+    """Finding-stating sentences of assistant prose shortly after friction
+    or a human redirection. Text blocks only, never tool inputs (the turn
+    `text` is built from text blocks)."""
+    line_to_turn = {t["lineno"]: t["turn_index"] for t in turn_sequence}
+    anchors: list[dict[str, Any]] = [
+        {"turn_index": ev["turn_index"], "text": ev["excerpt"], "friction": True} for ev in friction_events
+    ]
+    anchors += [
+        {"turn_index": line_to_turn[r["line"]], "text": r["excerpt"], "friction": False}
+        for r in redirections
+        if r["line"] in line_to_turn
+    ]
+    if not anchors:
+        return []
+    arc_text = " ".join(a["excerpt"].lower() for a in arcs)
+
+    candidates: list[dict[str, Any]] = []
+    for turn in turn_sequence:
+        if turn["role"] != "assistant" or not turn.get("text", "").strip():
+            continue
+        t = turn["turn_index"]
+        window = [a for a in anchors if a["turn_index"] < t <= a["turn_index"] + CONCLUSION_WINDOW_TURNS]
+        if not window:
+            continue
+        opener = max(window, key=lambda a: a["turn_index"])
+        friction_tokens = [_content_tokens(a["text"]) for a in window if a["friction"]]
+        text = turn["text"]
+        spans = _sentence_spans(text)
+        for i, (a, b) in enumerate(spans):
+            sentence = text[a:b].strip()
+            if len(sentence) < CONCLUSION_MIN_CHARS:
+                continue
+            strong = bool(_CONCLUSION_STRONG_RE.search(sentence))
+            if not strong and not _CONCLUSION_WEAK_RE.search(sentence):
+                continue
+            tokens = _content_tokens(sentence)
+            if tokens and any(len(tokens & ft) / len(tokens) >= CONCLUSION_RESTATE_OVERLAP for ft in friction_tokens):
+                continue
+            if sentence[:60].lower() in arc_text:
+                continue
+            # The sentence plus one neighbour (the next, else the previous),
+            # cut from the original text so it stays contiguous.
+            if i + 1 < len(spans):
+                start, end = a, spans[i + 1][1]
+            elif i > 0:
+                start, end = spans[i - 1][0], b
+            else:
+                start, end = a, b
+            candidates.append(
+                {
+                    "strong": strong,
+                    "order": (t, a),
+                    "tokens": tokens,
+                    "signal": {
+                        "kind": "conclusion",
+                        "session_id": session_id,
+                        "timestamp": turn["timestamp"],
+                        "line": turn["lineno"],
+                        "excerpt": make_excerpt(text[start:end].strip()),
+                        "context": make_excerpt(opener["text"], CONTEXT_MAX_CHARS),
+                    },
+                }
+            )
+
+    # Dedupe near-identical sentences (earliest wins), then keep the
+    # strongest MAX_CONCLUSIONS_PER_SESSION, in transcript order.
+    kept: list[dict[str, Any]] = []
+    for cand in sorted(candidates, key=lambda c: c["order"]):
+        if any(
+            cand["tokens"] and k["tokens"]
+            and len(cand["tokens"] & k["tokens"]) / len(cand["tokens"] | k["tokens"]) >= CONCLUSION_DEDUPE_JACCARD
+            for k in kept
+        ):
+            continue
+        kept.append(cand)
+    kept = sorted(kept, key=lambda c: (not c["strong"], c["order"]))[:MAX_CONCLUSIONS_PER_SESSION]
+    return [c["signal"] for c in sorted(kept, key=lambda c: c["order"])]
 
 
 def _human_turn_signals(
@@ -987,6 +1126,9 @@ def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
     for signal in _human_turn_signals(turn_sequence, session_id, mid_session=start_offset > 0):
         by_kind[signal["kind"]].append(signal)
     by_kind["struggle_arc"] = _struggle_arcs(attempts, turn_sequence, session_id)
+    by_kind["conclusion"] = _conclusion_signals(
+        turn_sequence, friction_events, by_kind["redirection"], by_kind["struggle_arc"], session_id
+    )
     for cmd in abandon_commands:
         by_kind["abandoned_work"].append(
             {

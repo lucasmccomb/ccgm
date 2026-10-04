@@ -239,9 +239,9 @@ calls, no LLM calls, no scheduling:
   dreamed before cursors existed are seeded once from `last-dreamed.json`.
 - `mine(path, start_offset=0)` -- extract friction events (tool errors, hook errors,
   prevented-continuation), user-correction sequences, PR links, token
-  totals + cache-read ratio, session identity, and the four **signals**
+  totals + cache-read ratio, session identity, and the five **signals**
   below, from one transcript.
-- **Signals** -- four deterministic extractors for knowledge the agent does
+- **Signals** -- five deterministic extractors for knowledge the agent does
   not already carry (hook friction goes to friction clusters, not here):
   `redirection` (a human-typed turn that corrects or redirects, with or
   without a nearby tool error; the excerpt is the human's text and
@@ -249,7 +249,16 @@ calls, no LLM calls, no scheduling:
   more consecutive failures on one file path, test name or three-word
   command prefix, then a success; the excerpt is the assistant's
   conclusion, preferring "root cause" / "the fix" / "turns out" /
-  "because" sentences), `abandoned_work` (a clean `git revert` or
+  "because" sentences), `conclusion` (a sentence of assistant prose, text
+  blocks only, that states a finding -- markers: "root cause", "turns out",
+  "the fix is/was", "the problem is/was", "the actual", "the reason",
+  "because", "doesn't support", "only works when", "so ... requires/needs/
+  must" -- within 8 turns after a friction event or a human redirection;
+  sentences under 40 characters, ones that restate a friction excerpt (60%
+  token overlap), and near-duplicates are dropped; at most 6 per session;
+  the excerpt is the sentence plus one neighbour as a contiguous span and
+  `context` is the friction or redirection that opened the window),
+  `abandoned_work` (a clean `git revert` or
   `git reset --hard` that is not a sync to `origin/`, or a human asking to
   undo or revert), and `rediscovery` (the same Read/Grep/Glob target in two
   or more sessions of one slug in the mining window; built in
@@ -259,6 +268,8 @@ calls, no LLM calls, no scheduling:
   opening prompt. Every excerpt goes through `make_excerpt()`. Signals
   take token budget before friction clusters (at most 80% of it; the
   lowest-priority kinds drop first and `signals_dropped` counts them).
+  Priority: redirection, struggle_arc, conclusion, abandoned_work,
+  rediscovery.
 - `cluster(events)` -- group events by `(event_kind, tool_name,
   command_prefix)`.
 - `budget(clusters, max_input_tokens)` -- trim to a token cap without ever

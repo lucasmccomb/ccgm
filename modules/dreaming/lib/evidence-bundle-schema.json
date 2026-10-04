@@ -126,12 +126,12 @@
     },
     "signals": {
       "type": "array",
-      "description": "Knowledge-bearing signals from the four deterministic extractors (transcript_miner.py, #1098 Phase 3.1), in budget-priority order: redirection, struggle_arc, abandoned_work, rediscovery. They take token budget before friction clusters. `excerpt` is the cited text (redacted, <=400 chars, one contiguous transcript span); `context` is the assistant turn before it.",
+      "description": "Knowledge-bearing signals from the four deterministic extractors (transcript_miner.py, #1098 Phase 3.1), in budget-priority order: redirection, struggle_arc, conclusion, abandoned_work, rediscovery. They take token budget before friction clusters. `excerpt` is the cited text (redacted, <=400 chars, one contiguous transcript span); `context` is what preceded it (the assistant turn, or for a conclusion the friction event or redirection that opened its window).",
       "items": {
         "type": "object",
         "required": ["kind", "session_id", "excerpt"],
         "properties": {
-          "kind": { "type": "string", "enum": ["redirection", "struggle_arc", "abandoned_work", "rediscovery"] },
+          "kind": { "type": "string", "enum": ["redirection", "struggle_arc", "conclusion", "abandoned_work", "rediscovery"] },
           "session_id": { "type": ["string", "null"] },
           "session_ids": {
             "type": "array",
@@ -143,7 +143,7 @@
           "excerpt": { "type": "string" },
           "context": {
             "type": "string",
-            "description": "redirection and abandoned_work: the assistant turn before the excerpt (may be empty)."
+            "description": "redirection and abandoned_work: the assistant turn before the excerpt (may be empty). conclusion: the friction excerpt or human redirection that opened its 8-turn window."
           },
           "signature": {
             "type": "string",
