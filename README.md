@@ -23,7 +23,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 80 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 81 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 
@@ -138,7 +138,7 @@ For a quick install with a preset:
 | **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, ask-context, model-vetting, live-testing-guard, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline | Most users |
 | **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, ask-context, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, writing-system, ce-review, pr-feedback, pr-review-toolkit, document-review, compound-knowledge, skill-authoring, subagent-patterns (+ deps) | Teams |
 | **cloud-agent** | 55 modules | Autonomous/headless agents |
-| **full** | 76 modules | Power users |
+| **full** | 77 modules | Power users |
 
 ### Other install options
 
@@ -230,6 +230,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **orrery** | commands | `/orrery` | Deep-dives a codebase with parallel read-only scouts and renders an interactive, zoomable, embeddable system-design map as one self-contained HTML file: 4 zoom tiers, GitHub links pinned to an anchor SHA, per-node product prose; `/orrery update` refreshes it | - |
 | **output-formatting** | patterns | - | Copy-pasteable content goes in fenced code blocks, never blockquotes, so it pastes clean anywhere | - |
 | **output-styles** | patterns | - | Packages the always-on tone rules as Claude Code output styles - a prompt-cached system-prompt layer instead of per-turn rule files | - |
+| **persist** | workflow | `/persist` | Opt-in Stop hook that keeps the agent working on a declared task until it is marked done, with fail-open guards (context limit, abort, auth error, stale state, iteration cap, cancel) | settings |
 | **plugin-marketplace** [BETA] | core | - | Maintainer tooling that projects CCGM modules into a native Claude Code plugin marketplace. The bash installer stays canonical | - |
 | **pr-feedback** | workflow | `/resolve-pr-feedback` | Fetches unresolved PR review threads via GraphQL, clusters 3+ items by category, dispatches parallel resolver agents | skill-authoring, subagent-patterns |
 | **pr-review-toolkit** | commands | `/scope-drift` | Augments the external pr-review-toolkit plugin with scope-drift detection on top of the standard code/test/comment/silent-failure/type passes | - |
@@ -366,9 +367,9 @@ The `docs/` directory contains comprehensive documentation:
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 80 modules |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 81 modules |
 | [Commands Reference](docs/commands.md) | All 92 slash commands with usage examples |
-| [Hooks Reference](docs/hooks.md) | All 36 hooks explained - what they do and when they fire |
+| [Hooks Reference](docs/hooks.md) | All 37 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |
 | [Configuration](docs/configuration.md) | Customization, template variables, settings overrides |

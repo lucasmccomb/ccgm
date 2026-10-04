@@ -1,6 +1,6 @@
 # Module Catalog
 
-CCGM contains 80 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
+CCGM contains 81 modules across 5 categories. Each module is self-contained in `modules/{name}/` with a `module.json` manifest and its content files.
 
 ## How modules work
 
@@ -902,6 +902,18 @@ Delegation-only session posture for expensive orchestrator models (Fable/Opus), 
 **What it does**: State is one flag file per session, `~/.claude/advisor-mode/<session_id>`, keyed by the `session_id` every hook input carries — one session's mode never binds another's. `advisor-session-start.py` creates the flag at startup, resume, and clear, so every session begins in the mode (opt out with `CCGM_ADVISOR_AUTO=false` in the environment or `~/.claude/.ccgm.env`; compaction never re-enables a mode the session turned off), and sweeps flags whose session is gone; `advisor-session-end.py` removes the flag when the session ends. `/advisor` (bare = toggle; explicit `on|off|status` accepted) acts on the current session only, and `status` lists every session currently in the mode. The posture itself: the main agent writes four-field specs, dispatches cheaper implementer agents (worktree isolation), personally reviews spec compliance then code quality, triages findings, delegates fixes (three-round lead checkpoint; optional native runs have their own tighter bounds and no automatic extensions), and merges — it never implements. While this session's flag exists, `advisor-guard.py` hard-blocks (exit 2, survives bypass mode) the main agent's file edits outside its work-product paths (`~/.claude/`, scratchpads, `~/code/plans/`, `~/code/docs/`, worktrees, plan-mode files) and any Bash beyond read-only inspection plus orchestration verbs (read-only git, branch/worktree/pull lifecycle, `gh` PR/issue/run/label management including merge). Subagent tool calls pass untouched (their hook input carries `agent_id`), so delegated workers are unaffected, and `advisor-posture.py` re-injects the posture each turn so the model delegates instead of fighting denials. Plan- or issue-shaped work is routed to `/etp`, which already runs this loop at full ceremony. Escape hatches: `/advisor off` and a one-off `ADVISOR_DIRECT=1`.
 
 **Dependencies**: settings, subagent-patterns
+
+---
+
+### persist
+
+Opt-in Stop hook that keeps the main agent working on a declared task until it is marked done.
+
+**Installs**: `commands/persist.md`, `hooks/persist-stop.py`, `bin/ccgm-persist`, hook registration
+
+**What it does**: `/persist <task>` writes `~/.claude/persist/<session_id>.json` (task, iteration, max_iterations, started_at, done_criteria); while that file is active, fresh and belongs to this session, the Stop hook blocks the stop and tells the agent to continue, to mark done only after verifying the done criteria with fresh evidence, and how (`$HOME/.claude/bin/ccgm-persist done`). The hook lets the stop through on re-entrancy (`stop_hook_active`), context-limit stops, transcript context at or above 95 percent, user aborts, auth errors, state older than 2 hours, the iteration cap (default 50, hard max 200), a cancel signal, another session or project, and any parse or IO error. Advisor mode's Bash gate allows exactly the installed `ccgm-persist` path with its start, status, done and cancel grammar. See [module documentation](../modules/persist/README.md).
+
+**Dependencies**: settings
 
 ---
 
