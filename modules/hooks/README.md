@@ -20,6 +20,7 @@ This module installs fourteen Python hooks, several Python libraries, and a sett
 | `orphan-process-check.py` | Not a hook | Detects and warns about orphaned background processes (stale dev servers, zombie workers). Registered under no event; run as a plain script by `/startup` via `startup-dashboard`'s `startup-gather.sh` |
 | `check-careful.py` | PreToolUse (Bash) | Prompts before destructive Bash commands (rm -rf, SQL DROP/TRUNCATE, force push, hard reset, kubectl delete, docker prune). Build-artifact directories (node_modules, dist, .next, build, __pycache__, .cache, .turbo, coverage) are whitelisted for `rm -rf` |
 | `check-freeze.py` | PreToolUse (Edit/Write) | Denies Edit/Write outside the frozen directory when `~/.claude/freeze-dir.txt` is set. Pair with `/freeze`, `/unfreeze`, `/guard` from `commands-extra` |
+| `read-budget.py` | PreToolUse (Read) | Denies the first unranged Read (no `offset`/`limit`) of a file over 2000 lines or 100 KB per session, suggesting Grep or a ranged Read; a repeat full Read is allowed. Skips images, PDFs, notebooks, binaries, and missing files; fails open. Env: `CCGM_READ_BUDGET=off`, `CCGM_READ_BUDGET_LINES`, `CCGM_READ_BUDGET_BYTES` |
 | `sync-ccgm-canonical.py` | PostToolUse (Bash) | After `gh pr merge` succeeds in the CCGM repo, fast-forwards the canonical CCGM clone (the symlink source for `~/.claude/`) so it never drifts. Default canonical dir: `~/code/ccgm`; override with `CCGM_CANONICAL_DIR` env var. No-op if the dir doesn't exist or the merge wasn't in a CCGM clone |
 
 The `settings.partial.json` wires these hooks into your `~/.claude/settings.json`.
@@ -66,6 +67,7 @@ cp hooks/check-migration-timestamps.py ~/.claude/hooks/check-migration-timestamp
 cp hooks/orphan-process-check.py ~/.claude/hooks/orphan-process-check.py
 cp hooks/check-careful.py ~/.claude/hooks/check-careful.py
 cp hooks/check-freeze.py ~/.claude/hooks/check-freeze.py
+cp hooks/read-budget.py ~/.claude/hooks/read-budget.py
 cp hooks/sync-ccgm-canonical.py ~/.claude/hooks/sync-ccgm-canonical.py
 cp hooks/pretooluse-bash-dispatch.py ~/.claude/hooks/pretooluse-bash-dispatch.py
 
@@ -170,6 +172,7 @@ six standalone hook entries (`enforce-git-workflow`, `auto-approve-bash`,
 | `hooks/orphan-process-check.py` | Orphaned background process detection before conflicting Bash commands |
 | `hooks/check-careful.py` | Destructive-command warning (careful safety hook) |
 | `hooks/check-freeze.py` | Scope-lock Edit/Write to `~/.claude/freeze-dir.txt` (freeze safety hook) |
+| `hooks/read-budget.py` | Deny-once gate on unranged Reads of large files (Read budget) |
 | `hooks/sync-ccgm-canonical.py` | Auto-pull `~/code/ccgm` after CCGM PR merges so symlinked runtime never drifts (override path via `CCGM_CANONICAL_DIR`) |
 | `hooks/pretooluse-bash-dispatch.py` | Default single-process composition dispatcher for the PreToolUse:Bash chain (declarative precedence; equivalence-proven against the six-process chain) |
 | `lib/hook_dispatcher.py` | Composition engine: declarative `Manifest`/`Check`/`Result` model + `dispatch()` precedence resolution (hard_block > deny > allow > ask) |

@@ -51,6 +51,11 @@
             "type": "command",
             "command": "$HOME/.claude/hooks/auto-approve-file-ops.py",
             "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/read-budget.py",
+            "timeout": 5000
           }
         ]
       },

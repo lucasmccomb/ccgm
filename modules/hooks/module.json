@@ -101,6 +101,11 @@
       "type": "hook",
       "template": false
     },
+    "hooks/read-budget.py": {
+      "target": "hooks/read-budget.py",
+      "type": "hook",
+      "template": false
+    },
     "hooks/sync-ccgm-canonical.py": {
       "target": "hooks/sync-ccgm-canonical.py",
       "type": "hook",
