@@ -88,8 +88,8 @@ if [ ! -f "${AUTOHEAL_DIR}/config.json" ]; then
     cat > "${AUTOHEAL_DIR}/config.json" <<EOF
 {
   "email_enabled": false,
-  "realtime_alerts_enabled": false,
-  "auto_apply_enabled": false,
+  "realtime_alerts_enabled": "off",
+  "auto_apply_enabled": "off",
   "digest_email": null,
   "webhook_url": null,
   "webhook_token": "${WEBHOOK_TOKEN}",

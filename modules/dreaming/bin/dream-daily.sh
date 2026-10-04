@@ -158,26 +158,25 @@ run_step() {
 # gate so they turn on and off together.
 # ---------------------------------------------------------------------
 
-_optimistic_integration_active() {
+_optimistic_integration_mode() {
     local cfg="${DREAMING_DIR}/config.json"
     if [ ! -f "${cfg}" ]; then
-        echo false
+        echo off
         return
     fi
-    python3 -c "
-import json, sys
-try:
-    cfg = json.load(open(sys.argv[1], encoding='utf-8'))
-except Exception:
-    print('false')
-    sys.exit(0)
-if not isinstance(cfg, dict):
-    print('false')
-    sys.exit(0)
-opt = cfg.get('optimistic_integration')
-enabled = isinstance(opt, dict) and bool(opt.get('enabled', False))
-print('true' if enabled else 'false')
-" "${cfg}" 2>/dev/null || echo false
+    # rollout_mode.py is the one resolver: a persisted boolean reads as
+    # active/off, "shadow" is shadow, anything else fails closed to off.
+    python3 "${MODULE_ROOT}/lib/rollout_mode.py" "${cfg}" 2>/dev/null || echo off
+}
+
+# True iff the mode is "active". Shadow integrates nothing, so the steps that
+# spend money or write the store (eval-refresh, a real integrate) key on this.
+_optimistic_integration_active() {
+    if [ "$(_optimistic_integration_mode)" = "active" ]; then
+        echo true
+    else
+        echo false
+    fi
 }
 
 # ---------------------------------------------------------------------
@@ -246,9 +245,17 @@ run_eval_refresh_step() {
 # ---------------------------------------------------------------------
 
 run_optimistic_integrate_step() {
-    if [ "$(_optimistic_integration_active)" != "true" ]; then
+    local mode shadow_flag=""
+    mode="$(_optimistic_integration_mode)"
+    if [ "${mode}" = "off" ]; then
         log "optimistic-integrate: optimistic_integration.enabled=false (default off); skipping ${TODAY}"
         return 0
+    fi
+    # Shadow runs the same gates and the same decision pass, but the engine
+    # logs would-integrate and writes nothing else. A red gate in shadow only
+    # logs: recording the anomaly would move the live breaker.
+    if [ "${mode}" = "shadow" ]; then
+        shadow_flag="--shadow"
     fi
 
     # CCGM_DREAMING_EVAL_SCRIPT lets tests (and any future alternate
@@ -267,6 +274,10 @@ run_optimistic_integrate_step() {
     gate_rc=$?
     if [ "${gate_rc}" -ne 0 ]; then
         log "optimistic-integrate: dream-eval.sh --gate exit=${gate_rc}; failing closed (${gate_out})"
+        if [ "${mode}" = "shadow" ]; then
+            log "optimistic-integrate: shadow mode; no anomaly recorded, nothing decided this run"
+            return 0
+        fi
         local anomaly_out anomaly_rc
         anomaly_out="$(python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" record-anomaly --reason red_eval_gate 2>&1)"
         anomaly_rc=$?
@@ -281,7 +292,7 @@ run_optimistic_integrate_step() {
     # a fired timeout SIGTERMs the process, which its SIGTERM-safe handler turns
     # into a clean commit-what-it-has + a recorded timeout anomaly (never a
     # dirty tree). Exit-tolerance is preserved: this step always returns 0.
-    integrate_out="$(_run_with_timeout 600 python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" optimistic-integrate --day "${TODAY}" 2>&1)"
+    integrate_out="$(_run_with_timeout 600 python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" optimistic-integrate --day "${TODAY}" ${shadow_flag} 2>&1)"
     integrate_rc=$?
     printf '%s\n' "${integrate_out}" >>"${DAILY_LOG}"
     if [ "${integrate_rc}" -ne 0 ]; then

@@ -12,10 +12,20 @@ Self-healing observability loop for Claude Code. Captures permission events, too
 
 ## Default posture
 
-- **Real-time security alerts: OFF.** Enable with `/autoheal-toggle realtime on` (or `realtime_alerts_enabled: true` in config).
-- **Auto-apply: OFF.** Enable with `/autoheal-toggle autoapply on` (or `auto_apply_enabled: true` in config).
+- **Real-time security alerts: OFF.** Enable with `/autoheal-toggle realtime on` (or `realtime_alerts_enabled: "active"` in config). Try `/autoheal-toggle realtime shadow` first.
+- **Auto-apply: OFF.** Enable with `/autoheal-toggle autoapply on` (or `auto_apply_enabled: "active"` in config). Try `/autoheal-toggle autoapply shadow` first.
 - **Email digest: OFF.** Local digest is always-on; opt into Resend with `digest_email` and `email_enabled: true` + `RESEND_API_KEY` in `~/.claude/autoheal/.env` (NOT shell rc — see "API keys" below).
 - **Webhook publisher: OFF.** Set `webhook_url` in config to enable.
+
+## Rollout: off, shadow, active
+
+`realtime_alerts_enabled` and `auto_apply_enabled` each take `"off"`, `"shadow"` or `"active"`. Configs written before shadow mode hold a boolean; `lib/autoheal_mode.py` reads `true` as `active` and `false` as `off` and never rewrites the file. Every reader goes through its `resolve_mode`.
+
+- **shadow** computes the decision and logs it. Nothing else happens.
+  - Auto-apply runs the same eligibility logic as active (confidence, breadth, kind, target, snooze, block, the `check`-surface rule, the eval gate) and appends `{ts, proposal_id, would_apply, reason, fingerprint, fix_surface}` to `~/.claude/autoheal/shadow/auto-apply.jsonl`. It creates no branch and no applied record.
+  - Realtime alerts evaluate the patterns and append `{ts, session_id, pattern, severity, would_alert}` to `~/.claude/autoheal/shadow/realtime.jsonl` (never the command). No `<autoheal-security-alert>` block, no event, exit 0.
+- **Agreement.** The digest's "Shadow rollout" section compares each auto-apply decision with what you did next: an applied record (`/autoheal-apply`, `/permission-fix`) means accepted, a snoozed fingerprint means rejected. Would-apply and accepted, or would-skip and rejected, is agreed; would-apply and rejected is a false positive; would-skip and accepted is a false negative; neither yet is pending. Alerts have no recorded human outcome, so they are counted but stay pending.
+- **Promotion bar.** Move a flag to `active` only when the digest shows at least 20 decided (non-pending) decisions, at 90% agreement or better, with zero false positives on `check`-surface proposals. The numbers are `PROMOTION_MIN_DECIDED`, `PROMOTION_MIN_AGREEMENT` and `PROMOTION_MAX_GUARDED_FALSE_POSITIVES` in `lib/autoheal_mode.py`; the digest computes the verdict from them.
 
 ## Config
 

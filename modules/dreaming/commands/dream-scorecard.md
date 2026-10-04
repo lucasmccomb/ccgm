@@ -47,6 +47,13 @@ signals — the honest answer to "how do I know the memory system is working?"
     tripped this window (apply-audit `outcome: "circuit_breaker_tripped"`),
     plus whether the breaker is currently suspended
     (`state/optimistic.json`).
+- **Shadow integration** — only when `optimistic_integration.enabled` has run
+  in `"shadow"` (the log `state/shadow-optimistic.jsonl` exists). All-time, not
+  window-scoped, because the promotion bar needs the whole record. Shows
+  decisions, agreed, disagreed (false positives and false negatives), pending
+  (no `/dream-apply` outcome yet), false positives on evictions, and whether
+  the promotion bar is met (20 decided decisions, 90% agreement, zero eviction
+  false positives; constants in `lib/rollout_mode.py`).
 - **Store health** — total active learnings, effective-confidence bands, and
   deprecated/superseded counts.
 

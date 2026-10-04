@@ -23,6 +23,15 @@ Print the markdown digest for today (default) or a specific past date.
    - If no proposals file exists for that date: print "no digest available
      for {date}" plus the path that was checked.
 
+## Shadow rollout section
+
+When `auto_apply_enabled` or `realtime_alerts_enabled` has run in `shadow`,
+the digest ends with a "Shadow rollout" section: decisions logged, agreed,
+disagreed (false positives and false negatives), pending, false positives on
+`check`-surface proposals, and whether the promotion bar is met (20 decided
+decisions, 90% agreement, zero `check` false positives). See the README's
+"Rollout: off, shadow, active".
+
 ## When to invoke
 
 - The daily launchd job has not yet fired and you want to see what is

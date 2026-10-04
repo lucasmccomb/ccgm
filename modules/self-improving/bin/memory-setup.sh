@@ -28,8 +28,10 @@
 #               behind a 24h dwell window + daily report + one-command rollback
 #               (optimistic-memory plan.md §3.5 / §5 Epic 8 -- the activation
 #               forcing-function: the operator never has to hand-edit
-#               config.json to turn this on). Sets
-#               optimistic_integration.enabled=true in
+#               config.json to turn this on). Offers shadow mode first
+#               (optimistic_integration.enabled="shadow": the nightly decision
+#               pass runs and is logged, nothing is written to the store), then
+#               active (enabled=true). Both land in
 #               ~/.claude/dreaming/config.json. When you turn it on, a second
 #               prompt OFFERS the composite eligibility gate
 #               (optimistic_integration.eligibility.enabled=true, recommended
@@ -99,7 +101,9 @@ write is confirmed first; the script commits to no git repo.
   Optimistic  auto-integration (opt-in, offered when `dreaming` is installed).
   mode        Adds a 24h dwell window + daily report + one-command rollback
               instead of every mined memory sitting pending for a human
-              /dream-apply. Sets optimistic_integration.enabled=true in
+              /dream-apply. Offers shadow mode first (decisions logged,
+              nothing written), then active. Sets
+              optimistic_integration.enabled to "shadow" or true in
               ~/.claude/dreaming/config.json. Turning it on then offers the
               composite eligibility gate (recommended defaults) as a second
               prompt.
@@ -345,25 +349,30 @@ offer_dreaming() {
 # mode later should still see this prompt.
 # ---------------------------------------------------------------------------
 
-# Echo the current optimistic_integration.enabled value: "true", "unset", or
-# "invalid" (config.json present but unparseable). A missing OR zero-byte
-# file is "unset". Deliberately does NOT use jq's `//` alternative operator
-# against the raw boolean (`.optimistic_integration.enabled // "unset"`) --
-# `//` treats a JSON `false` the same as `null`/absent, which would report
-# the common, correct "explicitly disabled" state as "unset" and re-offer a
-# prompt the operator already answered. An explicit `if/then/else` keys on
-# real presence-and-truth instead.
+# Echo the current optimistic_integration mode: "active", "shadow", "unset", or
+# "invalid" (config.json present but unparseable). The flag takes
+# off|shadow|active; configs written before shadow mode hold a boolean, and
+# those files are never rewritten, so `true` reads as "active". A missing or
+# zero-byte file, `false` and "off" are all "unset" (offer the prompt).
+# Deliberately does NOT use jq's `//` alternative operator against the raw
+# value (`.optimistic_integration.enabled // "unset"`) -- `//` treats a JSON
+# `false` the same as `null`/absent. An explicit `if/elif` keys on real
+# presence-and-value instead.
 current_optimistic_flag() {
     local cfg="${DREAMING_DIR}/config.json"
     if [ ! -s "$cfg" ]; then
         printf 'unset\n'
         return
     fi
-    jq -r 'if .optimistic_integration.enabled == true then "true" else "unset" end' "$cfg" 2>/dev/null \
+    jq -r '.optimistic_integration.enabled as $e
+           | if $e == true or $e == "active" then "active"
+             elif $e == "shadow" then "shadow"
+             else "unset" end' "$cfg" 2>/dev/null \
         || printf 'invalid\n'
 }
 
-# Merge optimistic_integration.enabled=true into ~/.claude/dreaming/config.json,
+# Merge optimistic_integration.enabled into ~/.claude/dreaming/config.json
+# ($1 = "active" (default, written as the boolean true) or "shadow"),
 # preserving every other top-level and optimistic_integration key --
 # dream_analyze.py's own load_config() fills in every other
 # optimistic_integration default (dwell_hours, caps, floors, ...) at read
@@ -377,6 +386,12 @@ current_optimistic_flag() {
 write_optimistic_flag() {
     mkdir -p "$DREAMING_DIR" 2>/dev/null || true
 
+    local mode="${1:-active}" json_value expected
+    case "$mode" in
+        shadow) json_value='"shadow"'; expected="shadow" ;;
+        *)      json_value='true';     expected="true" ;;
+    esac
+
     local cfg="${DREAMING_DIR}/config.json"
     local tmp
     tmp="$(mktemp)" || {
@@ -385,9 +400,9 @@ write_optimistic_flag() {
     }
 
     if [ -s "$cfg" ]; then
-        jq '.optimistic_integration.enabled = true' "$cfg" >"$tmp" 2>/dev/null
+        jq --argjson v "$json_value" '.optimistic_integration.enabled = $v' "$cfg" >"$tmp" 2>/dev/null
     else
-        printf '{}\n' | jq '.optimistic_integration.enabled = true' >"$tmp" 2>/dev/null
+        printf '{}\n' | jq --argjson v "$json_value" '.optimistic_integration.enabled = $v' >"$tmp" 2>/dev/null
     fi
 
     if [ ! -s "$tmp" ]; then
@@ -402,8 +417,12 @@ write_optimistic_flag() {
         return 1
     fi
 
-    if [ "$(jq -r '.optimistic_integration.enabled // "unset"' "$cfg" 2>/dev/null)" = "true" ]; then
-        ok "Optimistic auto-integration enabled — optimistic_integration.enabled=true verified in ${cfg}."
+    if [ "$(jq -r '.optimistic_integration.enabled // "unset"' "$cfg" 2>/dev/null)" = "$expected" ]; then
+        if [ "$mode" = "shadow" ]; then
+            ok "Optimistic integration set to shadow — optimistic_integration.enabled=\"shadow\" verified in ${cfg}. Decisions are logged; nothing is written to the store."
+        else
+            ok "Optimistic auto-integration enabled — optimistic_integration.enabled=true verified in ${cfg}."
+        fi
         return 0
     fi
 
@@ -450,7 +469,9 @@ write_eligibility_flag() {
         return 1
     }
 
-    local filter='.optimistic_integration.enabled = true | .optimistic_integration.eligibility.enabled = true'
+    # An outer flag already in shadow stays in shadow: eligibility is scored in
+    # the shadow decision pass too, and this write must not promote it to active.
+    local filter='.optimistic_integration.enabled = (if .optimistic_integration.enabled == "shadow" then "shadow" else true end) | .optimistic_integration.eligibility.enabled = true'
     if [ -s "$cfg" ]; then
         jq "$filter" "$cfg" >"$tmp" 2>/dev/null
     else
@@ -472,7 +493,7 @@ write_eligibility_flag() {
     local outer elig
     outer="$(jq -r '.optimistic_integration.enabled // "unset"' "$cfg" 2>/dev/null)"
     elig="$(jq -r '.optimistic_integration.eligibility.enabled // "unset"' "$cfg" 2>/dev/null)"
-    if [ "$outer" = "true" ] && [ "$elig" = "true" ]; then
+    if { [ "$outer" = "true" ] || [ "$outer" = "shadow" ]; } && [ "$elig" = "true" ]; then
         ok "Composite eligibility gate enabled — optimistic_integration.eligibility.enabled=true (recommended defaults) verified in ${cfg}."
         return 0
     fi
@@ -525,11 +546,25 @@ offer_optimistic_integration() {
     local state
     state="$(current_optimistic_flag)"
     case "$state" in
-        true)
+        active)
             ok "Optimistic auto-integration already enabled (optimistic_integration.enabled=true) — no change."
             # Outer already on -> the eligibility gate may be offered with no
             # risk of leaving the outer flag off (adrev2-001), so an operator who
             # opted into optimistic mode earlier can still add the gate now.
+            offer_eligibility_gate
+            return 0
+            ;;
+        shadow)
+            ok "Optimistic integration is in shadow mode (decisions logged, nothing written to the store)."
+            say "Agreement with your /dream-apply decisions is in /dream-scorecard. Promote only"
+            say "once it shows 20 or more decided decisions at 90% agreement or better, with no"
+            say "false positives on evictions."
+            say ""
+            if confirm "Promote to active (auto-integrate for real)?"; then
+                write_optimistic_flag active || return 1
+            else
+                skip "Staying in shadow mode."
+            fi
             offer_eligibility_gate
             return 0
             ;;
@@ -546,8 +581,18 @@ offer_optimistic_integration() {
             say "anomaly check, and a windowed circuit breaker bound every run whether or"
             say "not you ever read the report."
             say ""
-            if confirm "Enable auto-integration with a 24h dwell window + daily report?"; then
-                write_optimistic_flag || return 1
+            say "Shadow mode runs the same decisions every night and logs what it would"
+            say "integrate, but writes nothing to the store. /dream-scorecard then shows how"
+            say "often it agrees with your /dream-apply choices, so you can promote on evidence."
+            say ""
+            local chosen=""
+            if confirm "Start in shadow mode (recommended: decisions logged, nothing written)?"; then
+                chosen="shadow"
+            elif confirm "Enable auto-integration directly, with a 24h dwell window + daily report?"; then
+                chosen="active"
+            fi
+            if [ -n "$chosen" ]; then
+                write_optimistic_flag "$chosen" || return 1
                 # The eligibility gate is offered ONLY here -- strictly AFTER the
                 # outer flag is confirmed on (write_optimistic_flag verified it) --
                 # so a yes can never land eligibility=true with the outer engine

@@ -29,7 +29,9 @@ command modifies no files. Use the listed subcommands for stateful actions.
 7. Whether the LaunchAgent is loaded: `launchctl list | grep ccgm.dreaming`.
 8. **Optimistic auto-integration state** (optimistic-memory plan.md §3.5,
    Epic 6): a one-line summary —
-   - `enabled` — `config.json`'s `optimistic_integration.enabled` (a
+   - `enabled` — `config.json`'s `optimistic_integration.enabled`, shown as
+     its resolved mode (`off`, `shadow` or `active`; a persisted `true` is
+     `active`, `false` is `off`) (a
      DIFFERENT, more specific flag than the top-level `enabled` in item 2,
      which gates the mining/analyze pipeline, not auto-integration).
    - `suspended` — `~/.claude/dreaming/state/optimistic.json`'s
