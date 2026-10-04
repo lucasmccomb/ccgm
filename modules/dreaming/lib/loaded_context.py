@@ -31,8 +31,14 @@ candidates never reach the reduce prompt. It drops a candidate when
 
   * its best match in a droppable category scores >= threshold
     (reason `already_encoded`, with the matching source path), or
-  * all of its evidence is a hook error from an installed hook
-    (reason `installed_hook_friction`; Phase 3.2 routes those to autoheal).
+  * (Phase 3.2, reason `routed_to_autoheal`) all of its evidence is friction
+    that autoheal's `failure-logger.py` already records first-hand, in real
+    time: a hook error from an installed hook, or a tool error whose text the
+    candidate's content mostly restates. A candidate that cites any signal
+    from the miner's extractors (redirection, struggle_arc, conclusion,
+    abandoned_work, rediscovery) is kept even when tool errors are present.
+    Dreaming forwards nothing to autoheal; it only stops turning that
+    friction into memory proposals.
 
 `store` rows are in the corpus but are not droppable: a candidate that
 restates a live row is a `learning_verify` waiting to happen, so it passes
@@ -55,9 +61,17 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
 ALREADY_ENCODED = "already_encoded"
-HOOK_FRICTION = "installed_hook_friction"
+ROUTED_TO_AUTOHEAL = "routed_to_autoheal"
 
 DEFAULT_THRESHOLD = 0.35
+# Tool-error restatement: the same idf-weighted cosine, scored between the
+# candidate's content and its own error excerpts. See the README for the pick.
+DEFAULT_FRICTION_THRESHOLD = 0.35
+# An evidence excerpt counts as a bundle signal or friction exemplar when it
+# shares at least this fraction of the shorter text's tokens with it, so a
+# quote the model truncated or lightly trimmed still classifies.
+_EXCERPT_MATCH_OVERLAP = 0.8
+_MIN_EXCERPT_TOKENS = 3
 DEFAULT_SNIPPET_COUNT = 3
 DEFAULT_RECENT_DAYS = 30
 
@@ -547,6 +561,62 @@ def _snippet(match: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+class EvidenceIndex:
+    """What kind of text each bundle excerpt is: a knowledge-bearing signal or
+    a friction-cluster exemplar (a tool error or hook denial)."""
+
+    def __init__(self, signals: list[frozenset[str]], friction: list[frozenset[str]]):
+        self.signals = signals
+        self.friction = friction
+
+    @staticmethod
+    def _matches(tokens: frozenset[str], pool: list[frozenset[str]]) -> bool:
+        if len(tokens) < _MIN_EXCERPT_TOKENS:
+            return False
+        for other in pool:
+            if (
+                len(other) >= _MIN_EXCERPT_TOKENS
+                and len(tokens & other) / min(len(tokens), len(other)) >= _EXCERPT_MATCH_OVERLAP
+            ):
+                return True
+        return False
+
+    def classify(self, excerpt: str) -> str:
+        """`signal`, `friction`, or `unknown`. A signal wins over friction;
+        text that matches neither is never treated as friction."""
+        tokens = tokenize(excerpt or "")
+        if self._matches(tokens, self.signals):
+            return "signal"
+        if self._matches(tokens, self.friction):
+            return "friction"
+        return "unknown"
+
+
+def build_evidence_index(bundle: Mapping[str, Any]) -> EvidenceIndex:
+    signals = [
+        tokenize(sig["excerpt"]) for sig in bundle.get("signals") or []
+        if isinstance(sig, dict) and isinstance(sig.get("excerpt"), str)
+    ]
+    friction = [
+        tokenize(ex["excerpt"])
+        for cluster in bundle.get("clusters") or []
+        if isinstance(cluster, dict) and cluster.get("is_friction")
+        for ex in cluster.get("exemplars") or []
+        if isinstance(ex, dict) and isinstance(ex.get("excerpt"), str)
+    ]
+    return EvidenceIndex(signals, friction)
+
+
+def error_restatement_score(content: str, error_excerpts: list[str]) -> float | None:
+    """Best score of `content` against the error excerpts, or None when no
+    excerpt is long enough to form a unit."""
+    units: list[Unit] = []
+    for excerpt in error_excerpts:
+        units.extend(_units_from_text(excerpt, "tool_error", "tool_error"))
+    hits = Corpus(units).matches(content, n=1) if units else []
+    return hits[0]["score"] if hits else None
+
+
 def prefilter_candidates(
     candidates: list[dict[str, Any]],
     corpus: Corpus,
@@ -555,10 +625,15 @@ def prefilter_candidates(
     hook_names: set[str],
     hooks_dir: Path | None = None,
     snippet_count: int = DEFAULT_SNIPPET_COUNT,
+    evidence_index: EvidenceIndex | None = None,
+    friction_threshold: float = DEFAULT_FRICTION_THRESHOLD,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Returns (kept, dropped). Each kept candidate is a copy carrying its top
     `snippet_count` corpus snippets as `corpus_snippets`. Each dropped record
-    names the reason, the matching source path and category, and the score."""
+    names the reason, the matching source path and category, and the score.
+
+    Without `evidence_index` the tool-error rule is off: nothing says which
+    evidence is a signal and which is friction."""
     kept: list[dict[str, Any]] = []
     dropped: list[dict[str, Any]] = []
     for cand in candidates:
@@ -567,8 +642,16 @@ def prefilter_candidates(
         hook_files = [installed_hook_in_error(x, hook_names) for x in excerpts]
         if excerpts and all(hook_files):
             source = str(Path(hooks_dir) / hook_files[0]) if hooks_dir else hook_files[0]
-            dropped.append({"reason": HOOK_FRICTION, "source": source, "category": "hook", "score": None, "content": content[:160]})
+            dropped.append({"reason": ROUTED_TO_AUTOHEAL, "source": source, "category": "hook", "score": None, "content": content[:160]})
             continue
+        if evidence_index is not None and excerpts and all(evidence_index.classify(x) == "friction" for x in excerpts):
+            score = error_restatement_score(content, excerpts)
+            if score is not None and score >= friction_threshold:
+                dropped.append({
+                    "reason": ROUTED_TO_AUTOHEAL, "source": "tool_error", "category": "tool_error",
+                    "score": score, "content": content[:160],
+                })
+                continue
         top = corpus.matches(content, n=snippet_count)
         droppable = corpus.matches(content, n=1, categories=DROP_CATEGORIES)
         if droppable and droppable[0]["score"] >= threshold:

@@ -239,6 +239,12 @@ if run_summary is not None:
             f"- **calls that stopped at the output cap: {truncated_calls}** "
             "(failed extractions -- raise `max_output_tokens` if this repeats)"
         )
+    # #1098 3.2: candidates whose only evidence was tool-error or hook-denial
+    # friction. Autoheal logs those first-hand; dreaming just does not
+    # propose them.
+    routed = (run_summary.get("prefilter_dropped") or {}).get("routed_to_autoheal", 0)
+    if routed:
+        out.append(f"- {routed} friction-only candidates left to autoheal")
     cost = run_summary.get("cost_breakdown") or {}
     if cost:
         out.append(

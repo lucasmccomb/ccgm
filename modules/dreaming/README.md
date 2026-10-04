@@ -227,9 +227,9 @@ The **nightly map->reduce analyzer**, on top of Epic 2's miner:
   Between the map and the reduce, `prefilter_candidates()` drops a candidate
   when its best match in a non-store category scores at or above
   `prefilter_threshold` (reason `already_encoded`, with the matching source
-  path), or when all of its evidence is a hook error from an installed hook
-  (reason `installed_hook_friction`). Dropped candidates never reach the
-  reduce prompt. A candidate that restates a live `store` row is kept so the
+  path), or when all of its evidence is friction that autoheal already
+  records (reason `routed_to_autoheal`, below). Dropped candidates never
+  reach the reduce prompt. A candidate that restates a live `store` row is kept so the
   reduce can `learning_verify` it. The score is the cosine of the two token
   sets with each token weighted by inverse document frequency in the corpus;
   plain Jaccard peaked at 0.36 on real learnings because they are longer
@@ -239,6 +239,26 @@ The **nightly map->reduce analyzer**, on top of Epic 2's miner:
   proposal is dropped and counted) or a one-line `novelty` for every add and
   supersede. The reduce also receives up to `reduce_pending_max` (100)
   pending proposals in compact form. The run summary records
+  `routed_to_autoheal` (#1098 3.2) keeps tool and hook friction out of
+  memory. Autoheal's `failure-logger.py` already records every tool failure
+  and hook denial first-hand, in real time, so dreaming forwards nothing;
+  forwarding would count each failure twice. A candidate is dropped when
+  every evidence excerpt is friction (it matches a friction-cluster exemplar
+  in the night's bundle and no signal from the redirection, struggle_arc,
+  conclusion, abandoned_work or rediscovery extractors) and either (a) each
+  excerpt is a hook error from an installed hook (this folds in the earlier
+  `installed_hook_friction` reason; the drop record's source is the hook
+  file), or (b) the candidate's content scores at or above
+  `friction_threshold` (default 0.35, the same score as the prefilter)
+  against the error excerpts, meaning the content restates the error. At 0.35
+  every drop in this machine's backlog restated its error text; at 0.25 the
+  extra drops were multi-line worktree and git failures whose content added
+  project facts. One cited signal keeps the candidate, tool errors or not,
+  and excerpts the bundle cannot place are never treated as friction. A value
+  above 1 turns rule (b) off. The digest prints "N friction-only candidates
+  left to autoheal" when N is above zero.
+
+  The run summary records
   `candidates_mapped`, `prefilter_dropped` (by reason), `prefilter_drops`
   (reason, source path, category, score), and `reduce_already_encoded`;
   `proposals_deduped` counts fingerprint hits plus candidates dropped for
