@@ -41,9 +41,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socketserver
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+class _LoopbackServer(ThreadingHTTPServer):
+    """HTTPServer.server_bind calls socket.getfqdn(), a reverse-DNS lookup that
+    stalls for ~30s on hosted macOS runners and delays the port file past the
+    tests' wait. Skip it; the fixture only listens on 127.0.0.1."""
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 REQUESTS: list[dict] = []
@@ -151,7 +162,7 @@ def main(argv: list[str]) -> int:
     FAIL_WITH = args.fail_with
     FAIL_ONCE = args.fail_once
 
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    server = _LoopbackServer(("127.0.0.1", args.port), Handler)
     actual_port = server.server_address[1]
 
     if args.pidfile:
