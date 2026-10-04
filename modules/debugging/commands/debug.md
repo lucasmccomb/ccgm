@@ -87,7 +87,7 @@ If no test framework exists, document the exact manual reproduction steps as a c
 
 ### Phase 2: Hypothesize
 
-Generate 3-5 root cause hypotheses before writing any fix.
+Write 3-5 ranked candidate causes, each with its evidence, before writing any fix. Test them one at a time.
 
 Format each hypothesis:
 ```
@@ -98,7 +98,7 @@ H1: [Theory]
     Test: [What observation would confirm or eliminate this]
 ```
 
-Rank hypotheses by likelihood. Consider these common root causes:
+Rank hypotheses by likelihood. For the leader, look for the strongest evidence against it, and fill in "Evidence against" from observation, not from reasoning alone. Weigh evidence by strength: controlled repro, then direct artifact, then correlated signal, then circumstantial clue, then speculation (see the `debugging-techniques` skill). A hypothesis that survives only because nobody looked for contrary evidence keeps low confidence. Consider these common root causes:
 - **Data shape mismatch**: value is null, undefined, wrong type, or unexpected structure
 - **Timing/async**: race condition, unresolved promise, stale closure, callback ordering
 - **Missing initialization**: variable/state not set before first use
@@ -114,34 +114,35 @@ Rank hypotheses by likelihood. Consider these common root causes:
 
 ### Phase 3: Instrument
 
-Add targeted debug logging to confirm or eliminate hypotheses. Use `[DEBUG]` tags for clean removal.
+Add targeted debug logging to confirm or eliminate hypotheses. Tag every line with one marker, `[DEBUG-xxxx]`, where `xxxx` is four random hex digits you pick now (for example `a3f9`), so cleanup is a single grep.
 
-1. Identify 3-5 key decision points that would differentiate hypotheses
-2. Add `[DEBUG]` tagged logging at each point:
+1. Identify 3-5 key decision points, and prefer the probe where the top two hypotheses predict different results
+2. Add `[DEBUG-xxxx]` tagged logging at each point, with the real hex digits in place of `xxxx`:
 
 **JavaScript/TypeScript:**
 ```javascript
-console.log('[DEBUG] functionName: variable =', JSON.stringify(variable, null, 2));
-console.error('[DEBUG] error context:', error.message, error.stack);
+console.log('[DEBUG-xxxx] functionName: variable =', JSON.stringify(variable, null, 2));
+console.error('[DEBUG-xxxx] error context:', error.message, error.stack);
 ```
 
 **Python:**
 ```python
-print(f'[DEBUG] function_name: variable = {variable!r}', flush=True)
+print(f'[DEBUG-xxxx] function_name: variable = {variable!r}', flush=True)
 import traceback; traceback.print_exc()  # for exceptions
 ```
 
 **Go:**
 ```go
-fmt.Fprintf(os.Stderr, "[DEBUG] functionName: variable = %+v\n", variable)
+fmt.Fprintf(os.Stderr, "[DEBUG-xxxx] functionName: variable = %+v\n", variable)
 ```
 
 **Rust:**
 ```rust
-eprintln!("[DEBUG] function_name: variable = {:?}", variable);
+eprintln!("[DEBUG-xxxx] function_name: variable = {:?}", variable);
 ```
 
-3. Do NOT commit instrumentation - it will be removed in Phase 7
+3. Redact secrets and credentials as `<REDACTED>` from any log, trace, or output before it enters a report, issue, or commit
+4. Do NOT commit instrumentation - it will be removed in Phase 5
 
 ---
 
@@ -155,7 +156,7 @@ Run the reproduction and collect evidence against each hypothesis.
    [test-command] 2>&1 | tee /tmp/debug-output.txt
    cat /tmp/debug-output.txt
    ```
-2. Cross-reference `[DEBUG]` log output against each hypothesis:
+2. Cross-reference `[DEBUG-xxxx]` log output against each hypothesis:
    - What does the data actually look like vs. what was expected?
    - Which hypotheses are now eliminated by the evidence?
    - What confirms the most likely root cause?
@@ -173,10 +174,10 @@ Run the reproduction and collect evidence against each hypothesis.
 
 Apply a minimal, targeted fix for the confirmed root cause only.
 
-1. Remove all `[DEBUG]` instrumentation from source files (NOT the test file):
+1. Remove all `[DEBUG-xxxx]` instrumentation from source files (NOT the test file):
    ```bash
    # Verify what instrumentation remains
-   grep -r '\[DEBUG\]' . --include='*.ts' --include='*.js' --include='*.py' --include='*.rs' --include='*.go' 2>/dev/null
+   grep -rF 'DEBUG-xxxx' . --include='*.ts' --include='*.js' --include='*.py' --include='*.rs' --include='*.go' 2>/dev/null
    # Remove manually or revert only the instrumented lines
    ```
 2. Apply the fix:
@@ -205,9 +206,9 @@ Confirm the fix works and introduced no regressions.
    # or: cargo test 2>&1 | tail -30
    ```
 3. If new test failures appeared, the fix introduced a regression - diagnose and resolve before continuing
-4. Confirm no `[DEBUG]` logs remain in source files:
+4. Confirm no `[DEBUG-xxxx]` logs remain in source files:
    ```bash
-   grep -r '\[DEBUG\]' . --include='*.ts' --include='*.js' --include='*.py' --include='*.rs' --include='*.go' 2>/dev/null && echo "INSTRUMENTATION STILL PRESENT" || echo "Clean"
+   grep -rF 'DEBUG-xxxx' . --include='*.ts' --include='*.js' --include='*.py' --include='*.rs' --include='*.go' 2>/dev/null && echo "INSTRUMENTATION STILL PRESENT" || echo "Clean"
    ```
 
 ---

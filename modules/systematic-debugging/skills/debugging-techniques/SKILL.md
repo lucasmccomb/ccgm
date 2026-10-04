@@ -60,6 +60,26 @@ Finding the origin tells you where to fix. But a single fix at the origin can be
 - **Guessing upward without instrumentation.** If the chain is not obvious from reading, add logging before speculating.
 - **Stopping at the first plausible-looking cause.** Keep asking "what called this?" until the bad value has no caller - only then are you at the origin.
 
+## Weighing Evidence
+
+A hypothesis is only as strong as the best evidence behind it. Rank what you hold, strongest first:
+
+1. **Controlled repro**: you change one variable and the failure appears or vanishes on demand.
+2. **Direct artifact**: the log line, stack frame, core dump, or recorded value that shows the failing step itself.
+3. **Correlated signal**: it happens with the failure but you have not shown it causes it (a deploy time, a metric spike, a config difference).
+4. **Circumstantial clue**: it fits the story but fits other stories as well (code that looks suspicious, a similar past bug).
+5. **Speculation**: reasoning with no observation behind it.
+
+Two habits follow from the ladder:
+
+- **Hunt for disconfirming evidence.** For each serious candidate, look for the observation that would kill it. A candidate that survives only because nobody looked for contrary evidence keeps low confidence, however well it fits.
+- **Pick the probe that splits the top two.** A probe that gathers more support for the leader teaches little. Choose the observation where the top two candidates predict different results.
+
+### Debug Output Hygiene
+
+- Tag every temporary log line with one marker, `[DEBUG-xxxx]`, where `xxxx` is four random hex digits chosen for this session. Before commit, `grep -rn 'DEBUG-xxxx'` finds every line to remove. A bare `[DEBUG]` collides with logging that already exists.
+- Redact secrets and credentials (tokens, keys, passwords, cookies, authorization headers) as `<REDACTED>` before logs and traces go into a report, issue, PR, or commit.
+
 ## Defense-in-Depth Validation
 
 Once root-cause-tracing has identified where a bad value originated, a single fix at that point is necessary but not sufficient. A single validation is a check a future refactor can remove. Layered validation makes the bug structurally impossible.
