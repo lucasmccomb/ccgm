@@ -54,7 +54,7 @@ print(json.dumps({'proposal': {'kind': 'rule_insert', 'target_path': sys.argv[1]
 }
 dropped_with() {
     assert_contains "${RESULT}" "\"reason\": \"$2\"" "$1: dropped as $2"
-    assert_no_file "${ROWS}" "$1: no proposal row"
+    assert_eq "$(jsonl_get "${ROWS}" 1 "d['state'] + ' ' + d['drop_reason']")" "dropped $2" "$1: stored as dropped, never ready"
     assert_contains "$(cat "${CASE}/rejected.log")" "$2" "$1: reason in the rejection log"
 }
 

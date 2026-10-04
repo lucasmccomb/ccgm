@@ -22,7 +22,30 @@ Self-healing observability loop for Claude Code. Captures permission events, too
 3. **Measure.** Before each call it measures the input with the Anthropic `count_tokens` endpoint (free). Input over 15,000 tokens is refused unsent and counted as a failed call.
 4. **Ask.** The model answers through structured outputs (`lib/proposal-schema.json`) with a `rule_insert` (`target_path` limited to the supplied candidates, `anchor_heading`, `insert_markdown` of 8 lines or fewer) or a `skip`. It returns no diff, id or fingerprint. The request uses `claude-sonnet-5` (or `default_model` from `config.json`), thinking off, `max_tokens` 2000. The prompt and module index form a cached prefix.
 5. **Build.** `lib/draft_proposals.py` checks that the path is a candidate and the anchor heading exists in the real file, then generates the unified diff. The id is the aggregator's `signature_id` (`sha256(signature)[:12]`). A failed check drops the answer with a counted reason (`anchor_missing`, `path_not_candidate`, `insert_too_long`, ...) in `runs/{today}.json` and the rejection log.
-6. **Write.** Rows go to `proposals/{today}.jsonl` with `signature_id`, `kind`, `target`, `anchor`, `insert_markdown`, `diff` and `evidence` (count, sessions, sample errors). `state` is `ready`, or `skipped` when the model declined; a skipped signature counts as covered, so it is not sent again. The digest and `/autoheal-apply` read these rows (`proposed_diff_target` and `proposed_diff` repeat the target and diff until the single ledger replaces this directory).
+6. **Validate.** `validate(proposal)` in `lib/apply-proposal.py` gates every `rule_insert` before it is stored as `ready`; `/autoheal-apply` runs the same function before it branches. It works on a throwaway copy of the source repo's `origin/main` (`git archive` into a temp dir), so the repo's working tree, index, refs and worktree list are only read, never changed. Checks run cheapest first, each capped by `validation_timeout_seconds` (default 120):
+
+   | Check | Drop reason |
+   |---|---|
+   | `target` is a `modules/*/rules/*.md` file in `origin/main` | `path_not_candidate` |
+   | The anchor heading is in that file | `anchor_missing` |
+   | Lines added to always-loaded rules (`rules/*.md` with no `paths:` frontmatter), counted with every ready or applied proposal of the last 7 days, stay within `rule_budget_lines_per_week` (default 20) | `rule_budget` |
+   | The diff applies to the copy | `apply_conflict` |
+   | `tests/test-no-personal-data.sh` passes with the diff applied | `personal_data` |
+   | `tests/test-modules.sh` passes with the diff applied | `module_tests` |
+   | The source repo cannot be resolved, `origin/main` is missing, or a check timed out | `validation_unavailable` |
+
+   A failing row is stored with `state: dropped` and a `drop_reason`, counted in `runs/{today}.json`, and never shown. The checks read the local `origin/main` ref and call no API; the gate does not fetch.
+
+   Every dropped draft is stored, including answers the build step rejects (`anchor_missing`, `path_not_candidate`, `insert_too_long`, ...). The aggregator turns a dropped row into a cooldown so a draft that cannot pass is not paid for again every night (`excluded: "cooldown"` with `cooldown_until` in `signatures/{date}.json`):
+
+   | Last drop | Signature is covered for |
+   |---|---|
+   | Content reason (anything but `validation_unavailable`) | `aggregation.redraft_cooldown_days` (default 14) from the drop date; each further content drop doubles it, capped at 90 days |
+   | `validation_unavailable` | 1 day; three in a row start the 14-day cooldown |
+   | Model `skip` (state `skipped`) | No expiry |
+
+   Rows dropped as `validation_unavailable` carry `consecutive_unavailable`; at three, the row also carries `health_reason`, for the health writer to surface.
+7. **Write.** Rows go to `proposals/{today}.jsonl` with `signature_id`, `kind`, `target`, `anchor`, `insert_markdown`, `diff` and `evidence` (count, sessions, sample errors). `state` is `ready`, or `skipped` when the model declined; a skipped signature counts as covered, so it is not sent again. The digest and `/autoheal-apply` read these rows (`proposed_diff_target` and `proposed_diff` repeat the target and diff until the single ledger replaces this directory).
 
 A failed call is logged and counted, never retried in the run and never held for a later one. There is no day watermark, no give-up counter and no calibration mode; `last-analyzed` only records the date of the last finished run.
 

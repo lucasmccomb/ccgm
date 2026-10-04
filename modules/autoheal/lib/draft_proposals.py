@@ -21,6 +21,13 @@ file does everything that is plain computation:
           generates the unified diff. A failed check drops the answer with a
           counted reason (anchor_missing, path_not_candidate, ...).
 
+  validate  Before a row is stored as ready, the gate in apply-proposal.py
+          (validate) checks that the diff applies to the source repo's
+          origin/main, that its personal-data and module tests pass, and that
+          always-loaded rules stay inside the weekly line budget. A failing row
+          is stored with state "dropped" and a drop_reason, counted with the
+          other drops, and never shown.
+
 Rows go to proposals/<today>.jsonl, where the digest and apply commands read
 them until the single ledger of a later unit replaces that directory.
 """
@@ -555,7 +562,24 @@ def cmd_finish(args) -> int:
         row, why = None, "answer_not_json"
     else:
         row, why = make_row(meta["signature"], answer, meta["candidates"], meta["repo_root"], ctx)
+    if row is not None and row["kind"] == "rule_insert":
+        gate = _load(os.path.join(_HERE, "apply-proposal.py"), "autoheal_apply")
+        ok, reason = gate.validate(row, repo_root=meta["repo_root"])
+        if not ok:
+            row, why = None, reason
     if row is None:
+        # Every drop is stored. The aggregator turns the row into a cooldown, so the
+        # signature is not drafted (and paid for) again the next night.
+        dropped = _base_row(meta["signature"], ctx)
+        dropped.update({"kind": "rule_insert", "state": "dropped", "drop_reason": why})
+        if why in agg.INFRA_DROP_REASONS:
+            history = agg.drop_history(agg.autoheal_dir()).get(meta["signature_id"], [])
+            # Read by the health writer: three in a row means validation is broken, not the draft.
+            dropped["consecutive_unavailable"] = agg.unavailable_streak(history) + 1
+            if dropped["consecutive_unavailable"] >= agg.INFRA_STREAK_FOR_COOLDOWN:
+                dropped["health_reason"] = (f"validation_unavailable {dropped['consecutive_unavailable']} "
+                                            f"nights running for signature {meta['signature_id']}")
+        append_jsonl(_proposals_path(agg), dropped)
         if args.rejected_log:
             append_jsonl(args.rejected_log, {
                 "ts": dt.datetime.now(dt.timezone.utc).isoformat(),

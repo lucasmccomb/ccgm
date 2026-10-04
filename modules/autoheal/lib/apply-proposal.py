@@ -33,14 +33,22 @@ Env overrides (tests):
   - CCGM_AUTOHEAL_APPLIED_DIR   — default ~/.claude/autoheal/applied
   - CCGM_AUTOHEAL_TODAY         — YYYY-MM-DD override
   - CCGM_CLONE_ROOT             — explicit clone root (skips resolve)
+
+Validation gate (#1099 Phase 2.3): `validate(proposal)` is the one check the
+nightly drafting path and `apply_proposal()` both run before a proposal is
+shown or applied.
 """
 from __future__ import annotations
 
 import datetime as _dt
+import glob
+import importlib.util
 import json
 import os
+import signal
 import subprocess
 import sys
+import tempfile
 
 # Source labels for apply_proposal. The string is used as part of the
 # branch name and as the `method` value in the applied audit record.
@@ -95,6 +103,263 @@ def demonstration_problem(demo: dict | None) -> str | None:
     if demo.get("reverted") is not True:
         return "violation was not reverted"
     return None
+
+
+# ---------------------------------------------------------------------
+# Validation gate. Runs against a throwaway copy of origin/main, so the
+# source repo's working tree, index, refs and worktree list are never touched.
+# ---------------------------------------------------------------------
+
+DEFAULT_RULE_BUDGET_LINES = 20       # config: rule_budget_lines_per_week
+DEFAULT_CHECK_TIMEOUT_SECONDS = 120  # config: validation_timeout_seconds
+BUDGET_WINDOW_DAYS = 7
+
+
+class _Unavailable(Exception):
+    """A check could not run (missing script, timeout, no archive). Not a verdict."""
+
+
+def _sibling(filename: str, name: str):
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location(name, os.path.join(here, filename))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _clean_env() -> dict:
+    env = os.environ.copy()
+    for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        env.pop(var, None)
+    return env
+
+
+def _run_limited(cmd: list[str], cwd: str, timeout: int, input_bytes: bytes | None = None):
+    """Run cmd in its own process group and kill the group on timeout.
+
+    Returns (returncode, output bytes). Raises _Unavailable on timeout or when
+    the command cannot start.
+    """
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=cwd, env=_clean_env(), start_new_session=True,
+            stdin=subprocess.PIPE if input_bytes is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+    except OSError as exc:
+        raise _Unavailable(f"cannot run {cmd[0]}: {exc}")
+    try:
+        out, _ = proc.communicate(input=input_bytes, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        proc.communicate()
+        raise _Unavailable(f"{cmd[0]} timed out after {timeout}s")
+    return proc.returncode, out
+
+
+def _gate_config() -> dict:
+    try:
+        path = _sibling("module-index.py", "autoheal_module_index").config_path()
+        with open(path, "r", encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _int_setting(cfg: dict, key: str, default: int) -> int:
+    value = cfg.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else default
+
+
+def _origin_show(repo: str, path: str, timeout: int) -> str | None:
+    """Text of `path` at origin/main, or None when it is not there."""
+    rc, out = _run_limited(["git", "-C", repo, "show", f"origin/main:{path}"], repo, timeout)
+    return out.decode("utf-8", "replace") if rc == 0 else None
+
+
+def _is_rule_path(path: str) -> bool:
+    parts = path.split("/")
+    return len(parts) == 4 and parts[0] == "modules" and parts[2] == "rules" and parts[3].endswith(".md")
+
+
+def _has_paths_frontmatter(text: str) -> bool:
+    """True when the file opens with YAML frontmatter holding a `paths:` key."""
+    lines = text.split("\n")
+    if lines[0].strip() != "---":
+        return False
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return False
+        if line.startswith("paths:"):
+            return True
+    return False
+
+
+def _added_by_file(diff: str) -> dict:
+    """{repo-relative path: number of added lines} from a unified diff."""
+    counts: dict = {}
+    current = None
+    for line in diff.split("\n"):
+        if line.startswith("+++ "):
+            name = line[4:].split("\t")[0].strip()
+            current = name[2:] if name.startswith("b/") else None
+            if current is not None:
+                counts.setdefault(current, 0)
+        elif line.startswith("+") and current is not None:
+            counts[current] += 1
+    return counts
+
+
+def _always_loaded_added(repo: str, diff: str, timeout: int) -> int:
+    """Lines a diff adds to always-loaded rule files (rules/*.md without `paths:`)."""
+    total = 0
+    for path, added in _added_by_file(diff).items():
+        if not _is_rule_path(path):
+            continue
+        text = _origin_show(repo, path, timeout)
+        if text is not None and _has_paths_frontmatter(text):
+            continue
+        total += added
+    return total
+
+
+def _parse_ts(value, fallback):
+    try:
+        ts = _dt.datetime.fromisoformat(str(value))
+    except ValueError:
+        return fallback
+    return ts if ts.tzinfo else ts.replace(tzinfo=_dt.timezone.utc)
+
+
+def _jsonl_rows(directory: str):
+    """(record, date from the file name or None) for every row of every *.jsonl."""
+    for path in sorted(glob.glob(os.path.join(directory, "*.jsonl"))):
+        stem = os.path.basename(path)[: -len(".jsonl")]
+        try:
+            day = _dt.datetime.strptime(stem, "%Y-%m-%d").replace(tzinfo=_dt.timezone.utc)
+        except ValueError:
+            day = None
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(rec, dict):
+                        yield rec, day
+        except OSError:
+            continue
+
+
+def _recent_rule_lines(repo: str, exclude_id: str, now: _dt.datetime, timeout: int) -> int:
+    """Always-loaded rule lines added by ready or applied proposals in the last 7 days."""
+    cutoff = now - _dt.timedelta(days=BUDGET_WINDOW_DAYS)
+    rows: dict = {}
+    for rec, day in _jsonl_rows(_proposals_dir()):
+        if isinstance(rec.get("id"), str):
+            rows[rec["id"]] = (rec, _parse_ts(rec.get("generated_at"), day))
+    counted = {pid for pid, (rec, ts) in rows.items()
+               if rec.get("state") in ("ready", "applied") and ts is not None and ts >= cutoff}
+    for rec, day in _jsonl_rows(_applied_dir()):
+        ts = _parse_ts(rec.get("ts"), day)
+        if rec.get("proposal_id") in rows and ts is not None and ts >= cutoff and not rec.get("rolled_back"):
+            counted.add(rec["proposal_id"])
+    total = 0
+    for pid in counted - {exclude_id}:
+        rec = rows[pid][0]
+        total += _always_loaded_added(repo, rec.get("diff") or rec.get("proposed_diff") or "", timeout)
+    return total
+
+
+def _check_passes(tree: str, name: str, timeout: int) -> bool:
+    """Run tests/<name> in the copy; True on exit 0."""
+    script = os.path.join(tree, "tests", name)
+    if not os.path.isfile(script):
+        raise _Unavailable(f"tests/{name} missing in origin/main")
+    rc, _ = _run_limited(["bash", script], tree, timeout)
+    return rc == 0
+
+
+def validate(proposal: dict, repo_root: str | None = None, now: _dt.datetime | None = None) -> tuple[bool, str]:
+    """Gate a proposal before it is shown or applied: (ok, reason).
+
+    reason is "" on success, else one of path_not_candidate, anchor_missing,
+    rule_budget, apply_conflict, personal_data, module_tests, or
+    validation_unavailable (the source repo or a check could not run, which
+    says nothing about the proposal). A row with no diff, such as an issue
+    proposal, passes.
+
+    Checks, cheapest first, all against origin/main of the CCGM source repo:
+      1. rule_insert only: target is a modules/*/rules/*.md file in origin/main
+         and the anchor heading is in it.
+      2. Rule budget: lines this diff adds to always-loaded rule files (no
+         `paths:` frontmatter) plus those of every ready or applied proposal
+         in the last 7 days stay within `rule_budget_lines_per_week`
+         (config, default 20).
+      3. The diff applies to a throwaway copy of origin/main (git archive
+         into a temp dir; the repo itself is only read).
+      4. tests/test-no-personal-data.sh passes in the copy with the diff applied.
+      5. tests/test-modules.sh passes in the copy.
+    Each command is capped by `validation_timeout_seconds` (config, default 120).
+    """
+    diff = proposal.get("diff") or proposal.get("proposed_diff") or ""
+    if not diff.strip():
+        return True, ""
+    cfg = _gate_config()
+    timeout = _int_setting(cfg, "validation_timeout_seconds", DEFAULT_CHECK_TIMEOUT_SECONDS)
+    budget = _int_setting(cfg, "rule_budget_lines_per_week", DEFAULT_RULE_BUDGET_LINES)
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    try:
+        if repo_root is None:
+            repo_root, _how = _sibling("module-index.py", "autoheal_module_index").resolve_source_repo()
+        if not repo_root or not os.path.isdir(repo_root):
+            return False, "validation_unavailable"
+        rc, _ = _run_limited(["git", "-C", repo_root, "rev-parse", "--verify", "-q", "origin/main"],
+                             repo_root, timeout)
+        if rc != 0:
+            return False, "validation_unavailable"
+
+        if proposal.get("kind") == "rule_insert":
+            target = proposal.get("target") or ""
+            text = _origin_show(repo_root, target, timeout) if _is_rule_path(target) else None
+            if text is None:
+                return False, "path_not_candidate"
+            found = _sibling("draft_proposals.py", "autoheal_draft").find_heading(
+                text.split("\n"), proposal.get("anchor") or "")
+            if found is None:
+                return False, "anchor_missing"
+
+        added = _always_loaded_added(repo_root, diff, timeout)
+        if added and added + _recent_rule_lines(repo_root, str(proposal.get("id")), now, timeout) > budget:
+            return False, "rule_budget"
+
+        with tempfile.TemporaryDirectory(prefix="autoheal-validate-") as tree:
+            rc, archive = _run_limited(["git", "-C", repo_root, "archive", "origin/main"], repo_root, timeout)
+            if rc != 0:
+                raise _Unavailable("git archive failed")
+            rc, _ = _run_limited(["tar", "-x", "-C", tree], tree, timeout, input_bytes=archive)
+            if rc != 0:
+                raise _Unavailable("tar extract failed")
+            # A private repo in the copy stops `git apply` from resolving paths against an
+            # enclosing repository, and gives the repo's own checks a git tree to inspect.
+            _run_limited(["git", "init", "-q"], tree, timeout)
+            payload = diff.encode("utf-8")
+            for args in (["--check", "-"], ["-"]):
+                rc, _ = _run_limited(["git", "apply", *args], tree, timeout, input_bytes=payload)
+                if rc != 0:
+                    return False, "apply_conflict"
+            if not _check_passes(tree, "test-no-personal-data.sh", timeout):
+                return False, "personal_data"
+            if not _check_passes(tree, "test-modules.sh", timeout):
+                return False, "module_tests"
+    except _Unavailable:
+        return False, "validation_unavailable"
+    return True, ""
 
 
 def _find_proposal(proposal_id: str) -> dict | None:
@@ -388,6 +653,10 @@ def apply_proposal(
         result["error"] = f"proposal {proposal_id} not found in today's JSONL"
         return result
 
+    if proposal.get("state", "ready") != "ready":
+        result["error"] = f"proposal {proposal_id} is {proposal.get('state')}, not ready"
+        return result
+
     if fix_surface(proposal) == "check":
         problem = demonstration_problem(demonstration)
         if problem:
@@ -397,6 +666,12 @@ def apply_proposal(
     cwd = _resolve_clone_root()
     if cwd is None:
         result["error"] = "could not resolve canonical CCGM clone root"
+        return result
+
+    ok, reason = validate(proposal, repo_root=cwd)
+    # An unavailable gate does not block: the test gate below still runs on the clone.
+    if not ok and reason != "validation_unavailable":
+        result["error"] = f"validation failed: {reason}"
         return result
 
     ok, msg = _ensure_clean_main(cwd)
