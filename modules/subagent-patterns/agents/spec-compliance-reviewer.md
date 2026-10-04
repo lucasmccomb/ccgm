@@ -89,9 +89,11 @@ These belong to Stage 2 (`code-quality-reviewer`):
 
 Do not do Stage 2's job here. A clean Stage 1 pass just means Stage 2 can run. It does not mean the code is good.
 
+<!-- ccgm:section status-protocol-intro -->
 ## The Four-State Status Protocol
 
-End with exactly one status:
+End every report with exactly one of these statuses. No free-form summary, no preamble:
+<!-- /ccgm:section status-protocol-intro -->
 
 | Status | Emit when | Next step |
 |--------|-----------|-----------|
@@ -102,7 +104,11 @@ End with exactly one status:
 
 ## Output Shape
 
-**Results stay in files, not in the reply.** Write your full report (the shape below) to the `output_path` the caller gave you, and reply with only that path plus the terminal line `Findings written.`. The caller routes on the file it reads from disk, not on a prose summary in the chat - so your verdict must live in the artifact, not the narrative.
+<!-- ccgm:section reviewer-results-in-files -->
+**Results stay in files, not in the reply.** Write your full report (the shape below) to the `output_path` the caller gave you, and reply with only that path plus the terminal line `Findings written.`. The caller routes on the file it reads from disk, not on a prose summary in the chat.
+<!-- /ccgm:section reviewer-results-in-files -->
+
+Your verdict must live in the artifact, not the narrative.
 
 ```
 ## Deliverables

@@ -40,9 +40,11 @@ The caller SHOULD pass paths, not file bodies. See `subagent-patterns` > "Pass P
 
 5. **Report with structured status.** Use the four-state protocol.
 
+<!-- ccgm:section status-protocol-intro -->
 ## The Four-State Status Protocol
 
 End every report with exactly one of these statuses. No free-form summary, no preamble:
+<!-- /ccgm:section status-protocol-intro -->
 
 | Status | Emit when | Include |
 |--------|-----------|---------|
