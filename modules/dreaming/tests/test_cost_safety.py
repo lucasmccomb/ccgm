@@ -259,7 +259,8 @@ class FakeClaudeEvalTests(unittest.TestCase):
         )
         self.fake_claude.chmod(self.fake_claude.stat().st_mode | stat.S_IXUSR)
 
-        # A prior open gate: an abort must leave this exactly as it is.
+        # A prior open gate. An abort leaves the results files exactly as
+        # they are, and its marker pauses the gate (#1098 item 2.1).
         arm = {"runs": 5, "format_error_rate": 0.0, "judge_error_rate": 0.0, "mean_score": 9.0}
         green = {
             "date": "2026-08-30", "task_id": "dreamed-01", "kind": "dreamed", "offline": False,
@@ -297,9 +298,8 @@ class FakeClaudeEvalTests(unittest.TestCase):
         }
 
     def test_three_dollar_cap_runs_exactly_three_sessions(self):
-        gate_before = me.gate_check()
         snapshot_before = self._evals_snapshot()
-        self.assertEqual(gate_before, (True, "ok"))
+        self.assertEqual(me.gate_check()["state"], "open")
 
         rc, stderr = self._run_main("--runs", "3", "--max-total-usd", "3")
 
@@ -311,9 +311,10 @@ class FakeClaudeEvalTests(unittest.TestCase):
         self.assertEqual(body["cap_usd"], 3.0)
         self.assertAlmostEqual(body["spent_usd"], 3.0, places=6)
         self.assertEqual(body["phase"], "run")
-        # Gate state unchanged: same verdict, same results files, same bytes.
-        self.assertEqual(me.gate_check(), gate_before)
+        # Results untouched; the marker pauses the gate (infra, not content).
         self.assertEqual(self._evals_snapshot(), snapshot_before)
+        gate = me.gate_check()
+        self.assertEqual((gate["state"], gate["code"]), ("paused", "budget_abort"))
         self.assertFalse(list(me.evals_dir().glob("*.harness-broken")))
         # All spend is in the ledger.
         rows = _ledger_rows()
@@ -328,7 +329,7 @@ class FakeClaudeEvalTests(unittest.TestCase):
         body = json.loads((me.evals_dir() / f"{DAY}.budget-abort").read_text(encoding="utf-8"))
         self.assertEqual(body["phase"], "preflight")
         self.assertEqual(_ledger_rows(), [])
-        self.assertEqual(me.gate_check(), (True, "ok"))
+        self.assertEqual(me.gate_check()["code"], "budget_abort")
 
     def test_eval_refuses_when_module_budget_is_spent(self):
         _seed_ledger("2026-08-20", 25.0)

@@ -419,7 +419,8 @@ if applied_rows:
         out.append("")
         for batch_id in tripped_batches:
             out.append(f"- ⚠️ **circuit breaker tripped** during batch `{batch_id}` -- optimistic "
-                       "auto-integration is now suspended; see `/dream` status.")
+                       "auto-integration is suspended and the implicated batches were reverted "
+                       "(`batch_auto_reverted` in the apply-audit); see `/dream` status.")
         for rec in anomaly_hits:
             out.append(f"- ⚠️ **{rec.get('outcome')}** on `{rec.get('project', '?')}` "
                        f"(batch `{rec.get('batch_id')}`) -- eviction proposals for this project were "

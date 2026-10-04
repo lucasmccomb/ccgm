@@ -3,6 +3,9 @@
 # optimistic-memory plan.md Epic 3).
 #
 # Full nightly chain (plan.md §5 Epic 3/6):
+#   0. breaker-check               — active mode only: resume a suspended
+#      circuit breaker after N quiet nights with no content anomaly, before
+#      and independent of the eval gate (#1098 item 2.2).
 #   1. bin/dream-analyze.sh       (Epic 3) — mine + map/reduce -> proposals
 #   2. eval-refresh                — OFF by default (`eval_refresh_enabled`
 #      must be true; #1098 item 0.1). When opted in: weekly, live eval
@@ -10,8 +13,10 @@
 #      freshness bound stays met (fix (b) for adrev-opt-001). Runs BEFORE
 #      optimistic-integrate so a freshly-refreshed result is available to
 #      the SAME night's gate check.
-#   3. optimistic-integrate        — opt-in, config- AND eval-gated (see
-#      below). The full per-op-kind posture engine
+#   3. optimistic-integrate        — opt-in, config- AND eval-gated, and
+#      paused on a night the analyze step failed (see below). Every night it
+#      does not integrate records one infra or content anomaly. The full
+#      per-op-kind posture engine
 #      (apply_dream_proposal.run_optimistic_integrate) -- supersedes the
 #      retired verify-only auto-apply step. Runs BEFORE digest so the
 #      digest reports tonight's batch while its dwell window is still
@@ -218,38 +223,75 @@ run_eval_refresh_step() {
 }
 
 # ---------------------------------------------------------------------
+# Step 0: breaker resume check (#1098 item 2.2). Runs first, before analyze
+# and independent of the eval gate: a suspended breaker resumes after N quiet
+# nights (default 7) with no CONTENT anomaly, even on a night the gate is
+# paused. Resuming only clears content anomalies; integration still needs
+# tonight's gate to be open. Active mode only (shadow never writes breaker
+# state). Always returns 0.
+# ---------------------------------------------------------------------
+
+run_breaker_check_step() {
+    if [ "$(_optimistic_integration_active)" != "true" ]; then
+        return 0
+    fi
+    local out rc
+    out="$(python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" breaker-check 2>&1)"
+    rc=$?
+    log "breaker-check: exit=${rc} ${out}"
+    return 0
+}
+
+# ---------------------------------------------------------------------
 # Step 3: opt-in, config- AND eval-gated optimistic auto-integration.
-# Supersedes the retired verify-only auto-apply step.
 #
 # Two independent gates must BOTH pass before anything is applied:
-#   (a) config gate: _optimistic_integration_active() above (default false
-#       -- optimistic integration stays off until a human opts in).
-#   (b) eval gate: `bin/dream-eval.sh --gate` must exit 0. dream-eval.sh is
-#       Epic 7's deliverable; a missing eval harness FAILS CLOSED (no
-#       integration this run) rather than being treated as "no gate
-#       configured, proceed anyway". This is the same fail-closed posture
-#       modules/autoheal/bin/autoheal-auto-apply.sh uses for its own
-#       missing-evaluator case, and the same posture the retired
-#       run_auto_apply_step used.
+#   (a) config gate: _optimistic_integration_mode() above (default off).
+#   (b) eval gate: `bin/dream-eval.sh --gate` prints
+#       {"gate": "open"|"closed"|"paused", "code", "reason", "since"} and
+#       exits 0 / 1 / 3 (#1098 item 2.1). Integration runs only on open.
 #
-# Per plan.md Epic 3, the full per-op-kind posture/cap/anomaly/breaker
-# engine lives in apply_dream_proposal.py's run_optimistic_integrate(), not
-# here -- this function's job is only the two gates above, then a single
-# CLI invocation for the day.
+# Every night that does not integrate records ONE anomaly through
+# `apply_dream_proposal.py record-anomaly`, and its class decides what the
+# breaker does with it (#1098 item 2.2, lib/breaker.py):
+#   * infra (pauses tonight, never counts toward a trip):
+#       eval_gate_paused  -- the gate said paused (missing, stale, broken or
+#                            budget-aborted results)
+#       harness_failure   -- the eval script is missing, crashed, or printed
+#                            something other than the documented JSON
+#       analyze_failed    -- tonight's analyze step exited non-zero, so
+#                            tonight's proposals are not trustworthy
+#   * content (counts toward a trip; a trip reverts implicated batches):
+#       eval_regression --since <last green run> -- the gate said closed.
+#       With no batch integrated since the last green run it is recorded
+#       as eval_regression_unattributed, which is infra.
 #
-# Red-gate-as-anomaly (review fix for #801, PR #810): plan.md §3.5 says the
-# breaker trips on "batch-anomaly fire OR red eval gate" -- but a red
-# `--gate` result short-circuits BEFORE `apply_dream_proposal.py
-# optimistic-integrate` is ever invoked, so the breaker's own anomaly_log
-# previously had zero memory of a red-gate streak. When gate (b) fails,
-# this function now ALSO calls `apply_dream_proposal.py record-anomaly
-# --reason red_eval_gate` before returning -- still fail-closed (no
-# integration on a red gate; only the anomaly itself is recorded).
-#
-# Always returns 0: a stand-down (disabled, gate missing, gate red) is a
-# successful, expected outcome, never a chain failure (mirrors
-# autoheal-auto-apply.sh's own "Exit codes: 0 always" contract).
+# Shadow mode runs the same gates but records nothing: an anomaly would move
+# the live breaker. Always returns 0 (a stand-down is an expected outcome).
 # ---------------------------------------------------------------------
+
+_record_anomaly() {
+    local out rc
+    out="$(python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" record-anomaly "$@" 2>&1)"
+    rc=$?
+    printf '%s\n' "${out}" >>"${DAILY_LOG}"
+    log "optimistic-integrate: recorded anomaly $* (exit=${rc})"
+}
+
+# Prints "<gate>|<code>|<since>" from the gate's JSON (its last stdout
+# line), or nothing when the output is not the documented shape.
+_parse_gate_json() {
+    printf '%s\n' "$1" | python3 -c '
+import json, sys
+lines = [l for l in sys.stdin.read().splitlines() if l.strip()]
+try:
+    d = json.loads(lines[-1])
+except (IndexError, ValueError):
+    sys.exit(0)
+if isinstance(d, dict) and d.get("gate") in ("open", "closed", "paused"):
+    print("|".join([d["gate"], str(d.get("code") or ""), str(d.get("since") or "")]))
+' 2>/dev/null
+}
 
 run_optimistic_integrate_step() {
     local mode shadow_flag=""
@@ -258,42 +300,71 @@ run_optimistic_integrate_step() {
         log "optimistic-integrate: optimistic_integration.enabled=false (default off); skipping ${TODAY}"
         return 0
     fi
-    # Shadow runs the same gates and the same decision pass, but the engine
-    # logs would-integrate and writes nothing else. A red gate in shadow only
-    # logs: recording the anomaly would move the live breaker.
     if [ "${mode}" = "shadow" ]; then
         shadow_flag="--shadow"
     fi
 
-    # CCGM_DREAMING_EVAL_SCRIPT lets tests (and any future alternate
-    # deployment layout) point this at a controlled path independent of
-    # BIN_DIR, so the fail-closed-when-missing behavior stays testable
-    # regardless of whether Epic 7 has landed the real dream-eval.sh in
-    # this checkout yet.
+    # CCGM_DREAMING_EVAL_SCRIPT lets tests point this at a controlled path.
     local eval_script="${CCGM_DREAMING_EVAL_SCRIPT:-${BIN_DIR}/dream-eval.sh}"
+    local gate="paused" code="" since="" reason_args=()
     if [ ! -f "${eval_script}" ]; then
-        log "optimistic-integrate: ${eval_script} missing (Epic 7 not yet installed); failing closed -- no integration this run"
-        return 0
+        log "optimistic-integrate: ${eval_script} missing (Epic 7 not yet installed); gate paused (harness_failure); failing closed -- no integration this run"
+        reason_args=(--reason harness_failure)
+    else
+        local gate_out gate_rc parsed
+        gate_out="$(bash "${eval_script}" --gate 2>&1)"
+        gate_rc=$?
+        parsed="$(_parse_gate_json "${gate_out}")"
+        if [ -n "${parsed}" ]; then
+            IFS='|' read -r gate code since <<<"${parsed}"
+            # The exit code must agree with the JSON; a mismatch is a broken
+            # gate, never a content verdict.
+            case "${gate}:${gate_rc}" in
+                open:0|closed:1|paused:3) ;;
+                *) gate="paused"; code="harness_failure" ;;
+            esac
+        elif [ "${gate_rc}" -eq 0 ]; then
+            gate="open"  # a gate that exits 0 without JSON (test stubs)
+        else
+            gate="paused"; code="harness_failure"  # crashed or printed something else
+        fi
+
+        case "${gate}" in
+            open)
+                if [ -n "${ANALYZE_RC}" ] && [ "${ANALYZE_RC}" -ne 0 ]; then
+                    log "optimistic-integrate: eval gate open but the analyze step failed (exit=${ANALYZE_RC}); gate paused (analyze_failed); failing closed -- no integration this run"
+                    gate="paused"
+                    reason_args=(--reason analyze_failed)
+                fi
+                ;;
+            closed)
+                log "optimistic-integrate: dream-eval.sh --gate exit=${gate_rc}; gate closed (${code}); failing closed -- no integration this run (${gate_out})"
+                reason_args=(--reason eval_regression)
+                if [ -n "${since}" ]; then
+                    reason_args+=(--since "${since}")
+                fi
+                ;;
+            paused)
+                log "optimistic-integrate: dream-eval.sh --gate exit=${gate_rc}; gate paused (${code}); failing closed -- no integration this run (${gate_out})"
+                if [ "${code}" = "harness_failure" ]; then
+                    reason_args=(--reason harness_failure)
+                else
+                    reason_args=(--reason eval_gate_paused)
+                fi
+                ;;
+        esac
     fi
 
-    local gate_out gate_rc
-    gate_out="$(bash "${eval_script}" --gate 2>&1)"
-    gate_rc=$?
-    if [ "${gate_rc}" -ne 0 ]; then
-        log "optimistic-integrate: dream-eval.sh --gate exit=${gate_rc}; failing closed (${gate_out})"
+    if [ "${gate}" != "open" ]; then
         if [ "${mode}" = "shadow" ]; then
             log "optimistic-integrate: shadow mode; no anomaly recorded, nothing decided this run"
             return 0
         fi
-        local anomaly_out anomaly_rc
-        anomaly_out="$(python3 "${MODULE_ROOT}/lib/apply_dream_proposal.py" record-anomaly --reason red_eval_gate 2>&1)"
-        anomaly_rc=$?
-        printf '%s\n' "${anomaly_out}" >>"${DAILY_LOG}"
-        log "optimistic-integrate: recorded red_eval_gate anomaly (exit=${anomaly_rc})"
+        _record_anomaly "${reason_args[@]}"
         return 0
     fi
 
-    log "optimistic-integrate: eval gate passed; running apply_dream_proposal.py optimistic-integrate for ${TODAY}"
+    log "optimistic-integrate: eval gate open; running apply_dream_proposal.py optimistic-integrate for ${TODAY}"
     local integrate_out integrate_rc
     # timeout 600 bounds the apply-time re-verification cost (plan.md §5 E3);
     # a fired timeout SIGTERMs the process, which its SIGTERM-safe handler turns
@@ -436,6 +507,10 @@ steps_failed=0
 
 log "dream-daily start (${TODAY})"
 
+# Breaker resume check first: before analyze, and independent of the gate.
+steps_total=$((steps_total + 1))
+run_breaker_check_step || steps_failed=$((steps_failed + 1))
+
 steps_total=$((steps_total + 1))
 run_step "analyze" "${BIN_DIR}/dream-analyze.sh" "$@"
 ANALYZE_RC=$?
@@ -443,7 +518,7 @@ if [ "${ANALYZE_RC}" -ne 0 ]; then
     steps_failed=$((steps_failed + 1))
 fi
 
-# eval-refresh, optimistic-integrate, and retention always return 0 (see
+# breaker-check, eval-refresh, optimistic-integrate, and retention always return 0 (see
 # comments above) -- their own internal stand-down/failure reasons are
 # logged, never surfaced as a chain step failure.
 steps_total=$((steps_total + 1))

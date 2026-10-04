@@ -84,11 +84,17 @@ def build_red(root: Path) -> None:
 
 
 def no_gate(**_kw):
-    return True, "open"
+    return {"state": "open", "code": "ok", "reason": "ok", "since": None}
 
 
 def closed_gate(**_kw):
-    return False, "no high_value rows"
+    return {"state": "closed", "code": "regression", "reason": "canary-01 on m regressed", "since": None}
+
+
+def paused_gate(code: str, reason: str = "paused for a test"):
+    def _gate(**_kw):
+        return {"state": "paused", "code": code, "reason": reason, "since": None}
+    return _gate
 
 
 def compute(root: Path, **kw):
@@ -207,6 +213,70 @@ class HealthComputeTest(unittest.TestCase):
         h = compute(self.root)
         self.assertEqual(h["status"], "yellow")
         self.assertIn("breaker_suspended", codes(h))
+
+    def _reason(self, h, code):
+        return next(r for r in h["reasons"] if r["code"] == code)
+
+    def test_paused_gate_is_yellow_and_names_disabled_eval_refresh(self):
+        build_green(self.root)
+        h = compute(self.root, gate_fn=paused_gate("no_results", "no results"))
+        self.assertEqual((h["status"], h["gate"]["state"]), ("yellow", "paused"))
+        self.assertEqual(h["gate"]["code"], "no_results")
+        fix = self._reason(h, "gate_paused")["fix"]
+        self.assertIn("no fresh eval: eval-refresh is disabled until the Phase 4 smoke test lands", fix)
+
+    def test_paused_gate_with_eval_refresh_enabled_points_at_the_next_refresh(self):
+        build_green(self.root)
+        write_json(self.root / "config.json",
+                   {"enabled": True, "optimistic_integration": {"enabled": True, "eval_refresh_enabled": True}})
+        h = compute(self.root, gate_fn=paused_gate("results_stale", "stale"))
+        fix = self._reason(h, "gate_paused")["fix"]
+        self.assertNotIn("disabled", fix)
+        self.assertIn("eval-refresh", fix)
+
+    def test_paused_gate_fix_names_each_infra_cause(self):
+        build_green(self.root)
+        expected = {
+            "stale_own_writes": "integrated since the last eval",
+            "harness_broken": "harness-broken",
+            "budget_abort": "cost cap",
+            "unmeasured_rows": "failed launches or judge errors",
+            "results_empty": "results file is empty",
+        }
+        for code, needle in expected.items():
+            with self.subTest(code=code):
+                fix = self._reason(compute(self.root, gate_fn=paused_gate(code)), "gate_paused")["fix"]
+                self.assertIn(needle, fix)
+
+    def test_paused_gate_stays_yellow_however_long_it_lasts(self):
+        build_green(self.root)
+        audit = self.root / "state" / "apply-audit.jsonl"
+        audit.write_text("".join(
+            json.dumps({"outcome": "anomaly_recorded", "reason": "eval_gate_paused", "class": "infra", "ts": ts(n)}) + "\n"
+            for n in range(10)), encoding="utf-8")
+        h = compute(self.root, gate_fn=paused_gate("no_results"))
+        self.assertEqual(h["status"], "yellow")
+        self.assertEqual(h["gate"]["consecutive_closed_nights"], 10)
+        self.assertIn("10 night(s)", self._reason(h, "gate_paused")["message"])
+
+    def test_breaker_fix_says_resume_is_due_when_quiet_long_enough(self):
+        build_red(self.root)
+        fix = self._reason(compute(self.root, gate_fn=closed_gate), "breaker_suspended")["fix"]
+        self.assertIn("no content anomaly", fix)
+        self.assertIn("the next nightly run resumes it", fix)
+        self.assertNotIn("optimistic-resume", fix)
+
+    def test_breaker_fix_gives_the_resume_date_after_a_recent_content_anomaly(self):
+        build_green(self.root)
+        write_json(self.root / "state" / "optimistic.json", {
+            "suspended": True, "suspended_at": ts(10),
+            "anomaly_log": [{"ts": ts(2), "reason": "eval_regression", "class": "content", "batch_ids": []}],
+        })
+        h = compute(self.root)
+        fix = self._reason(h, "breaker_suspended")["fix"]
+        self.assertIn(day(-5), fix)
+        self.assertEqual(h["breaker"]["resume_due"], day(-5))
+        self.assertNotIn("optimistic-resume", fix)
 
     def test_integration_off_ignores_gate_breaker_and_pending(self):
         build_red(self.root)
@@ -457,7 +527,8 @@ class HealthHookTest(unittest.TestCase):
         self.assertEqual(payload["hookEventName"], "SessionStart")
         text = payload["additionalContext"]
         self.assertIn('<dreaming-health status="red">', text)
-        self.assertIn("optimistic-resume", text)  # the breaker fix command
+        self.assertIn("no content anomaly", text)  # the breaker fix says what clears it
+        self.assertNotIn("optimistic-resume", text)
         self.assertEqual(text.count("fix:"), 2)  # top 2 reasons only
 
     def test_green_fixture_injects_nothing(self):

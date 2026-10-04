@@ -22,19 +22,17 @@ hand-authored memory helps" (bizlogic-001). It runs alongside a noise-only
 negative-control corpus that must yield zero high-value proposals
 (adrev-305).
 
-`--gate` mode (consumed by Epic 6's auto-apply): exits 0 iff the most
-recent results file exists, is fresh (newer than the configured freshness
-bound AND newer than the last CONTENT-SHAPING store mutation -- pure
-`verify` counter-ops are excluded from that bound, adrev-403), has zero
-`regression` rows, at least one `high_value` row, the live (non-offline)
-`kind:dreamed` row itself classifies `high_value` (adrev-305; #784: via the
-outcome path Δ_sat>0 OR the efficiency path -- memory matching the dump at
-materially fewer input tokens -- both encoded by classify_bucket()),
-AND that same row's paired noise-only corpus produced NO high-value
-proposal (`mining.noise_high_value` is not true -- adrev-305's own
-Acceptance sentence: a pipeline that manufactures memories from noise must
-not open the gate even when its signal-side output looks healthy).
-Fails closed -- same reason shape for "stale" as for "missing".
+`--gate` mode (the nightly integration gate, #1098 item 2.1) prints
+`{"gate", "code", "reason", "since"}` and exits 0 / 1 / 3 for
+open / closed / paused. It OPENS unless there is a supported regression:
+treatment fails a check the baseline passes, each in at least 2 of 3 runs,
+on a canary task or on a task whose seed changed since the previous run
+(see gate_check() and assess_row()). It CLOSES on that, or when the live
+dreamed task's noise-only corpus yielded a proposal (adrev-305). It PAUSES
+when nothing usable was measured -- missing, stale, broken or budget-aborted
+results, results older than dreaming's own last auto-integrated write, or a
+checked row that did not fully run. No high_value row is required (#1037);
+the buckets below are reporting only.
 
 Fail-loud contract (#1027): a single arm run that fails to execute is
 non-fatal -- it is recorded as a format error and the eval carries on, and
@@ -71,13 +69,13 @@ pipeline runs end-to-end, never that memory measurably helps in reality
 mine->analyze step also runs offline in this mode (reusing dream_analyze.py
 via `--offline <dir>/../offline-responses-dreamed`, a sibling of the outer
 `--offline` directory) and is explicitly labeled `"offline": true` in its
-results row -- `--gate` never accepts an offline-labeled `dreamed` row as
-satisfying its live-high_value requirement.
+results row.
 """
 from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import importlib
 import importlib.util
 import json
@@ -184,6 +182,15 @@ CLAUDE_BIN_FALLBACK_DIRS = (
     "/usr/local/bin",
 )
 
+# The gate's supported-regression rule (#1098 item 2.1): treatment fails a
+# check the baseline passes, each in at least 2 of 3 runs, with at least 3
+# scored runs per arm.
+SUPPORTED_FRACTION = 2 / 3
+MIN_SUPPORTED_RUNS = 3
+
+# `--gate` exit codes, one per state.
+GATE_EXIT_CODES = {"open": 0, "closed": 1, "paused": 3}
+
 # Content-shaping op-events (adrev-403): the gate's freshness bound is
 # scoped to these. Pure `verify` counter-ops -- the only thing auto-apply
 # itself can write -- are deliberately excluded, or the gate would
@@ -192,7 +199,7 @@ CONTENT_SHAPING_OPS = {"add", "supersede", "deprecate", "contradict"}
 
 # Filename suffix of the whole-run abort's marker (#1027). NOT ".jsonl": the
 # results glob must not see it as a results file, but gate_check() must see
-# it, or an abort that writes nothing leaves the gate reading the PREVIOUS
+# it (it pauses the gate), or an abort that writes nothing leaves the gate reading the PREVIOUS
 # night's file -- which, once its regression rows clear, is green. That is a
 # broken harness reporting "open", the one direction this gate must never
 # fail in.
@@ -201,8 +208,8 @@ HARNESS_BROKEN_MARKER_SUFFIX = ".harness-broken"
 
 # Hard total-cost stop (#1098 item 0.2). A run that aborts on budget writes
 # `evals/<date>.budget-abort`. Like the harness-broken marker it is not a
-# `.jsonl`, so no results glob picks it up; unlike it, gate_check() ignores
-# it: an abort leaves the gate state exactly as it was.
+# `.jsonl`, so no results glob picks it up. While it is at least as new as
+# the newest results, gate_check() returns `paused` (#1098 item 2.1).
 BUDGET_ABORT_MARKER_SUFFIX = ".budget-abort"
 # Preflight price of one `claude -p` arm session: the measured mean of the
 # 270-session run on 2026-10-04 ($20.97 / 270). Recalibrate when a run's
@@ -1431,7 +1438,7 @@ def run_task(
         )
         rows.append(_build_result_row(
             task_id=task_id, kind=kind, backbone=backbone, runs=runs, offline=offline_all_scores is not None,
-            arms=arms, bucket=bucket, delta=delta, delta_sat=delta_sat,
+            arms=arms, bucket=bucket, delta=delta, delta_sat=delta_sat, seed=seed_learnings,
         ))
     return rows
 
@@ -1468,13 +1475,10 @@ def downgrade_bucket_for_launch_failures(
     allowed to open the gate. This function is the single place that decides
     that, and it is monotone in exactly one direction:
 
-    * `regression` is PRESERVED. A regression is the strongest close-the-gate
-      signal there is, and gate_check() selects regressions by bucket name --
-      overwriting one deletes it from the gate's view. That is how the first
-      cut of this rule turned a real regression plus one flake into an OPEN
-      gate: `(True, "ok")` with the flake, `(False, "1 regression bucket
-      row(s) present")` without it. Preserving it is not an exception to the
-      invariant, it is the invariant.
+    * `regression` is PRESERVED, so the row still reads as one. (Since #1098
+      the gate reads pass rates through assess_row(), not bucket names, and
+      applies the same invariant there: a row with a failed launch shows its
+      regression or pauses the gate, never opens it.)
     * EVERY other bucket becomes `error` -- including `high_value`, which is
       the case that matters (a flake in the full_context arm can inflate
       Δ_sat off runs that never happened), and including the already-inert
@@ -1482,10 +1486,8 @@ def downgrade_bucket_for_launch_failures(
       easier to verify than a list, and `error` states in the row and the
       summary that the harness, not memory, produced this row.
 
-    `error` is a bucket classify_bucket() never returns and gate_check()
-    treats as neither high_value nor regression, so a downgraded row is
-    inert: it can cost the run its "at least one high_value row" (and, for
-    the live dreamed row, close the gate outright), never open it.
+    `error` is a bucket classify_bucket() never returns; it marks the row as
+    a harness observation in the JSONL and the summary.
 
     Returns (bucket, launch_failures) -- the summary string is returned even
     when the bucket is preserved, so the flake stays visible in the row and
@@ -1501,6 +1503,7 @@ def downgrade_bucket_for_launch_failures(
 def _build_result_row(
     *, task_id: str, kind: str, backbone: str, runs: int, offline: bool,
     arms: dict[str, dict[str, Any]], bucket: str, delta: float, delta_sat: float, extra: dict[str, Any] | None = None,
+    seed: Any = None,
 ) -> dict[str, Any]:
     token_delta = arms["treatment"]["mean_input_tokens"] + arms["treatment"]["mean_output_tokens"] - (
         arms["baseline"]["mean_input_tokens"] + arms["baseline"]["mean_output_tokens"]
@@ -1529,6 +1532,10 @@ def _build_result_row(
         "cost_usd": round(total_cost, 6),
         "bucket": bucket,
     }
+    if seed is not None:
+        # The gate checks a non-canary task only when this changed since the
+        # previous run (#1098 item 2.1).
+        row["seed_fingerprint"] = seed_fingerprint(seed)
     if launch_failures is not None:
         row["task_error"] = launch_failures
     if extra:
@@ -1775,6 +1782,8 @@ def run_dreamed_task(
         rows.append(_build_result_row(
             task_id=task_id, kind="dreamed", backbone=backbone, runs=runs, offline=offline,
             arms=arms, bucket=bucket, delta=delta, delta_sat=delta_sat,
+            # The dreamed task's seed is the learning mining produced tonight.
+            seed=follow_up_facts,
             extra={
                 "mining": {
                     "signal_proposals_written": len(signal_proposals),
@@ -1808,11 +1817,15 @@ def write_results(rows: list[dict[str, Any]], *, date: str) -> Path:
     return path
 
 
-def _find_latest_results_file() -> Path | None:
+def _results_files_by_mtime() -> list[Path]:
     d = evals_dir()
     if not d.is_dir():
-        return None
-    candidates = sorted(d.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+        return []
+    return sorted(d.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+
+
+def _find_latest_results_file() -> Path | None:
+    candidates = _results_files_by_mtime()
     return candidates[-1] if candidates else None
 
 
@@ -1858,12 +1871,21 @@ def budget_abort_marker_path(date: str) -> Path:
     return evals_dir() / f"{date}{BUDGET_ABORT_MARKER_SUFFIX}"
 
 
+def _find_latest_budget_abort_marker() -> Path | None:
+    d = evals_dir()
+    if not d.is_dir():
+        return None
+    candidates = sorted(d.glob(f"*{BUDGET_ABORT_MARKER_SUFFIX}"), key=lambda p: p.stat().st_mtime)
+    return candidates[-1] if candidates else None
+
+
 def write_budget_abort_marker(
     *, date: str, phase: str, cap_usd: float, spent_usd: float, sessions_run: int, detail: str,
 ) -> Path:
     """Record that a run stopped on budget. `phase` is `module-budget` (the
     30-day budget was already spent), `preflight` (the estimate exceeded the
-    cap) or `run` (the running total would cross it). The gate ignores it."""
+    cap) or `run` (the running total would cross it). It pauses the gate
+    until a later run writes results."""
     path = budget_abort_marker_path(date)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -1909,28 +1931,18 @@ def _read_results_file(path: Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def latest_content_shaping_mutation_epoch(learnings_root: Path) -> float | None:
-    """Max timestamp (epoch seconds) across every add/supersede/deprecate/
-    contradict op-event (and every legacy v1 row, which IS an add-
-    equivalent) in the store. Pure `verify` counter-ops are excluded
-    (adrev-403) -- the only op auto-apply itself can ever write, so
-    including it would make the gate self-close after every routine
-    reinforcement instead of only after a real content change.
+def latest_auto_integration_epoch(learnings_root: Path) -> float | None:
+    """Max timestamp (epoch seconds) across dreaming's OWN content-shaping
+    writes: add/supersede/deprecate/contradict op-events tagged `auto: true`
+    (the optimistic engine tags every write it makes, learnings_store.py
+    `_build_op_row`). These are the only writes that change what a re-run of
+    the eval would measure about dreaming, so they are the only ones that
+    make the results stale (#1098 item 2.1).
 
-    Resolution of adrev-opt-001 (P0): op-events carrying `auto: true` are
-    ALSO excluded here. Epic 3's optimistic engine tags every one of its
-    own content-shaping writes `auto: true` (extending the pre-existing
-    verify-only `auto` marker -- learnings_store.py `_build_op_row`,
-    adrev-opt-008); without this skip, the freshness bound below would
-    self-close the very gate that authorized last night's auto-integration
-    the moment that write landed -- a circular self-suspend that would trip
-    on the second productive night, every night thereafter. A NON-auto
-    (human/external) content-shaping op-event still counts and still forces
-    the gate stale, preserving adrev-403's original intent: the eval must
-    re-run after a REAL, human/external store change, just not after the
-    engine's own already-gated writes. Legacy v1 rows (no `op` field, and
-    therefore never an `auto` key either) are unaffected -- they always
-    count, exactly as before."""
+    Excluded on purpose: `verify` counter-ops (adrev-403), every non-auto
+    op-event, and legacy v1 rows. An agent's in-session `ccgm-learnings-log`
+    write has nothing to do with dreaming; before #1098 it made the eval
+    stale on 15 of the last 30 nights."""
     if not learnings_root.is_dir():
         return None
     latest: float | None = None
@@ -1957,136 +1969,177 @@ def latest_content_shaping_mutation_epoch(learnings_root: Path) -> float | None:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                op = obj.get("op")
-                if op is not None and op not in CONTENT_SHAPING_OPS:
-                    continue  # verify/other non-content-shaping op -- excluded
-                if obj.get("auto"):
-                    continue  # adrev-opt-001: the engine's OWN auto-integrated
-                              # write must not reset the clock that authorized it
-                ts = obj.get("timestamp")
-                if not ts:
+                if obj.get("op") not in CONTENT_SHAPING_OPS or obj.get("auto") is not True:
                     continue
-                epoch = learnings_store._parse_iso(ts)  # noqa: SLF001 -- same-package internal reuse
+                epoch = learnings_store._parse_iso(obj.get("timestamp") or "")  # noqa: SLF001 -- same-package internal reuse
                 if epoch and (latest is None or epoch > latest):
                     latest = epoch
     return latest
 
 
-def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float | None = None) -> tuple[bool, str]:
-    """Returns (open, reason). Fails closed on every branch: a harness-broken
-    marker newer than the latest results (#1027), missing
-    results, stale results (either bound), any regression row, no
-    high_value row, no LIVE dreamed row classifying high_value (adrev-305),
-    or that live dreamed row's paired noise-only corpus itself yielding a
-    high-value proposal (`mining.noise_high_value` -- adrev-305's Acceptance
-    sentence, the mining-side negative control that must ALSO hold before
-    auto-apply's gate can open) -- exactly one reason string per failure
-    mode, "stale" handled identically to "missing".
+def seed_fingerprint(seed: Any) -> str:
+    """Stable short hash of a task's seed learnings (or, for the dreamed
+    task, the mined proposal it applied). The gate compares it across runs
+    to tell whether a task's seed changed since the last run."""
+    canonical = json.dumps(seed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
-    #784: the live-dreamed check no longer independently re-tests Δ_sat>0.
-    "high_value" now covers BOTH the outcome path (Δ_sat>0) and the
-    efficiency path (memory matches the full-context dump within noise at
-    materially fewer input tokens); the explicit Δ_sat>0 clause that used to
-    live here is subsumed by classify_bucket()'s two-path definition, so a
-    dreamed row that is high_value via efficiency (Δ_sat can be 0) now opens
-    the gate. The judge-error and noise-control guards below are unchanged."""
+
+def _iso_from_epoch(epoch: float) -> str:
+    return learnings_store._iso_from_epoch(epoch)  # noqa: SLF001 -- same-package internal reuse
+
+
+def _scored_runs(arm: dict[str, Any], runs: int) -> int:
+    """Runs of one arm that executed AND were judged: the denominator of its
+    `pass_rate` (_aggregate_arm_runs excludes launch and judge failures)."""
+    failed = round(float(arm.get("format_error_rate", 0) or 0) * runs)
+    judge_failed = round(float(arm.get("judge_error_rate", 0) or 0) * runs)
+    return max(0, runs - failed - judge_failed)
+
+
+def assess_row(row: dict[str, Any]) -> str:
+    """One checked row's verdict for the gate: `regression`, `ok`, or
+    `unmeasured`.
+
+    A supported regression: the baseline arm passes the task's check in at
+    least 2 of 3 runs (SUPPORTED_FRACTION) and the treatment arm fails it in
+    at least 2 of 3, each arm with at least MIN_SUPPORTED_RUNS scored runs.
+    Pass rates, not judge-score deltas: the old -1.0 mean-score rule fired on
+    one-point dips of a single backbone (RCA R1).
+
+    `unmeasured` covers a row with too few runs, or any failed launch or
+    judge error in either arm. A regression the surviving runs still show
+    stands; otherwise the row cannot vouch for memory and the gate pauses.
+    This keeps #1027's invariant: a launch failure never moves the gate
+    toward open."""
+    runs = int(row.get("runs", 0) or 0)
+    baseline = row.get("baseline") or {}
+    treatment = row.get("treatment") or {}
+    n_base, n_treat = _scored_runs(baseline, runs), _scored_runs(treatment, runs)
+    if n_base >= MIN_SUPPORTED_RUNS and n_treat >= MIN_SUPPORTED_RUNS:
+        base_pass = round(float(baseline.get("pass_rate", 0) or 0) * n_base)
+        treat_fail = n_treat - round(float(treatment.get("pass_rate", 0) or 0) * n_treat)
+        if base_pass >= SUPPORTED_FRACTION * n_base and treat_fail >= SUPPORTED_FRACTION * n_treat:
+            return "regression"
+    complete = n_base == runs and n_treat == runs and runs >= MIN_SUPPORTED_RUNS
+    return "ok" if complete else "unmeasured"
+
+
+def _row_key(row: dict[str, Any]) -> tuple[str, str]:
+    return str(row.get("task_id")), str(row.get("backbone"))
+
+
+def _checked_rows(rows: list[dict[str, Any]], previous: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rows the regression rule applies to: every canary, and every task
+    whose seed changed since the previous run. A row with no fingerprint on
+    either side cannot prove its seed stayed the same, so it is checked."""
+    before = {_row_key(r): r.get("seed_fingerprint") for r in previous}
+    checked = []
+    for row in rows:
+        fingerprint = row.get("seed_fingerprint")
+        prior = before.get(_row_key(row))
+        if row.get("kind") == "canary" or not fingerprint or not prior or fingerprint != prior:
+            checked.append(row)
+    return checked
+
+
+def _gate(state: str, code: str, reason: str, *, since: str | None = None) -> dict[str, Any]:
+    return {"state": state, "code": code, "reason": reason, "since": since}
+
+
+def gate_check(*, freshness_days: int = DEFAULT_EVAL_FRESHNESS_DAYS, now: float | None = None) -> dict[str, Any]:
+    """The integration gate (#1098 item 2.1). Returns
+    `{"state", "code", "reason", "since"}` with state one of:
+
+    * `open`   -- no supported regression. No high_value row and no live
+                  dreamed row is required (#1037): value is measured by the
+                  recurrence metric, not by this gate.
+    * `closed` -- a supported regression (see assess_row) on a checked row
+                  (see _checked_rows), or the live dreamed row's noise-only
+                  corpus yielded a proposal (adrev-305). `since` is the mtime
+                  of the results file before this one -- the last run that
+                  could have been green -- or None when there is none; the
+                  breaker implicates batches integrated after it.
+    * `paused` -- nothing usable was measured: a harness-broken marker or a
+                  budget-abort marker at least as new as the newest results,
+                  no results, results past the freshness bound, results
+                  older than dreaming's own last auto-integrated write, an
+                  empty file, or a checked row that did not fully run. An
+                  infra state: it pauses integration and is never a breaker
+                  content anomaly.
+
+    Codes: ok, regression, noise_contamination, harness_broken,
+    budget_abort, no_results, results_stale, stale_own_writes,
+    results_empty, unmeasured_rows."""
     now = now if now is not None else time.time()
+    results = _results_files_by_mtime()
+    latest = results[-1] if results else None
+    latest_mtime = latest.stat().st_mtime if latest is not None else None
 
-    latest = _find_latest_results_file()
-
-    # #1027: a whole-run abort writes no results file, so without this branch
-    # the gate would silently fall back to the PREVIOUS run's file for the
-    # whole freshness window -- opening on a green stale file while tonight's
-    # harness is provably broken. The marker is newer than any results file
-    # only while no successful run has happened since the abort.
     # `>=`, not `>`: on a filesystem with 1-second mtime granularity a marker
     # written in the same second as the newest results must not lose the tie.
     marker = _find_latest_harness_broken_marker()
-    if marker is not None and (latest is None or marker.stat().st_mtime >= latest.stat().st_mtime):
+    if marker is not None and (latest_mtime is None or marker.stat().st_mtime >= latest_mtime):
         broken_date = marker.name[: -len(HARNESS_BROKEN_MARKER_SUFFIX)] or "an unknown date"
-        return False, f"harness broken: every agent run failed to execute on {broken_date}"
+        return _gate("paused", "harness_broken", f"harness broken: every agent run failed to execute on {broken_date}")
+
+    abort = _find_latest_budget_abort_marker()
+    if abort is not None and (latest_mtime is None or abort.stat().st_mtime >= latest_mtime):
+        abort_date = abort.name[: -len(BUDGET_ABORT_MARKER_SUFFIX)] or "an unknown date"
+        return _gate("paused", "budget_abort", f"the eval run on {abort_date} stopped on its cost cap; no results since")
 
     if latest is None:
-        return False, "no results"
+        return _gate("paused", "no_results", "no results")
 
-    results_mtime = latest.stat().st_mtime
-    if now - results_mtime > freshness_days * 86400:
-        return False, f"stale: results file {latest.name} is older than the freshness bound ({freshness_days}d)"
+    if now - latest_mtime > freshness_days * 86400:
+        return _gate(
+            "paused", "results_stale",
+            f"results file {latest.name} is older than the freshness bound ({freshness_days}d)",
+        )
 
-    last_mutation = latest_content_shaping_mutation_epoch(_learnings_root_for_gate())
-    if last_mutation is not None and results_mtime < last_mutation:
-        return False, "stale: results predate the last content-shaping store mutation (add/supersede/deprecate/contradict)"
+    last_auto = latest_auto_integration_epoch(_learnings_root_for_gate())
+    if last_auto is not None and latest_mtime < last_auto:
+        return _gate(
+            "paused", "stale_own_writes",
+            f"dreaming integrated learnings after {latest.name} was written; the results no longer describe the store",
+        )
 
     rows = _read_results_file(latest)
     if not rows:
-        return False, "results file is empty"
+        return _gate("paused", "results_empty", f"results file {latest.name} is empty")
 
-    # Both selections below are by bucket NAME, which is what makes
-    # downgrade_bucket_for_launch_failures()'s monotonicity load-bearing
-    # rather than cosmetic (#1027). `error` matches neither: a row whose
-    # harness misbehaved can cost the run its high_value row but can never
-    # supply one. `regression` is preserved through that downgrade for the
-    # same reason read from the other side -- a regression the override
-    # renamed would vanish from this line and open the gate.
-    regressions = [r for r in rows if r.get("bucket") == "regression"]
+    previous = _read_results_file(results[-2]) if len(results) > 1 else []
+    since = _iso_from_epoch(results[-2].stat().st_mtime) if len(results) > 1 else None
+    checked = _checked_rows(rows, previous)
+    verdicts = [(row, assess_row(row)) for row in checked]
+
+    regressions = [row for row, verdict in verdicts if verdict == "regression"]
     if regressions:
-        return False, f"{len(regressions)} regression bucket row(s) present"
-
-    high_value = [r for r in rows if r.get("bucket") == "high_value"]
-    if not high_value:
-        return False, "no high_value rows"
-
-    live_dreamed_high_value = [
-        r for r in rows
-        if r.get("kind") == "dreamed" and not r.get("offline") and r.get("bucket") == "high_value"
-    ]
-    if not live_dreamed_high_value:
-        return False, "kind:dreamed task has not classified high_value under a live (non-offline) run"
-
-    # Stage-2 #771 Blocking fix: classify_bucket() is a judge-error-unaware
-    # pure function -- a judge-API transport/parse failure on one arm
-    # (judge_output()'s fabricated score=0.0 sentinel, EXCLUDED from that
-    # arm's mean_score by _aggregate_arm_runs() but still capable of
-    # driving the mean to a degenerate value when every run in the arm
-    # failed) can still produce a high_value-shaped delta/delta_sat that
-    # LOOKS healthy but rests on no real judgment at all. Refuse to trust
-    # any live dreamed high_value row where ANY of its three arms carries
-    # a nonzero judge_error_rate -- mirrors dream_analyze.py's own
-    # accepted "abort loud rather than trust a coercible sentinel" pattern
-    # (ApiCallError, dream_analyze.py:618-702) at the one point this
-    # module's own judge sentinel is actually consumed as evidence. A row
-    # with no judge_error_rate field at all (e.g. a pre-fix results file)
-    # is treated as "no evidence of a judge failure", matching the same
-    # graceful-degradation convention the noise-mining check below uses.
-    judge_unreliable = [
-        r for r in live_dreamed_high_value
-        if any(float((r.get(arm) or {}).get("judge_error_rate", 0) or 0) > 0 for arm in ARMS)
-    ]
-    if judge_unreliable:
-        return False, (
-            "live kind:dreamed high_value row has a nonzero judge-error rate in at least one arm -- "
-            "classification is not trustworthy (judge API transport/parse failures were silently "
-            "present; Stage-2 #771)"
+        names = ", ".join(f"{r.get('task_id')} on {r.get('backbone')}" for r in regressions)
+        return _gate(
+            "closed", "regression",
+            f"supported regression (treatment fails a check baseline passes, >= 2 of 3 runs): {names}",
+            since=since,
         )
 
-    # adrev-305 Acceptance: the live dreamed task classifying high_value
-    # with Δ_sat>0 is necessary but NOT sufficient -- the paired noise-only
-    # negative-control corpus mined alongside it must ALSO have yielded no
-    # high-value proposal. mining.noise_high_value records exactly that;
-    # True here is a caught mining false-positive/poisoning bug, so the
-    # gate must stay closed even though the signal-side row looks healthy.
-    # A row with no `mining` block at all (e.g. a pre-adrev-305 results
-    # file) is treated as "no evidence of contamination", not as a hard
-    # failure -- the field is always populated by run_dreamed_task() in
-    # real usage; only synthetic/legacy rows can lack it.
-    noise_contaminated = [r for r in live_dreamed_high_value if bool((r.get("mining") or {}).get("noise_high_value"))]
-    if noise_contaminated:
-        return False, (
-            "noise-only negative-control corpus yielded a high-value proposal -- "
-            "mining false-positive (adrev-305)"
+    noisy = [r for r in rows if r.get("kind") == "dreamed" and not r.get("offline")
+             and (r.get("mining") or {}).get("noise_high_value")]
+    if noisy:
+        return _gate(
+            "closed", "noise_contamination",
+            "noise-only negative-control corpus yielded a proposal -- mining false-positive (adrev-305)",
+            since=since,
         )
 
-    return True, "ok"
+    unmeasured = [row for row, verdict in verdicts if verdict == "unmeasured"]
+    if unmeasured:
+        names = ", ".join(f"{r.get('task_id')} on {r.get('backbone')}" for r in unmeasured)
+        return _gate(
+            "paused", "unmeasured_rows",
+            f"checked row(s) with too few runs, failed launches or judge errors: {names}",
+        )
+
+    return _gate("open", "ok", f"no supported regression in {latest.name} ({len(checked)} checked row(s))")
 
 
 # ---------------------------------------------------------------------------
@@ -2141,8 +2194,8 @@ def render_summary_table(rows: list[dict[str, Any]]) -> str:
     if bucket_counts.get("error"):
         lines.append(
             "bucket `error` -- the row's own orchestration failed, or an arm had a run that never "
-            "executed; either way it is a harness observation, not a memory measurement, and the "
-            "gate treats it as neither high_value nor regression (#1027)"
+            "executed; either way it is a harness observation, not a memory measurement. A checked "
+            "row like this pauses the gate unless it still shows a regression (#1027, #1098)"
         )
     return "\n".join(lines)
 
@@ -2173,7 +2226,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--backbone", metavar="A,B", help="comma-separated model list (default: configured map_model,reduce_model)")
     p.add_argument("--judge-model", metavar="MODEL", help="default: configured reduce_model")
     p.add_argument("--offline", metavar="DIR", help="canned judge/arm scores + analyzer responses; no network, no API key")
-    p.add_argument("--gate", action="store_true", help="check the latest results file against the auto-apply gate contract; print JSON, exit 0/1")
+    p.add_argument(
+        "--gate", action="store_true",
+        help="check the latest results file against the integration gate; print JSON, exit 0 open / 1 closed / 3 paused",
+    )
     p.add_argument("--freshness-days", type=int, default=DEFAULT_EVAL_FRESHNESS_DAYS)
     p.add_argument("--date", metavar="YYYY-MM-DD", help="override the results filename date (default: today)")
     p.add_argument("--claude-bin", default=os.environ.get("CCGM_EVAL_CLAUDE_BIN", "claude"))
@@ -2225,9 +2281,9 @@ def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
 
     if args.gate:
-        is_open, reason = gate_check(freshness_days=args.freshness_days)
-        print(json.dumps({"gate": "open" if is_open else "closed", "reason": reason}))
-        return 0 if is_open else 1
+        gate = gate_check(freshness_days=args.freshness_days)
+        print(json.dumps({"gate": gate["state"], "code": gate["code"], "reason": gate["reason"], "since": gate["since"]}))
+        return GATE_EXIT_CODES[gate["state"]]
 
     da.load_env()
     cfg = da.load_config()
