@@ -421,6 +421,12 @@ DEFAULT_OPTIMISTIC_INTEGRATION: dict[str, Any] = {
     "circuit_breaker_auto_resume_nights": 7,
     "rolling_add_rate_window_nights": 14,
     "rolling_add_rate_max": 40,
+    # Eval freshness for the integration gate (#1098 item 2.1): results stay
+    # fresh while they are at most `eval_freshness_days` old AND dreaming
+    # has made at most `max_unevaluated_writes` auto writes since them.
+    # Beyond either bound the gate pauses until the next (weekly) eval.
+    "eval_freshness_days": 7,
+    "max_unevaluated_writes": 15,
     # Off until the Phase 4 smoke test replaces the 270-session eval (one
     # full run cost ~$21). The step stays in the chain; only an explicit
     # `eval_refresh_enabled: true` runs it, and then under the hard

@@ -34,8 +34,14 @@ optimistic_integration is shadow or active):
   no_recent_success   R  no good run in 36h (or ever)
   success_aging       Y  last good run 26-36h ago
   analyze_failed      R  the analyze step exited non-zero this run
-  breaker_suspended   R  suspended 3+ nights   Y  suspended 0-2 nights
-  gate_closed         R  closed 3+ nights      Y  closed 1-2 nights
+  breaker_suspended   R  suspended 3+ nights   Y  suspended 0-2 nights. The fix
+                          says what clears it: N nights with no content anomaly
+                          (lib/breaker.py), and the date that falls on.
+  gate_closed         R  closed 3+ nights      Y  closed 1-2 nights (a supported
+                          regression)
+  gate_paused         Y  the gate is paused (no usable eval: missing, stale,
+                          broken, budget-aborted). Never red by itself; the fix
+                          names the cause.
   no_terminal_outcomes R oldest pending is 7+ nights old and no proposal in the
                           last 7 nights was integrated, accepted or rejected
   pending_backlog     Y  oldest pending is 3+ nights old (and not red above)
@@ -54,8 +60,8 @@ stays analyze_failed red even during a budget pause.
   eval_budget_abort   R  an eval budget-abort marker from the last 7 days that
                           no later results file follows
 
-Python 3 standard library only, plus dream_analyze and rollout_mode from this
-directory.
+Python 3 standard library only, plus dream_analyze, rollout_mode and breaker
+from this directory.
 """
 from __future__ import annotations
 
@@ -86,10 +92,18 @@ SUCCESS_MARKER = "last-success.json"
 PRIORITY = [
     "no_recent_success", "analyze_failed", "breaker_suspended", "gate_closed",
     "no_terminal_outcomes", "spend_near_budget", "eval_budget_abort",
-    "success_aging", "pending_backlog", "budget_paused", "daily_cap_reached",
+    "gate_paused", "success_aging", "pending_backlog", "budget_paused", "daily_cap_reached",
 ]
 
-GateFn = Callable[..., "tuple[bool, str]"]
+# Audit `anomaly_recorded` reasons dream-daily.sh writes on a night the gate
+# did not open. `red_eval_gate` is the pre-#1098 name.
+GATE_NIGHT_REASONS = frozenset({
+    "red_eval_gate", "eval_gate_paused", "harness_failure", "eval_regression", "eval_regression_unattributed",
+})
+
+# Returns {"state": "open"|"closed"|"paused", "code", "reason", ...}; see
+# memory_eval.gate_check().
+GateFn = Callable[..., "dict[str, Any]"]
 
 
 def _iso(dt: datetime) -> str:
@@ -172,7 +186,7 @@ def _resume_date(costs: "list[tuple[str, float, str]]", budget: float, today: da
     return (today + timedelta(days=31)).isoformat()
 
 
-def _default_gate(**_kw: Any) -> "tuple[bool, str]":
+def _default_gate(**_kw: Any) -> "dict[str, Any]":
     sys.path.insert(0, str(_HERE.parent / "eval"))
     import memory_eval  # noqa: PLC0415 -- heavy; only the nightly chain needs it
 
@@ -189,6 +203,27 @@ def _reason(code: str, severity: str, message: str, fix: str) -> "dict[str, str]
     return {"code": code, "severity": severity, "message": message, "fix": fix}
 
 
+def _paused_fix(code: str, eval_refresh_enabled: bool) -> str:
+    """The fix line for a paused gate, naming the actual cause."""
+    if eval_refresh_enabled:
+        no_fresh = ("the next weekly eval-refresh writes fresh results; check it with "
+                    "grep eval-refresh ~/.claude/logs/dreaming-daily-$(date -u +%F).log")
+    else:
+        no_fresh = ("no fresh eval: eval-refresh is disabled until the Phase 4 smoke test lands "
+                    "(optimistic_integration.eval_refresh_enabled is false), so integration stays paused")
+    fixes = {
+        "no_results": no_fresh,
+        "results_stale": no_fresh,
+        "stale_own_writes": ("dreaming made more auto writes since the last eval than max_unevaluated_writes "
+                             f"allows (default 15); {no_fresh}"),
+        "harness_broken": "the eval harness launched no agent run; read the first failure in ~/.claude/dreaming/evals/*.harness-broken",
+        "budget_abort": "the last eval stopped on its cost cap; see grep eval_ ~/.claude/dreaming/config.json and tail ~/.claude/dreaming/cost.log",
+        "unmeasured_rows": "the last eval had failed launches or judge errors on a checked task, so it cannot rule out a regression; re-run bash ~/.claude/bin/dream-eval.sh",
+        "results_empty": "the newest results file is empty; re-run bash ~/.claude/bin/dream-eval.sh",
+    }
+    return fixes.get(code, "bash ~/.claude/bin/dream-eval.sh --gate")
+
+
 def compute(
     dreaming: Path,
     now: datetime,
@@ -198,6 +233,7 @@ def compute(
 ) -> "dict[str, Any]":
     """Build the health dict from the files under `dreaming`. Never raises on
     bad input files; each unreadable source reads as absent."""
+    import breaker  # noqa: PLC0415
     import dream_analyze as da  # noqa: PLC0415
     import rollout_mode  # noqa: PLC0415
 
@@ -302,7 +338,7 @@ def compute(
                 last_applied = d
             if d >= window_start:
                 applied_in_window = True
-        elif row.get("outcome") == "anomaly_recorded" and row.get("reason") == "red_eval_gate":
+        elif row.get("outcome") == "anomaly_recorded" and row.get("reason") in GATE_NIGHT_REASONS:
             gate_days.add(d)
     nights_since_integration = _nights(today, last_applied) if last_applied else None
 
@@ -313,21 +349,44 @@ def compute(
     since = opt_state.get("suspended_at") if suspended else None
     since_dt = _parse(since)
     breaker_nights = _nights(today, since_dt.date() if since_dt else None) if suspended else 0
-    breaker = {"suspended": suspended, "since": since if suspended else None, "nights_suspended": breaker_nights}
+    # Resume rule (#1098 item 2.2): N nights with no CONTENT anomaly, checked
+    # at the top of every chain. Infra anomalies (a paused gate) never hold it.
+    try:
+        resume_nights = int((opt_cfg if isinstance(opt_cfg, dict) else {}).get(
+            "circuit_breaker_auto_resume_nights", breaker.DEFAULT_RESUME_NIGHTS))
+    except (TypeError, ValueError):
+        resume_nights = breaker.DEFAULT_RESUME_NIGHTS
+    entries = breaker.normalize_anomaly_log(opt_state.get("anomaly_log"), audit)
+    due = breaker.resume_due_epoch(opt_state, entries, resume_nights=resume_nights) if suspended else None
+    resume_due = datetime.fromtimestamp(due, tz=timezone.utc).date() if due is not None else None
+    breaker_info = {
+        "suspended": suspended, "since": since if suspended else None, "nights_suspended": breaker_nights,
+        "resume_due": resume_due.isoformat() if resume_due else None,
+    }
     if suspended and integration_on:
         red = breaker_nights >= BREAKER_RED_NIGHTS
+        rule = f"it resumes after {resume_nights} night(s) with no content anomaly"
+        if resume_due is None:
+            fix = (f"{rule}, but its suspension time is unreadable, so it will not resume on its own; "
+                   "check ~/.claude/dreaming/state/optimistic.json")
+        elif resume_due <= today:
+            fix = f"{rule}; that has passed, so the next nightly run resumes it (bash ~/.claude/bin/dream-daily.sh)"
+        else:
+            fix = (f"{rule}; with none before then, the nightly run on {resume_due.isoformat()} resumes it. "
+                   "Content anomalies: grep '\"class\": \"content\"' ~/.claude/dreaming/state/apply-audit.jsonl")
         reasons.append(_reason(
             "breaker_suspended", "red" if red else "yellow",
             f"integration circuit breaker suspended {breaker_nights} night(s) since {since}; nothing integrates",
-            "python3 ~/.claude/lib/apply_dream_proposal.py optimistic-resume"))
+            fix))
 
     # --- gate --------------------------------------------------------------
     if not integration_on:
         gate: dict[str, Any] = {"state": "off", "reason": "optimistic integration is off", "consecutive_closed_nights": 0}
     else:
+        gate_code = None
         try:
-            is_open, why = (gate_fn or _default_gate)()
-            gate_state, gate_reason = ("open" if is_open else "closed"), str(why)
+            result = (gate_fn or _default_gate)()
+            gate_state, gate_code, gate_reason = str(result["state"]), result.get("code"), str(result.get("reason"))
         except Exception as exc:  # noqa: BLE001 -- health must never crash the chain
             gate_state, gate_reason = "unknown", f"gate check failed: {exc}"
         streak = 0
@@ -336,8 +395,16 @@ def compute(
             while cursor in gate_days:
                 streak += 1
                 cursor -= timedelta(days=1)
-        gate = {"state": gate_state, "reason": gate_reason, "consecutive_closed_nights": streak}
-        if streak:
+        gate = {"state": gate_state, "code": gate_code, "reason": gate_reason, "consecutive_closed_nights": streak}
+        if gate_state == "paused":
+            # Infra, not content: yellow however long it lasts. The fix names
+            # the cause, which is usually that no eval has run.
+            refresh_on = bool((opt_cfg if isinstance(opt_cfg, dict) else {}).get("eval_refresh_enabled", False))
+            nights = f" {streak} night(s)" if streak else ""
+            reasons.append(_reason(
+                "gate_paused", "yellow", f"eval gate paused{nights}, nothing integrates: {gate_reason}",
+                _paused_fix(str(gate_code), refresh_on)))
+        elif streak:
             reasons.append(_reason(
                 "gate_closed", "red" if streak >= GATE_RED_NIGHTS else "yellow",
                 f"eval gate closed {streak} night(s): {gate_reason}",
@@ -405,7 +472,7 @@ def compute(
         "last_success_at": last_success,
         "nights_since_last_integration": nights_since_integration,
         "gate": gate,
-        "breaker": breaker,
+        "breaker": breaker_info,
         "pending_count": pending,
         "oldest_pending": oldest_pending.isoformat() if oldest_pending else None,
         "spend_7d": spend_7d,

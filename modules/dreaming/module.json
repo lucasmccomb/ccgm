@@ -68,6 +68,11 @@
       "type": "lib",
       "template": false
     },
+    "lib/breaker.py": {
+      "target": "lib/breaker.py",
+      "type": "lib",
+      "template": false
+    },
     "lib/scorecard.py": {
       "target": "lib/scorecard.py",
       "type": "lib",

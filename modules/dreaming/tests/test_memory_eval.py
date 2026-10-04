@@ -22,6 +22,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -1391,9 +1392,11 @@ class LiveJudgeOutageIntegrationTests(unittest.TestCase):
         )
         me.write_results([row], date=me.today_iso())
 
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open, reason)
-        self.assertIn("judge", reason)
+        # A row whose baseline was never judged measured nothing about
+        # memory: the gate pauses instead of reading it either way.
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "paused", gate)
+        self.assertEqual(gate["code"], "unmeasured_rows")
 
     def test_all_arms_clean_judge_calls_still_open_the_gate(self):
         """The paired positive case: the SAME integration shape (three
@@ -1402,7 +1405,7 @@ class LiveJudgeOutageIntegrationTests(unittest.TestCase):
         arm genuinely earns a distinct score in call order -- must still
         classify high_value and open the gate. The fix must not make the
         gate impossible to open."""
-        runs = 2
+        runs = 3
         call_state = {"n": 0}
         # baseline scores low, treatment high, full_context mid -- a
         # genuine high_value + delta_sat>0 shape (same canonical numbers
@@ -1459,14 +1462,42 @@ class LiveJudgeOutageIntegrationTests(unittest.TestCase):
         )
         me.write_results([row], date=me.today_iso())
 
-        is_open, reason = me.gate_check()
-        self.assertTrue(is_open, reason)
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "open", gate)
 
 
 # ---------------------------------------------------------------------------
-# --gate (adrev-006/adrev-403/adrev-305): freshness (both bounds, both
-# directions), regression, no-high-value, and the live-dreamed requirement.
+# --gate (#1098 item 2.1): the gate OPENS unless a supported regression
+# exists, CLOSES on one, and PAUSES on anything that means "nothing usable
+# was measured" (missing, stale, broken, budget-aborted, or a checked row the
+# harness did not fully run). Value is not the gate's question any more: no
+# high_value row and no live dreamed row are required (#1037).
 # ---------------------------------------------------------------------------
+
+REPLAY_FIXTURES = HERE / "fixtures" / "evals"
+
+
+def _gate_arm(pass_rate: float, *, runs: int = 3, failed: int = 0, judge_failed: int = 0) -> dict:
+    return {
+        "mean_score": round(pass_rate * 10, 2), "pass_rate": pass_rate, "runs": runs,
+        "format_error_rate": failed / runs, "judge_error_rate": judge_failed / runs,
+    }
+
+
+def _gate_row(
+    task_id: str, kind: str, *, baseline: float = 1.0, treatment: float = 1.0, runs: int = 3,
+    seed: str | None = "seed-a", backbone: str = "m", **extra,
+) -> dict:
+    row = {
+        "task_id": task_id, "kind": kind, "backbone": backbone, "runs": runs, "offline": False,
+        "baseline": _gate_arm(baseline, runs=runs), "treatment": _gate_arm(treatment, runs=runs),
+        "full_context": _gate_arm(1.0, runs=runs), "bucket": "redundant",
+    }
+    if seed is not None:
+        row["seed_fingerprint"] = seed
+    row.update(extra)
+    return row
+
 
 class GateTests(unittest.TestCase):
     def setUp(self):
@@ -1474,229 +1505,342 @@ class GateTests(unittest.TestCase):
         self.evals_dir = me.evals_dir()
         self.evals_dir.mkdir(parents=True, exist_ok=True)
 
-    def _healthy_rows(self, *, dreamed_offline: bool = False, dreamed_delta_sat: float = 2.0) -> list[dict]:
-        return [
-            {"task_id": "uplift-01", "kind": "uplift", "bucket": "high_value", "offline": False, "delta_sat": 2.0},
-            {
-                "task_id": "dreamed-01", "kind": "dreamed", "bucket": "high_value",
-                "offline": dreamed_offline, "delta_sat": dreamed_delta_sat,
-            },
-        ]
-
-    def _write_results(self, rows: list[dict], *, mtime_offset_s: float | None = None) -> Path:
-        path = self.evals_dir / "2026-07-02.jsonl"
-        with path.open("w", encoding="utf-8") as fh:
-            for r in rows:
-                fh.write(json.dumps(r) + "\n")
-        if mtime_offset_s is not None:
-            target = time.time() + mtime_offset_s
-            os.utime(path, (target, target))
+    def _write(self, name: str, rows: list[dict], *, age_s: float = 0.0) -> Path:
+        path = self.evals_dir / name
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        target = time.time() - age_s
+        os.utime(path, (target, target))
         return path
 
-    def test_no_results_on_clean_machine(self):
-        # evals_dir exists but is empty (setUp already created it).
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertEqual(reason, "no results")
+    def _quiet_rows(self) -> list[dict]:
+        """Nothing regresses, nothing is high_value: the shape every live
+        file since 2026-09-02 has, which the old gate could never open on."""
+        return [
+            _gate_row("uplift-01", "uplift", baseline=1.0, treatment=1.0),
+            _gate_row("canary-01", "canary", baseline=1.0, treatment=1.0),
+            _gate_row("dreamed-01", "dreamed", baseline=0.0, treatment=0.0,
+                      mining={"noise_high_value": False}),
+        ]
 
-    def test_no_results_when_evals_dir_absent_entirely(self):
+    # -- open ----------------------------------------------------------------
+    def test_quiet_results_open_without_any_high_value_row(self):
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=3600)
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "open", gate)
+        self.assertEqual(gate["code"], "ok")
+
+    def test_offline_dreamed_row_is_not_required_to_be_live(self):
+        rows = self._quiet_rows()
+        rows[-1]["offline"] = True
+        self._write("2026-09-30.jsonl", rows, age_s=3600)
+        self.assertEqual(me.gate_check()["state"], "open")
+
+    def test_replayed_live_results_open(self):
+        """RCA acceptance: live result files the old gate kept closed (no
+        high_value row) open the new one. The 2026-10-04 live file was lost
+        to an offline smoke run, so 2026-09-26 stands in for it."""
+        for name in ("2026-09-26.jsonl", "2026-09-10.jsonl"):
+            with self.subTest(name=name):
+                for stale in self.evals_dir.glob("*"):
+                    stale.unlink()
+                rows = me._read_results_file(REPLAY_FIXTURES / name)  # noqa: SLF001
+                self.assertEqual(len(rows), 18)
+                self._write(name, rows, age_s=3600)
+                gate = me.gate_check()
+                self.assertEqual(gate["state"], "open", gate)
+
+    # -- closed --------------------------------------------------------------
+    def test_canary_failing_two_of_three_treatment_runs_closes(self):
+        """RCA acceptance: a canary fails in 2 of 3 treatment runs and passes
+        every baseline run."""
+        rows = self._quiet_rows() + [_gate_row("canary-02", "canary", baseline=1.0, treatment=1 / 3)]
+        self._write("2026-09-30.jsonl", rows, age_s=3600)
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "closed", gate)
+        self.assertEqual(gate["code"], "regression")
+        self.assertIn("canary-02", gate["reason"])
+
+    def test_one_failing_treatment_run_of_three_is_noise_not_a_regression(self):
+        rows = self._quiet_rows() + [_gate_row("canary-02", "canary", baseline=1.0, treatment=2 / 3)]
+        self._write("2026-09-30.jsonl", rows, age_s=3600)
+        self.assertEqual(me.gate_check()["state"], "open")
+
+    def test_a_check_baseline_does_not_pass_is_never_a_regression(self):
+        rows = self._quiet_rows() + [_gate_row("canary-02", "canary", baseline=1 / 3, treatment=0.0)]
+        self._write("2026-09-30.jsonl", rows, age_s=3600)
+        self.assertEqual(me.gate_check()["state"], "open")
+
+    def test_regression_on_a_task_whose_seed_changed_since_the_last_run_closes(self):
+        self._write("2026-09-22.jsonl", [_gate_row("uplift-01", "uplift", seed="seed-a")], age_s=8 * 86400)
+        self._write("2026-09-30.jsonl", [_gate_row("uplift-01", "uplift", seed="seed-b", treatment=0.0)], age_s=3600)
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "closed", gate)
+
+    def test_regression_on_a_task_whose_seed_did_not_change_is_out_of_scope(self):
+        self._write("2026-09-22.jsonl", [_gate_row("uplift-01", "uplift", seed="seed-a")], age_s=8 * 86400)
+        self._write("2026-09-30.jsonl", [_gate_row("uplift-01", "uplift", seed="seed-a", treatment=0.0)], age_s=3600)
+        self.assertEqual(me.gate_check()["state"], "open")
+
+    def test_a_row_with_no_seed_fingerprint_counts_as_changed(self):
+        """Results written before fingerprints existed cannot prove the seed
+        stayed the same, so their regressions still count."""
+        self._write("2026-09-22.jsonl", [_gate_row("uplift-01", "uplift", seed=None)], age_s=8 * 86400)
+        self._write("2026-09-30.jsonl", [_gate_row("uplift-01", "uplift", seed=None, treatment=0.0)], age_s=3600)
+        self.assertEqual(me.gate_check()["state"], "closed")
+
+    def test_closed_names_the_previous_results_file_time_as_since(self):
+        previous = self._write("2026-09-22.jsonl", self._quiet_rows(), age_s=8 * 86400)
+        self._write("2026-09-30.jsonl", [_gate_row("canary-02", "canary", treatment=0.0)], age_s=3600)
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "closed")
+        self.assertEqual(gate["since"], me._iso_from_epoch(previous.stat().st_mtime))  # noqa: SLF001
+
+    def test_closed_with_no_previous_results_has_no_since(self):
+        self._write("2026-09-30.jsonl", [_gate_row("canary-02", "canary", treatment=0.0)], age_s=3600)
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "closed")
+        self.assertIsNone(gate["since"])
+
+    def test_noise_corpus_yielding_a_proposal_closes(self):
+        rows = self._quiet_rows()
+        rows[-1]["mining"] = {"noise_proposals_written": 1, "noise_high_value": True}
+        self._write("2026-09-30.jsonl", rows, age_s=3600)
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "closed")
+        self.assertEqual(gate["code"], "noise_contamination")
+
+    # -- paused --------------------------------------------------------------
+    def test_no_results_on_clean_machine_pauses(self):
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "paused")
+        self.assertEqual(gate["code"], "no_results")
+
+    def test_no_results_when_evals_dir_absent_entirely_pauses(self):
         import shutil as _shutil
         _shutil.rmtree(self.evals_dir)
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertEqual(reason, "no results")
+        self.assertEqual(me.gate_check()["code"], "no_results")
 
-    def test_stale_by_freshness_bound(self):
-        self._write_results(self._healthy_rows(), mtime_offset_s=-20 * 86400)  # 20 days old
-        is_open, reason = me.gate_check(freshness_days=14)
-        self.assertFalse(is_open)
-        self.assertIn("stale", reason)
-        self.assertIn("freshness", reason)
+    def test_results_beyond_the_freshness_bound_pause(self):
+        self._write("2026-09-01.jsonl", self._quiet_rows(), age_s=20 * 86400)
+        gate = me.gate_check(freshness_days=14)
+        self.assertEqual(gate["state"], "paused")
+        self.assertEqual(gate["code"], "results_stale")
 
-    def test_fresh_by_freshness_bound_alone_can_open(self):
-        self._write_results(self._healthy_rows(), mtime_offset_s=-1 * 86400)  # 1 day old, well within 14d
-        is_open, reason = me.gate_check(freshness_days=14)
-        self.assertTrue(is_open, reason)
+    def test_empty_results_file_pauses(self):
+        self._write("2026-09-30.jsonl", [], age_s=3600)
+        self.assertEqual(me.gate_check()["code"], "results_empty")
 
-    def test_stale_by_content_shaping_mutation(self):
-        """Results written, THEN a real add lands in the store -- the
-        results predate the mutation and must close the gate."""
-        results_path = self._write_results(self._healthy_rows(), mtime_offset_s=-3600)  # 1h ago
+    def test_budget_abort_newer_than_results_pauses(self):
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=3600)
+        me.write_budget_abort_marker(
+            date="2026-10-01", phase="run", cap_usd=5.0, spent_usd=5.0, sessions_run=3, detail="cap",
+        )
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "paused")
+        self.assertEqual(gate["code"], "budget_abort")
+
+    def test_results_newer_than_a_budget_abort_open(self):
+        marker = me.write_budget_abort_marker(
+            date="2026-09-29", phase="run", cap_usd=5.0, spent_usd=5.0, sessions_run=3, detail="cap",
+        )
+        old = time.time() - 2 * 86400
+        os.utime(marker, (old, old))
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=3600)
+        self.assertEqual(me.gate_check()["state"], "open")
+
+    def test_checked_row_with_too_few_runs_pauses(self):
+        rows = self._quiet_rows()
+        rows[1] = _gate_row("canary-01", "canary", runs=2)
+        self._write("2026-09-30.jsonl", rows, age_s=3600)
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "paused")
+        self.assertEqual(gate["code"], "unmeasured_rows")
+
+    def test_checked_row_with_a_failed_launch_and_no_regression_pauses(self):
+        rows = self._quiet_rows()
+        rows[1]["treatment"] = _gate_arm(1.0, runs=3, failed=1)
+        self._write("2026-09-30.jsonl", rows, age_s=3600)
+        self.assertEqual(me.gate_check()["code"], "unmeasured_rows")
+
+    def test_checked_row_with_a_judge_error_and_no_regression_pauses(self):
+        rows = self._quiet_rows()
+        rows[1]["baseline"] = _gate_arm(1.0, runs=3, judge_failed=1)
+        self._write("2026-09-30.jsonl", rows, age_s=3600)
+        self.assertEqual(me.gate_check()["code"], "unmeasured_rows")
+
+    # -- staleness: only dreaming's own writes count ---------------------------
+    def test_in_session_non_auto_add_after_results_stays_open(self):
+        """RCA acceptance: an agent's own in-session `add` has nothing to do
+        with dreaming and must not make the eval stale."""
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=3600)
         learnings_dir = Path(os.environ["CCGM_LEARNINGS_DIR"])
         with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
-            entry = learnings_store.build_entry(type_="pattern", content="Freshly learned fact.", project="proj-x")
+            entry = learnings_store.build_entry(type_="pattern", content="In-session fact.", project="proj-x")
             learnings_store.append_entry(entry, slug="proj-x")
+        self.assertEqual(me.gate_check()["state"], "open")
 
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open, reason)
-        self.assertIn("content-shaping", reason)
-        self.assertTrue(results_path.is_file())
-
-    def test_stays_green_across_a_pure_verify_mutation(self):
-        """adrev-403, both directions: a `verify` counter-op landing AFTER
-        the results file must NOT close the gate -- only content-shaping
-        ops (add/supersede/deprecate/contradict) count."""
-        self._write_results(self._healthy_rows(), mtime_offset_s=-3600)  # 1h ago
+    def _auto_adds(self, n: int) -> None:
         learnings_dir = Path(os.environ["CCGM_LEARNINGS_DIR"])
         with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
-            entry = learnings_store.build_entry(type_="pattern", content="Some fact.", project="proj-y")
-            learnings_store.append_entry(entry, slug="proj-y")
-            # This add() itself is content-shaping and lands AFTER the
-            # results mtime -- reset the results mtime to be freshly AFTER
-            # this add so we isolate the test to the verify-op that follows.
-        results_path = self.evals_dir / "2026-07-02.jsonl"
-        now = time.time()
-        os.utime(results_path, (now, now))
-        with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
-            heads = learnings_store.load_all("proj-y")
-            target_id = heads[0]["id"]
-            learnings_store.update_entry_by_id(target_id, slug="proj-y", verify=True)
+            for i in range(n):
+                entry = learnings_store.build_entry(type_="pattern", content=f"Dreamed fact {i}.", project="proj-x")
+                learnings_store.append_entry(entry, slug="proj-x", auto=True)
 
-        is_open, reason = me.gate_check()
-        self.assertTrue(is_open, reason)
+    def _config(self, **opt) -> None:
+        path = me.dreaming_dir() / "config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"optimistic_integration": opt}), encoding="utf-8")
 
-    def test_regression_present_closes_gate(self):
-        rows = self._healthy_rows()
-        rows.append({"task_id": "canary-01", "kind": "canary", "bucket": "regression", "offline": False, "delta_sat": -1.0})
-        self._write_results(rows)
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertIn("regression", reason)
+    def test_one_dreaming_write_since_the_eval_stays_open(self):
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=3600)
+        self._auto_adds(1)
+        self.assertEqual(me.gate_check()["state"], "open")
 
-    def test_no_high_value_rows_closes_gate(self):
-        rows = [{"task_id": "canary-01", "kind": "canary", "bucket": "redundant", "offline": False, "delta_sat": 0.0}]
-        self._write_results(rows)
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertEqual(reason, "no high_value rows")
+    def test_three_dreaming_writes_since_a_two_day_old_eval_stay_open(self):
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=2 * 86400)
+        self._auto_adds(3)
+        self.assertEqual(me.gate_check()["state"], "open")
 
-    def test_offline_dreamed_row_does_not_satisfy_gate(self):
-        """adrev-305: an offline (plumbing-only) dreamed high_value row
-        must never open the auto-apply gate -- only a LIVE run counts."""
-        self._write_results(self._healthy_rows(dreamed_offline=True))
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertIn("live", reason)
+    def test_sixteen_dreaming_writes_since_the_eval_pause(self):
+        """Default max_unevaluated_writes is 15."""
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=2 * 86400)
+        self._auto_adds(16)
+        gate = me.gate_check()
+        self.assertEqual((gate["state"], gate["code"]), ("paused", "stale_own_writes"), gate)
+        self.assertIn("16", gate["reason"])
 
-    def test_dreamed_high_value_via_efficiency_delta_sat_zero_opens_gate(self):
-        """#784: the gate no longer independently re-checks Δ_sat>0 -- that
-        is subsumed by classify_bucket()'s two-path high_value definition. A
-        live dreamed row the classifier deemed high_value via the EFFICIENCY
-        path (it matched the full-context dump within noise, so delta_sat can
-        be 0, at materially fewer input tokens) must now OPEN the gate.
-        Before #784 this exact row (bucket=high_value, delta_sat=0) was
-        force-closed by the gate's own Δ_sat>0 clause."""
-        self._write_results(self._healthy_rows(dreamed_offline=False, dreamed_delta_sat=0.0))
-        is_open, reason = me.gate_check()
-        self.assertTrue(is_open, reason)
+    def test_fifteen_dreaming_writes_since_the_eval_stay_open(self):
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=2 * 86400)
+        self._auto_adds(15)
+        self.assertEqual(me.gate_check()["state"], "open")
 
-    def test_non_high_value_dreamed_row_does_not_satisfy_gate(self):
-        """#784: the replacement negative control for the removed Δ_sat>0
-        clause -- a live dreamed row that is NOT high_value (via either
-        path) still fails the dreamed condition, and the reason no longer
-        names Δ_sat (that check moved into the classifier)."""
-        rows = self._healthy_rows()
-        for r in rows:
-            if r["kind"] == "dreamed":
-                r["bucket"] = "inconclusive"
-        self._write_results(rows)
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertIn("dreamed", reason)
-        self.assertNotIn("Δ_sat", reason)
+    def test_an_eight_day_old_eval_pauses_by_default(self):
+        """Default eval_freshness_days is 7, so a weekly smoke keeps it fresh."""
+        self._write("2026-09-26.jsonl", self._quiet_rows(), age_s=8 * 86400)
+        gate = me.gate_check()
+        self.assertEqual((gate["state"], gate["code"]), ("paused", "results_stale"), gate)
 
-    def test_noise_only_corpus_producing_high_value_proposal_closes_gate(self):
-        """adrev-305's own Acceptance sentence: a live dreamed task
-        classifying high_value with Δ_sat>0 is necessary but NOT
-        sufficient -- the paired noise-only corpus mined alongside it must
-        ALSO have yielded no high-value proposal. mining.noise_high_value
-        is the pipeline's own record of that; True means noise produced a
-        proposal (a caught mining false-positive/poisoning bug), and the
-        gate must stay CLOSED even though the signal-side row looks
-        healthy in every other respect. Mirrors the Stage-1 review's
-        prove_gap.py reproduction as a permanent regression test."""
-        rows = self._healthy_rows()
-        for r in rows:
-            if r["kind"] == "dreamed":
-                r["mining"] = {"noise_proposals_written": 1, "noise_high_value": True}
-        self._write_results(rows)
+    def test_a_six_day_old_eval_is_fresh_by_default(self):
+        self._write("2026-09-28.jsonl", self._quiet_rows(), age_s=6 * 86400)
+        self.assertEqual(me.gate_check()["state"], "open")
 
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertIn("noise", reason)
+    def test_both_bounds_come_from_config(self):
+        self._config(eval_freshness_days=30, max_unevaluated_writes=2)
+        self._write("2026-09-10.jsonl", self._quiet_rows(), age_s=20 * 86400)
+        self.assertEqual(me.gate_check()["state"], "open")
+        self._auto_adds(3)
+        self.assertEqual(me.gate_check()["code"], "stale_own_writes")
 
-    def test_noise_clean_dreamed_row_still_opens_gate(self):
-        """The paired positive case: an explicit, clean mining record
-        (noise corpus was actually mined and yielded nothing) alongside a
-        live high_value+Δ_sat>0 dreamed row must open the gate -- the fix
-        must not make the gate impossible to open."""
-        rows = self._healthy_rows()
-        for r in rows:
-            if r["kind"] == "dreamed":
-                r["mining"] = {"noise_proposals_written": 0, "noise_high_value": False}
-        self._write_results(rows)
+    def test_dreaming_writes_before_the_eval_do_not_count(self):
+        self._auto_adds(20)
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=-60)  # written after the adds
+        self.assertEqual(me.gate_check()["state"], "open")
 
-        is_open, reason = me.gate_check()
-        self.assertTrue(is_open, reason)
+    # -- CLI -------------------------------------------------------------------
+    def _main_gate(self) -> tuple[int, dict]:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = me.main(["--gate"])
+        return rc, json.loads(out.getvalue().strip().splitlines()[-1])
 
-    def test_dreamed_row_with_judge_error_rate_does_not_satisfy_gate(self):
-        """Stage-2 #771 Blocking: a live dreamed high_value row whose own
-        arms show a nonzero judge_error_rate must not open the gate -- the
-        classification it rests on may be built on a fabricated judge-
-        failure score, not real evidence."""
-        rows = self._healthy_rows()
-        for r in rows:
-            if r["kind"] == "dreamed":
-                r["baseline"] = {"mean_score": 0.0, "judge_error_rate": 0.33}
-                r["treatment"] = {"mean_score": 8.5, "judge_error_rate": 0.0}
-                r["full_context"] = {"mean_score": 6.0, "judge_error_rate": 0.0}
-                r["mining"] = {"noise_proposals_written": 0, "noise_high_value": False}
-        self._write_results(rows)
+    def test_main_gate_exit_0_when_open(self):
+        self._write("2026-09-30.jsonl", self._quiet_rows(), age_s=3600)
+        rc, payload = self._main_gate()
+        self.assertEqual((rc, payload["gate"]), (0, "open"))
 
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertIn("judge", reason)
+    def test_main_gate_exit_1_when_closed(self):
+        self._write("2026-09-30.jsonl", [_gate_row("canary-02", "canary", treatment=0.0)], age_s=3600)
+        rc, payload = self._main_gate()
+        self.assertEqual((rc, payload["gate"], payload["code"]), (1, "closed", "regression"))
+        self.assertIn("since", payload)
 
-    def test_dreamed_row_with_zero_judge_error_rate_still_opens_gate(self):
-        """The paired positive case: explicit judge_error_rate=0.0 on
-        every arm must not itself block the gate."""
-        rows = self._healthy_rows()
-        for r in rows:
-            if r["kind"] == "dreamed":
-                r["baseline"] = {"mean_score": 3.0, "judge_error_rate": 0.0}
-                r["treatment"] = {"mean_score": 8.5, "judge_error_rate": 0.0}
-                r["full_context"] = {"mean_score": 6.0, "judge_error_rate": 0.0}
-                r["mining"] = {"noise_proposals_written": 0, "noise_high_value": False}
-        self._write_results(rows)
+    def test_main_gate_exit_3_when_paused(self):
+        rc, payload = self._main_gate()
+        self.assertEqual((rc, payload["gate"], payload["code"]), (3, "paused", "no_results"))
 
-        is_open, reason = me.gate_check()
-        self.assertTrue(is_open, reason)
 
-    def test_gate_open_when_healthy(self):
-        """_healthy_rows()'s dreamed row deliberately carries no `mining`
-        key at all (pre-adrev-305-fix results shape) -- confirms the noise
-        check above degrades to "no evidence of contamination" rather than
-        hard-failing on an absent field, so the existing all-good scenario
-        still opens."""
-        self._write_results(self._healthy_rows())
-        is_open, reason = me.gate_check()
-        self.assertTrue(is_open, reason)
-        self.assertEqual(reason, "ok")
+class OfflineSmokeNeverTouchesTheRealDirTests(unittest.TestCase):
+    """`dream-eval.sh --offline` is a plumbing smoke (CI step d). Run with no
+    override it used to write the real ~/.claude/dreaming/evals/<today>.jsonl:
+    one run overwrote the output of a paid live eval, and an offline file
+    there also makes the live gate look fresh. It must leave the real dir
+    alone unless --allow-real-dir is given."""
 
-    def test_main_gate_mode_exit_code_0_when_open(self):
-        self._write_results(self._healthy_rows())
-        self.assertEqual(me.main(["--gate"]), 0)
+    DAY = "2026-10-04"
+    SENTINEL = b'{"sentinel": "a paid live eval row"}\n'
+    SCRIPT = HERE.parent / "bin" / "dream-eval.sh"
 
-    def test_main_gate_mode_exit_code_1_when_closed(self):
-        # evals_dir exists but is empty -> "no results".
-        self.assertEqual(me.main(["--gate"]), 1)
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="ccgm-eval-offline-guard-"))
+        self.home = self.tmp / "home"
+        self.real_evals = self.home / ".claude" / "dreaming" / "evals"
+        self.real_evals.mkdir(parents=True)
+        self.sentinel = self.real_evals / f"{self.DAY}.jsonl"
+        self.sentinel.write_bytes(self.SENTINEL)
 
-    def test_main_gate_mode_exit_code_1_on_regression(self):
-        rows = self._healthy_rows()
-        rows.append({"task_id": "canary-01", "kind": "canary", "bucket": "regression", "offline": False, "delta_sat": -1.0})
-        self._write_results(rows)
-        self.assertEqual(me.main(["--gate"]), 1)
+    def _run(self, *extra: str, dreaming_dir: Path | None = None) -> subprocess.CompletedProcess:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CCGM_") and k != "ANTHROPIC_API_KEY"}
+        env.update({
+            "HOME": str(self.home), "CCGM_DREAMING_TODAY": self.DAY,
+            "CCGM_LEARNINGS_DIR": str(self.tmp / "learnings"),
+            "CCGM_CLAUDE_PROJECTS_DIR": str(self.tmp / "projects"),
+        })
+        if dreaming_dir is not None:
+            env["CCGM_DREAMING_DIR"] = str(dreaming_dir)
+        return subprocess.run(
+            ["bash", str(self.SCRIPT), "--offline", str(OFFLINE_FIXTURES), *extra],
+            capture_output=True, text=True, env=env, timeout=120,
+        )
 
+    def _real_dir_files(self) -> list[str]:
+        root = self.home / ".claude" / "dreaming"
+        return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+
+    def test_default_run_leaves_the_real_evals_file_byte_identical(self):
+        proc = self._run()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.sentinel.read_bytes(), self.SENTINEL)
+        self.assertEqual(self._real_dir_files(), [f"evals/{self.DAY}.jsonl"])
+        self.assertIn("--allow-real-dir", proc.stderr)
+
+    def test_override_writes_only_under_the_override(self):
+        target = self.tmp / "dreaming-override"
+        proc = self._run(dreaming_dir=target)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue((target / "evals" / f"{self.DAY}.jsonl").is_file())
+        self.assertEqual(self.sentinel.read_bytes(), self.SENTINEL)
+        self.assertEqual(self._real_dir_files(), [f"evals/{self.DAY}.jsonl"])
+
+    def test_override_pointing_at_the_real_dir_is_still_refused(self):
+        proc = self._run(dreaming_dir=self.home / ".claude" / "dreaming")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.sentinel.read_bytes(), self.SENTINEL)
+
+    def test_allow_real_dir_is_the_explicit_opt_in(self):
+        proc = self._run("--allow-real-dir")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotEqual(self.sentinel.read_bytes(), self.SENTINEL)
+
+
+class SeedFingerprintTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = _isolate_env(self)
+
+    def test_run_task_rows_carry_a_fingerprint_of_the_seed_learnings(self):
+        task = me.load_task(TASKS_DIR / "06-canary-unrelated-rename.json")
+        offline = me.load_offline_scores(OFFLINE_FIXTURES)
+        sandbox = self.tmp / "sandbox"
+        sandbox.mkdir()
+        rows = me.run_task(
+            task, backbones=["m"], runs=1, api_key="", claude_bin="claude", max_budget_usd=0.5, timeout_s=5,
+            judge_model="j", judge_system_prompt="s", api_url="u", offline_all_scores=offline, sandbox_root=sandbox,
+        )
+        self.assertEqual(rows[0]["seed_fingerprint"], me.seed_fingerprint(task.get("seed_learnings") or []))
+
+    def test_fingerprint_changes_with_seed_content_and_ignores_key_order(self):
+        a = me.seed_fingerprint([{"content": "x", "type": "pattern"}])
+        self.assertEqual(a, me.seed_fingerprint([{"type": "pattern", "content": "x"}]))
+        self.assertNotEqual(a, me.seed_fingerprint([{"content": "y", "type": "pattern"}]))
 
 # ---------------------------------------------------------------------------
 # main()'s task-level isolation (Stage-2 #771 Recommend): a single task's
@@ -1751,8 +1895,7 @@ class TaskLevelIsolationTests(unittest.TestCase):
         self.assertIn("iso-ok", table)
         self.assertIn("iso-fail", table)
         self.assertIn("error", table)
-        is_open, _reason = me.gate_check()
-        self.assertFalse(is_open)  # no high_value rows in this fixture -- just must not crash
+        self.assertIn(me.gate_check()["state"], ("open", "closed", "paused"))  # must not crash
 
     def test_results_survive_an_uncaught_basexception_via_incremental_writes(self):
         """A BaseException the per-task `except Exception` deliberately
@@ -1875,7 +2018,7 @@ class WholeRunAbortTests(unittest.TestCase):
         the gate opens while the harness is provably broken. The marker is
         what closes it."""
         prior_green = self._seed_prior_green_results()
-        self.assertEqual(me.gate_check(), (True, "ok"), "fixture must start from an OPEN gate")
+        self.assertEqual(me.gate_check()["state"], "open", "fixture must start from an OPEN gate")
 
         self._write_task("01-a.json", "abort-a")
         self._write_task("02-b.json", "abort-b")
@@ -1890,10 +2033,11 @@ class WholeRunAbortTests(unittest.TestCase):
         # is still what _find_latest_results_file() returns.
         self.assertFalse(me.results_path_for_date("2026-09-02").exists())
         self.assertEqual(me._find_latest_results_file(), prior_green)  # noqa: SLF001
-        # ...and the gate is closed anyway, naming the harness.
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open, "a broken harness must never leave the gate open")
-        self.assertEqual(reason, "harness broken: every agent run failed to execute on 2026-09-02")
+        # ...and the gate pauses anyway, naming the harness.
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "paused", "a broken harness must never leave the gate open")
+        self.assertEqual(gate["code"], "harness_broken")
+        self.assertEqual(gate["reason"], "harness broken: every agent run failed to execute on 2026-09-02")
 
     def test_the_marker_is_not_mistaken_for_a_results_file(self):
         self._write_task("01-a.json", "abort-a")
@@ -1909,16 +2053,14 @@ class WholeRunAbortTests(unittest.TestCase):
     def test_a_later_successful_run_clears_the_marker_and_reopens_the_gate(self):
         self._write_task("01-a.json", "recover-a")
         self._run_main(lambda **kwargs: self._launch_failure())
-        self.assertFalse(me.gate_check()[0])
+        self.assertEqual(me.gate_check()["code"], "harness_broken")
 
         exit_code, _stderr, _judge = self._run_main(lambda **kwargs: self._healthy_result())
         self.assertEqual(exit_code, 0)
         self.assertFalse(me.harness_broken_marker_path("2026-09-02").exists())
-        # The gate now judges the fresh results on their merits (this
-        # fixture has no high_value row), never on the stale marker.
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertNotIn("harness broken", reason)
+        # The gate now judges the fresh results on their merits, never on
+        # the stale marker.
+        self.assertNotEqual(me.gate_check()["code"], "harness_broken")
 
     def test_a_partial_results_file_from_an_earlier_error_row_is_removed(self):
         """A task whose own orchestration raises writes a zero-run `error`
@@ -1937,9 +2079,8 @@ class WholeRunAbortTests(unittest.TestCase):
         self.assertIn("every agent run failed to execute", stderr)
         self.assertFalse(me.results_path_for_date("2026-09-02").exists(), "the partial file must not survive the abort")
         self.assertIsNone(me._find_latest_results_file())  # noqa: SLF001
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertEqual(reason, "harness broken: every agent run failed to execute on 2026-09-02")
+        gate = me.gate_check()
+        self.assertEqual((gate["state"], gate["code"]), ("paused", "harness_broken"))
 
     def test_an_all_failing_run_spends_no_judge_calls(self):
         self._write_task("01-a.json", "no-judge-a")
@@ -2015,7 +2156,7 @@ class WholeRunAbortTests(unittest.TestCase):
         exit_code, _stderr, _judge = self._run_main(lambda **kwargs: self._healthy_result(), date="2026-09-03")
         self.assertEqual(exit_code, 0)
         self.assertEqual(list(me.evals_dir().glob("*.harness-broken")), [])
-        self.assertNotIn("harness broken", me.gate_check()[1])
+        self.assertNotEqual(me.gate_check()["code"], "harness_broken")
 
     def test_the_abort_leaves_a_concurrent_runs_results_file_alone(self):
         """The unlink must remove the file THIS process wrote, not whatever
@@ -2041,8 +2182,8 @@ class WholeRunAbortTests(unittest.TestCase):
         self.assertTrue(me.results_path_for_date("2026-09-02").exists())
         self.assertIn("from-another-process", me.results_path_for_date("2026-09-02").read_text(encoding="utf-8"))
         self.assertIn("changed since this run wrote it", stderr)
-        # The marker still closes the gate -- the harness broke later today.
-        self.assertIn("harness broken", me.gate_check()[1])
+        # The marker still pauses the gate -- the harness broke later today.
+        self.assertEqual(me.gate_check()["code"], "harness_broken")
 
     def test_offline_mode_skips_binary_resolution_entirely(self):
         """--offline never spawns `claude`, so a machine with no CLI at all
@@ -2170,9 +2311,7 @@ class PartialLaunchFailureTests(unittest.TestCase):
 
     def test_a_partially_failed_row_cannot_open_the_gate(self):
         self._run(failing_call_indexes={1, 2})
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertNotEqual(reason, "ok")
+        self.assertNotEqual(me.gate_check()["state"], "open")
 
     def test_launch_failures_are_excluded_from_every_mean_not_only_the_score(self):
         """Token, turn and cost figures of a run that never executed are all
@@ -2224,12 +2363,11 @@ class PartialLaunchFailureTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# #1027 THE INVARIANT: a launch failure may only move a row TOWARD a closed
-# gate, never toward an open one. The first cut of the downgrade violated it
-# in the one place it mattered -- it overwrote `regression`, which
-# gate_check() selects by name, so a real regression plus one flake opened
-# the gate. These tests assert the invariant through gate_check(), not by
-# reading bucket names, because the gate is what the invariant is about.
+# #1027 THE INVARIANT: a launch failure may only move the gate TOWARD not
+# open, never toward open. #1098 item 2.1 keeps it under the new gate: a
+# checked row with a failed launch or judge error either still shows its
+# regression (closed) or pauses -- it never opens. These tests assert the
+# invariant through gate_check(), because the gate is what it is about.
 # ---------------------------------------------------------------------------
 
 class LaunchFailureMonotonicityTests(unittest.TestCase):
@@ -2240,99 +2378,61 @@ class LaunchFailureMonotonicityTests(unittest.TestCase):
         me.evals_dir().mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def _arm(mean_score: float, *, failed: int = 0, runs: int = 5) -> dict:
+    def _arm(mean_score: float = 7.0, *, pass_rate: float = 1.0, failed: int = 0, runs: int = 5) -> dict:
         return {
-            "mean_score": mean_score, "pass_rate": 1.0, "mean_input_tokens": 100.0,
+            "mean_score": mean_score, "pass_rate": pass_rate, "mean_input_tokens": 100.0,
             "mean_total_input_tokens": 1000.0, "mean_output_tokens": 20.0, "mean_turns": 2.0,
             "mean_cost_usd": 0.01, "format_error_rate": failed / runs,
             "judge_error_rate": 0.0, "runs": runs,
         }
 
-    def _arms(self, *, failed_arm=None, failed: int = 1) -> dict:
-        return {arm: self._arm(7.0, failed=failed if arm == failed_arm else 0) for arm in me.ARMS}
+    def _arms(self, *, failed_arm=None, failed: int = 1, treatment_pass: float = 1.0) -> dict:
+        return {
+            arm: self._arm(
+                pass_rate=treatment_pass if arm == "treatment" else 1.0,
+                failed=failed if arm == failed_arm else 0,
+            )
+            for arm in me.ARMS
+        }
 
-    def _row(self, bucket: str, *, kind: str = "uplift", task_id: str = "row-under-test",
-             failed_arm=None, failed: int = 1, delta: float = 0.0) -> dict:
+    def _row(self, *, kind: str = "canary", task_id: str = "row-under-test", failed_arm=None,
+             failed: int = 1, treatment_pass: float = 1.0, bucket: str = "redundant") -> dict:
         return me._build_result_row(  # noqa: SLF001
             task_id=task_id, kind=kind, backbone="m", runs=5, offline=False,
-            arms=self._arms(failed_arm=failed_arm, failed=failed),
-            bucket=bucket, delta=delta, delta_sat=1.0,
-            extra={"mining": {"noise_high_value": False}} if kind == "dreamed" else {},
+            arms=self._arms(failed_arm=failed_arm, failed=failed, treatment_pass=treatment_pass),
+            bucket=bucket, delta=0.0, delta_sat=0.0,
         )
 
-    def _gate_on(self, rows: list) -> tuple:
+    def _gate_on(self, rows: list) -> dict:
         for stale in me.evals_dir().glob("*"):
             stale.unlink()
         me.write_results(rows, date="2026-09-02")
         return me.gate_check()
 
-    def _clean_dreamed_high_value(self) -> dict:
-        return self._row("high_value", kind="dreamed", task_id="dreamed-01", delta=3.0)
-
-    # -- (1) the reviewer's repro ------------------------------------------
-    def test_a_regressing_row_with_a_failed_launch_stays_a_regression(self):
-        """One failed baseline launch in a genuinely regressing row must not
-        delete the regression from the gate's view. The row's scores come
-        from the runs that DID execute, so the regression is real; the flake
-        only changes the label."""
-        regressing = self._row("regression", failed_arm="baseline", delta=-5.0)
-        self.assertEqual(regressing["bucket"], "regression")
-        # The flake is still recorded, just not allowed to relabel the row.
+    def test_a_regressing_row_with_a_failed_launch_still_closes(self):
+        regressing = self._row(failed_arm="baseline", treatment_pass=0.0, bucket="regression")
         self.assertIn("baseline 1/5", regressing["task_error"])
+        gate = self._gate_on([regressing])
+        self.assertEqual((gate["state"], gate["code"]), ("closed", "regression"),
+                         "a launch failure must never hide a regression")
 
-        is_open, reason = self._gate_on([regressing, self._clean_dreamed_high_value()])
-        self.assertFalse(is_open, "a launch failure must never hide a regression")
-        self.assertEqual(reason, "1 regression bucket row(s) present")
+    def test_a_clean_row_with_a_failed_launch_pauses_instead_of_opening(self):
+        self.assertEqual(self._gate_on([self._row()])["state"], "open")
+        flaked = self._gate_on([self._row(failed_arm="treatment")])
+        self.assertEqual((flaked["state"], flaked["code"]), ("paused", "unmeasured_rows"))
 
-    def test_the_same_regression_without_a_flake_is_identical_to_the_gate(self):
-        """The control for the test above: the flake changes nothing the
-        gate can see."""
-        clean_regression = self._row("regression", delta=-5.0)
-        self.assertNotIn("task_error", clean_regression)
-        is_open, reason = self._gate_on([clean_regression, self._clean_dreamed_high_value()])
-        self.assertFalse(is_open)
-        self.assertEqual(reason, "1 regression bucket row(s) present")
-
-    # -- (2) the round-2 repro still holds ---------------------------------
-    def test_a_high_value_row_with_failed_launches_is_downgraded_to_error(self):
-        flaked = self._row("high_value", task_id="uplift-01", failed_arm="baseline", failed=2, delta=3.0)
-        self.assertEqual(flaked["bucket"], "error")
-        self.assertIn("baseline 2/5", flaked["task_error"])
-        is_open, reason = self._gate_on([flaked])
-        self.assertFalse(is_open)
-        self.assertEqual(reason, "no high_value rows")
-
-    def test_a_flaked_dreamed_row_cannot_satisfy_the_live_dreamed_clause(self):
-        """The full_context-arm case the review called out: with every run
-        of an arm excluded the classifier can read high_value off nothing at
-        all, and the whole-run abort does not fire because the other arms
-        ran."""
-        flaked = self._row("high_value", kind="dreamed", task_id="dreamed-01",
-                           failed_arm="full_context", delta=3.0)
-        self.assertEqual(flaked["bucket"], "error")
-        is_open, _reason = self._gate_on([flaked])
-        self.assertFalse(is_open)
-
-    # -- (3) the property, over every bucket and every arm -----------------
     def test_a_launch_failure_never_moves_the_gate_toward_open(self):
-        """For every bucket classify_bucket() can return and every arm:
-        adding a launch failure yields a gate verdict that is closed-or-equal
-        (`open_after` implies `open_before`). Asserted through gate_check()
-        on a real results file, never by inspecting bucket names."""
-        for bucket in self.ALL_BUCKETS:
+        """For every arm and both a regressing and a quiet row: adding a
+        launch failure yields a gate that is open only if it was open
+        before."""
+        for treatment_pass in (0.0, 1.0):
             for arm in me.ARMS:
-                with self.subTest(bucket=bucket, arm=arm):
-                    delta = -5.0 if bucket == "regression" else 3.0
-                    before = self._gate_on([
-                        self._row(bucket, delta=delta), self._clean_dreamed_high_value(),
-                    ])
-                    after = self._gate_on([
-                        self._row(bucket, failed_arm=arm, delta=delta), self._clean_dreamed_high_value(),
-                    ])
+                with self.subTest(treatment_pass=treatment_pass, arm=arm):
+                    before = self._gate_on([self._row(treatment_pass=treatment_pass)])
+                    after = self._gate_on([self._row(treatment_pass=treatment_pass, failed_arm=arm)])
                     self.assertFalse(
-                        after[0] and not before[0],
-                        f"a launch failure in {arm} opened the gate on a {bucket} row: "
-                        f"before={before}, after={after}",
+                        after["state"] == "open" and before["state"] != "open",
+                        f"a launch failure in {arm} opened the gate: before={before}, after={after}",
                     )
 
     def test_the_downgrade_function_states_the_rule_directly(self):

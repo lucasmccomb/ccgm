@@ -10,7 +10,14 @@
 #
 # Usage:
 #   dream-eval.sh [--tasks GLOB] [--runs N] [--backbone A,B] [--judge-model M]
-#                 [--offline DIR] [--gate] [--freshness-days N] [--date YYYY-MM-DD]
+#                 [--offline DIR [--allow-real-dir]] [--gate] [--freshness-days N]
+#                 [--date YYYY-MM-DD]
+#
+# Every path the harness writes (evals/ results and markers, cost.log)
+# resolves from CCGM_DREAMING_DIR, default ~/.claude/dreaming. An --offline
+# run never writes that live default: it moves to a fresh temp dir unless
+# CCGM_DREAMING_DIR names another dir or --allow-real-dir is given. A live
+# run (no --offline) and --gate use the dir as given.
 #
 # Env vars (all optional; see eval/memory_eval.py path helpers for the full
 # list): CCGM_DREAMING_DIR, CCGM_DREAMING_TODAY, CCGM_DREAMING_ENV_FILE,
@@ -23,9 +30,10 @@
 #   1  no tasks matched the glob; the `claude` binary could not be resolved;
 #      every agent run of the eval failed to execute (the harness is broken,
 #      so no results file is written -- the first failure's raw output is on
-#      stderr and an evals/<date>.harness-broken marker keeps --gate closed
-#      until a run produces results, #1027); or (in --gate mode) "gate
-#      closed" -- see the printed JSON `reason` field
+#      stderr and an evals/<date>.harness-broken marker pauses --gate until
+#      a run produces results, #1027); or (in --gate mode) "gate closed"
+#   3  (--gate mode) "gate paused" -- see the printed JSON `code` and
+#      `reason` fields (#1098 item 2.1)
 
 set -u
 set -o pipefail
@@ -37,8 +45,5 @@ if ! command -v python3 >/dev/null 2>&1; then
     echo "dream-eval: python3 not found on PATH" >&2
     exit 1
 fi
-
-DREAMING_DIR="${CCGM_DREAMING_DIR:-${HOME}/.claude/dreaming}"
-mkdir -p "${DREAMING_DIR}/evals"
 
 exec python3 "${MODULE_ROOT}/eval/memory_eval.py" "$@"

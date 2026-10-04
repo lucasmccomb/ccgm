@@ -67,6 +67,7 @@ os.environ["CCGM_CLAUDE_PROJECTS_DIR"] = _TMP_PROJECTS
 os.environ["HOME"] = _TMP_HOME
 
 import apply_dream_proposal as adp  # noqa: E402
+import breaker  # noqa: E402
 import dream_analyze as da  # noqa: E402
 import learnings_store as ls  # noqa: E402
 
@@ -475,126 +476,147 @@ class BatchAnomalyTests(OptimisticEngineTestBase):
 
 
 # ---------------------------------------------------------------------------
-# Windowed, self-healing circuit breaker (plan.md §3.5).
+# Windowed circuit breaker (#1098 item 2.2): only CONTENT anomalies count
+# toward a trip; INFRA anomalies pause one night and never count. Resume is
+# a separate step at the top of the nightly chain, independent of the gate.
 # ---------------------------------------------------------------------------
 
 
-class CircuitBreakerTests(OptimisticEngineTestBase):
-    def test_breaker_trips_when_two_anomalies_fall_within_window(self):
-        self._write_config({
-            "circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2,
-            "batch_anomaly_max_same_tag_fraction": 0.5,
-        })
-        now = time.time()
-        self._write_optimistic_state({
-            "suspended": False, "suspended_at": None,
-            "anomaly_log": [self._iso(now - 1 * 86400)],  # 1 day ago -- within a 7-night window
-            "last_run": None,
-        })
+def _content_entry(ts: str, *, reason: str = "batch_eviction_concentration", batch_ids=()) -> dict:
+    return {"ts": ts, "reason": reason, "class": "content", "batch_ids": list(batch_ids)}
 
-        slug = _unique_slug("breaker-trip")
+
+def _infra_entry(ts: str, *, reason: str = "eval_gate_paused") -> dict:
+    return {"ts": ts, "reason": reason, "class": "infra", "batch_ids": []}
+
+
+class BreakerTestBase(OptimisticEngineTestBase):
+    def _evict_concentrated_day(self, label: str) -> str:
+        """A day whose proposals fire the eviction-concentration batch anomaly."""
+        slug = _unique_slug(label)
         t0 = self._seed_learning(slug, content="s0", confidence=8, tags=["x"])
         t1 = self._seed_learning(slug, content="s1", confidence=8, tags=["x"])
         day = _unique_day()
         self._write_day(day, [
-            _proposal_row(pid="bt0", kind="learning_deprecate", project=slug, target_id=t0, confidence=9),
-            _proposal_row(pid="bt1", kind="learning_deprecate", project=slug, target_id=t1, confidence=9),
+            _proposal_row(pid=f"{label}0", kind="learning_deprecate", project=slug, target_id=t0, confidence=9),
+            _proposal_row(pid=f"{label}1", kind="learning_deprecate", project=slug, target_id=t1, confidence=9),
         ])
-        summary = adp.run_optimistic_integrate(day)
-        self.assertEqual(summary["circuit_breaker"], "tripped", summary)
+        return day
 
+    def _audit_for(self, batch_id: str) -> list[dict]:
+        return [a for a in self._read_audit() if a.get("batch_id") == batch_id]
+
+
+class AnomalyClassTests(unittest.TestCase):
+    def test_every_known_reason_has_exactly_one_class(self):
+        self.assertFalse(breaker.INFRA_REASONS & breaker.CONTENT_REASONS)
+        for reason in ("eval_gate_paused", "harness_failure", "analyze_failed", "timeout",
+                       "dirty_learnings_tree", "eval_regression_unattributed", "red_eval_gate"):
+            self.assertEqual(breaker.anomaly_class(reason), "infra", reason)
+        for reason in ("eval_regression", "batch_eviction_concentration", "session_citation_concentration",
+                       "rolling_add_rate_exceeded", "recurrence_spike"):
+            self.assertEqual(breaker.anomaly_class(reason), "content", reason)
+
+    def test_unknown_reason_is_rejected(self):
+        with self.assertRaises(ValueError):
+            breaker.anomaly_class("made_up")
+
+
+class CircuitBreakerTests(BreakerTestBase):
+    def _cfg(self) -> None:
+        self._write_config({
+            "circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2,
+            "circuit_breaker_auto_resume_nights": 7, "batch_anomaly_max_same_tag_fraction": 0.5,
+        })
+
+    def test_two_content_anomalies_within_window_trip(self):
+        self._cfg()
+        self._write_optimistic_state({
+            "suspended": False, "suspended_at": None,
+            "anomaly_log": [_content_entry(self._iso(time.time() - 86400))], "last_run": None,
+        })
+        summary = adp.run_optimistic_integrate(self._evict_concentrated_day("trip"))
+        self.assertEqual(summary["circuit_breaker"], "tripped", summary)
         state = self._read_optimistic_state_file()
         self.assertTrue(state["suspended"])
-        self.assertIsNotNone(state["suspended_at"])
+        self.assertTrue(any(a.get("outcome") == "circuit_breaker_tripped" for a in self._read_audit()))
 
-        audit = self._read_audit()
-        self.assertTrue(any(a.get("outcome") == "circuit_breaker_tripped" for a in audit))
-
-    def test_breaker_does_not_trip_when_anomalies_are_outside_window(self):
-        self._write_config({
-            "circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2,
-            "batch_anomaly_max_same_tag_fraction": 0.5,
+    def test_content_anomaly_outside_window_does_not_trip(self):
+        self._cfg()
+        self._write_optimistic_state({
+            "suspended": False, "suspended_at": None,
+            "anomaly_log": [_content_entry(self._iso(time.time() - 20 * 86400))], "last_run": None,
         })
+        summary = adp.run_optimistic_integrate(self._evict_concentrated_day("notrip"))
+        self.assertNotEqual(summary["circuit_breaker"], "tripped", summary)
+        self.assertFalse(self._read_optimistic_state_file()["suspended"])
+
+    def test_infra_anomalies_in_window_never_count_toward_a_trip(self):
+        self._cfg()
         now = time.time()
         self._write_optimistic_state({
             "suspended": False, "suspended_at": None,
-            "anomaly_log": [self._iso(now - 20 * 86400)],  # 20 days ago -- OUTSIDE a 7-night window
-            "last_run": None,
+            "anomaly_log": [_infra_entry(self._iso(now - n * 3600)) for n in range(1, 6)], "last_run": None,
         })
-
-        slug = _unique_slug("breaker-notrip")
-        t0 = self._seed_learning(slug, content="s0", confidence=8, tags=["x"])
-        t1 = self._seed_learning(slug, content="s1", confidence=8, tags=["x"])
-        day = _unique_day()
-        self._write_day(day, [
-            _proposal_row(pid="bn0", kind="learning_deprecate", project=slug, target_id=t0, confidence=9),
-            _proposal_row(pid="bn1", kind="learning_deprecate", project=slug, target_id=t1, confidence=9),
-        ])
-        summary = adp.run_optimistic_integrate(day)
-        # This run's own batch anomaly still fires (only 1 within the
-        # window after the 20-day-old entry ages out) -- below max=2.
+        summary = adp.run_optimistic_integrate(self._evict_concentrated_day("infra-only"))
         self.assertNotEqual(summary["circuit_breaker"], "tripped", summary)
-        state = self._read_optimistic_state_file()
-        self.assertFalse(state["suspended"])
+        self.assertFalse(self._read_optimistic_state_file()["suspended"])
 
-    def test_breaker_auto_resumes_after_quiet_period(self):
-        self._write_config({"circuit_breaker_auto_resume_nights": 7})
-        now = time.time()
+    def test_dirty_tree_and_timeout_are_infra(self):
+        self._cfg()
         self._write_optimistic_state({
-            "suspended": True, "suspended_at": self._iso(now - 8 * 86400),
-            "anomaly_log": [self._iso(now - 8 * 86400), self._iso(now - 8.1 * 86400)],
-            "last_run": None,
+            "suspended": False, "suspended_at": None,
+            "anomaly_log": [_content_entry(self._iso(time.time() - 86400))], "last_run": None,
         })
-        slug = _unique_slug("breaker-resume")
-        target_id = self._seed_learning(slug, confidence=8)
+        slug = _unique_slug("dirty-infra")
         day = _unique_day()
-        self._write_day(day, [_proposal_row(pid="ar1", kind="learning_verify", project=slug,
-                                             target_id=target_id, confidence=8)])
-        summary = adp.run_optimistic_integrate(day)
-        self.assertEqual(summary["circuit_breaker"], "auto_resumed", summary)
-        self.assertEqual(summary["applied"], 1, summary)  # the resume actually let this batch through
+        self._write_day(day, [_proposal_row(pid="di0", kind="learning_verify", project=slug,
+                                            target_id=self._seed_learning(slug), confidence=8)])
+        with unittest.mock.patch.object(adp, "_learnings_tree_dirty", return_value=True):
+            summary = adp.run_optimistic_integrate(day)
+        self.assertNotEqual(summary["circuit_breaker"], "tripped", summary)
+        log = self._read_optimistic_state_file()["anomaly_log"]
+        self.assertEqual([e["class"] for e in log if e["reason"] == "dirty_learnings_tree"], ["infra"])
 
-        state = self._read_optimistic_state_file()
-        self.assertFalse(state["suspended"])
-
-        audit = self._read_audit()
-        self.assertTrue(any(a.get("outcome") == "circuit_breaker_auto_resumed" for a in audit))
-
-    def test_breaker_stays_suspended_before_quiet_period_elapses(self):
-        self._write_config({"circuit_breaker_auto_resume_nights": 7})
-        now = time.time()
+    def test_legacy_bare_timestamp_without_an_infra_audit_counts_as_content(self):
+        """A pre-#1098 entry is a bare timestamp. With no matching infra
+        audit row it may have been a batch anomaly, so it still counts."""
+        self._cfg()
         self._write_optimistic_state({
-            "suspended": True, "suspended_at": self._iso(now - 1 * 86400),  # only 1 quiet day, not 7
-            "anomaly_log": [],
-            "last_run": None,
+            "suspended": False, "suspended_at": None,
+            "anomaly_log": [self._iso(time.time() - 86400)], "last_run": None,
         })
-        slug = _unique_slug("breaker-still-suspended")
-        target_id = self._seed_learning(slug, confidence=8)
+        summary = adp.run_optimistic_integrate(self._evict_concentrated_day("legacy"))
+        self.assertEqual(summary["circuit_breaker"], "tripped", summary)
+
+    def test_integrate_never_resumes_a_suspended_breaker(self):
+        """Resume moved to the top of the chain (breaker-check); the engine
+        itself only reads the suspension."""
+        self._cfg()
+        old = self._iso(time.time() - 30 * 86400)
+        self._write_optimistic_state({"suspended": True, "suspended_at": old, "anomaly_log": [], "last_run": None})
+        slug = _unique_slug("no-resume-in-engine")
         day = _unique_day()
-        self._write_day(day, [_proposal_row(pid="ss1", kind="learning_verify", project=slug,
-                                             target_id=target_id, confidence=8)])
+        self._write_day(day, [_proposal_row(pid="nr1", kind="learning_verify", project=slug,
+                                            target_id=self._seed_learning(slug), confidence=8)])
         summary = adp.run_optimistic_integrate(day)
         self.assertEqual(summary["circuit_breaker"], "suspended", summary)
         self.assertEqual(summary["applied"], 0, summary)
-        self.assertEqual(self._status_of(day, "ss1"), "pending")
+        self.assertEqual(self._status_of(day, "nr1"), "pending")
 
     def test_optimistic_resume_forces_immediate_reenable(self):
         now = time.time()
         self._write_optimistic_state({
-            "suspended": True, "suspended_at": self._iso(now),  # just tripped -- would NOT auto-resume
-            "anomaly_log": [self._iso(now)],
-            "last_run": None,
+            "suspended": True, "suspended_at": self._iso(now),
+            "anomaly_log": [_content_entry(self._iso(now))], "last_run": None,
         })
         result = adp.optimistic_resume()
         self.assertTrue(result["ok"])
         self.assertTrue(result["was_suspended"])
-
         state = self._read_optimistic_state_file()
         self.assertFalse(state["suspended"])
         self.assertIsNone(state["suspended_at"])
-
-        audit = self._read_audit()
-        self.assertTrue(any(a.get("outcome") == "circuit_breaker_manual_resume" for a in audit))
+        self.assertTrue(any(a.get("outcome") == "circuit_breaker_manual_resume" for a in self._read_audit()))
 
     def test_corrupt_state_file_fails_closed_to_suspended(self):
         adp.optimistic_state_path().parent.mkdir(parents=True, exist_ok=True)
@@ -604,267 +626,321 @@ class CircuitBreakerTests(OptimisticEngineTestBase):
         self.assertIsNotNone(state["suspended_at"])
 
 
-# ---------------------------------------------------------------------------
-# `record-anomaly` (review fix for #801, PR #810): plan.md §3.5 says the
-# breaker trips on "batch-anomaly fire OR red eval gate" -- but a red
-# `dream-eval.sh --gate` result short-circuits dream-daily.sh BEFORE
-# run_optimistic_integrate() is ever invoked, so a red-gate streak
-# previously left zero trace in anomaly_log. record_anomaly() closes that
-# gap: it records one anomaly directly into state/optimistic.json and
-# evaluates the SAME windowed breaker via the shared _evaluate_breaker_trip()
-# helper -- these tests exercise record_anomaly() directly (the Python
-# path); the bash-side wiring (dream-daily.sh calling the `record-anomaly`
-# CLI on a red gate) is covered by GatingTests below.
-# ---------------------------------------------------------------------------
+class BreakerResumeCheckTests(BreakerTestBase):
+    """`breaker-check` runs at the top of every nightly chain, before and
+    independent of the gate: N quiet nights with no CONTENT anomaly resume
+    the breaker, and resuming clears only content anomalies."""
 
+    def setUp(self) -> None:
+        super().setUp()
+        self._write_config({"circuit_breaker_auto_resume_nights": 7})
 
-class RecordAnomalyTests(OptimisticEngineTestBase):
-    """apply-audit.jsonl is a single, cumulative, never-reset file shared
-    by every test in this module (mirrors CircuitBreakerTests, which for
-    the same reason only ever asserts existence via `any(...)`, never an
-    exact count or an absence, against the whole file). `record_anomaly()`
-    returns a fresh, unique `batch_id` per call precisely so these tests
-    (and any real caller) can scope their audit assertions to THEIR OWN
-    call's records instead of the whole shared log.
-    """
-
-    def _audit_for(self, batch_id: str) -> list[dict]:
-        return [a for a in self._read_audit() if a.get("batch_id") == batch_id]
-
-    def test_single_anomaly_recorded_does_not_trip_below_threshold(self):
-        self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
-        result = adp.record_anomaly("red_eval_gate")
-        self.assertTrue(result["ok"], result)
-        self.assertIsNone(result.get("circuit_breaker"))
-
+    def test_resumes_after_seven_nights_with_no_content_anomaly(self):
+        now = time.time()
+        infra = _infra_entry(self._iso(now - 3600))
+        self._write_optimistic_state({
+            "suspended": True, "suspended_at": self._iso(now - 8 * 86400),
+            "anomaly_log": [_content_entry(self._iso(now - 8.5 * 86400)), infra], "last_run": None,
+        })
+        result = adp.breaker_resume_check()
+        self.assertEqual(result["outcome"], "resumed", result)
         state = self._read_optimistic_state_file()
         self.assertFalse(state["suspended"])
-        self.assertEqual(len(state["anomaly_log"]), 1)
+        self.assertIsNone(state["suspended_at"])
+        self.assertEqual(state["anomaly_log"], [infra], "only content anomalies are cleared")
+        self.assertTrue(any(a.get("outcome") == "circuit_breaker_auto_resumed" for a in self._read_audit()))
 
-        own_audit = self._audit_for(result["batch_id"])
-        self.assertEqual(len(own_audit), 1, own_audit)
-        self.assertEqual(own_audit[0]["outcome"], "anomaly_recorded")
-        self.assertEqual(own_audit[0]["reason"], "red_eval_gate")
+    def test_a_recent_content_anomaly_restarts_the_quiet_period(self):
+        now = time.time()
+        recent = float(int(now - 2 * 86400))  # whole seconds: the ISO round trip is exact
+        self._write_optimistic_state({
+            "suspended": True, "suspended_at": self._iso(now - 30 * 86400),
+            "anomaly_log": [_content_entry(self._iso(recent))], "last_run": None,
+        })
+        result = adp.breaker_resume_check()
+        self.assertEqual(result["outcome"], "still_suspended", result)
+        self.assertEqual(result["resume_due"], self._iso(recent + 7 * 86400))
+        self.assertTrue(self._read_optimistic_state_file()["suspended"])
 
-    def test_two_red_gate_anomalies_within_window_trip_the_breaker(self):
-        self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
-        first = adp.record_anomaly("red_eval_gate")
-        self.assertIsNone(first.get("circuit_breaker"), first)
-        second = adp.record_anomaly("red_eval_gate")
-        self.assertEqual(second.get("circuit_breaker"), "tripped", second)
-
-        state = self._read_optimistic_state_file()
-        self.assertTrue(state["suspended"])
-        self.assertIsNotNone(state["suspended_at"])
-        self.assertEqual(len(state["anomaly_log"]), 2)
-
-        first_audit = self._audit_for(first["batch_id"])
-        self.assertEqual(len(first_audit), 1, first_audit)
-        self.assertEqual(first_audit[0]["outcome"], "anomaly_recorded")
-
-        second_audit = self._audit_for(second["batch_id"])
-        # The SECOND call is the one that trips the breaker: its own
-        # anomaly_recorded record plus the circuit_breaker_tripped record
-        # (written under the same batch_id via _evaluate_breaker_trip).
-        self.assertEqual(len(second_audit), 2, second_audit)
-        outcomes = {a["outcome"] for a in second_audit}
-        self.assertEqual(outcomes, {"anomaly_recorded", "circuit_breaker_tripped"})
-
-    def test_anomaly_outside_window_does_not_contribute_to_trip(self):
-        self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
+    def test_infra_anomalies_never_hold_the_breaker_suspended(self):
         now = time.time()
         self._write_optimistic_state({
-            "suspended": False, "suspended_at": None,
-            "anomaly_log": [self._iso(now - 20 * 86400)],  # 20 days ago -- outside a 7-night window
-            "last_run": None,
+            "suspended": True, "suspended_at": self._iso(now - 8 * 86400),
+            "anomaly_log": [_infra_entry(self._iso(now - n * 86400)) for n in range(0, 8)], "last_run": None,
         })
-        result = adp.record_anomaly("red_eval_gate")
-        self.assertIsNone(result.get("circuit_breaker"), result)
+        self.assertEqual(adp.breaker_resume_check()["outcome"], "resumed")
+
+    def test_suspended_less_than_seven_nights_stays_suspended(self):
+        self._write_optimistic_state({
+            "suspended": True, "suspended_at": self._iso(time.time() - 86400), "anomaly_log": [], "last_run": None,
+        })
+        self.assertEqual(adp.breaker_resume_check()["outcome"], "still_suspended")
+
+    def test_not_suspended_is_a_no_op(self):
+        before = len(self._read_audit())
+        self.assertEqual(adp.breaker_resume_check()["outcome"], "not_suspended")
+        self.assertEqual(len(self._read_audit()), before)
+
+    def test_unparseable_suspended_at_never_auto_resumes(self):
+        self._write_optimistic_state({"suspended": True, "suspended_at": "garbage", "anomaly_log": [], "last_run": None})
+        self.assertEqual(adp.breaker_resume_check()["outcome"], "still_suspended")
+
+    def test_the_live_red_gate_history_no_longer_holds_the_breaker(self):
+        """The operator's state since 2026-07-09: suspended by red-gate nights,
+        with a bare-timestamp anomaly_log that record-anomaly kept filling
+        every night, each paired with an `anomaly_recorded`/`red_eval_gate`
+        audit row. Re-classified on read, those are infra, so the breaker
+        resumes on the next chain without any migration step."""
+        now = time.time()
+        stamps = [now - n * 86400 for n in range(0, 14)]
+        self._write_optimistic_state({
+            "suspended": True, "suspended_at": self._iso(now - 87 * 86400),
+            "anomaly_log": [self._iso(t) for t in stamps], "last_run": None,
+        })
+        with adp.apply_audit_path().open("a", encoding="utf-8") as fh:
+            for t in stamps:
+                fh.write(json.dumps({
+                    "outcome": "anomaly_recorded", "reason": "red_eval_gate", "batch_id": "anomaly_legacy",
+                    "id": f"audit_{uuid.uuid4().hex[:12]}", "ts": self._iso(t + 0.004),
+                }) + "\n")
+        self.assertEqual(adp.breaker_resume_check()["outcome"], "resumed")
+        self.assertFalse(self._read_optimistic_state_file()["suspended"])
+
+    def test_legacy_timestamp_without_audit_match_still_counts_as_content(self):
+        now = time.time()
+        self._write_optimistic_state({
+            "suspended": True, "suspended_at": self._iso(now - 30 * 86400),
+            "anomaly_log": [self._iso(now - 86400)], "last_run": None,
+        })
+        self.assertEqual(adp.breaker_resume_check()["outcome"], "still_suspended")
+
+
+class RecordAnomalyTests(BreakerTestBase):
+    def test_thirty_nights_of_infra_anomalies_never_suspend(self):
+        """RCA acceptance: 30 nights of infra anomalies never suspend the
+        breaker (here all inside one window, the strictest case)."""
+        self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
+        for reason in ["eval_gate_paused"] * 10 + ["harness_failure"] * 10 + ["analyze_failed"] * 10:
+            result = adp.record_anomaly(reason)
+            self.assertEqual(result["class"], "infra")
+            self.assertIsNone(result["circuit_breaker"], result)
         state = self._read_optimistic_state_file()
         self.assertFalse(state["suspended"])
-        # The 20-day-old entry is also beyond the 2*7=14-day prune retention
-        # (review fix for #801, PR #810 -- see AnomalyLogBoundedGrowthTests)
-        # and is dropped entirely on this append, leaving only the
-        # freshly-recorded anomaly.
-        self.assertEqual(len(state["anomaly_log"]), 1)
+        own = self._audit_for(result["batch_id"])
+        self.assertEqual([(a["outcome"], a["class"]) for a in own], [("anomaly_recorded", "infra")])
 
-    def test_record_anomaly_while_already_suspended_does_not_refire_trip_audit(self):
-        # Idempotency: a red-gate night that happens while the breaker is
-        # ALREADY suspended still records the anomaly (for history), but
-        # must never double-fire a SECOND circuit_breaker_tripped record
-        # for a breaker that is already tripped (mirrors the same
-        # not-already-suspended guard run_optimistic_integrate's own
-        # breaker check applies).
+    def test_two_content_anomalies_within_window_trip(self):
+        self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
+        first = adp.record_anomaly("recurrence_spike")
+        self.assertIsNone(first["circuit_breaker"], first)
+        second = adp.record_anomaly("recurrence_spike")
+        self.assertEqual(second["circuit_breaker"], "tripped", second)
+        self.assertEqual({a["outcome"] for a in self._audit_for(second["batch_id"])},
+                         {"anomaly_recorded", "circuit_breaker_tripped"})
+
+    def test_unknown_reason_raises(self):
+        with self.assertRaises(ValueError):
+            adp.record_anomaly("not_a_reason")
+
+    def test_regression_with_no_batch_since_last_green_is_unattributed_infra(self):
+        self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 1})
+        result = adp.record_anomaly("eval_regression", since=self._iso(time.time() + 3600))
+        self.assertEqual((result["reason"], result["class"]), ("eval_regression_unattributed", "infra"))
+        self.assertFalse(self._read_optimistic_state_file()["suspended"])
+
+    def test_record_while_already_suspended_does_not_refire_the_trip_audit(self):
         self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
         now = time.time()
         self._write_optimistic_state({
             "suspended": True, "suspended_at": self._iso(now),
-            "anomaly_log": [self._iso(now), self._iso(now)],
-            "last_run": None,
+            "anomaly_log": [_content_entry(self._iso(now)), _content_entry(self._iso(now))], "last_run": None,
         })
-        result = adp.record_anomaly("red_eval_gate")
-        self.assertEqual(result.get("circuit_breaker"), "suspended", result)
+        result = adp.record_anomaly("recurrence_spike")
+        self.assertEqual(result["circuit_breaker"], "suspended", result)
+        self.assertEqual([a["outcome"] for a in self._audit_for(result["batch_id"])], ["anomaly_recorded"])
+        self.assertEqual(len(self._read_optimistic_state_file()["anomaly_log"]), 3)
 
-        own_audit = self._audit_for(result["batch_id"])
-        self.assertEqual(len(own_audit), 1, own_audit)  # anomaly_recorded ONLY -- no re-trip
-        self.assertEqual(own_audit[0]["outcome"], "anomaly_recorded")
-
-        state = self._read_optimistic_state_file()
-        self.assertEqual(len(state["anomaly_log"]), 3)  # still appended, even while suspended
-
-    def test_state_write_is_atomic_after_record_anomaly(self):
-        adp.record_anomaly("red_eval_gate")
-        path = adp.optimistic_state_path()
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
-        self.assertFalse(tmp_path.exists(), "temp file should never survive an atomic write")
-        self.assertTrue(path.is_file())
-        on_disk = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(len(on_disk["anomaly_log"]), 1)
-
-
-# ---------------------------------------------------------------------------
-# Auto-resume clean slate (review fix for #801, PR #810): _maybe_auto_resume()
-# now clears anomaly_log on a genuine quiet-period resume, so stale-but-
-# still-within-window entries recorded before the original trip cannot
-# immediately re-trip the breaker the moment the engine resumes (which used
-# to apply-and-commit at most one capped batch before re-suspending --
-# "auto-resume" leaking a single batch per cycle instead of actually
-# resuming). anomaly_log accumulated AFTER the resume is unaffected -- it
-# still re-trips normally once it reaches the configured threshold.
-# ---------------------------------------------------------------------------
-
-
-class AutoResumeCleanSlateTests(OptimisticEngineTestBase):
-    def test_resume_clears_anomaly_log_then_new_anomalies_retrip_normally(self):
-        self._write_config({
-            "circuit_breaker_window_nights": 7,
-            "circuit_breaker_max_anomalies": 2,
-            "circuit_breaker_auto_resume_nights": 7,
-            "batch_anomaly_max_same_tag_fraction": 0.5,
-        })
-        now = time.time()
-        # Suspended long enough ago to auto-resume, but anomaly_log still
-        # carries entries that are STALE (recorded before the original
-        # trip) yet still fall inside the 7-night trip-window -- exactly
-        # the condition that used to cause an immediate re-trip on resume.
-        self._write_optimistic_state({
-            "suspended": True, "suspended_at": self._iso(now - 8 * 86400),
-            "anomaly_log": [self._iso(now - 2 * 86400), self._iso(now - 3 * 86400)],
-            "last_run": None,
-        })
-
-        # Phase 1: quiet-period resume with a harmless verify-only batch --
-        # must resume, reset anomaly_log to a clean slate, and NOT re-trip
-        # within this same run.
-        slug = _unique_slug("resume-cleanslate")
-        target_id = self._seed_learning(slug, confidence=8)
-        day1 = _unique_day()
-        self._write_day(day1, [_proposal_row(pid="rc1", kind="learning_verify", project=slug,
-                                              target_id=target_id, confidence=8)])
-        summary1 = adp.run_optimistic_integrate(day1)
-        self.assertEqual(summary1["circuit_breaker"], "auto_resumed", summary1)
-        self.assertEqual(summary1["applied"], 1, summary1)  # the resume actually let this batch through
-
-        state_after_resume = self._read_optimistic_state_file()
-        self.assertFalse(state_after_resume["suspended"])
-        self.assertEqual(state_after_resume["anomaly_log"], [],
-                          "resume must reset the window, not carry stale entries forward")
-
-        # Phase 2: exactly ONE new anomaly after the resume -- below
-        # max_anomalies=2, must not trip.
-        slug2 = _unique_slug("resume-cleanslate-evict1")
-        t0 = self._seed_learning(slug2, content="s0", confidence=8, tags=["x"])
-        t1 = self._seed_learning(slug2, content="s1", confidence=8, tags=["x"])
-        day2 = _unique_day()
-        self._write_day(day2, [
-            _proposal_row(pid="rc2a", kind="learning_deprecate", project=slug2, target_id=t0, confidence=9),
-            _proposal_row(pid="rc2b", kind="learning_deprecate", project=slug2, target_id=t1, confidence=9),
-        ])
-        summary2 = adp.run_optimistic_integrate(day2)
-        self.assertNotEqual(summary2["circuit_breaker"], "tripped", summary2)
-        state_after_one_new = self._read_optimistic_state_file()
-        self.assertFalse(state_after_one_new["suspended"])
-        self.assertEqual(len(state_after_one_new["anomaly_log"]), 1, state_after_one_new)
-
-        # Phase 3: a SECOND new anomaly reaches max_anomalies=2 -- the
-        # breaker re-trips normally, exactly as it would with no prior
-        # suspension history.
-        slug3 = _unique_slug("resume-cleanslate-evict2")
-        t2 = self._seed_learning(slug3, content="s2", confidence=8, tags=["y"])
-        t3 = self._seed_learning(slug3, content="s3", confidence=8, tags=["y"])
-        day3 = _unique_day()
-        self._write_day(day3, [
-            _proposal_row(pid="rc3a", kind="learning_deprecate", project=slug3, target_id=t2, confidence=9),
-            _proposal_row(pid="rc3b", kind="learning_deprecate", project=slug3, target_id=t3, confidence=9),
-        ])
-        summary3 = adp.run_optimistic_integrate(day3)
-        self.assertEqual(summary3["circuit_breaker"], "tripped", summary3)
-        state_after_retrip = self._read_optimistic_state_file()
-        self.assertTrue(state_after_retrip["suspended"])
-
-
-# ---------------------------------------------------------------------------
-# Bounded anomaly_log growth (review fix for #801, PR #810): every append
-# site (record_anomaly(), run_optimistic_integrate()) prunes entries older
-# than 2 * circuit_breaker_window_nights days so the state file cannot grow
-# forever under a sustained anomaly stream, without ever pruning an entry
-# _evaluate_breaker_trip() would still count (its own window is exactly
-# circuit_breaker_window_nights -- half this retention).
-# ---------------------------------------------------------------------------
-
-
-class AnomalyLogBoundedGrowthTests(OptimisticEngineTestBase):
-    def test_record_anomaly_prunes_entries_beyond_retention(self):
+    def test_record_prunes_entries_beyond_retention(self):
         self._write_config({"circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 100})
         now = time.time()
-        # Retention = 2 * 7 = 14 days. Seed a mix spanning well beyond that.
-        old_entries = [self._iso(now - 40 * 86400), self._iso(now - 15 * 86400)]
-        kept_entries = [self._iso(now - 10 * 86400), self._iso(now - 1 * 86400)]
-        self._write_optimistic_state({
-            "suspended": False, "suspended_at": None,
-            "anomaly_log": old_entries + kept_entries,
-            "last_run": None,
-        })
-
-        result = adp.record_anomaly("red_eval_gate")
-        self.assertTrue(result["ok"], result)
-
+        old = [_content_entry(self._iso(now - 40 * 86400)), _infra_entry(self._iso(now - 15 * 86400))]
+        kept = [_content_entry(self._iso(now - 10 * 86400)), _infra_entry(self._iso(now - 86400))]
+        self._write_optimistic_state({"suspended": False, "suspended_at": None, "anomaly_log": old + kept, "last_run": None})
+        adp.record_anomaly("eval_gate_paused")
         log = self._read_optimistic_state_file()["anomaly_log"]
-        for old in old_entries:
-            self.assertNotIn(old, log, log)
-        for kept in kept_entries:
-            self.assertIn(kept, log, log)
-        # kept_entries plus this call's own freshly-appended anomaly.
-        self.assertEqual(len(log), len(kept_entries) + 1, log)
+        for entry in old:
+            self.assertNotIn(entry, log)
+        for entry in kept:
+            self.assertIn(entry, log)
+        self.assertEqual(len(log), 3)
 
-    def test_run_optimistic_integrate_prunes_entries_beyond_retention(self):
+    def test_state_write_is_atomic_after_record_anomaly(self):
+        adp.record_anomaly("eval_gate_paused")
+        path = adp.optimistic_state_path()
+        self.assertFalse(path.with_suffix(path.suffix + ".tmp").exists())
+        self.assertEqual(len(json.loads(path.read_text(encoding="utf-8"))["anomaly_log"]), 1)
+
+
+class ContentTripAutoRevertTests(BreakerTestBase):
+    """A content trip reverts the implicated batch through
+    `ccgm-learnings-sync revert <sha>` against a real git-backed store, and
+    audits it."""
+
+    SYNC_BIN = str(HERE.parent.parent / "self-improving" / "bin" / "ccgm-learnings-sync")
+
+    def setUp(self) -> None:
+        super().setUp()
+        subprocess.run([sys.executable, self.SYNC_BIN, "init"], check=True, capture_output=True, text=True)
+        self._commit("test setup")
         self._write_config({
-            "circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 100,
-            "batch_anomaly_max_same_tag_fraction": 0.5,
+            "circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2,
+            "batch_anomaly_max_same_tag_fraction": 0.5, "max_add_supersede_per_run": 100,
         })
-        now = time.time()
-        old_entry = self._iso(now - 40 * 86400)  # far beyond the 14-day retention
-        kept_entry = self._iso(now - 5 * 86400)  # within retention
+
+    def _commit(self, message: str) -> None:
+        subprocess.run([sys.executable, self.SYNC_BIN, "commit", "-m", message], check=True, capture_output=True, text=True)
+
+    def _git_subjects(self) -> list[str]:
+        out = subprocess.run(["git", "-C", str(ls.LEARNINGS_ROOT), "log", "--format=%s"],
+                             check=True, capture_output=True, text=True).stdout
+        return out.splitlines()
+
+    def _add_rows(self, slug: str, n: int, label: str) -> list[dict]:
+        return [_proposal_row(pid=f"{label}{i}", kind="learning_add", project=slug, content=f"{label} fact {i}",
+                              type_="pattern", confidence=9, sessions=5) for i in range(n)]
+
+    def _live_contents(self, slug: str) -> set[str]:
+        return {h["content"] for h in ls.project_slug(slug, use_snapshot=False)["heads"]}
+
+    def _revert_audit(self, batch_id: str) -> list[dict]:
+        return [a for a in self._read_audit()
+                if a.get("outcome") == "batch_auto_reverted" and a.get("batch_id") == batch_id]
+
+    def test_one_attributable_anomaly_reverts_its_batch_without_suspending(self):
+        """A single content anomaly a batch explains reverts that batch at
+        once; suspension still waits for the threshold (2 in 7 nights)."""
+        self._write_config({"rolling_add_rate_max": 1, "max_add_supersede_per_run": 100,
+                            "circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
+        slug = _unique_slug("revert-once-rate")
+        day = _unique_day()
+        self._write_day(day, self._add_rows(slug, 2, "rr-add"))
+
+        summary = adp.run_optimistic_integrate(day)
+
+        self.assertEqual(summary["applied"], 2, summary)
+        self.assertIsNone(summary["circuit_breaker"], summary)
+        self.assertEqual(summary["reverted"], [summary["batch_id"]], summary)
+        self.assertFalse(self._read_optimistic_state_file()["suspended"])
+        self.assertEqual(self._live_contents(slug), set(), "the batch's adds are gone from the store")
+        short_sha = summary["commit"]["sha"]
+        self.assertTrue(self._git_subjects()[0].startswith(f"Revert {short_sha}"), self._git_subjects()[:2])
+        reverted = self._revert_audit(summary["batch_id"])
+        self.assertEqual(len(reverted), 1, reverted)
+        self.assertTrue(reverted[0]["sha"].startswith(short_sha), reverted[0])
+        self.assertEqual(reverted[0]["trigger"], "content_anomaly")
+
+    def test_a_second_attributable_anomaly_within_the_window_also_suspends(self):
+        self._write_config({"rolling_add_rate_max": 1, "max_add_supersede_per_run": 100,
+                            "circuit_breaker_window_nights": 7, "circuit_breaker_max_anomalies": 2})
         self._write_optimistic_state({
             "suspended": False, "suspended_at": None,
-            "anomaly_log": [old_entry, kept_entry],
-            "last_run": None,
+            "anomaly_log": [_content_entry(self._iso(time.time() - 86400))], "last_run": None,
         })
+        slug = _unique_slug("revert-and-trip")
+        day = _unique_day()
+        self._write_day(day, self._add_rows(slug, 2, "rt-add"))
 
-        slug = _unique_slug("prune-viaintegrate")
-        t0 = self._seed_learning(slug, content="s0", confidence=8, tags=["x"])
-        t1 = self._seed_learning(slug, content="s1", confidence=8, tags=["x"])
+        summary = adp.run_optimistic_integrate(day)
+
+        self.assertEqual(summary["circuit_breaker"], "tripped", summary)
+        self.assertEqual(summary["reverted"], [summary["batch_id"]], summary)
+        self.assertTrue(self._read_optimistic_state_file()["suspended"])
+        self.assertEqual(self._live_contents(slug), set())
+
+    def test_eviction_concentration_reverts_nothing(self):
+        """The eviction-concentration check runs before apply and withholds
+        that slug's evictions, so no written row is implicated. It still
+        counts toward suspension."""
+        evict_slug = _unique_slug("evict-norevert")
+        t0 = self._seed_learning(evict_slug, content="e0", confidence=8, tags=["x"])
+        t1 = self._seed_learning(evict_slug, content="e1", confidence=8, tags=["x"])
+        add_slug = _unique_slug("evict-norevert-add")
+        self._commit("seed")
         day = _unique_day()
         self._write_day(day, [
-            _proposal_row(pid="pv0", kind="learning_deprecate", project=slug, target_id=t0, confidence=9),
-            _proposal_row(pid="pv1", kind="learning_deprecate", project=slug, target_id=t1, confidence=9),
+            _proposal_row(pid="en-e0", kind="learning_deprecate", project=evict_slug, target_id=t0, confidence=9),
+            _proposal_row(pid="en-e1", kind="learning_deprecate", project=evict_slug, target_id=t1, confidence=9),
+            *self._add_rows(add_slug, 1, "en-add"),
         ])
-        adp.run_optimistic_integrate(day)
 
+        summary = adp.run_optimistic_integrate(day)
+
+        self.assertTrue(any(a["kind"] == "batch_eviction_concentration" for a in summary["anomalies"]), summary)
+        self.assertEqual(summary["reverted"], [], summary)
+        self.assertEqual(len(self._live_contents(add_slug)), 1)
         log = self._read_optimistic_state_file()["anomaly_log"]
-        self.assertNotIn(old_entry, log, log)
-        self.assertIn(kept_entry, log, log)
-        self.assertEqual(len(log), 2, log)  # kept_entry plus this run's own new anomaly
+        self.assertEqual([(e["class"], e["batch_ids"]) for e in log if e["reason"] == "batch_eviction_concentration"],
+                         [("content", [])])
+
+    def _fresh_since(self) -> str:
+        """A `since` no earlier test's batch commit can match: commit times
+        have whole-second resolution, so start on the next second."""
+        boundary = float(int(time.time()) + 1)
+        time.sleep(boundary - time.time() + 0.01)
+        return self._iso(boundary)
+
+    def test_one_attributable_regression_reverts_its_batch_without_suspending(self):
+        since = self._fresh_since()
+        slug = _unique_slug("regress-once")
+        day = _unique_day()
+        self._write_day(day, self._add_rows(slug, 2, "ro-add"))
+        batch = adp.run_optimistic_integrate(day)
+        self.assertEqual(batch["applied"], 2, batch)
+
+        result = adp.record_anomaly("eval_regression", since=since)
+
+        self.assertEqual((result["class"], result["circuit_breaker"]), ("content", None), result)
+        self.assertEqual(result["reverted"], [batch["batch_id"]])
+        self.assertFalse(self._read_optimistic_state_file()["suspended"])
+        self.assertEqual(self._live_contents(slug), set())
+        self.assertEqual(len(self._revert_audit(batch["batch_id"])), 1)
+    def test_regression_trip_reverts_batches_integrated_since_the_last_green_run(self):
+        since = self._iso(time.time() - 5)
+        slug = _unique_slug("revert-regress")
+        day = _unique_day()
+        self._write_day(day, self._add_rows(slug, 2, "rg-add"))
+        batch = adp.run_optimistic_integrate(day)
+        self.assertEqual(batch["applied"], 2, batch)
+        self.assertEqual(len(self._live_contents(slug)), 2)
+
+        self._write_optimistic_state({
+            "suspended": False, "suspended_at": None,
+            "anomaly_log": [_content_entry(self._iso(time.time() - 86400))], "last_run": None,
+        })
+        result = adp.record_anomaly("eval_regression", since=since)
+
+        self.assertEqual((result["class"], result["circuit_breaker"]), ("content", "tripped"), result)
+        self.assertIn(batch["batch_id"], result["reverted"])
+        self.assertEqual(self._live_contents(slug), set())
+        self.assertTrue(any(a.get("outcome") == "batch_auto_reverted" and a.get("batch_id") == batch["batch_id"]
+                            for a in self._read_audit()))
+
+    def test_a_batch_is_never_reverted_twice(self):
+        since = self._iso(time.time() - 5)
+        slug = _unique_slug("revert-once")
+        day = _unique_day()
+        self._write_day(day, self._add_rows(slug, 1, "once-add"))
+        batch = adp.run_optimistic_integrate(day)
+        self._write_optimistic_state({
+            "suspended": False, "suspended_at": None,
+            "anomaly_log": [_content_entry(self._iso(time.time() - 86400), batch_ids=[batch["batch_id"]])],
+            "last_run": None,
+        })
+        first = adp.record_anomaly("eval_regression", since=since)
+        self.assertEqual(first["reverted"], [batch["batch_id"]])
+        adp.optimistic_resume()
+        second = adp.record_anomaly("eval_regression", since=since)
+        self.assertEqual(second["reverted"], [])
 
 
 # ---------------------------------------------------------------------------
@@ -1252,14 +1328,25 @@ class GatingTests(OptimisticEngineTestBase):
         self._dreaming_dir = Path(fresh_dreaming)
         (self._dreaming_dir / "proposals").mkdir(parents=True, exist_ok=True)
 
-    def _run_dream_daily(self, day: str, *, eval_script: Path | None = None) -> tuple[int, str]:
+    def _enable(self) -> None:
+        (self._dreaming_dir / "config.json").write_text(
+            json.dumps({"optimistic_integration": {"enabled": True}}), encoding="utf-8",
+        )
+
+    def _fake_eval(self, body: str, rc: int) -> Path:
+        script_dir = Path(tempfile.mkdtemp(prefix="ccgm-fake-eval-gate-"))
+        script = script_dir / "fake-dream-eval.sh"
+        script.write_text(f"#!/usr/bin/env bash\ncat <<'OUT'\n{body}\nOUT\nexit {rc}\n", encoding="utf-8")
+        script.chmod(0o755)
+        return script
+
+    def _run_dream_daily(self, day: str, *, eval_script: Path | None = None,
+                         analyze_rc: int | None = None) -> tuple[int, str]:
         """Invokes the REAL dream-daily.sh end to end against an isolated,
-        offline sandbox (mirrors test-dream-apply.sh's fail-closed
-        scenarios: an empty --projects-root with no ANTHROPIC_API_KEY/
-        --offline so dream-analyze.sh's own "nothing to do" short-circuit
-        fires before ever touching a proposals file). Returns
-        (exit_code, daily_log_body).
-        """
+        offline sandbox (an empty --projects-root with no ANTHROPIC_API_KEY,
+        so dream-analyze.sh's own "nothing to do" short-circuit fires).
+        `analyze_rc` swaps in a stub analyze step that exits with that code.
+        Returns (exit_code, daily_log_body)."""
         sandbox = Path(tempfile.mkdtemp(prefix="ccgm-dreaming-test-optengine-gating-run-"))
         logs_dir = sandbox / "logs"
         empty_projects_root = sandbox / "empty-claude-projects"
@@ -1275,6 +1362,11 @@ class GatingTests(OptimisticEngineTestBase):
         env["CCGM_DREAMING_LOGS_DIR"] = str(logs_dir)
         env["CCGM_DREAMING_EVAL_SCRIPT"] = str(eval_script_path)
         env.pop("ANTHROPIC_API_KEY", None)  # keep this test fully offline/deterministic
+        if analyze_rc is not None:
+            bin_dir = sandbox / "bin"
+            bin_dir.mkdir()
+            (bin_dir / "dream-analyze.sh").write_text(f"#!/usr/bin/env bash\nexit {analyze_rc}\n", encoding="utf-8")
+            env["CCGM_DREAMING_BIN_DIR"] = str(bin_dir)
 
         proc = subprocess.run(
             ["bash", str(script), "--force-day", day, "--projects-root", str(empty_projects_root)],
@@ -1284,6 +1376,11 @@ class GatingTests(OptimisticEngineTestBase):
         log_body = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
         return proc.returncode, log_body
 
+    def _last_anomaly(self) -> dict:
+        rows = [a for a in self._read_audit() if a.get("outcome") == "anomaly_recorded"]
+        self.assertTrue(rows, "no anomaly recorded")
+        return rows[-1]
+
     def test_legacy_flag_alone_does_not_activate_optimistic_integration(self):
         (self._dreaming_dir / "config.json").write_text(
             json.dumps({"auto_apply_counters": True}), encoding="utf-8",
@@ -1292,52 +1389,84 @@ class GatingTests(OptimisticEngineTestBase):
         self.assertEqual(rc, 0, log_body)
         self.assertIn("optimistic_integration.enabled=false (default off); skipping", log_body)
         self.assertIn("eval-refresh: optimistic integration inactive; skipping", log_body)
-        # Never even reaches the eval-gate/script-presence check for either step.
+        self.assertNotIn("breaker-check: running", log_body)
         self.assertNotIn("missing (Epic 7 not yet installed)", log_body)
         self.assertNotIn("eval-refresh: running apply_dream_proposal.py eval-refresh", log_body)
 
     def test_enabled_flag_alone_activates_optimistic_integration(self):
-        (self._dreaming_dir / "config.json").write_text(
-            json.dumps({"optimistic_integration": {"enabled": True}}), encoding="utf-8",
-        )
+        self._enable()
         rc, log_body = self._run_dream_daily(_unique_day())
         self.assertEqual(rc, 0, log_body)
         self.assertNotIn("optimistic_integration.enabled=false (default off); skipping", log_body)
         self.assertNotIn("eval-refresh: optimistic integration inactive; skipping", log_body)
-        # Both steps get PAST the config gate -- optimistic-integrate then
-        # fails closed on the (deliberately) missing eval script, and
-        # eval-refresh is invoked but stands down on its own default-off
-        # `eval_refresh_enabled` (#1098 item 0.1; its other preconditions
-        # are covered by EvalRefreshTests above).
-        self.assertIn("missing (Epic 7 not yet installed); failing closed", log_body)
+        # Past the config gate: the missing eval script pauses integration,
+        # and eval-refresh stands down on its default-off flag.
+        self.assertIn("missing (Epic 7 not yet installed)", log_body)
+        self.assertIn("gate paused", log_body)
         self.assertIn("eval-refresh: running apply_dream_proposal.py eval-refresh", log_body)
         self.assertIn("eval_refresh_enabled", log_body)
+        anomaly = self._last_anomaly()
+        self.assertEqual((anomaly["reason"], anomaly["class"]), ("harness_failure", "infra"))
 
-    def test_red_eval_gate_records_anomaly_via_record_anomaly_cli(self):
-        (self._dreaming_dir / "config.json").write_text(
-            json.dumps({"optimistic_integration": {"enabled": True}}), encoding="utf-8",
-        )
-        script_dir = Path(tempfile.mkdtemp(prefix="ccgm-fake-red-eval-gate-"))
-        fake_red_eval = script_dir / "fake-dream-eval-red.sh"
-        fake_red_eval.write_text(
-            "#!/usr/bin/env bash\necho 'fake gate: no results (simulated red)' >&2\nexit 1\n",
-            encoding="utf-8",
-        )
-        fake_red_eval.chmod(0o755)
-
-        rc, log_body = self._run_dream_daily(_unique_day(), eval_script=fake_red_eval)
+    def test_gate_crash_without_json_is_an_infra_pause_not_a_breaker_anomaly(self):
+        self._enable()
+        fake = self._fake_eval("Traceback (most recent call last): boom", 1)
+        rc, log_body = self._run_dream_daily(_unique_day(), eval_script=fake)
         self.assertEqual(rc, 0, log_body)
-        self.assertIn("dream-eval.sh --gate exit=1; failing closed", log_body)
-        self.assertIn("recorded red_eval_gate anomaly", log_body)
-
+        self.assertIn("gate paused", log_body)
+        anomaly = self._last_anomaly()
+        self.assertEqual((anomaly["reason"], anomaly["class"]), ("harness_failure", "infra"))
         state = self._read_optimistic_state_file()
-        self.assertEqual(len(state.get("anomaly_log", [])), 1, state)
-        self.assertFalse(state.get("suspended"), state)  # 1 anomaly, below the default threshold of 2
+        self.assertFalse(state.get("suspended"), state)
 
-        audit = self._read_audit()
-        self.assertTrue(any(
-            a.get("outcome") == "anomaly_recorded" and a.get("reason") == "red_eval_gate" for a in audit
-        ), audit)
+    def test_paused_gate_records_an_infra_anomaly(self):
+        self._enable()
+        fake = self._fake_eval('{"gate": "paused", "code": "no_results", "reason": "no results", "since": null}', 3)
+        rc, log_body = self._run_dream_daily(_unique_day(), eval_script=fake)
+        self.assertEqual(rc, 0, log_body)
+        self.assertIn("gate paused (no_results)", log_body)
+        anomaly = self._last_anomaly()
+        self.assertEqual((anomaly["reason"], anomaly["class"]), ("eval_gate_paused", "infra"))
+
+    def test_closed_gate_with_no_batch_since_last_green_is_unattributed(self):
+        self._enable()
+        fake = self._fake_eval(
+            '{"gate": "closed", "code": "regression", "reason": "canary-02 regressed", "since": null}', 1,
+        )
+        rc, log_body = self._run_dream_daily(_unique_day(), eval_script=fake)
+        self.assertEqual(rc, 0, log_body)
+        self.assertIn("gate closed (regression)", log_body)
+        anomaly = self._last_anomaly()
+        self.assertEqual((anomaly["reason"], anomaly["class"]), ("eval_regression_unattributed", "infra"))
+
+    def test_analyze_failure_pauses_integration_even_with_an_open_gate(self):
+        self._enable()
+        fake = self._fake_eval('{"gate": "open", "code": "ok", "reason": "ok", "since": null}', 0)
+        rc, log_body = self._run_dream_daily(_unique_day(), eval_script=fake, analyze_rc=1)
+        self.assertIn("analyze step failed", log_body)
+        self.assertNotIn("running apply_dream_proposal.py optimistic-integrate", log_body)
+        anomaly = self._last_anomaly()
+        self.assertEqual((anomaly["reason"], anomaly["class"]), ("analyze_failed", "infra"))
+
+    def test_resume_runs_at_chain_start_even_while_the_gate_is_paused(self):
+        """RCA acceptance: suspended, then 7 nights with no content anomaly,
+        resumes at chain start even while the gate is paused."""
+        self._enable()
+        now = time.time()
+        self._write_optimistic_state({
+            "suspended": True, "suspended_at": self._iso(now - 8 * 86400),
+            "anomaly_log": [{"ts": self._iso(now - n * 86400), "reason": "eval_gate_paused",
+                             "class": "infra", "batch_ids": []} for n in range(1, 8)],
+            "last_run": None,
+        })
+        rc, log_body = self._run_dream_daily(_unique_day())  # eval script missing: gate paused
+        self.assertEqual(rc, 0, log_body)
+        self.assertIn("breaker-check: ", log_body)
+        self.assertLess(log_body.index("breaker-check: "), log_body.index("run  analyze"),
+                        "the resume check runs before anything else in the chain")
+        self.assertIn('"outcome": "resumed"', log_body)
+        self.assertIn("gate paused", log_body)
+        self.assertFalse(self._read_optimistic_state_file()["suspended"])
 
 
 # ---------------------------------------------------------------------------

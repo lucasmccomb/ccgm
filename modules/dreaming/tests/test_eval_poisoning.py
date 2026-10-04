@@ -16,11 +16,11 @@ Covers:
     live session's injected context (see modules/self-improving/hooks/
     learnings-inject.py's own docstring: "does not re-implement
     ranking/selection") -- while still resolvable via `load_all()`.
-  - The P0 regression-lock for adrev-opt-001: an `auto: true` content-
-    shaping op-event (add/supersede/contradict) landing after the results
-    file must NOT close gate_check() -- the engine's own auto-integrated
-    write must never self-suspend the gate that authorized it -- while a
-    NON-auto (human/external) content-shaping op-event still does.
+  - Staleness (#1098 item 2.1): only dreaming's own `auto: true`
+    content-shaping op-events (add/supersede/contradict) landing after the
+    results file make the eval stale, which PAUSES the gate (an infra
+    state, never a breaker anomaly). A NON-auto op-event an agent writes
+    in-session has nothing to do with dreaming and leaves the gate open.
   - The adrev-403 regression-lock: CONTENT_SHAPING_OPS still excludes
     `verify`, both as a constant and behaviorally (a pure verify op-event
     after the results file does not close the gate).
@@ -99,21 +99,44 @@ def _load_poisoning_scenarios() -> list[dict]:
     return data["scenarios"]
 
 
+def _arm(mean: float, pass_rate: float, runs: int) -> dict:
+    return {"mean_score": mean, "pass_rate": pass_rate, "runs": runs, "format_error_rate": 0.0, "judge_error_rate": 0.0}
+
+
 def _row_for_scenario(scenario: dict) -> dict:
     """Build a gate_check()-consumable result row from a poisoning
-    scenario, running the score triple through the REAL classify_bucket()
-    -- never hand-assigning `bucket` -- so this fixture actually proves the
-    classifier catches the poisoning shape, not merely that a pre-labeled
-    row trips the gate's regression guard."""
+    scenario. The bucket comes from the REAL classify_bucket() (reporting),
+    and the per-arm pass rates are what gate_check() reads: the poisoned
+    memory makes the treatment arm fail checks the baseline passes."""
     bucket, delta, delta_sat = me.classify_bucket(
         baseline_mean=scenario["baseline_mean"],
         treatment_mean=scenario["treatment_mean"],
         full_context_mean=scenario["full_context_mean"],
     )
+    runs = scenario["runs"]
     return {
-        "task_id": scenario["id"], "kind": "canary", "bucket": bucket,
+        "task_id": scenario["id"], "kind": "canary", "bucket": bucket, "backbone": "m", "runs": runs,
         "offline": False, "delta": delta, "delta_sat": delta_sat,
+        "baseline": _arm(scenario["baseline_mean"], scenario["baseline_pass_rate"], runs),
+        "treatment": _arm(scenario["treatment_mean"], scenario["treatment_pass_rate"], runs),
+        "full_context": _arm(scenario["full_context_mean"], scenario["treatment_pass_rate"], runs),
     }
+
+
+def _healthy_rows() -> list[dict]:
+    """Nothing regresses: every checked task passes in both arms."""
+    return [
+        {
+            "task_id": "canary-01", "kind": "canary", "bucket": "redundant", "backbone": "m", "runs": 3,
+            "offline": False, "baseline": _arm(9.0, 1.0, 3), "treatment": _arm(9.0, 1.0, 3),
+            "full_context": _arm(9.0, 1.0, 3),
+        },
+        {
+            "task_id": "dreamed-01", "kind": "dreamed", "bucket": "inconclusive", "backbone": "m", "runs": 3,
+            "offline": False, "baseline": _arm(6.0, 1.0, 3), "treatment": _arm(6.0, 1.0, 3),
+            "full_context": _arm(9.0, 1.0, 3), "mining": {"noise_proposals_written": 0, "noise_high_value": False},
+        },
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +158,10 @@ class PoisoningFixtureShapeTests(unittest.TestCase):
 
     def test_every_scenario_declares_a_regression_score_triple(self):
         for s in _load_poisoning_scenarios():
-            for field in ("baseline_mean", "treatment_mean", "full_context_mean", "expected_bucket"):
+            for field in (
+                "baseline_mean", "treatment_mean", "full_context_mean", "expected_bucket",
+                "baseline_pass_rate", "treatment_pass_rate", "runs",
+            ):
                 self.assertIn(field, s, s.get("id"))
             self.assertEqual(s["expected_bucket"], "regression", s["id"])
 
@@ -172,22 +198,15 @@ class PoisoningScenariosCloseGateTests(unittest.TestCase):
         rows = [_row_for_scenario(s) for s in _load_poisoning_scenarios()]
         me.write_results(rows, date=me.today_iso())
 
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertIn("regression", reason)
+        gate = me.gate_check()
+        self.assertEqual((gate["state"], gate["code"]), ("closed", "regression"), gate)
 
-    def test_legitimate_high_value_only_results_open_the_gate(self):
-        rows = [
-            {"task_id": "uplift-01", "kind": "uplift", "bucket": "high_value", "offline": False, "delta_sat": 2.0},
-            {
-                "task_id": "dreamed-01", "kind": "dreamed", "bucket": "high_value", "offline": False,
-                "delta_sat": 2.0, "mining": {"noise_proposals_written": 0, "noise_high_value": False},
-            },
-        ]
+    def test_legitimate_results_open_the_gate(self):
+        rows = _healthy_rows()
         me.write_results(rows, date=me.today_iso())
 
-        is_open, reason = me.gate_check()
-        self.assertTrue(is_open, reason)
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "open", gate)
 
 
 class DreamEvalGateCliTests(unittest.TestCase):
@@ -215,20 +234,15 @@ class DreamEvalGateCliTests(unittest.TestCase):
         me.write_results(rows, date=me.today_iso())
 
         proc = self._run_cli_gate()
-        self.assertNotEqual(proc.returncode, 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}")
+        self.assertEqual(proc.returncode, 1, f"stdout={proc.stdout!r} stderr={proc.stderr!r}")
+        self.assertIn('"gate": "closed"', proc.stdout)
         self.assertIn("regression", proc.stdout.lower())
 
     def test_cli_gate_exits_zero_when_results_are_healthy(self):
         """Paired positive control: proves the subprocess wiring itself is
         sound (correctly reports open/closed based on content) rather than
         e.g. always exiting non-zero regardless of the fixture."""
-        rows = [
-            {"task_id": "uplift-01", "kind": "uplift", "bucket": "high_value", "offline": False, "delta_sat": 2.0},
-            {
-                "task_id": "dreamed-01", "kind": "dreamed", "bucket": "high_value", "offline": False,
-                "delta_sat": 2.0, "mining": {"noise_proposals_written": 0, "noise_high_value": False},
-            },
-        ]
+        rows = _healthy_rows()
         me.write_results(rows, date=me.today_iso())
 
         proc = self._run_cli_gate()
@@ -237,112 +251,89 @@ class DreamEvalGateCliTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# P0 regression-lock (adrev-opt-001): an `auto: true` content-shaping
-# op-event must NOT close the gate; a non-auto one still must.
+# Staleness (#1098 item 2.1): only dreaming's own auto-integrated
+# content-shaping writes count toward `max_unevaluated_writes`, and past it
+# the gate PAUSES. An agent's in-session (non-auto) write never counts.
 # ---------------------------------------------------------------------------
 
-class FreshnessClockAutoSkipTests(unittest.TestCase):
-    """The engine's OWN auto-integrated content-shaping writes must not
-    reset gate_check()'s freshness clock -- or the engine would self-
-    suspend the very gate that authorized last night's write on the second
-    productive night, every night thereafter (adrev-opt-001, P0). A
-    non-auto (human/external) content-shaping write must still force the
-    gate stale, preserving adrev-403's original intent."""
+class StaleOnlyOnDreamingsOwnWritesTests(unittest.TestCase):
+    """Dreaming's own writes since the last eval change what a re-run
+    would measure; past `max_unevaluated_writes` of them the gate pauses
+    until the next eval. These tests set the limit to 0 so a single write
+    of each auto op kind shows that it counts. In-session writes through
+    `ccgm-learnings-log` have nothing to do with dreaming; before #1098
+    they made the eval stale on 15 of 30 nights."""
 
     def setUp(self):
         self.tmp = _isolate_env(self)
         self.evals_dir = me.evals_dir()
         self.evals_dir.mkdir(parents=True, exist_ok=True)
+        (me.dreaming_dir() / "config.json").write_text(
+            json.dumps({"optimistic_integration": {"max_unevaluated_writes": 0}}), encoding="utf-8",
+        )
 
-    @staticmethod
-    def _healthy_rows() -> list[dict]:
-        return [
-            {"task_id": "uplift-01", "kind": "uplift", "bucket": "high_value", "offline": False, "delta_sat": 2.0},
-            {
-                "task_id": "dreamed-01", "kind": "dreamed", "bucket": "high_value", "offline": False,
-                "delta_sat": 2.0, "mining": {"noise_proposals_written": 0, "noise_high_value": False},
-            },
-        ]
-
-    def _write_results(self, rows: list[dict], *, mtime_offset_s: float | None = None) -> Path:
-        path = me.write_results(rows, date=me.today_iso())
+    def _write_results(self, *, mtime_offset_s: float | None = None) -> Path:
+        path = me.write_results(_healthy_rows(), date=me.today_iso())
         if mtime_offset_s is not None:
             target = time.time() + mtime_offset_s
             os.utime(path, (target, target))
         return path
 
     def _touch_results_to_now(self) -> None:
-        """Reset the results file's mtime to "now", fresh AFTER whatever
-        setup writes preceded it -- isolates the test to ONLY the mutation
-        that follows this call (mirrors test_memory_eval.py's
-        test_stays_green_across_a_pure_verify_mutation)."""
+        """Results written just before the write under test. One second back:
+        op timestamps carry milliseconds, so a write in the same millisecond
+        as the touch would otherwise read as older than the results."""
         path = me.results_path_for_date(me.today_iso())
-        now = time.time()
-        os.utime(path, (now, now))
+        then = time.time() - 1
+        os.utime(path, (then, then))
 
-    def test_auto_add_after_results_does_not_close_gate(self):
-        self._write_results(self._healthy_rows(), mtime_offset_s=-3600)  # 1h ago
+    def _assert_paused_stale(self) -> None:
+        gate = me.gate_check()
+        self.assertEqual((gate["state"], gate["code"]), ("paused", "stale_own_writes"), gate)
+
+    def test_auto_add_after_results_pauses_the_gate(self):
+        self._write_results(mtime_offset_s=-3600)
         learnings_dir = Path(os.environ["CCGM_LEARNINGS_DIR"])
         with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
             entry = learnings_store.build_entry(type_="pattern", content="Auto-integrated fact.", project="proj-auto-add")
             learnings_store.append_entry(entry, slug="proj-auto-add", auto=True)
+        self._assert_paused_stale()
 
-        is_open, reason = me.gate_check()
-        self.assertTrue(is_open, reason)
-
-    def test_auto_supersede_after_results_does_not_close_gate(self):
-        self._write_results(self._healthy_rows(), mtime_offset_s=-3600)  # 1h ago
+    def test_auto_supersede_after_results_pauses_the_gate(self):
+        self._write_results(mtime_offset_s=-3600)
         learnings_dir = Path(os.environ["CCGM_LEARNINGS_DIR"])
         with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
-            # Setup: a normal (non-auto) row to supersede. This IS itself a
-            # content-shaping mutation, so isolate the test to the AUTO
-            # supersede that follows by re-freshening the results mtime.
             entry = learnings_store.build_entry(type_="pattern", content="Original fact.", project="proj-auto-sup")
             learnings_store.append_entry(entry, slug="proj-auto-sup")
         self._touch_results_to_now()
         with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
-            expected_sha = learnings_store.content_sha256(entry["content"])
             new_entry = learnings_store.supersede_entry(
                 entry["id"], content="Refined fact.", slug="proj-auto-sup",
-                expected_sha256=expected_sha, auto=True,
+                expected_sha256=learnings_store.content_sha256(entry["content"]), auto=True,
             )
         self.assertIsNotNone(new_entry)
+        self._assert_paused_stale()
 
-        is_open, reason = me.gate_check()
-        self.assertTrue(is_open, reason)
-
-    def test_auto_contradict_after_results_does_not_close_gate(self):
-        self._write_results(self._healthy_rows(), mtime_offset_s=-3600)  # 1h ago
+    def test_auto_contradict_after_results_pauses_the_gate(self):
+        self._write_results(mtime_offset_s=-3600)
         learnings_dir = Path(os.environ["CCGM_LEARNINGS_DIR"])
         with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
-            # Setup: a normal (non-auto) row to contradict -- same
-            # mtime-refreshing isolation as the supersede case above.
             entry = learnings_store.build_entry(type_="pattern", content="Some fact.", project="proj-auto-contra")
             learnings_store.append_entry(entry, slug="proj-auto-contra")
         self._touch_results_to_now()
         with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
             ok = learnings_store.update_entry_by_id(entry["id"], slug="proj-auto-contra", contradict=True, auto=True)
         self.assertTrue(ok)
+        self._assert_paused_stale()
 
-        is_open, reason = me.gate_check()
-        self.assertTrue(is_open, reason)
-
-    def test_non_auto_add_after_results_still_closes_gate(self):
-        """The paired proof required alongside the three tests above: a
-        HUMAN (non-auto) content-shaping write after the results file still
-        forces the gate closed -- the auto-skip must not silently swallow
-        real human/external changes (adrev-403's original intent,
-        preserved). This proves the human-vs-engine split actually works,
-        not just that auto ops are exempted."""
-        self._write_results(self._healthy_rows(), mtime_offset_s=-3600)  # 1h ago
+    def test_non_auto_add_after_results_leaves_the_gate_open(self):
+        self._write_results(mtime_offset_s=-3600)
         learnings_dir = Path(os.environ["CCGM_LEARNINGS_DIR"])
         with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
             entry = learnings_store.build_entry(type_="pattern", content="Human-written fact.", project="proj-human")
             learnings_store.append_entry(entry, slug="proj-human")  # auto=False (default)
-
-        is_open, reason = me.gate_check()
-        self.assertFalse(is_open)
-        self.assertIn("content-shaping", reason)
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "open", gate)
 
 
 # ---------------------------------------------------------------------------
@@ -369,13 +360,7 @@ class VerifyMutationDoesNotCloseGateTests(unittest.TestCase):
         self.evals_dir.mkdir(parents=True, exist_ok=True)
 
     def test_pure_verify_after_results_does_not_close_gate(self):
-        rows = [
-            {"task_id": "uplift-01", "kind": "uplift", "bucket": "high_value", "offline": False, "delta_sat": 2.0},
-            {
-                "task_id": "dreamed-01", "kind": "dreamed", "bucket": "high_value", "offline": False,
-                "delta_sat": 2.0, "mining": {"noise_proposals_written": 0, "noise_high_value": False},
-            },
-        ]
+        rows = _healthy_rows()
         me.write_results(rows, date=me.today_iso())
         learnings_dir = Path(os.environ["CCGM_LEARNINGS_DIR"])
         with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
@@ -388,10 +373,10 @@ class VerifyMutationDoesNotCloseGateTests(unittest.TestCase):
         now = time.time()
         os.utime(path, (now, now))
         with me._learnings_store_pointed_at(learnings_dir):  # noqa: SLF001
-            learnings_store.update_entry_by_id(entry["id"], slug="proj-verify", verify=True)
+            learnings_store.update_entry_by_id(entry["id"], slug="proj-verify", verify=True, auto=True)
 
-        is_open, reason = me.gate_check()
-        self.assertTrue(is_open, reason)
+        gate = me.gate_check()
+        self.assertEqual(gate["state"], "open", gate)
 
 
 # ---------------------------------------------------------------------------
