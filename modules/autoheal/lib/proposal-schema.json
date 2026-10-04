@@ -8,6 +8,7 @@
     "kind",
     "title",
     "rationale",
+    "fix_surface",
     "confidence",
     "breadth_score",
     "occurrence_count",
@@ -45,6 +46,11 @@
       "type": "string",
       "maxLength": 2000,
       "description": "Multi-line rationale; passed through redact_secrets() before persistence."
+    },
+    "fix_surface": {
+      "type": "string",
+      "enum": ["check", "rule", "tool", "access"],
+      "description": "The one surface that fixes the finding: check (a hook, test or lint enforces it), rule (steering doc), tool (a missing capability), access (the agent lacked a fact or file). Prefer check. Proposals written before this field existed lack it; readers treat a missing value as rule."
     },
     "confidence": {
       "type": "integer",

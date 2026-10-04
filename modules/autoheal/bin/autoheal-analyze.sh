@@ -1328,6 +1328,9 @@ def validate_against_schema(prop, schema):
     enum = schema.get("properties", {}).get("kind", {}).get("enum", [])
     if enum and kind not in enum:
         return False, f"bad kind: {kind}"
+    surface_enum = schema.get("properties", {}).get("fix_surface", {}).get("enum", [])
+    if prop.get("fix_surface") not in surface_enum:
+        return False, f"bad fix_surface: {prop.get('fix_surface')}"
     for nf, lo, hi in [
         ("confidence", 1, 10),
         ("breadth_score", 1, 10),

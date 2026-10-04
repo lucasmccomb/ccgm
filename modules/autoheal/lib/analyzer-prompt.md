@@ -59,6 +59,7 @@ contract rather than requesting it:
   "kind": "settings_allow_add" | "settings_deny_remove" |
           "hook_narrow" | "new_command" | "rule_update" |
           "command_doc_tweak",
+  "fix_surface": "check" | "rule" | "tool" | "access",
   "title": "<<= 200 chars, paraphrased>",
   "rationale": "<<= 2000 chars, paraphrased>",
   "confidence": <1-10 integer>,
@@ -78,6 +79,21 @@ A single JSON object wraps these:
 ```
 {"proposals": [<proposal>, <proposal>, ...]}
 ```
+
+## Pick one fix surface
+
+Set `fix_surface` to the one surface that fixes the friction:
+
+- `check`: a hook, test or lint could enforce it deterministically.
+- `rule`: a steering doc or prompt change, because no deterministic
+  check is feasible.
+- `tool`: the agent lacked a capability.
+- `access`: the agent lacked a fact or file it needed.
+
+Prefer `check`. Choose `rule` only when you cannot name a hook, test or
+lint that would catch the problem. A `check` proposal's diff must add
+the check itself; the operator must see it fail on a deliberate
+violation before it is applied.
 
 ## Constraints (hard rules — violating any disqualifies the proposal)
 

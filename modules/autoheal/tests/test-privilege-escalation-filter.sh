@@ -89,6 +89,7 @@ out, confidence, breadth, label = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]
 proposal = {
     "id": f"prop_{label}",
     "kind": "settings_allow_add",
+    "fix_surface": "rule",
     "title": f"Synthetic proposal {label}",
     "rationale": f"Test fixture for the privilege gate; confidence={confidence}, breadth_score={breadth}.",
     "confidence": confidence,

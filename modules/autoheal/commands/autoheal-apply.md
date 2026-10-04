@@ -46,9 +46,9 @@ any files.
 3. Print one table row per remaining proposal:
 
    ```
-   ID                  KIND                  CONFIDENCE  BREADTH  TITLE
-   prop_01HW3FQQX7     settings_allow_add    9/10        1        add wrangler dev to safe-list
-   prop_01HW8KLLM4     hook_narrow           7/10        3        narrow git-workflow allow-list
+   ID                  KIND                  SURFACE  CONFIDENCE  BREADTH  TITLE
+   prop_01HW3FQQX7     settings_allow_add    rule     9/10        1        add wrangler dev to safe-list
+   prop_01HW8KLLM4     hook_narrow           check    7/10        3        narrow git-workflow allow-list
    ...
    ```
 
@@ -74,6 +74,20 @@ identical to `/permission-fix apply <id>` and the opt-in
 3. Verify the working tree is clean on `main`. If dirty, commit any
    WIP per the CCGM no-stash rule (commit message
    `#auto: WIP before autoheal apply`).
+3a. If the proposal's `fix_surface` is `check` (a missing field means
+   `rule`), prove the check bites before applying. In a scratch copy,
+   run the check on clean code and confirm it passes, introduce one
+   deliberate violation and confirm it fails, then revert the
+   violation. Write the evidence to a JSON file:
+
+   ```json
+   {"command": "bash tests/test-x.sh", "clean_exit": 0,
+    "violation": "what you broke", "violation_exit": 1, "reverted": true}
+   ```
+
+   Pass it with `--demonstration <file>`. Without a valid file the apply
+   stops before it touches git, and the audit record stores the
+   demonstration alongside the apply.
 4. Create the feature branch `autoheal/{proposal-id}` (the `source`
    argument is `"permission-fix"`; the auto-apply daemon uses
    `"auto-apply"` which produces `autoheal/auto/{proposal-id}` —
@@ -101,7 +115,8 @@ identical to `/permission-fix apply <id>` and the opt-in
 The agent invoking this command should execute the apply through:
 
 ```bash
-python3 modules/autoheal/lib/apply-proposal.py <proposal-id> permission-fix
+python3 modules/autoheal/lib/apply-proposal.py <proposal-id> permission-fix \
+    [--demonstration <file.json>]
 ```
 
 The CLI exits 0 on success, 1 on apply failure, 2 on usage error.
@@ -120,6 +135,8 @@ The CLI exits 0 on success, 1 on apply failure, 2 on usage error.
 - Apply NEVER writes to `~/.claude/settings.json` directly. It always
   writes to the canonical CCGM clone under `modules/`. The next
   `start.sh --reinstall` propagates the change.
+- A `check` proposal is never applied without a failing demonstration
+  (step 3a). The auto-apply daemon passes none, so it skips them.
 - Apply runs both `test-modules.sh` and `test-no-personal-data.sh`
   before commit. A failing test is a hard stop, not a warning.
 - The list mode is read-only. It MUST NOT create branches, write to

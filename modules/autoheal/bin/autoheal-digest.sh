@@ -258,12 +258,15 @@ def render_proposal(p):
     confidence = safe(p, "confidence", "?")
     breadth = safe(p, "breadth_score", "?")
     occ = safe(p, "occurrence_count", "?")
+    # Proposals written before fix_surface existed lack it; read as rule.
+    surface = safe(p, "fix_surface", "rule")
 
     lines = [
         f"### {title}",
         "",
         f"- **id**: `{pid}`",
         f"- **kind**: `{kind}`",
+        f"- **surface**: `{surface}`",
         f"- **confidence**: {confidence}/10",
         f"- **breadth**: {breadth}/10",
         f"- **occurrences**: {occ}",

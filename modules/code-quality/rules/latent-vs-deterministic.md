@@ -29,7 +29,7 @@ When authoring a skill, hook, or command:
 2. Mark each step latent or deterministic.
 3. For every deterministic step, write or find a script that produces the answer.
 4. Have the skill invoke the script instead of describing the computation in prose.
-5. Write a test that pins the script's behavior on a representative input.
+5. Write a test that pins the script's behavior on a representative input. A new check counts only after you run it clean, watch it fail on a deliberate violation, and revert the violation.
 
 The script constrains the model; the test constrains the script.
 
