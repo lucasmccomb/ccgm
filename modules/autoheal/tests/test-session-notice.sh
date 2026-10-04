@@ -191,6 +191,30 @@ assert_eq "$(run_hook)" "" "t5f: a literal \$HOME in the arguments resolves agai
 scenario t5g
 assert_eq "$(run_hook "${S}/project" "${PYONLY}")" "" "t5g: no launchctl on PATH skips the job check"
 
+scenario t5h
+mkdir -p "${S}/foreign/.claude/autoheal"
+: > "${S}/foreign/.claude/autoheal/autoheal-daily.sh"
+launchctl_out "${S}/foreign/.claude/autoheal/autoheal-daily.sh"
+assert_eq "$(field "$(run_hook)" msg)" "autoheal: job points outside your home: ${S}/foreign/.claude/autoheal/autoheal-daily.sh — /autoheal doctor" "t5h: an existing file outside the real home gets its own line"
+
+scenario t5i
+mkdir -p "${S}/foreign"
+: > "${S}/foreign/run.sh"
+launchctl_out "bash ${S}/foreign/run.sh --daily"
+assert_eq "$(field "$(run_hook)" msg)" "autoheal: job points outside your home: ${S}/foreign/run.sh — /autoheal doctor" "t5i: the path inside a -c script string is checked"
+
+scenario t5j
+: > "${FAKE_HOME}/run.sh"
+launchctl_out "bash ${FAKE_HOME}/run.sh --daily"
+assert_eq "$(run_hook)" "" "t5j: a -c script path under the real home says nothing"
+
+scenario t5k
+mkdir -p "${S}/foreign"
+: > "${S}/foreign/real.sh"
+ln -s "${S}/foreign/real.sh" "${FAKE_HOME}/link.sh"
+launchctl_out "${FAKE_HOME}/link.sh"
+assert_eq "$(field "$(run_hook)" msg | cut -c1-40)" "autoheal: job points outside your home: " "t5k: a symlink under the home that resolves outside it is caught"
+
 # --- subagent worktrees stay quiet and keep the day's notice --------------------
 scenario t6
 ready_row sigA "echo zsh_not_found: add a rule to code-quality.md"

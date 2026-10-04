@@ -13,6 +13,7 @@ Says something when:
         autoheal: last good run 3d ago (<reason>) — /autoheal doctor
   - the launchd job runs a file that does not exist (checked once a day, cached)
         autoheal: scheduled job runs <path>, which does not exist — /autoheal doctor
+        autoheal: job points outside your home: <path> — /autoheal doctor
 
 Says nothing when health.json is absent or its status is paused, when the cwd is
 a subagent worktree (the day's notice is kept for a real session), or when
@@ -164,9 +165,15 @@ def _launchd_problem(label: str):
         return None
     if res.returncode != 0:
         return f"scheduled job {label} is not loaded — /autoheal doctor"
-    for path in _program_paths(res.stdout):
+    paths = _program_paths(res.stdout)
+    for path in paths:
         if not os.path.exists(path):
             return f"scheduled job runs {path}, which does not exist — /autoheal doctor"
+    home = os.path.realpath(_real_home())
+    for path in paths:
+        real = os.path.realpath(path)
+        if real != home and not real.startswith(home + os.sep):
+            return f"job points outside your home: {path} — /autoheal doctor"
     return None
 
 

@@ -75,6 +75,7 @@ Retention (`bin/autoheal-retention.sh`) never deletes a `ready` row. It prunes o
 - Ready fixes: `autoheal: 2 fixes ready (zsh quoting in Bash, cp -i alias) — run /autoheal-review`
 - Stale or failed run, from `health.json`: `autoheal: last good run 3d ago (<reason>) — /autoheal doctor`. A `paused` status says nothing.
 - A launchd job that runs a missing file, from `launchctl print` (once a day, cached in `notice-launchd.json`; skipped when `launchctl` is absent): `autoheal: scheduled job runs <path>, which does not exist — /autoheal doctor`
+  A path that exists but resolves (`realpath`) outside the real home gets its own line: `autoheal: job points outside your home: <path> — /autoheal doctor`. This is the foreign-HOME case, before the temp dir is cleaned up.
 
 The hook reads files only, never calls the network, never asks a question, and always exits 0.
 
