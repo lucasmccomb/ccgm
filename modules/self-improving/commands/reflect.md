@@ -45,6 +45,7 @@ Walk through each item:
 4. **Did I discover a common mistake?** Something that wasted significant time and could recur.
 5. **Did I learn a user preference?** A working style, communication preference, or approach the user validated.
 6. **Did I discover a tool/framework gotcha?** A non-obvious behavior, config requirement, or pitfall.
+7. **Which surface fixes this: check, rule, tool, or access?** A hook, test, or lint (check), a steering doc (rule), a missing capability (tool), or a fact or file the agent lacked (access). Prefer `check`; write a rule only when no deterministic check is feasible.
 
 ### Phase 4: Search Before Logging
 

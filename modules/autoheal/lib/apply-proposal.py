@@ -67,6 +67,36 @@ def _applied_dir() -> str:
     )
 
 
+def fix_surface(proposal: dict) -> str:
+    """The proposal's fix surface: check, rule, tool or access.
+
+    Proposals written before fix_surface existed are in the field with no
+    such key; they were all config or doc edits, so a missing value is
+    `rule`.
+    """
+    return proposal.get("fix_surface") or "rule"
+
+
+def demonstration_problem(demo: dict | None) -> str | None:
+    """Why a failing demonstration is unacceptable, or None if it holds.
+
+    A new check counts only after it ran clean, failed on a deliberate
+    violation, and the violation was reverted.
+    """
+    if not isinstance(demo, dict):
+        return "no demonstration supplied"
+    if not demo.get("command") or not demo.get("violation"):
+        return "demonstration needs `command` and `violation`"
+    if demo.get("clean_exit") != 0:
+        return "check did not pass on clean code (clean_exit must be 0)"
+    violation_exit = demo.get("violation_exit")
+    if not isinstance(violation_exit, int) or violation_exit == 0:
+        return "check did not fail on the violation (violation_exit must be non-zero)"
+    if demo.get("reverted") is not True:
+        return "violation was not reverted"
+    return None
+
+
 def _find_proposal(proposal_id: str) -> dict | None:
     """Walk today's proposals JSONL for the requested id; return None if absent.
 
@@ -320,7 +350,11 @@ def _append_applied_record(record: dict) -> None:
         fh.write(payload)
 
 
-def apply_proposal(proposal_id: str, source: str = SOURCE_PERMISSION_FIX) -> dict:
+def apply_proposal(
+    proposal_id: str,
+    source: str = SOURCE_PERMISSION_FIX,
+    demonstration: dict | None = None,
+) -> dict:
     """
     Apply a proposal to the canonical CCGM clone source.
 
@@ -328,6 +362,9 @@ def apply_proposal(proposal_id: str, source: str = SOURCE_PERMISSION_FIX) -> dic
         proposal_id: id of the proposal in today's proposals.jsonl.
         source: "permission-fix" or "auto-apply". Determines branch
                 shape and the `method` field in the audit record.
+        demonstration: required when the proposal's fix_surface is
+                "check": {command, clean_exit, violation, violation_exit,
+                reverted}. Recorded in the audit record.
 
     Returns:
         {
@@ -350,6 +387,12 @@ def apply_proposal(proposal_id: str, source: str = SOURCE_PERMISSION_FIX) -> dic
     if proposal is None:
         result["error"] = f"proposal {proposal_id} not found in today's JSONL"
         return result
+
+    if fix_surface(proposal) == "check":
+        problem = demonstration_problem(demonstration)
+        if problem:
+            result["error"] = f"check proposal needs a failing demonstration: {problem}"
+            return result
 
     cwd = _resolve_clone_root()
     if cwd is None:
@@ -407,6 +450,8 @@ def apply_proposal(proposal_id: str, source: str = SOURCE_PERMISSION_FIX) -> dic
             "commit_sha": result["commit_sha"],
             "tests_passed": True,
             "rolled_back": False,
+            "fix_surface": fix_surface(proposal),
+            "demonstration": demonstration,
         }
     )
 
@@ -416,20 +461,32 @@ def apply_proposal(proposal_id: str, source: str = SOURCE_PERMISSION_FIX) -> dic
 
 
 def _cli() -> int:
-    """Minimal CLI entry: `python apply-proposal.py <id> [source]`."""
-    if len(sys.argv) < 2:
+    """CLI: `python apply-proposal.py <id> [source] [--demonstration <file>]`."""
+    args = sys.argv[1:]
+    demonstration = None
+    if "--demonstration" in args:
+        i = args.index("--demonstration")
+        try:
+            with open(args[i + 1], "r", encoding="utf-8") as fh:
+                demonstration = json.load(fh)
+        except (IndexError, OSError, ValueError) as exc:
+            sys.stderr.write(f"cannot read --demonstration file: {exc}\n")
+            return 2
+        del args[i : i + 2]
+    if not args:
         sys.stderr.write(
-            "usage: apply-proposal.py <proposal-id> [permission-fix|auto-apply]\n"
+            "usage: apply-proposal.py <proposal-id> [permission-fix|auto-apply] "
+            "[--demonstration <file.json>]\n"
         )
         return 2
-    proposal_id = sys.argv[1]
-    source = sys.argv[2] if len(sys.argv) >= 3 else SOURCE_PERMISSION_FIX
+    proposal_id = args[0]
+    source = args[1] if len(args) >= 2 else SOURCE_PERMISSION_FIX
     if source not in (SOURCE_PERMISSION_FIX, SOURCE_AUTO_APPLY):
         sys.stderr.write(
             f"source must be {SOURCE_PERMISSION_FIX!r} or {SOURCE_AUTO_APPLY!r}\n"
         )
         return 2
-    result = apply_proposal(proposal_id, source)
+    result = apply_proposal(proposal_id, source, demonstration)
     sys.stdout.write(json.dumps(result) + "\n")
     return 0 if result["success"] else 1
 
