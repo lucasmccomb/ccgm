@@ -73,6 +73,11 @@
       "type": "lib",
       "template": false
     },
+    "lib/triggers.py": {
+      "target": "lib/triggers.py",
+      "type": "lib",
+      "template": false
+    },
     "lib/com.__USERNAME__.ccgm.dreaming.daily.plist.template": {
       "target": "lib/com.__USERNAME__.ccgm.dreaming.daily.plist",
       "type": "lib",

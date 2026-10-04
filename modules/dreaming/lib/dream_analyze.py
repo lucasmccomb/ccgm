@@ -91,6 +91,7 @@ import transcript_miner as tm  # noqa: E402  (sibling module, same lib/ dir)
 # to exist -- E2 depends on merged E1 at its acceptance boundary (adrev3-001).
 import eligibility  # noqa: E402  (sibling module, same lib/ dir; owned by Epic E1)
 import rollout_mode  # noqa: E402  (sibling module, same lib/ dir; off/shadow/active resolver)
+import triggers  # noqa: E402  (sibling module, same lib/ dir; the deterministic trigger matcher)
 
 # learnings_store lives in a DIFFERENT module's lib/ dir (self-improving).
 # Reuse transcript_miner's own cross-module import helper rather than
@@ -180,6 +181,11 @@ KINDS_REQUIRING_CONTENT = {"learning_add", "learning_supersede"}
 
 GLOBAL_SLUG = learnings_store.GLOBAL_SLUG
 
+# Rejection reasons for the `trigger` field (#1098 3.4). finalize_proposal()
+# returns reasons as free text; these prefixes are what main() counts on.
+TRIGGER_INVALID = "trigger_invalid"
+TRIGGER_UNVERIFIED = "trigger_unverified"
+
 # ---------------------------------------------------------------------------
 # Request shape: thinking, effort, and the output schemas (#1026, #1028)
 # ---------------------------------------------------------------------------
@@ -246,6 +252,24 @@ CANDIDATES_ENVELOPE_SCHEMA: dict[str, Any] = {
     "required": ["candidates"],
 }
 
+# Null for the kinds that act on an existing id; add/supersede must carry an
+# object (finalize_proposal() enforces that, and triggers.validate_trigger()
+# checks its content).
+_TRIGGER_SCHEMA = {
+    "anyOf": [
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "kind": {"type": "string", "enum": list(triggers.TRIGGER_KINDS)},
+                "value": {"anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
+            },
+            "required": ["kind", "value"],
+        },
+        {"type": "null"},
+    ]
+}
+
 PROPOSALS_ENVELOPE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -281,10 +305,11 @@ PROPOSALS_ENVELOPE_SCHEMA: dict[str, Any] = {
                     },
                     "evidence": {"type": "array", "items": _EVIDENCE_ITEM_SCHEMA},
                     "justification": {"type": "string"},
+                    "trigger": _TRIGGER_SCHEMA,
                 },
                 "required": [
                     "kind", "project", "target_id", "content", "type",
-                    "confidence", "prevalence", "evidence", "justification",
+                    "confidence", "prevalence", "evidence", "justification", "trigger",
                 ],
             },
         },
@@ -1486,6 +1511,20 @@ def finalize_proposal(
     if not isinstance(justification, str) or not justification.strip():
         return None, "missing/invalid justification"
 
+    # Trigger (#1098 3.4): add/supersede must say, deterministically, when the
+    # learning applies, and the trigger has to fire on the proposal's own
+    # cited evidence as stored. Phase 4's recurrence metric scans later
+    # transcripts with the same matcher; a trigger that cannot find its own
+    # evidence would never find a recurrence either.
+    trigger = None
+    if kind in KINDS_REQUIRING_CONTENT:
+        trigger = raw.get("trigger")
+        problem = triggers.validate_trigger(trigger)
+        if problem:
+            return None, f"{TRIGGER_INVALID}: {problem}"
+        if not triggers.matches_any(trigger, [e["excerpt"] for e in evidence]):
+            return None, f"{TRIGGER_UNVERIFIED}: trigger {json.dumps(trigger, ensure_ascii=False)[:160]} matches none of the {len(evidence)} cited evidence excerpt(s)"
+
     prevalence_raw = raw.get("prevalence")
     if prevalence_raw is None:
         distinct_sessions = len({e["session_id"] for e in evidence if e.get("session_id")})
@@ -1550,6 +1589,7 @@ def finalize_proposal(
         "prevalence": prevalence,
         "evidence": evidence,
         "justification": sanitized_justification,
+        "trigger": trigger,
         "fingerprint": fingerprint,
         "generated_at": _utc_now_iso(),
         "status": "pending",
@@ -1665,7 +1705,7 @@ ENRICHABLE_KINDS = frozenset({"learning_add", "learning_supersede"})
 def _bundle_verifiable_excerpts(bundle: dict[str, Any]) -> dict[str, str]:
     """session_id -> one transcript-derived, redacted excerpt for that session,
     drawn ONLY from the deterministic evidence bundle (friction cluster
-    exemplars + per-session user_corrections). Every value is miner output
+    exemplars + per-session user_corrections + signals). Every value is miner output
     (transcript_miner.make_excerpt() over real transcript text), so it
     corroborates against the cited session's transcript by construction at
     apply time. When a session has several candidate excerpts, the longest
@@ -1689,6 +1729,11 @@ def _bundle_verifiable_excerpts(bundle: dict[str, Any]) -> dict[str, str]:
         for corr in session.get("user_corrections", []) or []:
             if isinstance(corr, dict):
                 _offer(corr.get("session_id"), corr.get("excerpt"))
+    for signal in bundle.get("signals", []) or []:
+        # Rediscovery excerpts are synthesized by the miner, not a span of the
+        # transcript, so they cannot corroborate a citation.
+        if isinstance(signal, dict) and signal.get("kind") != "rediscovery":
+            _offer(signal.get("session_id"), signal.get("excerpt"))
 
     return {sid: max(excerpts, key=lambda e: (len(e), e)) for sid, excerpts in by_session.items()}
 
@@ -2086,11 +2131,14 @@ def main(argv: list[str] | None = None) -> int:
 
     written_rows: list[dict[str, Any]] = []
     rejected = 0
+    triggers_unverified = 0
     deduped = 0
     for raw in raw_proposals:
         row, reason = finalize_proposal(raw, store_by_id=store_by_id, cfg=cfg, proposal_schema=proposal_schema)
         if row is None:
             rejected += 1
+            if reason and reason.startswith(TRIGGER_UNVERIFIED):
+                triggers_unverified += 1
             print(f"dream_analyze: dropped proposal: {reason}", file=sys.stderr)
             continue
         if row["fingerprint"] in dedup_corpus:
@@ -2151,6 +2199,7 @@ def main(argv: list[str] | None = None) -> int:
         "truncated_calls": truncated_calls,
         "proposals_written": len(written_rows),
         "proposals_rejected": rejected,
+        "triggers_unverified": triggers_unverified,
         "proposals_deduped": deduped,
         "cost_breakdown": cost_breakdown,
         "actual_input_tokens": total_input_tokens,

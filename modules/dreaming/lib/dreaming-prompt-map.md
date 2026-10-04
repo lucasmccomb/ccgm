@@ -33,6 +33,26 @@ exact contract):
 - `slugs` -- the learnings-store project slug(s) represented.
 - `session_count` / `sessions` -- one summary row per mined session (token
   totals, cache-read ratio, user corrections, PR links).
+- `signals` -- knowledge the agent does not already carry, found by
+  deterministic extractors. Each has a `kind`, a `session_id`, an `excerpt`
+  (the text to cite) and, for some kinds, a `context`:
+  - `redirection` -- the human told the agent to do something differently
+    (a preference, a project fact, a rule). `excerpt` is what the human
+    typed; `context` is the assistant turn just before it.
+  - `struggle_arc` -- three or more failed attempts on one thing
+    (`signature`, `failure_count`), then a success. `excerpt` is what the
+    assistant concluded afterward. The lesson is the conclusion (the root
+    cause, the fix), not the failed attempts.
+  - `abandoned_work` -- a `git revert` / `git reset --hard`, or the human
+    asking to undo or revert. `excerpt` is the command or the request;
+    `context` is what was being abandoned. The lesson is what not to do and
+    why.
+  - `rediscovery` -- the same file, search or glob was explored in several
+    sessions (`session_ids`). `excerpt` names the target and how many
+    sessions explored it. A candidate here is an architecture fact (where
+    something lives or how it is wired) that the agent keeps relearning;
+    state the fact only if the bundle gives you enough to state it,
+    otherwise skip it.
 - `clusters` -- friction clusters first (tool errors, hook errors,
   prevented-continuation events, each carrying up to a few redacted
   exemplars), then routine clusters (bare counts, no exemplars -- these are
@@ -42,11 +62,24 @@ exact contract):
   drift is a hard failure that never reaches this prompt). Never propose
   anything about this field itself.
 
-Weight friction clusters heavily. A cluster that recurs across multiple
-distinct `sample_session_ids` is a much stronger signal than a single
-occurrence. `user_corrections` on session summaries are a strong signal too
--- a user correcting the agent within 2 turns of a failure often marks
-exactly where a durable learning belongs.
+Mine `signals` first. They are where durable learnings come from. A
+redirection that states a preference or a fact about the project, a
+struggle that ended in a stated root cause, or work abandoned for a stated
+reason is worth a candidate even when it appears once. A signal repeated
+across distinct sessions is stronger still.
+
+Friction clusters are secondary. A tool error or hook denial already tells
+the agent what is wrong: the hook's denial text is the instruction, and the
+tool's own error message names the remedy. Do not write a candidate that
+restates a hook, guard or permission denial, or a tool error whose text
+already states the fix. Propose from a friction cluster only when it shows a
+cause or a workaround that the error text does not give. `user_corrections`
+on session summaries are redirections that followed a failure; they are
+already covered by `signals` when the human typed them.
+
+Most signals are noise: a redirection that only applies to one moment ("no,
+the other file"), an abandoned attempt with no stated reason, a struggle
+whose conclusion is trivial. Skip them.
 
 ## What to output
 
@@ -63,8 +96,8 @@ Each `<candidate>` is:
 {
   "type": "pattern" | "pitfall" | "preference" | "architecture" | "tool" | "operational",
   "content": "<one paragraph, paraphrased, actionable, <=800 chars>",
-  "evidence": [{"session_id": "<from the cluster/session data>", "excerpt": "<copy an excerpt from the bundle verbatim -- excerpts are ALREADY redacted, this is the one place copying is correct>"}],
-  "occurrence_count": <number of friction events in the bundle supporting this candidate>,
+  "evidence": [{"session_id": "<from the signal/cluster/session data>", "excerpt": "<copy a signal's or exemplar's `excerpt` from the bundle verbatim -- excerpts are ALREADY redacted, this is the one place copying is correct; never cite `context`>"}],
+  "occurrence_count": <number of signals and friction events in the bundle supporting this candidate>,
   "notes": "<anything the reduce step should know, e.g. 'this may relate to an existing pitfall about the same tool'; null when there is nothing to add>"
 }
 ```
@@ -82,8 +115,8 @@ candidate patterns and their supporting evidence.
 
 ## When there is nothing worth extracting
 
-If the bundle shows no recurring friction (all clusters are routine, or
-friction clusters are one-off with no clear pattern), return
-`{"candidates": []}`. An empty response is the correct answer far more
+If the bundle has no signals worth a candidate and its friction clusters are
+routine, one-off, or only restate what a hook or tool error already says,
+return `{"candidates": []}`. An empty response is the correct answer far more
 often than a proposal-shaped one -- most sessions produce nothing durable
 worth remembering.

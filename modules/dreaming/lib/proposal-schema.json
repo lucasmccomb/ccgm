@@ -14,6 +14,7 @@
     "prevalence",
     "evidence",
     "justification",
+    "trigger",
     "fingerprint",
     "generated_at",
     "status"
@@ -97,6 +98,23 @@
     "justification": {
       "type": "string",
       "description": "Why this warrants a store change. Sanitized via learnings_store.sanitize_content() before this row is ever written to disk (sec-3), same as `content`."
+    },
+    "trigger": {
+      "type": ["object", "null"],
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["regex", "command_prefix", "path_glob", "phrase_set"],
+          "description": "How `value` is read: regex = re.search ignoring case; command_prefix = the command at a word boundary; path_glob = a path token (or its basename) fnmatch-ing the glob; phrase_set = any phrase, ignoring case."
+        },
+        "value": {
+          "type": ["string", "array"],
+          "items": { "type": "string" },
+          "description": "A string for regex, command_prefix and path_glob; a non-empty list of strings for phrase_set."
+        }
+      },
+      "description": "REQUIRED object for learning_add and learning_supersede, null for the other kinds. A small deterministic matcher for the situation the learning is about (lib/triggers.py owns the semantics). dream_analyze.py's finalizer rejects the proposal as `trigger_unverified` when the trigger matches none of its own cited evidence excerpts, and as `trigger_invalid` when it is missing or malformed. Phase 4's recurrence metric scans later transcripts with the same matcher."
     },
     "fingerprint": {
       "type": "string",

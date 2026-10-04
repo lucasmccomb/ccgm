@@ -8,6 +8,7 @@
     "slugs",
     "session_count",
     "sessions",
+    "signals",
     "clusters",
     "friction_cluster_count",
     "routine_cluster_count",
@@ -122,6 +123,44 @@
           }
         }
       }
+    },
+    "signals": {
+      "type": "array",
+      "description": "Knowledge-bearing signals from the four deterministic extractors (transcript_miner.py, #1098 Phase 3.1), in budget-priority order: redirection, struggle_arc, abandoned_work, rediscovery. They take token budget before friction clusters. `excerpt` is the cited text (redacted, <=400 chars, one contiguous transcript span); `context` is the assistant turn before it.",
+      "items": {
+        "type": "object",
+        "required": ["kind", "session_id", "excerpt"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["redirection", "struggle_arc", "abandoned_work", "rediscovery"] },
+          "session_id": { "type": ["string", "null"] },
+          "session_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "rediscovery only: every session that explored the target."
+          },
+          "timestamp": { "type": ["string", "null"] },
+          "line": { "type": "integer", "minimum": 1 },
+          "excerpt": { "type": "string" },
+          "context": {
+            "type": "string",
+            "description": "redirection and abandoned_work: the assistant turn before the excerpt (may be empty)."
+          },
+          "signature": {
+            "type": "string",
+            "description": "struggle_arc only: the repeated attempt signature (path:, test:, or cmd: prefix)."
+          },
+          "failure_count": {
+            "type": "integer",
+            "minimum": 3,
+            "description": "struggle_arc only: failed attempts before the success."
+          }
+        }
+      }
+    },
+    "signals_dropped": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Signals cut because they exceeded their share of the token budget (lowest-priority kinds first)."
     },
     "clusters": {
       "type": "array",

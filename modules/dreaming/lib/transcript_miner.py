@@ -249,19 +249,21 @@ def _redact(text: str) -> str:
     return redact_pii(redact_secrets(text))
 
 
-def make_excerpt(text: str) -> str:
-    """Redact secrets + PII, then truncate to EXCERPT_MAX_CHARS.
+def make_excerpt(text: str, limit: int = EXCERPT_MAX_CHARS) -> str:
+    """Redact secrets + PII, then truncate to `limit` (default
+    EXCERPT_MAX_CHARS).
 
     Redaction MUST happen before truncation (hook_utils.redact_secrets'
     own documented contract) so the truncation boundary can never lop a
     redaction marker -- or a partial secret/PII fragment -- in half.
-    Guarantees len(result) <= EXCERPT_MAX_CHARS.
+    Guarantees len(result) <= min(limit, EXCERPT_MAX_CHARS).
     """
+    limit = min(limit, EXCERPT_MAX_CHARS)
     redacted = redact_secrets(text or "")
     redacted = redact_pii(redacted)
-    if len(redacted) <= EXCERPT_MAX_CHARS:
+    if len(redacted) <= limit:
         return redacted
-    return redacted[: EXCERPT_MAX_CHARS - 3].rstrip() + "..."
+    return redacted[: limit - 3].rstrip() + "..."
 
 
 def _text_from_content(content: Any) -> str:
@@ -453,6 +455,248 @@ def _head_metadata(path: Path) -> dict[str, str]:
     return found
 
 
+# ---------------------------------------------------------------------------
+# Signal extractors (#1098 Phase 3.1): knowledge the agent does not already
+# carry. Four deterministic extractors -- human redirections, resolved
+# struggle arcs, rediscovery, abandoned work. Each emits a "signal" dict:
+#   kind        redirection | struggle_arc | abandoned_work | rediscovery
+#   session_id, timestamp, line
+#   excerpt     the cited text: redacted, <= EXCERPT_MAX_CHARS, and a single
+#               contiguous span of the transcript so the apply-time
+#               corroboration check can find it
+#   context     (redirection, abandoned_work) the assistant turn before it
+# Hook friction stays in the friction clusters; corrections no longer need a
+# nearby tool error to count.
+# ---------------------------------------------------------------------------
+
+SIGNAL_KINDS = ("redirection", "struggle_arc", "abandoned_work", "rediscovery")
+# Signals may use at most this share of the token budget; friction gets the
+# rest. When signals alone exceed it, later kinds in SIGNAL_KINDS drop first.
+SIGNAL_BUDGET_FRACTION = 0.8
+MAX_SIGNALS_PER_KIND_PER_SESSION = 20
+MAX_REDISCOVERY_PER_SLUG = 15
+STRUGGLE_MIN_FAILURES = 3
+CONTEXT_MAX_CHARS = 240
+# A human-typed redirection is a sentence or two. Anything longer is pasted
+# content or a skill/command expansion that carries origin markers.
+MAX_HUMAN_TURN_CHARS = 800
+
+_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL | re.IGNORECASE)
+_HARNESS_PREFIXES = (
+    "<system-reminder",
+    "<command-",
+    "<local-command",
+    "<task-notification",
+    "<user-prompt-submit-hook",
+    "caveat:",
+    "[request interrupted",
+    "base directory for this skill",
+)
+
+_REDIRECT_RE = re.compile(
+    r"^\s*(?:no|nope|wrong)\b"
+    r"|\bthat(?:'s| is) (?:not|wrong|incorrect)\b"
+    r"|\bwe (?:don't|do not|never|shouldn't|should not)\b"
+    r"|\b(?:always|never)\b"
+    r"|\binstead\b"
+    r"|\bi (?:want|prefer|need you to)\b|\bi'd rather\b"
+    r"|\bnot (?:that|what i)\b"
+    r"|\bstop (?:doing|using)\b"
+    r"|\bplease (?:don't|do not)\b"
+    r"|\b(?:incorrect|you broke|that broke|wrong approach|actually,? no)\b",
+    re.IGNORECASE,
+)
+_ABANDON_USER_RE = re.compile(
+    r"\bundo (?:that|this|it|those|the)\b"
+    r"|\brevert(?:ed|ing)?\b"
+    r"|\broll(?:ed)? ?back\b"
+    r"|\bscrap (?:that|this|it)\b",
+    re.IGNORECASE,
+)
+# `git reset --hard origin/...` is how this workflow syncs a branch, not how
+# it abandons work, so it is excluded.
+_GIT_ABANDON_RE = re.compile(
+    r"(?:^|[;&|(]\s*|\s)git(?:\s+-[Cc]\s+\S+|\s+--[\w-]+(?:=\S+)?)*\s+(?:revert\b|reset\s+--hard\b(?!\s+origin/))"
+)
+_CONCLUSION_RE = re.compile(r"root cause|the fix|turns out|because", re.IGNORECASE)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+_TEST_TOKEN_RE = re.compile(r"\S*(?:test|spec)\S*\.(?:py|js|jsx|ts|tsx|sh|rb|go|rs)(?:::\S+)?", re.IGNORECASE)
+
+# Files every session loads or reads by habit: re-reading them is not
+# rediscovery of anything.
+_ALWAYS_READ_BASENAMES = frozenset({"claude.md", "memory.md", "readme.md", "agents.md"})
+_FILE_PATH_TOOLS = frozenset({"Edit", "MultiEdit", "Write", "NotebookEdit", "Read"})
+
+
+def _clean_human_text(turn: dict[str, Any]) -> str:
+    """The typed text of a genuinely human turn, or "" if it is not one.
+
+    Reuses the miner's human_origin gate, then drops what rides along with
+    it: <system-reminder> blocks appended to the same message, harness
+    wrappers (command output, interrupts, skill expansions), `isMeta`
+    lines, and anything longer than MAX_HUMAN_TURN_CHARS."""
+    if turn.get("role") != "user" or not turn.get("human_origin") or turn.get("is_meta"):
+        return ""
+    text = _REMINDER_RE.sub("", turn.get("text") or "").strip()
+    if not text or len(text) > MAX_HUMAN_TURN_CHARS:
+        return ""
+    if text.lower().startswith(_HARNESS_PREFIXES):
+        return ""
+    return text
+
+
+def _preceding_assistant_text(turn_sequence: list[dict[str, Any]], index: int) -> str:
+    """Text of the nearest assistant turn before `index` that has any,
+    without crossing a human turn."""
+    for turn in reversed(turn_sequence[:index]):
+        if turn["role"] == "assistant":
+            if turn.get("text", "").strip():
+                return turn["text"]
+        elif turn.get("human_origin"):
+            break
+    return ""
+
+
+def _conclusion_excerpt(text: str) -> str:
+    """The sentences of `text` that state a conclusion ("root cause", "the
+    fix", "turns out", "because"); when none do, the first three sentences."""
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if s and s.strip()]
+    chosen = [s for s in sentences if _CONCLUSION_RE.search(s)] or sentences[:3]
+    return make_excerpt(" ".join(chosen))
+
+
+def _attempt_signature(name: Any, tinput: Any) -> str | None:
+    """What an attempt is "the same as": a file path, a test name, or the
+    first three words of a shell command."""
+    if not isinstance(tinput, dict):
+        return None
+    if name in _FILE_PATH_TOOLS:
+        path = tinput.get("file_path") or tinput.get("notebook_path")
+        return f"path:{path}" if isinstance(path, str) and path else None
+    if name == "Bash":
+        command = tinput.get("command")
+        if not isinstance(command, str) or not command.strip():
+            return None
+        test = _TEST_TOKEN_RE.search(command)
+        if test:
+            return f"test:{test.group(0)}"
+        return "cmd:" + " ".join(command.split()[:3])
+    return None
+
+
+def _explore_target(name: Any, tinput: Any) -> str | None:
+    """Raw (not yet cwd-relative) Read/Grep/Glob target, or None."""
+    if not isinstance(tinput, dict):
+        return None
+    if name == "Read":
+        path = tinput.get("file_path")
+        return f"Read {path}" if isinstance(path, str) and path else None
+    if name == "Grep":
+        pattern = tinput.get("pattern")
+        if not isinstance(pattern, str) or len(pattern) < 4:
+            return None
+        path = tinput.get("path")
+        return f'Grep "{pattern}"' + (f" {path}" if isinstance(path, str) and path else "")
+    if name == "Glob":
+        pattern = tinput.get("pattern")
+        return f"Glob {pattern}" if isinstance(pattern, str) and pattern else None
+    return None
+
+
+def _relativize_target(target: str, cwd: str | None) -> str | None:
+    """Make a path-bearing target cwd-relative so the same file explored from
+    two clones or worktrees compares equal; drop always-read files."""
+    if cwd:
+        target = target.replace(cwd.rstrip("/") + "/", "")
+    words = target.split()
+    last = words[-1].strip('"') if words else ""
+    if target.startswith("Read ") and (
+        last.rsplit("/", 1)[-1].lower() in _ALWAYS_READ_BASENAMES or "/.claude/" in "/" + last
+    ):
+        return None
+    return _redact(target)[:200]
+
+
+def _struggle_arcs(
+    attempts: list[dict[str, Any]],
+    turn_sequence: list[dict[str, Any]],
+    session_id: str | None,
+) -> list[dict[str, Any]]:
+    """Three or more consecutive failed attempts on one signature, then a
+    success on it. The excerpt is the assistant's conclusion after the
+    success; an arc with no assistant text after it has nothing to mine."""
+    failures: dict[str, int] = {}
+    arcs: list[dict[str, Any]] = []
+    for attempt in attempts:
+        sig = attempt["signature"]
+        if attempt["failed"]:
+            failures[sig] = failures.get(sig, 0) + 1
+            continue
+        count = failures.pop(sig, 0)
+        if count < STRUGGLE_MIN_FAILURES:
+            continue
+        following: list[str] = []
+        for turn in turn_sequence[attempt["turn_index"] + 1:]:
+            if turn["role"] == "user" and turn.get("human_origin"):
+                break
+            if turn["role"] == "assistant" and turn.get("text", "").strip():
+                following.append(turn["text"])
+                if len(following) == 3:
+                    break
+        if not following:
+            continue
+        arcs.append(
+            {
+                "kind": "struggle_arc",
+                "session_id": session_id,
+                "timestamp": attempt["timestamp"],
+                "line": attempt["line"],
+                "excerpt": _conclusion_excerpt("\n".join(following)),
+                "signature": _redact(sig)[:120],
+                "failure_count": count,
+            }
+        )
+    return arcs
+
+
+def _human_turn_signals(
+    turn_sequence: list[dict[str, Any]], session_id: str | None, *, mid_session: bool
+) -> list[dict[str, Any]]:
+    """Redirections and user-requested abandonment. Each human turn is
+    classified once: abandonment wins over redirection.
+
+    Until the assistant has done something there is nothing to redirect or
+    undo, so a turn before the first assistant turn is a task statement, not
+    a signal. `mid_session` (mining resumed from a cursor) lifts that: the
+    assistant turn it answers sits in the part already mined."""
+    signals: list[dict[str, Any]] = []
+    seen_assistant = mid_session
+    for turn in turn_sequence:
+        if turn["role"] == "assistant":
+            seen_assistant = True
+            continue
+        text = _clean_human_text(turn)
+        if not text or not seen_assistant:
+            continue
+        if _ABANDON_USER_RE.search(text):
+            kind = "abandoned_work"
+        elif _REDIRECT_RE.search(text):
+            kind = "redirection"
+        else:
+            continue
+        signals.append(
+            {
+                "kind": kind,
+                "session_id": session_id,
+                "timestamp": turn["timestamp"],
+                "line": turn["lineno"],
+                "excerpt": make_excerpt(text),
+                "context": make_excerpt(_preceding_assistant_text(turn_sequence, turn["turn_index"]), CONTEXT_MAX_CHARS),
+            }
+        )
+    return signals
+
+
 def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
     """Mine one session-transcript JSONL into a MinedSession dict.
 
@@ -536,6 +780,11 @@ def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
 
     turn_sequence: list[dict[str, Any]] = []
     friction_events: list[dict[str, Any]] = []
+    # Inputs to the signal extractors: every completed tool attempt in order,
+    # abandonment commands that ran clean, and raw Read/Grep/Glob targets.
+    attempts: list[dict[str, Any]] = []
+    abandon_commands: list[dict[str, Any]] = []
+    explore_raw: list[str] = []
 
     for lineno, obj in lines:
         line_type = obj.get("type")
@@ -579,6 +828,9 @@ def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
                     token_totals[key] += int(v)
             content = message.get("content")
             if isinstance(content, list):
+                turn_sequence[turn_index]["text"] = _text_from_content(
+                    [b for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                )
                 for block in content:
                     if not isinstance(block, dict) or block.get("type") != "tool_use":
                         continue
@@ -597,7 +849,12 @@ def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
                             # same redaction guarantee as command_prefix.
                             "name": _redact(name) if isinstance(name, str) else name,
                             "command_prefix": command_prefix,
+                            "signature": _attempt_signature(name, tinput),
+                            "command": tinput.get("command") if name == "Bash" and isinstance(tinput, dict) else None,
                         }
+                    target = _explore_target(name, tinput)
+                    if target:
+                        explore_raw.append(target)
 
         elif line_type == "user":
             turn_index = len(turn_sequence)
@@ -612,6 +869,7 @@ def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
                     "text": user_text,
                     "timestamp": ts,
                     "human_origin": _is_human_origin_turn(obj),
+                    "is_meta": bool(obj.get("isMeta")),
                 }
             )
 
@@ -628,7 +886,23 @@ def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
                     tool_info = tool_uses.get(tu_id, {}) if isinstance(tu_id, str) else {}
                     is_error = bool(block.get("is_error"))
                     exit_code = _bash_exit_code(obj, block, tool_info)
-                    if is_error or (exit_code not in (None, 0)):
+                    failed = is_error or (exit_code not in (None, 0))
+                    if tool_info.get("signature"):
+                        attempts.append(
+                            {
+                                "signature": tool_info["signature"],
+                                "failed": failed,
+                                "turn_index": turn_index,
+                                "timestamp": ts,
+                                "line": lineno,
+                            }
+                        )
+                    command = tool_info.get("command")
+                    if not failed and isinstance(command, str) and _GIT_ABANDON_RE.search(command):
+                        abandon_commands.append(
+                            {"command": command, "turn_index": turn_index, "timestamp": ts, "line": lineno}
+                        )
+                    if failed:
                         friction_events.append(
                             {
                                 "kind": "tool_error",
@@ -709,6 +983,28 @@ def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
                 }
             )
 
+    by_kind: dict[str, list[dict[str, Any]]] = {kind: [] for kind in SIGNAL_KINDS}
+    for signal in _human_turn_signals(turn_sequence, session_id, mid_session=start_offset > 0):
+        by_kind[signal["kind"]].append(signal)
+    by_kind["struggle_arc"] = _struggle_arcs(attempts, turn_sequence, session_id)
+    for cmd in abandon_commands:
+        by_kind["abandoned_work"].append(
+            {
+                "kind": "abandoned_work",
+                "session_id": session_id,
+                "timestamp": cmd["timestamp"],
+                "line": cmd["line"],
+                "excerpt": make_excerpt(cmd["command"]),
+                "context": make_excerpt(_preceding_assistant_text(turn_sequence, cmd["turn_index"]), CONTEXT_MAX_CHARS),
+            }
+        )
+    by_kind["abandoned_work"].sort(key=lambda s: s["line"])
+    signals = [s for kind in SIGNAL_KINDS for s in by_kind[kind][:MAX_SIGNALS_PER_KIND_PER_SESSION]]
+
+    explored_targets = sorted(
+        {t for t in (_relativize_target(raw, cwd) for raw in explore_raw) if t}
+    )
+
     cache_read = token_totals["cache_read_input_tokens"]
     cache_creation = token_totals["cache_creation_input_tokens"]
     base_input = token_totals["input_tokens"]
@@ -730,6 +1026,8 @@ def mine(path: str | Path, start_offset: int = 0) -> dict[str, Any]:
         "ended_at": ended_at,
         "friction_events": friction_events,
         "user_corrections": user_corrections,
+        "signals": signals,
+        "explored_targets": explored_targets,
         "pr_links": pr_links,
         "token_totals": token_totals,
         "cache_read_ratio": cache_read_ratio,
@@ -856,6 +1154,51 @@ def budget(clusters: list[dict[str, Any]], max_input_tokens: int) -> dict[str, A
         "max_input_tokens": max_input_tokens,
         "over_budget": estimate > max_input_tokens,
     }
+
+
+def budget_signals(signals: list[dict[str, Any]], max_input_tokens: int) -> tuple[list[dict[str, Any]], int]:
+    """Keep signals in SIGNAL_KINDS priority order (stable within a kind)
+    until they use SIGNAL_BUDGET_FRACTION of `max_input_tokens`; drop the
+    rest. Returns (kept, dropped_count)."""
+    rank = {kind: i for i, kind in enumerate(SIGNAL_KINDS)}
+    ordered = sorted(signals, key=lambda s: rank.get(s["kind"], len(rank)))
+    cap = int(max_input_tokens * SIGNAL_BUDGET_FRACTION)
+    kept: list[dict[str, Any]] = []
+    used = 0
+    for signal in ordered:
+        cost = _estimate_tokens(signal)
+        if used + cost > cap:
+            break
+        kept.append(signal)
+        used += cost
+    return kept, len(ordered) - len(kept)
+
+
+def _rediscovery_signals(mined_sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Read/Grep/Glob targets explored in two or more distinct sessions of
+    one slug within this mining window. Most-repeated first."""
+    by_slug: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for s in mined_sessions:
+        sid = s.get("session_id") or s.get("transcript_path")
+        for target in s.get("explored_targets") or []:
+            hits = by_slug.setdefault(s.get("slug") or "", {}).setdefault(target, [])
+            if all(h["id"] != sid for h in hits):
+                hits.append({"id": sid, "session_id": s.get("session_id"), "at": s.get("started_at")})
+    signals: list[dict[str, Any]] = []
+    for slug in sorted(by_slug):
+        repeated = [(t, h) for t, h in by_slug[slug].items() if len(h) >= 2]
+        repeated.sort(key=lambda th: (-len(th[1]), th[0]))
+        for target, hits in repeated[:MAX_REDISCOVERY_PER_SLUG]:
+            signals.append(
+                {
+                    "kind": "rediscovery",
+                    "session_id": hits[0]["session_id"],
+                    "session_ids": [h["session_id"] for h in hits if h["session_id"]],
+                    "timestamp": hits[0]["at"],
+                    "excerpt": make_excerpt(f"Explored in {len(hits)} sessions: {target}"),
+                }
+            )
+    return signals
 
 
 # ---------------------------------------------------------------------------
@@ -1398,7 +1741,12 @@ def mine_to_evidence_bundle(
 
     all_friction_events = [ev for s in mined_sessions for ev in s["friction_events"]]
     clustered = cluster(all_friction_events)
-    budgeted = budget(clustered, max_input_tokens)
+    # Signals are budgeted first; friction gets what they leave.
+    all_signals = [sig for s in mined_sessions for sig in s["signals"]] + _rediscovery_signals(mined_sessions)
+    signals, signals_dropped = budget_signals(all_signals, max_input_tokens)
+    signal_tokens = _estimate_tokens(signals)
+    budgeted = budget(clustered, max(max_input_tokens - signal_tokens, 1))
+    token_estimate = budgeted["token_estimate"] + signal_tokens
 
     slugs = sorted({s["slug"] for s in mined_sessions if s.get("slug")})
     malformed_total = sum(s["malformed_line_count"] for s in mined_sessions)
@@ -1430,12 +1778,14 @@ def mine_to_evidence_bundle(
         "slugs": slugs,
         "session_count": len(mined_sessions),
         "sessions": sessions_summary,
+        "signals": signals,
+        "signals_dropped": signals_dropped,
         "clusters": budgeted["clusters"],
         "friction_cluster_count": budgeted["friction_cluster_count"],
         "routine_cluster_count": budgeted["routine_cluster_count"],
-        "token_estimate": budgeted["token_estimate"],
+        "token_estimate": token_estimate,
         "max_input_tokens": max_input_tokens,
-        "over_budget": budgeted["over_budget"],
+        "over_budget": token_estimate > max_input_tokens,
         "malformed_line_total": malformed_total,
         "canary": canary,
     }

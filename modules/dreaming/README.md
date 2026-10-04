@@ -191,6 +191,24 @@ The **nightly map->reduce analyzer**, on top of Epic 2's miner:
   the shape, so the prompts document it rather than pleading for it.
 - `lib/proposal-schema.json` -- the per-change proposal row contract every
   written row is validated against before it touches disk.
+- `lib/triggers.py` -- the deterministic trigger matcher. Every
+  `learning_add` / `learning_supersede` proposal carries
+  `trigger: {"kind", "value"}` (null for the other kinds):
+
+  | kind | value | fires when the text |
+  |------|-------|---------------------|
+  | `regex` | string, 3-200 chars | matches it (`re.search`, ignoring case) |
+  | `command_prefix` | string | contains the command at a word boundary |
+  | `path_glob` | glob string | contains a path (or its basename) that matches |
+  | `phrase_set` | list of strings, 3+ chars each | contains any phrase, ignoring case |
+
+  The finalizer validates the trigger against the proposal's own cited
+  evidence: a missing or malformed trigger is rejected as `trigger_invalid`,
+  one that fires on none of its evidence excerpts as `trigger_unverified`
+  (counted as `triggers_unverified` in the run summary). Triggers that match
+  everything (`.*`, `*`, one-letter values) and nested-quantifier regexes
+  are invalid. Phase 4's recurrence metric imports `triggers.matches()` to
+  scan later transcripts.
 - `bin/dream-digest.sh` -- renders `~/.claude/dreaming/digests/{date}.md`:
   proposals grouped by project/kind with evidence, prevalence, and
   confidence; a durable canary banner for schema-drift/reduce-failure
@@ -221,7 +239,26 @@ calls, no LLM calls, no scheduling:
   dreamed before cursors existed are seeded once from `last-dreamed.json`.
 - `mine(path, start_offset=0)` -- extract friction events (tool errors, hook errors,
   prevented-continuation), user-correction sequences, PR links, token
-  totals + cache-read ratio, and session identity from one transcript.
+  totals + cache-read ratio, session identity, and the four **signals**
+  below, from one transcript.
+- **Signals** -- four deterministic extractors for knowledge the agent does
+  not already carry (hook friction goes to friction clusters, not here):
+  `redirection` (a human-typed turn that corrects or redirects, with or
+  without a nearby tool error; the excerpt is the human's text and
+  `context` is the assistant turn before it), `struggle_arc` (three or
+  more consecutive failures on one file path, test name or three-word
+  command prefix, then a success; the excerpt is the assistant's
+  conclusion, preferring "root cause" / "the fix" / "turns out" /
+  "because" sentences), `abandoned_work` (a clean `git revert` or
+  `git reset --hard` that is not a sync to `origin/`, or a human asking to
+  undo or revert), and `rediscovery` (the same Read/Grep/Glob target in two
+  or more sessions of one slug in the mining window; built in
+  `mine_to_evidence_bundle()`). Only genuinely human turns count: the
+  existing `human_origin` gate, minus `<system-reminder>` blocks, harness
+  wrappers, `isMeta` lines, anything over 800 characters, and the session's
+  opening prompt. Every excerpt goes through `make_excerpt()`. Signals
+  take token budget before friction clusters (at most 80% of it; the
+  lowest-priority kinds drop first and `signals_dropped` counts them).
 - `cluster(events)` -- group events by `(event_kind, tool_name,
   command_prefix)`.
 - `budget(clusters, max_input_tokens)` -- trim to a token cap without ever
@@ -337,6 +374,17 @@ Schema, validated by both this module's `--self-check` and, in Epic 3,
       "friction_field_presence": 4
     }
   ],
+  "signals": [
+    {
+      "kind": "redirection",
+      "session_id": "<uuid>",
+      "timestamp": "<ISO or null>",
+      "line": 7,
+      "excerpt": "<what the human typed; redacted, <=400 chars>",
+      "context": "<the assistant turn before it; redacted, <=240 chars>"
+    }
+  ],
+  "signals_dropped": 0,
   "clusters": [
     {
       "event_kind": "tool_error",

@@ -76,6 +76,13 @@ decide:
    your honest `prevalence` either way; a low-breadth `_global` proposal is
    still useful for human review, it is simply not auto-eligible later.
 
+Evidence from `redirection`, `struggle_arc` and `abandoned_work` signals
+(what the human said, what the agent concluded after a long struggle, what
+was abandoned and why) is the strongest basis for an `add`. An `add` that
+only restates a hook, guard or permission denial, or a tool error whose text
+already states the fix, teaches the agent nothing it was not already told:
+leave it out.
+
 Never invent a `target_id`. If you cannot find a matching existing row in
 `store_projection`, the only valid kind is `learning_add` (or leave the
 candidate out entirely if it does not clear the bar in step 3).
@@ -112,9 +119,39 @@ you):
   "confidence": <1-10 integer: your confidence THIS ACTION is warranted>,
   "prevalence": {"sessions": <distinct session ids in evidence>, "agents": <distinct writer identities the evidence spans, usually 1>},
   "evidence": [{"session_id": "<from a map candidate>", "excerpt": "<reuse the candidate's excerpt verbatim -- already redacted>"}, ...],
-  "justification": "<why this action is warranted, paraphrased, <=500 chars>"
+  "justification": "<why this action is warranted, paraphrased, <=500 chars>",
+  "trigger": {"kind": "regex" | "command_prefix" | "path_glob" | "phrase_set", "value": "<string, or a list of strings for phrase_set>"} | null
 }
 ```
+
+### The `trigger`
+
+A `learning_add` or `learning_supersede` MUST carry a `trigger`; the other
+three kinds carry `null`. The trigger is a small deterministic matcher for
+the situation the learning is about. Later runs scan new transcripts with it
+to check whether the learning changes behavior, so it must fire when that
+situation shows up again and stay quiet otherwise.
+
+| kind | `value` | fires when the text |
+|------|---------|---------------------|
+| `regex` | one regex string (3-200 chars) | matches it, ignoring case |
+| `command_prefix` | a command such as `kubectl delete` | contains that command at a word boundary |
+| `path_glob` | a glob such as `migrations/*.sql` | contains a path that matches it (whole path or basename) |
+| `phrase_set` | a list of phrases (3+ chars each) | contains any one of them, ignoring case |
+
+Rules:
+
+- The trigger MUST match at least one of the proposal's own `evidence`
+  excerpts. The runtime checks this and discards the proposal as
+  `trigger_unverified` when it fails, so copy distinctive wording from an
+  excerpt rather than inventing it.
+- Pick the most specific matcher that still covers the situation: an error
+  string, a command, a file pattern, or the phrases a person would use
+  again. Never use a trigger that fires on nearly everything (`.*`, a
+  single common word); the runtime rejects those too.
+- For a redirection, a phrase or two from the human's own words usually
+  works. For a tool or command gotcha, prefer `command_prefix` or the error
+  string as a `regex`.
 
 `evidence` MUST carry one item per distinct supporting session -- if a
 candidate's evidence spans two sessions, cite BOTH (so the number of distinct
@@ -125,13 +162,13 @@ uncredited. (The runtime also deterministically back-fills any supporting
 session you omit when it can, but cite them yourself -- do not rely on it.)
 
 Field rules by kind:
-- `learning_add` / `learning_supersede`: `content` and `type` are
+- `learning_add` / `learning_supersede`: `content`, `type` and `trigger` are
   REQUIRED (non-null). `learning_supersede` additionally REQUIRES a
   `target_id` that resolves in `store_projection`.
 - `learning_verify` / `learning_contradict` / `learning_deprecate`:
   `target_id` is REQUIRED (non-null) and must resolve in
-  `store_projection`. `content` and `type` MUST be `null` -- these
-  operations act on an existing id, they do not carry new prose.
+  `store_projection`. `content`, `type` and `trigger` MUST be `null` --
+  these operations act on an existing id, they do not carry new prose.
 
 ## When there is nothing to propose
 
