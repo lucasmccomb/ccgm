@@ -59,7 +59,12 @@ import hook_utils  # noqa: E402
 sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib")
 )
-import autoheal_mode  # noqa: E402
+try:
+    import autoheal_mode  # noqa: E402
+except Exception:  # partial install, older lib, dangling symlink
+    # The hook stays default-off: without the mode resolver it does nothing,
+    # silently, rather than raising into every tool call.
+    autoheal_mode = None
 
 
 # Default location of the patterns file once installed. Tests override
@@ -286,6 +291,8 @@ def _emit_alert(match: dict) -> None:
 
 def main() -> None:
     # 1. Default-OFF gate. NEVER scan unless the mode is shadow or active.
+    if autoheal_mode is None:
+        sys.exit(0)
     mode = _mode()
     if mode == autoheal_mode.MODE_OFF:
         sys.exit(0)

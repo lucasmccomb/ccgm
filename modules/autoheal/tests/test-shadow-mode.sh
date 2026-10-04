@@ -294,6 +294,21 @@ run_rt '{"realtime_alerts_enabled": false}'
 assert_eq "${RT_RC}" "0" "off realtime (persisted false): exit 0"
 assert_eq "$(test -e "${RT_HOME}/autoheal/shadow" && echo yes || echo no)" "no" "off realtime: no shadow log"
 
+# Missing autoheal_mode.py (partial install): the hook does nothing, silently.
+ORPHAN="${TMPROOT}/orphan-hook"
+mkdir -p "${ORPHAN}"
+cp "${HOOK}" "${ORPHAN}/realtime-security-scanner.py"
+printf '%s\n' '{"realtime_alerts_enabled": "active"}' > "${RT_HOME}/autoheal/config.json"
+rm -rf "${RT_HOME}/autoheal/shadow" "${RT_HOME}/autoheal/events"
+orphan_payload="$(python3 -c "import json; print(json.dumps({'hook_event_name':'PostToolUse','session_id':'s-rt','tool_name':'Bash','tool_input':{'command':'rm -rf /'},'cwd':'/tmp/x'}))")"
+orphan_out="$(printf '%s' "${orphan_payload}" | HOME="${RT_HOME}" CCGM_AUTOHEAL_DIR="${RT_HOME}/autoheal" \
+    CCGM_REALTIME_PATTERNS="${LIB}/realtime-security-patterns.json" \
+    python3 "${ORPHAN}/realtime-security-scanner.py" 2>&1)"
+assert_eq "$?" "0" "missing autoheal_mode: hook exits 0"
+assert_eq "${orphan_out}" "" "missing autoheal_mode: no output"
+assert_eq "$(test -e "${RT_HOME}/autoheal/events" && echo yes || echo no)" "no" "missing autoheal_mode: no event written"
+assert_eq "$(test -e "${RT_HOME}/autoheal/shadow" && echo yes || echo no)" "no" "missing autoheal_mode: no shadow log"
+
 # --- 6. digest ---------------------------------------------------------
 DG="${TMPROOT}/dg"
 mkdir -p "${DG}/proposals" "${DG}/shadow" "${DG}/applied"
