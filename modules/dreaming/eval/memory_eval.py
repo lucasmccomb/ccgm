@@ -199,6 +199,28 @@ CONTENT_SHAPING_OPS = {"add", "supersede", "deprecate", "contradict"}
 HARNESS_BROKEN_MARKER_SUFFIX = ".harness-broken"
 
 
+# Hard total-cost stop (#1098 item 0.2). A run that aborts on budget writes
+# `evals/<date>.budget-abort`. Like the harness-broken marker it is not a
+# `.jsonl`, so no results glob picks it up; unlike it, gate_check() ignores
+# it: an abort leaves the gate state exactly as it was.
+BUDGET_ABORT_MARKER_SUFFIX = ".budget-abort"
+# Preflight price of one `claude -p` arm session: the measured mean of the
+# 270-session run on 2026-10-04 ($20.97 / 270). Recalibrate when a run's
+# ledger rows say otherwise.
+ESTIMATED_SESSION_COST_USD = 0.08
+# Preflight price of the dreamed task's in-eval mining (2 map + 1 reduce).
+ESTIMATED_MINING_COST_USD = 0.50
+# Preflight guess at a judge request's payload size, in characters.
+ESTIMATED_JUDGE_PAYLOAD_CHARS = 8000
+_COST_EPSILON = 1e-9
+
+
+class BudgetAbortError(RuntimeError):
+    """Raised when the next billed call would cross the run's cost cap.
+    main() turns it into a `budget-abort` marker and an untouched gate;
+    the per-task `except Exception` in main() must let it through."""
+
+
 class IsolatedConfigError(RuntimeError):
     """Raised by assert_isolated_config_registers_only_injection_hook() when
     the eval's isolated CLAUDE_CONFIG_DIR would register anything other
@@ -229,6 +251,109 @@ def dreaming_dir() -> Path:
 
 def evals_dir() -> Path:
     return dreaming_dir() / "evals"
+
+
+# ---------------------------------------------------------------------------
+# Cost tracking: one running total over every billed call, mirrored to the
+# shared cost.log ledger (#1098 items 0.2, 0.3)
+# ---------------------------------------------------------------------------
+
+
+class CostTracker:
+    """Running total of this run's spend, checked BEFORE each billed call.
+
+    `check()` raises BudgetAbortError when `spent + estimate` would cross the
+    cap, so the run stops before the call that overspends, not after it.
+    `record()` adds a finished call's cost and appends one cost.log row
+    (`eval:arm:<model>`, `eval:judge:<model>`, `eval:mine:<model>`). The
+    ledger path is captured at construction, because in-eval mining
+    repoints CCGM_DREAMING_DIR at a sandbox for a while."""
+
+    def __init__(
+        self, *, cap_usd: float, ledger_path: Path, date: str, cfg: dict[str, Any],
+        session_estimate_usd: float = ESTIMATED_SESSION_COST_USD,
+    ) -> None:
+        self.cap_usd = cap_usd
+        self.ledger_path = ledger_path
+        self.date = date
+        self.cfg = cfg
+        self.session_estimate_usd = session_estimate_usd
+        self.spent_usd = 0.0
+        self.sessions_run = 0
+        self.max_session_cost_usd = 0.0
+
+    def remaining_usd(self) -> float:
+        return self.cap_usd - self.spent_usd
+
+    def check(self, estimate_usd: float, what: str) -> None:
+        if self.spent_usd + estimate_usd > self.cap_usd + _COST_EPSILON:
+            raise BudgetAbortError(
+                f"next {what} (estimated ${estimate_usd:.4f}) would cross the ${self.cap_usd:.4f} cap "
+                f"(spent ${self.spent_usd:.4f})"
+            )
+
+    def next_session_estimate(self, max_budget_usd: float) -> float:
+        """Worst case for the next arm session: its own --max-budget-usd
+        ceiling, or the dearest session seen so far if that is higher."""
+        return max(max_budget_usd, self.max_session_cost_usd)
+
+    def judge_cost(self, model: str, in_tok: int, out_tok: int) -> float:
+        return da.estimate_call_cost_usd(in_tok, out_tok, da.resolve_pricing(self.cfg, model))
+
+    def judge_estimate(self, model: str, system_prompt: str, payload_chars: int) -> float:
+        in_tok = (len(system_prompt) + payload_chars) // 3 + 1
+        return self.judge_cost(model, in_tok, DEFAULT_JUDGE_MAX_OUTPUT_TOKENS)
+
+    def record(self, *, in_tok: int, out_tok: int, cost_usd: float, label: str) -> None:
+        self.spent_usd += cost_usd
+        if label.startswith("eval:arm:"):
+            self.sessions_run += 1
+            self.max_session_cost_usd = max(self.max_session_cost_usd, cost_usd)
+        if cost_usd > 0 or in_tok or out_tok:
+            da._append_cost(self.ledger_path, self.date, in_tok, out_tok, cost_usd, label)  # noqa: SLF001 -- the analyzer's own ledger writer
+
+
+_COST_TRACKER: CostTracker | None = None
+
+
+def set_cost_tracker(tracker: CostTracker | None) -> None:
+    global _COST_TRACKER
+    _COST_TRACKER = tracker
+
+
+def forward_mining_cost(state_dir: Path) -> None:
+    """The dreamed task mines under a sandbox CCGM_DREAMING_DIR, so the
+    analyzer wrote its spend to a cost.log that is deleted with the sandbox.
+    Copy those rows into the run's tracker and the real ledger."""
+    tracker = _COST_TRACKER
+    sandbox_log = state_dir / "cost.log"
+    if tracker is None or not sandbox_log.is_file():
+        return
+    for line in sandbox_log.read_text(encoding="utf-8").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 5:
+            continue
+        try:
+            in_tok, out_tok, cost = int(parts[1]), int(parts[2]), float(parts[3])
+        except ValueError:
+            continue
+        tracker.record(in_tok=in_tok, out_tok=out_tok, cost_usd=cost, label=f"eval:mine:{parts[4]}")
+    if tracker.spent_usd > tracker.cap_usd + _COST_EPSILON:
+        raise BudgetAbortError(
+            f"in-eval mining pushed spend to ${tracker.spent_usd:.4f}, over the ${tracker.cap_usd:.4f} cap"
+        )
+
+
+def write_mining_budget(state_dir: Path) -> None:
+    """Hand the sandboxed analyzer what is left of the run cap as its daily
+    cap, so mining cannot overspend what the arms and judges already used."""
+    tracker = _COST_TRACKER
+    if tracker is None or tracker.cap_usd == float("inf"):
+        return
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "config.json").write_text(
+        json.dumps({"daily_cost_cap_usd": max(0.0, tracker.remaining_usd())}), encoding="utf-8",
+    )
 
 
 def today_iso() -> str:
@@ -881,10 +1006,28 @@ def judge_output(
     live judge-call machinery below is exercised only when actually live,
     and NEVER carries an "error" key (a canned score is never a failure).
     """
+    tracker = _COST_TRACKER
     if offline_score is not None:
         score = max(0.0, min(10.0, float(offline_score["score"])))
-        return {"pass": score >= 6.0, "score": score, "usage": {"input_tokens": 0, "output_tokens": 0}}
+        # `judge_usage` in a canned score stands in for the usage a live
+        # judge call would report; it reaches the ledger the same way.
+        canned = offline_score.get("judge_usage") or {}
+        usage = {
+            "input_tokens": int(canned.get("input_tokens", 0) or 0),
+            "output_tokens": int(canned.get("output_tokens", 0) or 0),
+        }
+        if tracker is not None and (usage["input_tokens"] or usage["output_tokens"]):
+            tracker.record(
+                in_tok=usage["input_tokens"], out_tok=usage["output_tokens"],
+                cost_usd=tracker.judge_cost(judge_model, usage["input_tokens"], usage["output_tokens"]),
+                label=f"eval:judge:{judge_model}",
+            )
+        return {"pass": score >= 6.0, "score": score, "usage": usage}
 
+    if tracker is not None:
+        tracker.check(
+            tracker.judge_estimate(judge_model, judge_system_prompt, len(json.dumps(payload))), "judge call",
+        )
     parsed, usage = _call_judge_api(
         model=judge_model,
         system_prompt=judge_system_prompt,
@@ -893,6 +1036,12 @@ def judge_output(
         api_key=api_key or "",
         api_url=api_url,
     )
+    if tracker is not None:
+        tracker.record(
+            in_tok=usage["input_tokens"], out_tok=usage["output_tokens"],
+            cost_usd=tracker.judge_cost(judge_model, usage["input_tokens"], usage["output_tokens"]),
+            label=f"eval:judge:{judge_model}",
+        )
     if parsed is None or "score" not in parsed:
         return {"pass": False, "score": 0.0, "usage": usage, "error": "judge did not return parseable {pass, score}"}
     try:
@@ -974,11 +1123,22 @@ def _run_one(
             },
         }
     else:
+        tracker = _COST_TRACKER
+        if tracker is not None:
+            tracker.check(tracker.next_session_estimate(max_budget_usd), "claude -p session")
         result = run_claude_p(
             prompt=prompt, workdir=workdir, config_dir=config_dir, home_dir=home_dir,
             model=backbone, inject=inject, api_key=api_key, learnings_dir=learnings_dir,
             claude_bin=claude_bin, max_budget_usd=max_budget_usd, timeout_s=timeout_s,
         )
+        if tracker is not None:
+            session_usage = result.get("usage") or {}
+            tracker.record(
+                in_tok=int(session_usage.get("input_tokens", 0) or 0),
+                out_tok=int(session_usage.get("output_tokens", 0) or 0),
+                cost_usd=float(result.get("total_cost_usd", 0.0) or 0.0),
+                label=f"eval:arm:{backbone}",
+            )
         if result.get("is_error"):
             # Keep the first failure's raw detail for the whole-run abort in
             # main() (#1027); per-row failures stay non-fatal.
@@ -1496,6 +1656,10 @@ def _mine_and_analyze(
         argv = ["--offline", str(offline_dir)] + argv
     prev_dreaming_dir = os.environ.get("CCGM_DREAMING_DIR")
     prev_api_key = os.environ.get("ANTHROPIC_API_KEY")
+    tracker = _COST_TRACKER
+    if tracker is not None and offline_dir is None:
+        tracker.check(ESTIMATED_MINING_COST_USD, "in-eval mining")
+        write_mining_budget(dreaming_state_dir)
     try:
         os.environ["CCGM_DREAMING_DIR"] = str(dreaming_state_dir)
         if api_key:
@@ -1510,6 +1674,7 @@ def _mine_and_analyze(
             os.environ.pop("ANTHROPIC_API_KEY", None)
         else:
             os.environ["ANTHROPIC_API_KEY"] = prev_api_key
+    forward_mining_cost(dreaming_state_dir)
     return dreaming_state_dir / "proposals" / f"{force_day}.jsonl"
 
 
@@ -1687,6 +1852,43 @@ def _find_latest_harness_broken_marker() -> Path | None:
         return None
     candidates = sorted(d.glob(f"*{HARNESS_BROKEN_MARKER_SUFFIX}"), key=lambda p: p.stat().st_mtime)
     return candidates[-1] if candidates else None
+
+
+def budget_abort_marker_path(date: str) -> Path:
+    return evals_dir() / f"{date}{BUDGET_ABORT_MARKER_SUFFIX}"
+
+
+def write_budget_abort_marker(
+    *, date: str, phase: str, cap_usd: float, spent_usd: float, sessions_run: int, detail: str,
+) -> Path:
+    """Record that a run stopped on budget. `phase` is `module-budget` (the
+    30-day budget was already spent), `preflight` (the estimate exceeded the
+    cap) or `run` (the running total would cross it). The gate ignores it."""
+    path = budget_abort_marker_path(date)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "date": date, "generated_at": _utc_now_iso(), "phase": phase, "cap_usd": cap_usd,
+                "spent_usd": round(spent_usd, 6), "sessions_run": sessions_run, "detail": detail,
+            },
+            sort_keys=True,
+        ) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def estimate_run_cost(
+    tasks: list[dict[str, Any]], *, backbones: list[str], runs: int, judge_model: str,
+    judge_system_prompt: str, tracker: CostTracker,
+) -> float:
+    """Preflight estimate: arm sessions at the typical session price, one
+    judge call per session, and the mining cost of each dreamed task."""
+    sessions = len(tasks) * len(backbones) * len(ARMS) * runs
+    judge = tracker.judge_estimate(judge_model, judge_system_prompt, ESTIMATED_JUDGE_PAYLOAD_CHARS)
+    mining = sum(ESTIMATED_MINING_COST_USD for t in tasks if t["kind"] == "dreamed")
+    return sessions * (tracker.session_estimate_usd + judge) + mining
 
 
 def _read_results_file(path: Path) -> list[dict[str, Any]]:
@@ -1975,7 +2177,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--freshness-days", type=int, default=DEFAULT_EVAL_FRESHNESS_DAYS)
     p.add_argument("--date", metavar="YYYY-MM-DD", help="override the results filename date (default: today)")
     p.add_argument("--claude-bin", default=os.environ.get("CCGM_EVAL_CLAUDE_BIN", "claude"))
-    p.add_argument("--max-budget-usd", type=float, default=DEFAULT_MAX_BUDGET_USD_PER_RUN)
+    p.add_argument("--max-budget-usd", type=float, default=DEFAULT_MAX_BUDGET_USD_PER_RUN, help="per-session ceiling passed to claude -p")
+    p.add_argument(
+        "--max-total-usd", type=float, metavar="USD",
+        help="hard cap on this run's total spend (default: config eval_run_cost_cap_usd, 5.0). "
+             "Also bounded by what is left of module_budget_usd_30d",
+    )
     p.add_argument("--timeout-s", type=int, default=DEFAULT_RUN_TIMEOUT_S)
     return p
 
@@ -2061,6 +2268,49 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"memory_eval: using claude binary {claude_bin}", file=sys.stderr)
 
+    ledger_path = da.cost_log_path()
+    ledger_day = today_iso()
+    if offline_dir is None:
+        run_cap = args.max_total_usd if args.max_total_usd is not None else float(
+            cfg.get("eval_run_cost_cap_usd", da.DEFAULT_EVAL_RUN_COST_CAP_USD)
+        )
+        spent_30d, module_budget = da.module_budget_status(cfg, ledger_day)
+        if spent_30d >= module_budget:
+            detail = (
+                f"30-day module budget reached (spent ${spent_30d:.4f} of ${module_budget:.4f} in cost.log); "
+                "refusing to start."
+            )
+            print(f"memory_eval: {detail}", file=sys.stderr)
+            write_budget_abort_marker(
+                date=date, phase="module-budget", cap_usd=module_budget, spent_usd=spent_30d,
+                sessions_run=0, detail=detail,
+            )
+            return 1
+        cap = min(run_cap, module_budget - spent_30d)
+    else:
+        cap = float("inf")  # offline: no billed calls, nothing to cap
+    tracker = CostTracker(cap_usd=cap, ledger_path=ledger_path, date=ledger_day, cfg=cfg)
+    if offline_dir is None:
+        estimate = estimate_run_cost(
+            tasks, backbones=backbones, runs=args.runs, judge_model=judge_model,
+            judge_system_prompt=judge_system_prompt, tracker=tracker,
+        )
+        if estimate > cap + _COST_EPSILON:
+            detail = (
+                f"preflight estimate ${estimate:.2f} exceeds the ${cap:.2f} cap "
+                f"({len(tasks)} task(s) x {len(backbones)} backbone(s) x {len(ARMS)} arms x {args.runs} run(s)); "
+                "lower --runs/--tasks/--backbone or raise --max-total-usd."
+            )
+            print(f"memory_eval: {detail}", file=sys.stderr)
+            write_budget_abort_marker(
+                date=date, phase="preflight", cap_usd=cap, spent_usd=0.0, sessions_run=0, detail=detail,
+            )
+            return 1
+    set_cost_tracker(tracker)
+
+    # What the gate reads for `date` today. A budget abort puts it back.
+    results_before = results_path_for_date(date).read_bytes() if results_path_for_date(date).is_file() else None
+
     reset_agent_error_samples()
     sandbox_root = Path(tempfile.mkdtemp(prefix="ccgm-eval-sandbox-"))
     all_rows: list[dict[str, Any]] = []
@@ -2095,6 +2345,8 @@ def main(argv: list[str] | None = None) -> int:
                         judge_system_prompt=judge_system_prompt, api_url=api_url, offline_all_scores=offline_all_scores,
                         sandbox_root=sandbox_root,
                     )
+            except BudgetAbortError:
+                raise
             except Exception as exc:  # noqa: BLE001 -- ANY task-orchestration failure degrades to a recorded row; it must never discard earlier tasks' results
                 print(f"memory_eval: task {task['id']!r} raised {exc!r}; recording an error row and continuing", file=sys.stderr)
                 rows = [_synthetic_error_row(task, backbones=backbones, runs=args.runs, offline=offline_dir is not None, exc=exc)]
@@ -2149,7 +2401,29 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"memory_eval: wrote {marker}; the gate stays closed until a run produces results", file=sys.stderr)
         return 1
+    except BudgetAbortError as exc:
+        print(f"memory_eval: budget abort: {exc}", file=sys.stderr)
+        # Put the results file back exactly as this run found it, so the gate
+        # reads what it read before the run started.
+        if wrote_results is not None:
+            partial = results_path_for_date(date)
+            try:
+                still_ours = partial.stat().st_mtime_ns == wrote_results
+            except OSError:
+                still_ours = False
+            if still_ours:
+                if results_before is None:
+                    partial.unlink(missing_ok=True)
+                else:
+                    partial.write_bytes(results_before)
+        marker = write_budget_abort_marker(
+            date=date, phase="run", cap_usd=tracker.cap_usd, spent_usd=tracker.spent_usd,
+            sessions_run=tracker.sessions_run, detail=str(exc),
+        )
+        print(f"memory_eval: wrote {marker}; gate state unchanged", file=sys.stderr)
+        return 1
     finally:
+        set_cost_tracker(None)
         shutil.rmtree(sandbox_root, ignore_errors=True)
 
     results_path = write_results(all_rows, date=date)

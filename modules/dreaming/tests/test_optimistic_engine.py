@@ -1102,7 +1102,7 @@ class EvalRefreshTests(OptimisticEngineTestBase):
         self._pin_env("CCGM_DREAMING_DIR", fresh_dreaming)
 
     def test_eval_refresh_skips_when_results_too_fresh(self):
-        self._write_config({"eval_refresh_min_age_days": 7})
+        self._write_config({"eval_refresh_enabled": True, "eval_refresh_min_age_days": 7})
         evals_dir = da.dreaming_dir() / "evals"
         evals_dir.mkdir(parents=True, exist_ok=True)
         (evals_dir / "2026-05-01.jsonl").write_text("{}\n", encoding="utf-8")  # mtime = now
@@ -1112,7 +1112,7 @@ class EvalRefreshTests(OptimisticEngineTestBase):
         self.assertIn("old", reason)
 
     def test_eval_refresh_skips_when_no_api_key(self):
-        self._write_config({"eval_refresh_min_age_days": 7})
+        self._write_config({"eval_refresh_enabled": True, "eval_refresh_min_age_days": 7})
         prior = os.environ.pop("ANTHROPIC_API_KEY", None)
         self.addCleanup(lambda: os.environ.__setitem__("ANTHROPIC_API_KEY", prior) if prior else None)
         cfg = da.load_config()
@@ -1121,12 +1121,12 @@ class EvalRefreshTests(OptimisticEngineTestBase):
         self.assertIn("ANTHROPIC_API_KEY", reason)
 
     def test_eval_refresh_skips_when_cost_cap_exhausted(self):
-        self._write_config({"eval_refresh_min_age_days": 7, "eval_refresh_cost_cap_usd": 1.0})
+        self._write_config({"eval_refresh_enabled": True, "eval_refresh_min_age_days": 7, "eval_refresh_cost_cap_usd": 1.0})
         os.environ["ANTHROPIC_API_KEY"] = "fake-key-for-test"
         self.addCleanup(lambda: os.environ.pop("ANTHROPIC_API_KEY", None))
         day = _unique_day()
         adp.da._append_cost(  # noqa: SLF001 -- test-only direct ledger seed
-            adp.da.cost_log_path(), day, 0, 0, 1.50, adp.EVAL_REFRESH_COST_LABEL,
+            adp.da.cost_log_path(), day, 0, 0, 1.50, "eval:arm:claude-sonnet-5",
         )
         cfg = da.load_config()
         should_run, reason = adp._eval_refresh_preconditions(day, cfg)
@@ -1134,12 +1134,39 @@ class EvalRefreshTests(OptimisticEngineTestBase):
         self.assertIn("exhausted", reason)
 
     def test_eval_refresh_preconditions_pass_when_all_clear(self):
-        self._write_config({"eval_refresh_min_age_days": 7, "eval_refresh_cost_cap_usd": 5.0})
+        self._write_config({"eval_refresh_enabled": True, "eval_refresh_min_age_days": 7, "eval_refresh_cost_cap_usd": 5.0})
         os.environ["ANTHROPIC_API_KEY"] = "fake-key-for-test"
         self.addCleanup(lambda: os.environ.pop("ANTHROPIC_API_KEY", None))
         cfg = da.load_config()
         should_run, reason = adp._eval_refresh_preconditions(_unique_day(), cfg)
         self.assertTrue(should_run, reason)
+
+    def test_default_config_never_runs_eval_refresh(self):
+        """#1098 item 0.1: every other precondition is satisfied (key set,
+        no results on disk, no spend), and the default config still refuses."""
+        self._write_config()
+        os.environ["ANTHROPIC_API_KEY"] = "fake-key-for-test"
+        self.addCleanup(lambda: os.environ.pop("ANTHROPIC_API_KEY", None))
+        cfg = da.load_config()
+        self.assertFalse(cfg["optimistic_integration"]["eval_refresh_enabled"])
+        should_run, reason = adp._eval_refresh_preconditions(_unique_day(), cfg)
+        self.assertFalse(should_run)
+        self.assertIn("eval_refresh_enabled", reason)
+
+    def test_run_eval_refresh_with_default_config_does_not_invoke_the_script(self):
+        self._write_config()
+        os.environ["ANTHROPIC_API_KEY"] = "fake-key-for-test"
+        self.addCleanup(lambda: os.environ.pop("ANTHROPIC_API_KEY", None))
+        script_dir = Path(tempfile.mkdtemp(prefix="ccgm-fake-eval-refresh-default-off-"))
+        marker = script_dir / "was-run"
+        script_path = script_dir / "must_not_run.py"
+        script_path.write_text(f"open({str(marker)!r}, 'w').write('x')\n", encoding="utf-8")
+        self._pin_env("CCGM_DREAMING_EVAL_REFRESH_SCRIPT", str(script_path))
+
+        summary = adp.run_eval_refresh(_unique_day())
+        self.assertFalse(summary["ran"])
+        self.assertIn("eval_refresh_enabled", summary["reason"])
+        self.assertFalse(marker.exists())
 
     def _write_fake_eval_refresh_script(self, *, cost_usd: float = 0.42, exit_code: int = 0) -> Path:
         """A tiny, self-contained fake standing in for memory_eval.py's
@@ -1150,6 +1177,7 @@ class EvalRefreshTests(OptimisticEngineTestBase):
         script_path = script_dir / "fake_memory_eval.py"
         script_path.write_text(
             "import argparse, json, os, sys\n"
+            "json.dump(sys.argv[1:], open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'argv.json'), 'w'))\n"
             "p = argparse.ArgumentParser()\n"
             "p.add_argument('--date', required=True)\n"
             "args, _ = p.parse_known_args()\n"
@@ -1164,7 +1192,7 @@ class EvalRefreshTests(OptimisticEngineTestBase):
         return script_path
 
     def test_run_eval_refresh_end_to_end_with_fake_script(self):
-        self._write_config({"eval_refresh_min_age_days": 7, "eval_refresh_cost_cap_usd": 5.0})
+        self._write_config({"eval_refresh_enabled": True, "eval_refresh_min_age_days": 7, "eval_refresh_cost_cap_usd": 5.0})
         os.environ["ANTHROPIC_API_KEY"] = "fake-key-for-test"
         self.addCleanup(lambda: os.environ.pop("ANTHROPIC_API_KEY", None))
         script = self._write_fake_eval_refresh_script(cost_usd=0.42)
@@ -1175,11 +1203,14 @@ class EvalRefreshTests(OptimisticEngineTestBase):
         self.assertTrue(summary["ran"], summary)
         self.assertAlmostEqual(summary["cost_usd"], 0.42, places=6)
 
-        spent = adp._read_cost_spent_today_by_label(da.cost_log_path(), day, adp.EVAL_REFRESH_COST_LABEL)
-        self.assertAlmostEqual(spent, 0.42, places=6)
+        # memory_eval writes its own ledger rows now; run_eval_refresh adding
+        # the results-file total on top would count the spend twice.
+        self.assertFalse(da.cost_log_path().exists())
+        argv = json.loads((script.parent / "argv.json").read_text(encoding="utf-8"))
+        self.assertEqual(argv[argv.index("--max-total-usd") + 1], "5.0")
 
     def test_run_eval_refresh_skips_without_invoking_script_when_preconditions_fail(self):
-        self._write_config({"eval_refresh_min_age_days": 7, "eval_refresh_cost_cap_usd": 5.0})
+        self._write_config({"eval_refresh_enabled": True, "eval_refresh_min_age_days": 7, "eval_refresh_cost_cap_usd": 5.0})
         prior = os.environ.pop("ANTHROPIC_API_KEY", None)
         self.addCleanup(lambda: os.environ.__setitem__("ANTHROPIC_API_KEY", prior) if prior else None)
         # A script that would raise if ever invoked -- proves the
@@ -1275,11 +1306,12 @@ class GatingTests(OptimisticEngineTestBase):
         self.assertNotIn("eval-refresh: optimistic integration inactive; skipping", log_body)
         # Both steps get PAST the config gate -- optimistic-integrate then
         # fails closed on the (deliberately) missing eval script, and
-        # eval-refresh actually starts (its own preconditions handle the
-        # no-API-key stand-down separately, already covered by
-        # EvalRefreshTests above).
+        # eval-refresh is invoked but stands down on its own default-off
+        # `eval_refresh_enabled` (#1098 item 0.1; its other preconditions
+        # are covered by EvalRefreshTests above).
         self.assertIn("missing (Epic 7 not yet installed); failing closed", log_body)
         self.assertIn("eval-refresh: running apply_dream_proposal.py eval-refresh", log_body)
+        self.assertIn("eval_refresh_enabled", log_body)
 
     def test_red_eval_gate_records_anomaly_via_record_anomaly_cli(self):
         (self._dreaming_dir / "config.json").write_text(

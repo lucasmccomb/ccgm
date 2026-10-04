@@ -1006,11 +1006,11 @@ OPTIMISTIC_STATE_FILENAME = "optimistic.json"
 # threshold is even meaningful.
 MIN_EVICTION_BATCH_FOR_ANOMALY_CHECK = 2
 
-# Ledger `model` field value the eval-refresh step tags its own cost.log
-# rows with (see run_eval_refresh below) -- distinguishes its spend from
-# the nightly analyzer's map_model/reduce_model rows in the SAME shared
-# ledger file (adrev-opt-010).
-EVAL_REFRESH_COST_LABEL = "eval-refresh"
+# Ledger `model` field prefix of every cost.log row memory_eval.py writes
+# (eval:arm:<model>, eval:judge:<model>, eval:mine:<model>) --
+# distinguishes eval spend from the nightly analyzer's map_model/reduce_model
+# rows in the SAME shared ledger file (adrev-opt-010).
+EVAL_REFRESH_COST_LABEL = da.EVAL_COST_LABEL_PREFIX
 
 
 def optimistic_state_path() -> Path:
@@ -2557,19 +2557,19 @@ def _latest_eval_results_age_days(*, now: float | None = None) -> float | None:
 
 def _read_cost_spent_today_by_label(path: Path, today: str, label: str) -> float:
     """Like `dream_analyze._read_cost_spent_today()`, but scoped to ledger
-    rows whose `model` field equals `label` exactly. Lets the eval-refresh
-    step check its OWN spend against its OWN `eval_refresh_cost_cap_usd`
-    without being confused by the analyzer's spend on the SAME shared
-    `cost.log` file (adrev-opt-010: the two must never silently compete
-    for one cap, but they DO share one ledger so total daily spend stays
-    visible in one place)."""
+    rows whose `model` field starts with `label`. Lets the eval-refresh
+    step check its OWN spend (the `eval:` rows memory_eval.py writes)
+    against its OWN `eval_refresh_cost_cap_usd` without being confused by
+    the analyzer's spend on the SAME shared `cost.log` file (adrev-opt-010:
+    the two must never silently compete for one cap, but they DO share one
+    ledger so total daily spend stays visible in one place)."""
     if not path.is_file():
         return 0.0
     total = 0.0
     with path.open("r", encoding="utf-8") as fh:
         for line in fh:
             parts = line.rstrip("\n").split("\t")
-            if len(parts) >= 5 and parts[0] == today and parts[4] == label:
+            if len(parts) >= 5 and parts[0] == today and parts[4].startswith(label):
                 try:
                     total += float(parts[3])
                 except ValueError:
@@ -2586,6 +2586,8 @@ def _eval_refresh_preconditions(day: str, cfg: dict[str, Any]) -> tuple[bool, st
     reason).
     """
     opt_cfg = cfg.get("optimistic_integration") or {}
+    if not opt_cfg.get("eval_refresh_enabled", False):
+        return False, "eval_refresh_enabled is false (default off until the Phase 4 smoke test); skipping"
     min_age_days = float(opt_cfg.get("eval_refresh_min_age_days", 7))
     cost_cap = float(opt_cfg.get("eval_refresh_cost_cap_usd", 2.0))
 
@@ -2613,17 +2615,12 @@ def run_eval_refresh(day: str) -> dict[str, Any]:
     its own -- a surfaced, safe degradation, never a silent one;
     adrev-opt-009's named, accepted drift window).
 
-    Honest limitation: `_eval_refresh_preconditions()`'s cost-cap check is
-    a START gate (refuses to begin if the ledger already shows the cap
-    spent today), not a HARD mid-run stop -- memory_eval.py has no
-    cumulative total-run cost limiter today (only a PER-CALL
-    `--max-budget-usd`, a different knob), and adding one is out of this
-    function's file-touch scope (memory_eval.py is not modified here). A
-    single refresh run can therefore spend somewhat more than
-    `eval_refresh_cost_cap_usd` before the NEXT day's precondition check
-    sees the overage and refuses to run again. Actual spend is always
-    recorded to the shared ledger regardless of whether it overshot, so
-    the overage is visible, not hidden.
+    The step is off unless `eval_refresh_enabled` is true. The cost cap is
+    enforced inside memory_eval.py: `--max-total-usd` carries
+    `eval_refresh_cost_cap_usd` to its running total, which refuses to
+    start when the estimate exceeds it and aborts before the call that
+    would cross it. memory_eval.py also writes every billed call to the
+    shared ledger itself, so this function adds no ledger rows.
     """
     cfg = da.load_config()
     summary: dict[str, Any] = {"day": day, "ran": False, "reason": None}
@@ -2638,8 +2635,9 @@ def run_eval_refresh(day: str) -> dict[str, Any]:
         summary["reason"] = f"eval refresh script not found at {script}"
         return summary
 
+    cost_cap = float((cfg.get("optimistic_integration") or {}).get("eval_refresh_cost_cap_usd", 2.0))
     proc = subprocess.run(
-        [sys.executable, str(script), "--date", day],
+        [sys.executable, str(script), "--date", day, "--max-total-usd", str(cost_cap)],
         capture_output=True, text=True, check=False,
     )
     summary["exit_code"] = proc.returncode
@@ -2650,10 +2648,6 @@ def run_eval_refresh(day: str) -> dict[str, Any]:
     if results_path.is_file():
         result_rows = _read_jsonl(results_path)
         total_cost = sum(float(r.get("cost_usd") or 0.0) for r in result_rows)
-        if total_cost > 0:
-            da._append_cost(  # noqa: SLF001 -- cross-module reuse of the analyzer's own shared cost-ledger writer
-                da.cost_log_path(), day, 0, 0, total_cost, EVAL_REFRESH_COST_LABEL,
-            )
         summary["cost_usd"] = round(total_cost, 6)
         summary["rows_written"] = len(result_rows)
 

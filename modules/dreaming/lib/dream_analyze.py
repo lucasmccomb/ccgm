@@ -74,7 +74,7 @@ import subprocess
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -130,6 +130,16 @@ PLANNING_OUTPUT_TOKENS = 4096
 # Raising the cap without raising this makes the cap unreachable.
 CURL_MAX_TIME_SECONDS = 300
 DEFAULT_DAILY_COST_CAP_USD = 10.0
+# Rolling 30-day ceiling on ALL dreaming spend in cost.log: analyzer, eval
+# arms, judge calls and in-eval mining, manual runs included (#1098 item 0.2).
+DEFAULT_MODULE_BUDGET_USD_30D = 25.0
+# Default hard cap for one memory_eval run (live). The preflight refuses a
+# run whose estimate exceeds it; the running total aborts it mid-run.
+DEFAULT_EVAL_RUN_COST_CAP_USD = 5.0
+MODULE_BUDGET_WINDOW_DAYS = 30
+# cost.log `model` field prefix for every row memory_eval writes
+# (eval:arm:<model>, eval:judge:<model>, eval:mine:<model>).
+EVAL_COST_LABEL_PREFIX = "eval:"
 DEFAULT_LOOKBACK_DAYS = 7
 DEFAULT_PROMOTION_MIN_SESSIONS = 3
 DEFAULT_PROMOTION_MIN_AGENTS = 2
@@ -376,6 +386,11 @@ DEFAULT_OPTIMISTIC_INTEGRATION: dict[str, Any] = {
     "circuit_breaker_auto_resume_nights": 7,
     "rolling_add_rate_window_nights": 14,
     "rolling_add_rate_max": 40,
+    # Off until the Phase 4 smoke test replaces the 270-session eval (one
+    # full run cost ~$21). The step stays in the chain; only an explicit
+    # `eval_refresh_enabled: true` runs it, and then under the hard
+    # `eval_refresh_cost_cap_usd` total-cost stop in memory_eval.py.
+    "eval_refresh_enabled": False,
     "eval_refresh_min_age_days": 7,
     "eval_refresh_cost_cap_usd": 2.00,
 }
@@ -387,6 +402,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "max_input_tokens": DEFAULT_MAX_INPUT_TOKENS,
     "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
     "daily_cost_cap_usd": DEFAULT_DAILY_COST_CAP_USD,
+    "module_budget_usd_30d": DEFAULT_MODULE_BUDGET_USD_30D,
+    "eval_run_cost_cap_usd": DEFAULT_EVAL_RUN_COST_CAP_USD,
     "lookback_days": DEFAULT_LOOKBACK_DAYS,
     "auto_apply_counters": False,
     "promotion_min_sessions": DEFAULT_PROMOTION_MIN_SESSIONS,
@@ -682,6 +699,34 @@ def _read_cost_spent_today(path: Path, today: str) -> float:
                 except ValueError:
                     continue
     return total
+
+
+def read_cost_spent_30d(path: Path, today: str) -> float:
+    """Sum of cost.log rows dated within the 30 days ending `today`
+    (inclusive; a row exactly 30 days back is outside). The module budget
+    reads this, so it counts every row whatever wrote it."""
+    if not path.is_file():
+        return 0.0
+    try:
+        cutoff = (datetime.fromisoformat(today) - timedelta(days=MODULE_BUDGET_WINDOW_DAYS)).date().isoformat()
+    except ValueError:
+        return 0.0
+    total = 0.0
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 4 and parts[0] > cutoff:
+                try:
+                    total += float(parts[3])
+                except ValueError:
+                    continue
+    return total
+
+
+def module_budget_status(cfg: dict[str, Any], today: str) -> tuple[float, float]:
+    """(spent over the last 30 days, budget). Spent >= budget means refuse."""
+    budget = float(cfg.get("module_budget_usd_30d", DEFAULT_MODULE_BUDGET_USD_30D))
+    return read_cost_spent_30d(cost_log_path(), today), budget
 
 
 def _append_cost(path: Path, today: str, in_tok: int, out_tok: int, cost_usd: float, model: str) -> None:
@@ -1834,6 +1879,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     today = args.force_day or today_iso()
+    if offline_dir is None:
+        spent_30d, module_budget = module_budget_status(cfg, today)
+        if spent_30d >= module_budget:
+            print(
+                f"dream_analyze: 30-day module budget reached (spent ${spent_30d:.4f} of ${module_budget:.4f} "
+                "in cost.log, analyzer and eval together); refusing to start.",
+                file=sys.stderr,
+            )
+            return 2
     cli_slugs = [s.strip() for s in args.slugs.split(",") if s.strip()] if args.slugs else None
 
     candidate_slugs = resolve_candidate_slugs(cli_slugs, cfg)
