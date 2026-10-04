@@ -114,7 +114,7 @@ Base `settings.json` with 800+ pre-configured tool permission entries.
 
 Python hooks that automate and enforce development workflows.
 
-**Installs**: 14 hook scripts, 6 Python libraries, settings.json fragment
+**Installs**: 15 hook scripts, 6 Python libraries, settings.json fragment
 
 This module installs the most hooks of any module. See [Hooks Reference](hooks.md) for detailed documentation of each hook.
 
@@ -122,7 +122,7 @@ This module installs the most hooks of any module. See [Hooks Reference](hooks.m
 
 | Hook | Type | Purpose |
 |------|------|---------|
-| `enforce-git-workflow.py` | PreToolUse:Bash | Blocks commits/pushes to protected branches, enforces `#N:` commit format |
+| `enforce-git-workflow.py` | PreToolUse:Bash | Blocks commits/pushes to protected branches, enforces `#N:` commit format, blocks destructive history and worktree commands (`reset --hard`, `clean -f`, `checkout .`, `restore`, `branch -D`) only when they would destroy unsaved work |
 | `enforce-issue-workflow.py` | UserPromptSubmit | Reminds Claude to follow issue-first workflow |
 | `auto-approve-bash.py` | PreToolUse:Bash | Enforces bash permissions from settings.json |
 | `auto-approve-file-ops.py` | PreToolUse | Enforces path-based read/edit/write permissions |
@@ -136,6 +136,7 @@ This module installs the most hooks of any module. See [Hooks Reference](hooks.m
 | `check-freeze.py` | PreToolUse | Scope-locks Edit/Write to the `/freeze` directory |
 | `orphan-process-check.py` | SessionStart | Warns about orphaned test worker processes (vitest/jest) |
 | `sync-ccgm-canonical.py` | PostToolUse:Bash | Auto-pulls the canonical CCGM clone after PR merges |
+| `read-budget.py` | PreToolUse:Read | Denies the first unranged Read of a file over 2000 lines or 100 KB per session |
 
 **Config prompts**: Protected branches (custom list), auto update check (yes/no)
 
@@ -610,12 +611,12 @@ Commands installed:
 
 Deep research, planning, and execution framework for complex projects.
 
-**Installs**: 5 command files + 2 lib files
+**Installs**: 5 command files + 2 lib files + `bin/ccgm-etp-receipts`
 
 **What it does**: An interactive, human-in-the-loop planning framework:
 
 - **Phase 0** - Resolve the upfront 1–3 adversarial review choice (default one) before planning side effects, then create the plan directory
-- **Phase 0.5** - Discovery interview: confirm concept, choose research depth
+- **Phase 0.5** - Discovery interview: confirm concept, choose research depth, then a scored ambiguity gate (goal, constraints, criteria, context) that ends the interview at `--ambiguity` (default 0.20)
 - **Phase 1** - Deep research via parallel agents (Full / Technical Only / Market & Product / Lite / Custom presets)
 - **Phase 1.5** - Research review with business viability assessment; confirm to proceed
 - **Phase 2** - Naming ideation (optional)
@@ -640,7 +641,7 @@ Commands installed:
 | `/xplana` | Autonomous alias - `/xplan --autonomous` (full-depth, zero mid-flow prompts after the upfront count choice) |
 | `/xplan-status` | Check progress on a running or completed plan |
 | `/xplan-resume` | Resume an interrupted plan execution |
-| `/etp` | Execute a ready plan or GitHub issue(s) end-to-end with adversarial PR review |
+| `/etp` | Execute a ready plan or GitHub issue(s) end-to-end with adversarial PR review, an optional cleanup stage (`--no-clean` skips it), and a merge receipt per unit (`ccgm-etp-receipts verify`) |
 
 **Dependencies**: multi-agent, adversarial-review (read-only attack criteria), cross-agent-review (native transport and deterministic pilot policy)
 
@@ -839,7 +840,7 @@ Continuous self-improvement loop: capture hook events, daily transcript analysis
 
 **Installs**: 6 hooks (`permission-event-logger.py`, `failure-logger.py`, `user-correction-detector.py`, `permission-request-suppress.py`, `post-prompt-introspect.py`, `realtime-security-scanner.py`), 7 commands (`/autoheal`, `/autoheal-apply`, `/autoheal-digest`, `/autoheal-snooze`, `/autoheal-toggle`, `/permission-audit`, `/permission-fix`), 10 bin scripts under `~/.claude/autoheal/`, `skills/autoheal-reference/SKILL.md`, JSONL schemas, redaction patterns, and a LaunchAgent installer.
 
-**What it does**: Four event-capture hooks (`PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `UserPromptSubmit`) record permission requests, tool failures, and user-correction phrases to `~/.claude/autoheal/events/{date}.jsonl` (cross-clone fcntl-locked). A daily `launchd` LaunchAgent runs `autoheal-analyze.sh` (direct `curl` to Anthropic — no claude -p, no exec-escape surface), which proposes small hook/settings fixes filtered by a privilege-escalation gate. Proposals render to a local markdown digest, optionally email via Resend (multi-recipient with per-recipient idempotency keys), and feed into `/permission-fix` (in-session) and `/autoheal-apply` (manual or auto-applied via the strict confidence-9 / breadth-1 / settings-only gate). Default OFF for the three opt-in surfaces (real-time alerts, auto-apply, email/webhook).
+**What it does**: Four event-capture hooks (`PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `UserPromptSubmit`) record permission requests, tool failures, and user-correction phrases to `~/.claude/autoheal/events/{date}.jsonl` (cross-clone fcntl-locked). A daily `launchd` LaunchAgent runs `autoheal-analyze.sh` (direct `curl` to Anthropic — no claude -p, no exec-escape surface), which proposes small hook/settings fixes filtered by a privilege-escalation gate. Proposals render to a local markdown digest, optionally email via Resend (multi-recipient with per-recipient idempotency keys), and feed into `/permission-fix` (in-session) and `/autoheal-apply` (manual or auto-applied via the strict confidence-9 / breadth-1 / settings-only gate). Default OFF for the three opt-in surfaces (real-time alerts, auto-apply, email/webhook). Real-time alerts and auto-apply each take `off`, `shadow` or `active`: shadow logs the decision without acting, and the digest compares it with what you did next. Proposals carry a `fix_surface`, and a `check`-surface proposal must demonstrate the check.
 
 **Dependencies**: hooks
 
@@ -851,7 +852,7 @@ Nightly, cost-capped service that mines session transcripts for cross-session fa
 
 **Installs**: `skills/dreaming/SKILL.md`; 7 bin scripts (`dream-analyze.sh`, `dream-digest.sh`, `dream-daily.sh`, `dream-reconcile.sh`, `dream-eval.sh`, `dream-install.sh`, `dream-scorecard.sh`); 5 commands (`/dream`, `/dream-digest`, `/dream-review`, `/dream-apply`, `/dream-scorecard`); lib files for the transcript miner, map/reduce analyzer, optimistic integration engine, apply path, auto-memory reconciliation, weekly observability scorecard, evidence-bundle and proposal JSON schemas, prompt templates, and LaunchAgent/cron templates; 9 eval seed tasks plus fixtures under `eval/tasks/`.
 
-**What it does**: The deterministic transcript miner (`discover()`/`mine()`/`cluster()`/`budget()` plus a schema-drift canary) turns session transcripts into a bounded, redacted (secrets + PII) evidence bundle, re-deriving each transcript's owning learnings-store slug from its own `cwd` field rather than a directory-name heuristic. The map-reduce analyzer (`dream_analyze.py`, direct Anthropic API over `curl` -- no nested agent runtime) turns that evidence into per-change proposals against the `self-improving` learnings store, written to `~/.claude/dreaming/proposals/{date}.jsonl` and rendered as a digest (`/dream-digest`). The optimistic integration engine (`run_optimistic_integrate`) is the primary write path: it auto-integrates eligible proposals with per-op-kind postures (verify integrates immediately; add/supersede land under a 24h dwell window before injection; evictions quarantine), bounded by per-run blast caps, batch-anomaly detection, and a windowed self-healing circuit breaker. An opt-in composite eligibility gate (`lib/eligibility.py`, default off, `add`/`supersede` only) can decide those two op-kinds' admission by a deterministic no-LLM waterfall -- static floor, non-compensatory origin gate, then a four-signal composite score (`confidence`/`prevalence`/`recency`/`novelty`) re-derived from the transcripts and live store at apply time -- with a read-only `eligibility-dry-run` CLI to preview a day before opting in; evictions and `verify` are untouched. `/dream-review` inspects auto-integrated + dwelling rows and vetoes/reverts them post-hoc; `/dream-apply` remains the back-compat human-gated path (and the only path a `_global` proposal is promoted through). A nightly `launchd` LaunchAgent (`dream-install.sh`) chains analyze -> eval-refresh -> optimistic-integrate -> digest -> reconcile -> retention; optimistic integration is default OFF (`optimistic_integration.enabled`) and eval-gated. A read-only reconciliation report (`reconcile_automemory.py`) compares Claude Code's own harness auto-memory (`~/.claude/projects/*/memory/`) against the learnings store and appends import-candidate/contradiction findings to the digest, never writing to auto-memory itself. The memory eval harness (`eval/`) runs a with/without-memory A/B (plus a full-context-dump third arm) across 9 seed tasks -- uplift, canary, contradiction, and one end-to-end task exercising the analyzer's own mined output -- with four-bucket outcome classification; `dream-eval.sh --gate` is the regression gate the optimistic engine must pass. A read-only weekly observability scorecard (`/dream-scorecard`, `lib/scorecard.py`) aggregates captured / injected / reused / applied counts plus store health from the on-disk signals (learnings store, injection telemetry, proposals), so the read path's value is reviewable at a glance without touching the store.
+**What it does**: The deterministic transcript miner (`discover()`/`mine()`/`cluster()`/`budget()` plus a schema-drift canary) turns session transcripts into a bounded, redacted (secrets + PII) evidence bundle, re-deriving each transcript's owning learnings-store slug from its own `cwd` field rather than a directory-name heuristic. The map-reduce analyzer (`dream_analyze.py`, direct Anthropic API over `curl` -- no nested agent runtime) turns that evidence into per-change proposals against the `self-improving` learnings store, written to `~/.claude/dreaming/proposals/{date}.jsonl` and rendered as a digest (`/dream-digest`). The optimistic integration engine (`run_optimistic_integrate`) is the primary write path: it auto-integrates eligible proposals with per-op-kind postures (verify integrates immediately; add/supersede land under a 24h dwell window before injection; evictions quarantine), bounded by per-run blast caps, batch-anomaly detection, and a windowed self-healing circuit breaker. An opt-in composite eligibility gate (`lib/eligibility.py`, default off, `add`/`supersede` only) can decide those two op-kinds' admission by a deterministic no-LLM waterfall -- static floor, non-compensatory origin gate, then a four-signal composite score (`confidence`/`prevalence`/`recency`/`novelty`) re-derived from the transcripts and live store at apply time -- with a read-only `eligibility-dry-run` CLI to preview a day before opting in; evictions and `verify` are untouched. `/dream-review` inspects auto-integrated + dwelling rows and vetoes/reverts them post-hoc; `/dream-apply` remains the back-compat human-gated path (and the only path a `_global` proposal is promoted through). A nightly `launchd` LaunchAgent (`dream-install.sh`) chains analyze -> eval-refresh -> optimistic-integrate -> digest -> reconcile -> retention; optimistic integration is default OFF (`optimistic_integration.enabled` takes `off`, `shadow` or `active`; shadow logs each would-integrate decision without writing) and eval-gated. A read-only reconciliation report (`reconcile_automemory.py`) compares Claude Code's own harness auto-memory (`~/.claude/projects/*/memory/`) against the learnings store and appends import-candidate/contradiction findings to the digest, never writing to auto-memory itself. The memory eval harness (`eval/`) runs a with/without-memory A/B (plus a full-context-dump third arm) across 9 seed tasks -- uplift, canary, contradiction, and one end-to-end task exercising the analyzer's own mined output -- with four-bucket outcome classification; `dream-eval.sh --gate` is the regression gate the optimistic engine must pass. A read-only weekly observability scorecard (`/dream-scorecard`, `lib/scorecard.py`) aggregates captured / injected / reused / applied counts plus store health from the on-disk signals (learnings store, injection telemetry, proposals), so the read path's value is reviewable at a glance without touching the store.
 
 **Dependencies**: hooks, self-improving, session-history
 
@@ -1217,6 +1218,7 @@ Evidence-before-claims methodology for confirming work is done.
 - **Evidence table**: What evidence to provide for each claim type (bug fix, feature, deployment, etc.)
 - **Fresh-run requirement**: Always re-execute verification commands rather than relying on earlier output
 - **Honest reporting**: If verification fails, say so - never claim success without evidence
+- **Baseline gate**: `bin/ccgm-verify-baseline` records which checks fail before work starts, then gates on new failures by exit code (0 none new, 1 new, 2 setup error)
 
 **Dependencies**: None
 

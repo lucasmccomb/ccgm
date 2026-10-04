@@ -42,10 +42,12 @@ The most critical hook. Enforces branch protection and commit message formatting
 - Commits directly to protected branches (main, master, develop, dev, staging, prod, production, release, trunk, stag)
 - Commits without the `#N:` issue prefix format (e.g., `#42: add login form`)
 - Pushes to protected branches
+- `reset --hard`, `clean -f`, `checkout .`/`-- <path>`, `restore` and `branch -D`, only when they would destroy unsaved work: a dirty tree, untracked files, or a branch no remote has
 
 **Escape hatches**:
 - `sync:` prefix in commit messages bypasses format check (for non-issue commits like syncing docs)
 - `ALLOW_MAIN_COMMIT=1` environment variable disables all checks (emergency use)
+- `ALLOW_DESTRUCTIVE_GIT=1` bypasses the destructive-command check only
 - Repos listed in `DIRECT_TO_MAIN_REPOS` skip all checks (configured during install with your username)
 
 **Custom protected branches**: During installation, you can specify additional branch names to protect. These are stored in `~/.claude/git-flow-protected-branches.json`.

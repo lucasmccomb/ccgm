@@ -8,7 +8,7 @@ For user-facing documentation, see the [README](../README.md) and the rest of [`
 
 ## What CCGM Is
 
-CCGM is a modular configuration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Instead of hand-crafting rules, hooks, slash commands, and permissions from scratch, users pick from a catalog of 80 self-contained modules and install them with a single command. Each module packages one coherent capability — a behavioral discipline, a workflow command, an enforcement hook, an entire subsystem — with its own manifest, README, tests, and manual-install path.
+CCGM is a modular configuration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Instead of hand-crafting rules, hooks, slash commands, and permissions from scratch, users pick from a catalog of 81 self-contained modules and install them with a single command. Each module packages one coherent capability — a behavioral discipline, a workflow command, an enforcement hook, an entire subsystem — with its own manifest, README, tests, and manual-install path.
 
 At a higher level, CCGM is an answer to a question: **what does a fully-configured, safety-railed, self-improving AI coding environment look like when you treat the configuration itself as a serious software project?** It applies production engineering practice — issue-first workflow, CI, adversarial review, append-only data models, deterministic gates, incident postmortems — to the layer most people treat as dotfiles.
 
@@ -17,10 +17,10 @@ At a higher level, CCGM is an answer to a question: **what does a fully-configur
 | Fact | Value |
 |------|-------|
 | First commit | 2026-03-19 |
-| Modules | 80 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
-| Slash commands | 92 |
-| Hooks | 36 Python hooks across 11 Claude Code events |
-| Presets | 5 (minimal, standard 16 modules, team, cloud-agent 55, full 76) |
+| Modules | 81 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
+| Slash commands | 93 |
+| Hooks | 37 Python hooks across 11 Claude Code events |
+| Presets | 5 (minimal, standard 16 modules, team, cloud-agent 55, full 77) |
 | Commits / issues | 430+ commits, 870+ issues and PRs in the first 4 months |
 | Base permission policy | 800+ allow entries, curated deny list, bypass-proof destructive-command blocks |
 | Audit engine | 21 audit packs over a deterministic tool spine + LLM triage |
@@ -153,6 +153,10 @@ The busiest month, in several waves:
 - **Cloudflare Pages is API-creatable.** A live run in a sibling project overturned the standing assumption — baked into the `cloudflare` rule, `common-mistakes` #8, and `/launch` — that the dashboard's Connect-to-Git flow was the only way to create a Git-connected Pages project: `POST .../pages/projects` with `source.type: "github"` does it, followed by a separate deployment-trigger call and its own poll step. The rewrite went through three adversarial review rounds after a reviewer caught the source research and the live transcript disagreeing on trigger behavior.
 - **advisor-guard's argument model closed its last shell-parsing gap.** Every flag and predicate check had read an argument's literal text, so a quoted, ANSI-C-quoted, or expansion-carried flag reached real bash unseen. A differential harness — spell every way of disguising a mutating flag against every command that acts on one, run each through the guard and real `bash -c` in a throwaway sandbox, assert that whatever mutated the sandbox was denied — found the gap and, across two review rounds, closed it from 27 live bypasses to zero (the full incident is below, in Incidents & Lessons).
 - **The ask-context gate could not see a mid-turn brief.** `ask-context-gate.py`'s G3 counted `text` blocks in the transcript since the user's last message, and blocked the same `/xplana` question twice after the agent wrote a multi-paragraph brief before each call. The cause was not a dropped transcript entry: on Claude Fable 5.1, text written between tool calls comes back from the API as a progress-update `thinking` block, which Claude Code renders as a one-line status and persists as `thinking`, so only turn-opening and turn-final text is ever stored verbatim. Verified against the raw Messages API, a `claude -p` stream, and the live JSONL; the fix makes the question payload the primary G3 surface and starts the turn at the human's message rather than a harness-injected entry (#1055).
+
+### October 2026 (October 4) — The oh-my-claudecode copycat adoption (16 PRs, #1089-#1106)
+
+- **One analysis, sixteen merges in a day.** `/copycat` on oh-my-claudecode produced a batch of issues (#1073-#1088) that `/etp` executed in parallel. The mechanisms adopted: a `persist` module (opt-in Stop-hook run-to-completion loop, #1094); per-unit merge receipts verified against GitHub (`ccgm-etp-receipts`, #1101) and an optional cleanup stage in `/etp` (#1100); `ccgm-verify-baseline`, which gates on new failures instead of all failures (#1102); a read-budget hook that denies the first unranged Read of a large file (#1095); a destructive-command guard that blocks only when unsaved work would be lost (#1103); a scored ambiguity gate in the `/xplan` interview (#1097); a prompt-section composer with a CI `--check` gate (`prompts/sections`, #1105); off/shadow/active rollout for autoheal and dreaming decisions (#1106) with `fix_surface` routing for autoheal proposals (#1104); and tighter rules for completion claims, debugging, adversarial review, code quality, change boundaries and rule authoring (#1089-#1093, #1096).
 
 ---
 
@@ -375,7 +379,7 @@ CCGM's most distinctive property is that it is built *by* the environment it con
 
 ## Notable Engineering Highlights
 
-- Designed and shipped an 80-module configuration platform with dependency resolution, deep JSON settings merging, template expansion, manifest-tracked install/update/uninstall, and four distribution surfaces — in pure bash + jq with no runtime dependencies.
+- Designed and shipped an 81-module configuration platform with dependency resolution, deep JSON settings merging, template expansion, manifest-tracked install/update/uninstall, and four distribution surfaces — in pure bash + jq with no runtime dependencies.
 - Built a durable cross-session memory system on an append-only op-event log with read-time projection, confidence decay, conflict-free multi-writer git sync, computed rollback, three independent anti-poisoning layers, and a published adversarial security analysis — then held its automation behind an eval gate its own results hadn't yet passed.
 - Built two autonomous observe-analyze-propose loops (permission friction; session transcripts) that run nightly under cost caps with direct API calls, layered defenses (dwell windows, blast-radius caps, anomaly checks, self-healing circuit breakers), and human-gated apply paths.
 - Rebuilt a codebase auditor as a 21-pack engine over a deterministic multi-tool spine with schema-validated, fingerprinted findings, baseline/delta classification, and suppression/provenance workflows.
