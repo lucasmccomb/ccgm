@@ -86,7 +86,7 @@ jobs:
           # assumption). Stage it before running.
           mkdir -p "$HOME/.claude/lib"
           cp modules/hooks/lib/*.py "$HOME/.claude/lib/"
-          for t in modules/hooks/tests/*.sh modules/branch-guard/tests/*.sh modules/ask-context/tests/*.sh modules/git-worktrees/tests/*.sh modules/advisor-mode/tests/*.sh modules/xplan/tests/*.sh modules/verification/tests/*.sh; do
+          for t in modules/hooks/tests/*.sh modules/branch-guard/tests/*.sh modules/ask-context/tests/*.sh modules/git-worktrees/tests/*.sh modules/advisor-mode/tests/*.sh modules/xplan/tests/*.sh modules/verification/tests/*.sh modules/persist/tests/*.sh; do
             echo "=== Running $t ==="
             bash "$t"
           done
@@ -265,7 +265,7 @@ jobs:
           # assumption). Stage it before running.
           mkdir -p "$HOME/.claude/lib"
           cp modules/hooks/lib/*.py "$HOME/.claude/lib/"
-          for t in modules/hooks/tests/*.sh modules/branch-guard/tests/*.sh modules/ask-context/tests/*.sh modules/git-worktrees/tests/*.sh modules/advisor-mode/tests/*.sh modules/xplan/tests/*.sh modules/verification/tests/*.sh; do
+          for t in modules/hooks/tests/*.sh modules/branch-guard/tests/*.sh modules/ask-context/tests/*.sh modules/git-worktrees/tests/*.sh modules/advisor-mode/tests/*.sh modules/xplan/tests/*.sh modules/verification/tests/*.sh modules/persist/tests/*.sh; do
             echo "=== Running $t ==="
             bash "$t"
           done

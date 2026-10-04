@@ -170,33 +170,33 @@ chmod 700 "${DIR}"
 # --- CLI ----------------------------------------------------------------------------------
 rm -f "${DIR}"/*
 export CLAUDE_CODE_SESSION_ID="sess-cli"
-python3 "${CLI}" start --task "refactor X" --criteria "suite green" >/dev/null 2>&1
+"${CLI}" start --task "refactor X" --criteria "suite green" >/dev/null 2>&1
 [ -f "${DIR}/sess-cli.json" ] && pass || failed "cli start writes state"
 [ "$(field "${DIR}/sess-cli.json" task)" = "refactor X" ] && pass || failed "cli start records task"
 [ "$(field "${DIR}/sess-cli.json" max_iterations)" = "50" ] && pass || failed "cli default max is 50"
 [ "$(field "${DIR}/sess-cli.json" iteration)" = "0" ] && pass || failed "cli start iteration 0"
 assert_blocks "hook blocks after cli start" '{"session_id":"sess-cli"}'
-python3 "${CLI}" status 2>&1 | grep -q "refactor X" && pass || failed "cli status shows task"
-python3 "${CLI}" done >/dev/null 2>&1
+"${CLI}" status 2>&1 | grep -q "refactor X" && pass || failed "cli status shows task"
+"${CLI}" done >/dev/null 2>&1
 [ ! -e "${DIR}/sess-cli.json" ] && pass || failed "cli done removes state"
 assert_allows "hook allows after cli done" '{"session_id":"sess-cli"}'
 
-python3 "${CLI}" start --task "again" --max 3 >/dev/null 2>&1
+"${CLI}" start --task "again" --max 3 >/dev/null 2>&1
 [ "$(field "${DIR}/sess-cli.json" max_iterations)" = "3" ] && pass || failed "cli --max honored"
-python3 "${CLI}" cancel >/dev/null 2>&1
+"${CLI}" cancel >/dev/null 2>&1
 [ ! -e "${DIR}/sess-cli.json" ] && pass || failed "cli cancel removes state"
 [ -e "${DIR}/sess-cli.cancel" ] && pass || failed "cli cancel writes signal"
 assert_allows "hook allows after cli cancel" '{"session_id":"sess-cli"}'
-python3 "${CLI}" start --task "fresh start" >/dev/null 2>&1
+"${CLI}" start --task "fresh start" >/dev/null 2>&1
 [ ! -e "${DIR}/sess-cli.cancel" ] && pass || failed "cli start clears stale cancel signal"
 assert_blocks "restart after cancel blocks again" '{"session_id":"sess-cli"}'
 
 unset CLAUDE_CODE_SESSION_ID
-python3 "${CLI}" start --task "no session" >/dev/null 2>&1 && failed "cli without session id must fail" || pass
-python3 "${CLI}" --session sess-flag start --task "explicit" >/dev/null 2>&1
+"${CLI}" start --task "no session" >/dev/null 2>&1 && failed "cli without session id must fail" || pass
+"${CLI}" --session sess-flag start --task "explicit" >/dev/null 2>&1
 [ -f "${DIR}/sess-flag.json" ] && pass || failed "cli --session flag"
-python3 "${CLI}" --session "../evil" start --task "x" >/dev/null 2>&1 && failed "cli rejects unsafe session id" || pass
-python3 "${CLI}" --session sess-flag start >/dev/null 2>&1 && failed "cli start without task must fail" || pass
+"${CLI}" --session "../evil" start --task "x" >/dev/null 2>&1 && failed "cli rejects unsafe session id" || pass
+"${CLI}" --session sess-flag start >/dev/null 2>&1 && failed "cli start without task must fail" || pass
 
 echo "persist tests: ${PASS} passed, ${FAIL} failed"
 [ "${FAIL}" -eq 0 ]

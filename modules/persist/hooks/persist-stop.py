@@ -139,7 +139,7 @@ def reason_text(state: dict, sid: str, iteration: int, max_iterations: int) -> s
     criteria_line = (
         f"Done criteria: {criteria}\n" if isinstance(criteria, str) and criteria.strip() else ""
     )
-    cli = f"python3 $HOME/.claude/bin/ccgm-persist --session {sid}"
+    cli = f"$HOME/.claude/bin/ccgm-persist --session {sid}"
     return (
         f"[PERSIST {iteration}/{max_iterations}] Work is NOT done. Continue the task: {task}\n"
         f"{criteria_line}"

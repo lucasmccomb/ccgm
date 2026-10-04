@@ -1005,6 +1005,50 @@ else
     echo "  got: ${posture_out_on}"
 fi
 
+# ─── ccgm-persist: exact CLI grammar, trusted only by installed path ─────────
+
+# Same canonical-repository symlink shape as the pilot: the script lives
+# outside every main-agent write root and ~/.claude/bin links to it.
+PERSIST_MODULE="${HOME}/code/repo/persist-module"
+mkdir -p "${PERSIST_MODULE}/bin" "${HOME}/.claude/bin"
+cp "${MODULE_ROOT}/../persist/bin/ccgm-persist" "${PERSIST_MODULE}/bin/"
+chmod +x "${PERSIST_MODULE}/bin/ccgm-persist"
+ln -s "${PERSIST_MODULE}/bin/ccgm-persist" "${HOME}/.claude/bin/ccgm-persist"
+P='$HOME/.claude/bin/ccgm-persist'
+
+assert_exit 0 "persist start allowed" "$(bash_json "${P} start --task 'ship it' --criteria 'tests pass' --max 10")"
+assert_exit 0 "persist start equals-style allowed" "$(bash_json "${P} start --task=ship --max=3")"
+assert_exit 0 "persist tilde path allowed" "$(bash_json '~/.claude/bin/ccgm-persist status')"
+assert_exit 0 "persist status allowed" "$(bash_json "${P} status")"
+assert_exit 0 "persist done allowed" "$(bash_json "${P} done")"
+assert_exit 0 "persist cancel allowed" "$(bash_json "${P} cancel")"
+assert_exit 0 "persist --session done allowed" "$(bash_json "${P} --session abc-123 done")"
+assert_exit 2 "persist unknown subcommand denied" "$(bash_json "${P} exec")"
+assert_exit 2 "persist no subcommand denied" "$(bash_json "${P}")"
+assert_exit 2 "persist done with extra argument denied" "$(bash_json "${P} done --task x")"
+assert_exit 2 "persist done with positional extra denied" "$(bash_json "${P} done /etc/passwd")"
+assert_exit 2 "persist start without task denied" "$(bash_json "${P} start --max 3")"
+assert_exit 2 "persist start unknown flag denied" "$(bash_json "${P} start --task x --output /tmp/f")"
+assert_exit 2 "persist duplicate option denied" "$(bash_json "${P} start --task a --task b")"
+assert_exit 2 "persist non-numeric max denied" "$(bash_json "${P} start --task a --max 3x")"
+assert_exit 2 "persist dash value denied" "$(bash_json "${P} start --task --max")"
+assert_exit 2 "persist unsafe session id denied" "$(bash_json "${P} --session ../evil done")"
+assert_exit 2 "persist session without verb denied" "$(bash_json "${P} --session abc")"
+assert_exit 2 "persist redirect outside roots denied" "$(bash_json "${P} status > /etc/out")"
+assert_exit 2 "persist chained command denied" "$(bash_json "${P} done && rm -rf /x")"
+assert_exit 2 "persist via python3 denied" "$(bash_json "python3 ${P} status")"
+assert_exit 2 "persist basename spoof denied" "$(bash_json '/tmp/ccgm-persist status')"
+assert_exit 2 "persist relative spoof denied" "$(bash_json 'ccgm-persist status')"
+assert_exit 2 "persist env prefix denied" "$(bash_json "PATH=/tmp:\$PATH ${P} status")"
+assert_exit 2 "persist substitution value denied" "$(bash_json "${P} start --task \"\$(date)\"")"
+
+# A copy install is main-agent-writable code, so it is not trusted.
+rm "${HOME}/.claude/bin/ccgm-persist"
+cp "${PERSIST_MODULE}/bin/ccgm-persist" "${HOME}/.claude/bin/ccgm-persist"
+assert_exit 2 "persist writable copy denied" "$(bash_json "${P} status")"
+rm "${HOME}/.claude/bin/ccgm-persist"
+assert_exit 2 "persist missing install denied" "$(bash_json "${P} status")"
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 
 python3 -c "import shutil; shutil.rmtree('${TMP}', ignore_errors=True)"

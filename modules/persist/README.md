@@ -54,12 +54,24 @@ The hook lets the stop through when any of these hold:
 
 Any parse or IO error also allows the stop.
 
+Guards 2, 4 and 5 are heuristics: they key off stop-reason fields
+(`stop_reason`, `end_turn_reason`) that Claude Code may not send in Stop hook
+input. The input fields this module relies on, `session_id`,
+`transcript_path` and `stop_hook_active`, are the ones the repo's other hooks
+use; the stop-reason field names could not be checked against the Claude Code
+hooks docs from the authoring environment and remain unverified. The real
+backstops are `stop_hook_active`, the iteration cap, staleness and cancel.
+
 ## Notes
 
 - Each block rewrites the state file, which refreshes the 2-hour staleness clock.
-- Under advisor mode the main agent's Bash gate may deny the CLI. The block
-  reason also gives `rm -f ~/.claude/persist/<session_id>.json`, which that
-  gate allows, as an equivalent way to end the loop.
+- Run the CLI by its path, `$HOME/.claude/bin/ccgm-persist`, not through
+  `python3`. Advisor mode's Bash gate allows exactly that form (installed
+  symlink, its grammar, no env-var prefix) and denies `python3 ccgm-persist`
+  and any other spelling. A copy install under `~/.claude/bin` is writable by
+  the main agent and is denied; use the symlink install. The block reason also
+  gives `rm -f ~/.claude/persist/<session_id>.json` as an equivalent way to end
+  the loop.
 - `/etp` can wrap a run with `/persist` for mechanical run-to-completion.
 
 ## Install
