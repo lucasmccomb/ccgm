@@ -867,7 +867,7 @@ Reads `~/.claude/autoheal/digests/{date}.md` rendered by `autoheal-digest.sh` fr
 
 **Flip an autoheal config flag without editing `~/.claude/autoheal/config.json` directly.**
 
-Subcommands cover the opt-in surfaces — `pause | resume | status | realtime | autoapply | email | digest | webhook`. The webhook variant accepts a URL setter (`/autoheal-toggle webhook url https://dev.lem.work/v1/ingest`).
+Subcommands cover the opt-in surfaces — `pause | resume | status | realtime | autoapply | email | digest | webhook`. `realtime` and `autoapply` take `on | off | shadow | status`; shadow logs each decision to `~/.claude/autoheal/shadow/` without acting on it. The webhook variant accepts a URL setter (`/autoheal-toggle webhook url https://dev.lem.work/v1/ingest`).
 
 **Installed by**: autoheal module
 
@@ -951,6 +951,7 @@ Every plan is engineered to execute with minimal human involvement (human work b
 - `--autonomous` (alias `-a`, or `/xplana`) - Skip all mid-flow prompts; run the full-depth research + planning + review pipeline end-to-end, then present the completed plan at a single final gate
 - `--cross-provider` - Explicitly enable optional native Claude/Codex review; default review is personal lead review
 - `--adversarial-reviews <1|2|3>` - Supply the upfront adversarial count (default recommendation one)
+- `--ambiguity <0.05-0.5>` - Interview stop threshold (default 0.20). The Phase 0.5 interview scores goal, constraints, criteria (and context for existing repos) after each answer and ends when ambiguity is at or below the threshold. No effect with `--light` or `--autonomous`
 - `--unattended` - Explicitly run without a question channel; an omitted count records `unattended-default`
 - `--deepen [<plan-dir>]` - Load an existing plan and run targeted deepening passes on under-specified sections instead of planning fresh
 
@@ -1026,7 +1027,7 @@ Reconstructs context from plan files (`progress.md`, `plan.md`, `decisions.md`, 
 
 **Execute ready work — a plan or one-or-more GitHub issues — end-to-end with parallel agents, adversarial PR review, and follow-up completion.**
 
-Resolves a target (a plan file/dir, a single issue, a batch of issues, or the in-progress plan) into units, then runs each through the same hardened loop. A plan fans out across dependency-ordered waves; a single issue is one unit; a batch runs independent issues in parallel. For an issue, the body **and comments** (the investigation) become the spec. Every PR gets personal lead spec-compliance review followed by code-quality review against the actual artifact and fresh checks; explicit `--light-review` selects spec only. `--cross-provider` or natural-language opt-in adds a restricted native run opposite the actual producer, after early binary/login preflight. Provider errors stop that optional run and preserve reports/findings; the lead can separately decide delivery readiness without labeling it approved. Coordinator repairs require no recursive consensus. Optional limits are bounded separately; the ordinary three-round CI-repair limit stays unchanged. Follow-up work that arises is tracked, triaged against the plan's decision context, and the in-scope items get the same review — completed before the run is reported done. The **autonomous E2E suite is the completion oracle** (green ⇒ clean/mergeable), not a bare smoke test, and a changed surface without coverage gets an E2E test before completion; test infrastructure (testing agents, RunPod, cloud Mac, real devices) is provisioned as needed. Ceremony scales to the work (a single issue skips the wave/clone/bring-up machinery). Reconciles against live git/GitHub state so finished work is skipped — resumable; re-running a batch continues the unfinished issues. Runs to completion, stopping only for absolute blockers, which it reports while continuing all non-blocked work.
+Resolves a target (a plan file/dir, a single issue, a batch of issues, or the in-progress plan) into units, then runs each through the same hardened loop. A plan fans out across dependency-ordered waves; a single issue is one unit; a batch runs independent issues in parallel. For an issue, the body **and comments** (the investigation) become the spec. Every PR gets personal lead spec-compliance review followed by code-quality review against the actual artifact and fresh checks; explicit `--light-review` selects spec only. `--cross-provider` or natural-language opt-in adds a restricted native run opposite the actual producer, after early binary/login preflight. Provider errors stop that optional run and preserve reports/findings; the lead can separately decide delivery readiness without labeling it approved. Coordinator repairs require no recursive consensus. Optional limits are bounded separately; the ordinary three-round CI-repair limit stays unchanged. After each merge it writes a merge receipt per unit; `ccgm-etp-receipts verify <dir>` re-checks every receipt against GitHub. A cleanup stage runs between spec-compliance and quality review (skip with `--no-clean`). Follow-up work that arises is tracked, triaged against the plan's decision context, and the in-scope items get the same review — completed before the run is reported done. The **autonomous E2E suite is the completion oracle** (green ⇒ clean/mergeable), not a bare smoke test, and a changed surface without coverage gets an E2E test before completion; test infrastructure (testing agents, RunPod, cloud Mac, real devices) is provisioned as needed. Ceremony scales to the work (a single issue skips the wave/clone/bring-up machinery). Reconciles against live git/GitHub state so finished work is skipped — resumable; re-running a batch continues the unfinished issues. Runs to completion, stopping only for absolute blockers, which it reports while continuing all non-blocked work.
 
 **Usage**:
 ```
@@ -1038,6 +1039,7 @@ Resolves a target (a plan file/dir, a single issue, a batch of issues, or the in
 /etp <target> --confirm      # one go/no-go gate before executing
 /etp <target> --max-agents 3 # cap parallel agents
 /etp #42 --light-review      # trivial diff: single lead spec-compliance pass
+/etp #42 --no-clean          # skip the cleanup stage between spec and quality review
 /etp #42 --cross-provider    # explicitly enable optional native review
 ```
 
@@ -1160,6 +1162,24 @@ Bookend to `/startup`. Composes existing primitives instead of duplicating them.
 ```
 
 **Installed by**: session-lifecycle module
+
+---
+
+### /persist
+
+**Keep working on a task until it is verified done.**
+
+Starts a loop enforced by the opt-in `persist-stop.py` Stop hook: while the loop is active, a stop attempt is blocked and the agent is told to continue. State lives in `~/.claude/persist/<session_id>.json`. The hook fails open on every safety condition (context limit, user abort, auth error, state older than 2 hours, iteration cap, cancel).
+
+**Usage**:
+```
+/persist <task> [--criteria TEXT] [--max N]   Start the loop (default cap 50, hard max 200)
+/persist done                                 End it after verifying the done criteria with fresh evidence
+/persist cancel                               Abandon it
+/persist status                               Show the loop state
+```
+
+**Installed by**: persist module
 
 ---
 

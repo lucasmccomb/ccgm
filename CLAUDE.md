@@ -21,12 +21,16 @@ ccgm/
 │   ├── backup.sh       # Backup/restore
 │   ├── mcp-migrate.sh  # Legacy mcp.json re-registration
 │   ├── repair.sh       # Stale symlink repair
+│   ├── compose-sections.py  # Expands prompts/sections into agent and command files (--check gates CI)
+│   ├── rule_tiering.py # Rule-tiering support library (paths: frontmatter)
 │   └── statusline.sh   # Status line script
 ├── modules/            # 81 self-contained modules
 │   └── {name}/
 │       ├── module.json # Manifest
 │       ├── README.md   # Module docs
 │       └── ...         # Content files
+├── prompts/            # Shared prompt text
+│   └── sections/       # One file per repeated passage, inlined by compose-sections.py
 ├── presets/            # Named module collections
 │   ├── minimal.json
 │   ├── standard.json
