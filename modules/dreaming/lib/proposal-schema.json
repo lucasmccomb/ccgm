@@ -15,6 +15,7 @@
     "evidence",
     "justification",
     "trigger",
+    "novelty",
     "fingerprint",
     "generated_at",
     "status"
@@ -116,10 +117,14 @@
       },
       "description": "REQUIRED object for learning_add and learning_supersede, null for the other kinds. A small deterministic matcher for the situation the learning is about (lib/triggers.py owns the semantics). dream_analyze.py's finalizer rejects the proposal as `trigger_unverified` when the trigger matches none of its own cited evidence excerpts, and as `trigger_invalid` when it is missing or malformed. Phase 4's recurrence metric scans later transcripts with the same matcher."
     },
+    "novelty": {
+      "type": ["string", "null"],
+      "description": "REQUIRED non-empty string for learning_add and learning_supersede, null for the other kinds. One line from the reduce model saying what this learning adds beyond the rules, CLAUDE.md files, auto-memory, hook messages, store rows and pending proposals it was shown (#1098 3.3). A proposal the reduce marks `already_encoded: <source path>` is dropped and counted in the run summary, never written, so that marker has no field on the row."
+    },
     "fingerprint": {
       "type": "string",
       "minLength": 1,
-      "description": "sha256 hex over the normalized (kind, project, key) tuple, computed by dream_analyze.py -- never trusted from the model. Used for cross-run dedup against every prior proposals/*.jsonl file (--force-day excludes its own target-day file from that dedup corpus, adrev-013)."
+      "description": "sha256 hex over the normalized (kind, project, key) tuple, computed by dream_analyze.py -- never trusted from the model. For learning_add and learning_supersede the key is (target_id, sorted evidence session ids, normalized key terms shared by content and excerpts), so a reworded re-run over the same evidence collides (#1098 3.3). Used for cross-run dedup against every prior proposals/*.jsonl and *.jsonl.gz file (--force-day excludes its own target-day file from that dedup corpus, adrev-013)."
     },
     "generated_at": {
       "type": "string",

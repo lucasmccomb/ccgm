@@ -156,6 +156,8 @@ class MultiCitationEndToEndTests(unittest.TestCase):
             "evidence": [{"session_id": self.sid_a, "excerpt": FRICTION}],
             "justification": "Reserved-keyword quoting bit twice across sessions; the fix generalizes.",
             "trigger": {"kind": "phrase_set", "value": ["reserved keyword position"]},
+            "already_encoded": None,
+            "novelty": "Adds the reserved-word cause behind the migration failure.",
         }
         row, reason = da.finalize_proposal(
             raw, store_by_id={self.slug: {}}, cfg=dict(da.DEFAULT_CONFIG),

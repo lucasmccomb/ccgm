@@ -209,6 +209,46 @@ The **nightly map->reduce analyzer**, on top of Epic 2's miner:
   everything (`.*`, `*`, one-letter values) and nested-quantifier regexes
   are invalid. Phase 4's recurrence metric imports `triggers.matches()` to
   scan later transcripts.
+- `lib/loaded_context.py` -- the loaded-context corpus and prefilter
+  (#1098 3.3). Every session already loads its rules, CLAUDE.md files,
+  auto-memory and hook messages; a mined learning that restates one of them
+  teaches nothing. Each night, with no model calls, the analyzer builds a
+  corpus per slug from:
+
+  | category | source |
+  |----------|--------|
+  | `rule` | `~/.claude/rules/*.md` (symlinks followed) |
+  | `claude_md` | `~/.claude/CLAUDE.md`, plus each `CLAUDE.md` and `.claude/rules/*.md` from every cwd seen in the slug's transcripts up to `/` |
+  | `auto_memory` | `~/.claude/projects/<cwd-encoded>/memory/*.md` |
+  | `hook` | string constants and docstrings (the denial messages) of `~/.claude/hooks/*.py` |
+  | `store` | live learnings-store rows for the slug and `_global` |
+  | `pending_proposal`, `discarded_proposal` | pending and rejected add/supersede rows of the last 30 days, `.jsonl.gz` included |
+
+  Between the map and the reduce, `prefilter_candidates()` drops a candidate
+  when its best match in a non-store category scores at or above
+  `prefilter_threshold` (reason `already_encoded`, with the matching source
+  path), or when all of its evidence is a hook error from an installed hook
+  (reason `installed_hook_friction`). Dropped candidates never reach the
+  reduce prompt. A candidate that restates a live `store` row is kept so the
+  reduce can `learning_verify` it. The score is the cosine of the two token
+  sets with each token weighted by inverse document frequency in the corpus;
+  plain Jaccard peaked at 0.36 on real learnings because they are longer
+  elaborations of the rule text, so the default threshold is 0.35, and a
+  value above 1 turns the prefilter off. Survivors carry their top three
+  corpus snippets to the reduce, which emits `already_encoded: <source>` (the
+  proposal is dropped and counted) or a one-line `novelty` for every add and
+  supersede. The reduce also receives up to `reduce_pending_max` (100)
+  pending proposals in compact form. The run summary records
+  `candidates_mapped`, `prefilter_dropped` (by reason), `prefilter_drops`
+  (reason, source path, category, score), and `reduce_already_encoded`;
+  `proposals_deduped` counts fingerprint hits plus candidates dropped for
+  restating a prior proposal. Roots are overridable: `CCGM_DREAMING_CLAUDE_HOME`
+  moves the whole `~/.claude` tree, `CCGM_DREAMING_RULES_DIR` and
+  `CCGM_DREAMING_HOOKS_DIR` move one directory.
+
+  Add and supersede fingerprints key on `(target_id, sorted evidence session
+  ids, key terms shared by content and excerpts)`, not on the reduce
+  model's wording, so a re-run over the same evidence collides.
 - `bin/dream-digest.sh` -- renders `~/.claude/dreaming/digests/{date}.md`:
   proposals grouped by project/kind with evidence, prevalence, and
   confidence; a durable canary banner for schema-drift/reduce-failure

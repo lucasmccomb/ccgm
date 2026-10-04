@@ -92,6 +92,7 @@ import transcript_miner as tm  # noqa: E402  (sibling module, same lib/ dir)
 import eligibility  # noqa: E402  (sibling module, same lib/ dir; owned by Epic E1)
 import rollout_mode  # noqa: E402  (sibling module, same lib/ dir; off/shadow/active resolver)
 import triggers  # noqa: E402  (sibling module, same lib/ dir; the deterministic trigger matcher)
+import loaded_context  # noqa: E402  (sibling module, same lib/ dir; loaded-context corpus + prefilter, #1098 3.3)
 
 # learnings_store lives in a DIFFERENT module's lib/ dir (self-improving).
 # Reuse transcript_miner's own cross-module import helper rather than
@@ -144,6 +145,7 @@ EVAL_COST_LABEL_PREFIX = "eval:"
 DEFAULT_LOOKBACK_DAYS = 7
 DEFAULT_PROMOTION_MIN_SESSIONS = 3
 DEFAULT_PROMOTION_MIN_AGENTS = 2
+DEFAULT_REDUCE_PENDING_MAX = 100
 
 DEFAULT_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -183,6 +185,8 @@ GLOBAL_SLUG = learnings_store.GLOBAL_SLUG
 
 # Rejection reasons for the `trigger` field (#1098 3.4). finalize_proposal()
 # returns reasons as free text; these prefixes are what main() counts on.
+ALREADY_ENCODED_PREFIX = "already_encoded"
+NOVELTY_MISSING = "novelty_missing"
 TRIGGER_INVALID = "trigger_invalid"
 TRIGGER_UNVERIFIED = "trigger_unverified"
 
@@ -306,10 +310,16 @@ PROPOSALS_ENVELOPE_SCHEMA: dict[str, Any] = {
                     "evidence": {"type": "array", "items": _EVIDENCE_ITEM_SCHEMA},
                     "justification": {"type": "string"},
                     "trigger": _TRIGGER_SCHEMA,
+                    # #1098 3.3: for add/supersede, either the source path
+                    # that already holds this fact (the proposal is then
+                    # dropped) or a one-line statement of what is new.
+                    "already_encoded": _NULLABLE_STRING,
+                    "novelty": _NULLABLE_STRING,
                 },
                 "required": [
                     "kind", "project", "target_id", "content", "type",
                     "confidence", "prevalence", "evidence", "justification", "trigger",
+                    "already_encoded", "novelty",
                 ],
             },
         },
@@ -433,6 +443,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "auto_apply_counters": False,
     "promotion_min_sessions": DEFAULT_PROMOTION_MIN_SESSIONS,
     "promotion_min_agents": DEFAULT_PROMOTION_MIN_AGENTS,
+    # #1098 3.3: a map candidate whose best match in the loaded-context corpus
+    # scores at or above this is dropped before the reduce (a value above 1
+    # turns the prefilter off). See loaded_context.py for the score.
+    "prefilter_threshold": loaded_context.DEFAULT_THRESHOLD,
+    # Most pending proposals (newest first) shown to the reduce so it can
+    # verify or skip them instead of proposing them again.
+    "reduce_pending_max": DEFAULT_REDUCE_PENDING_MAX,
     # §3.3 shows a literal "<slug>" placeholder in its example -- that is
     # documentation shorthand, not a real default (adrev-l9). The real
     # default is an empty list, which means "auto-discover" (see
@@ -1366,6 +1383,7 @@ def run_reduce(
     offline_dir: Path | None,
     instructions: str | None,
     day: str | None = None,
+    pending_proposals: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int], bool, bool]:
     """Returns (raw_proposals, usage, ok, truncated). `ok` is False ONLY
     when the reduce phase never obtained a parseable {"proposals": [...]}
@@ -1380,6 +1398,7 @@ def run_reduce(
     user_obj: dict[str, Any] = {
         "map_candidates": [{"slug": slug, "candidates": cands} for slug, cands in map_results.items()],
         "store_projection": store_projection,
+        "pending_proposals": pending_proposals or [],
     }
     if instructions:
         user_obj["instructions"] = instructions
@@ -1448,6 +1467,13 @@ def finalize_proposal(
     target_id = raw.get("target_id")
     content = raw.get("content")
     type_ = raw.get("type")
+
+    # Reduce-time loaded-context check (#1098 3.3): the model found the fact
+    # already held by a rule, CLAUDE.md, memory file, hook message or store
+    # row. Nothing to write; main() counts the drop.
+    already_encoded = raw.get("already_encoded")
+    if kind in KINDS_REQUIRING_CONTENT and isinstance(already_encoded, str) and already_encoded.strip():
+        return None, f"{ALREADY_ENCODED_PREFIX}: {already_encoded.strip()}"
 
     if kind in KINDS_REQUIRING_TARGET:
         if not isinstance(target_id, str) or not target_id:
@@ -1525,6 +1551,14 @@ def finalize_proposal(
         if not triggers.matches_any(trigger, [e["excerpt"] for e in evidence]):
             return None, f"{TRIGGER_UNVERIFIED}: trigger {json.dumps(trigger, ensure_ascii=False)[:160]} matches none of the {len(evidence)} cited evidence excerpt(s)"
 
+    # Without already_encoded, an add/supersede must say what is new.
+    novelty = None
+    if kind in KINDS_REQUIRING_CONTENT:
+        novelty_raw = raw.get("novelty")
+        if not isinstance(novelty_raw, str) or not novelty_raw.strip():
+            return None, f"{NOVELTY_MISSING}: {kind} needs a one-line novelty statement or an already_encoded source"
+        novelty = learnings_store.sanitize_content(novelty_raw.strip())
+
     prevalence_raw = raw.get("prevalence")
     if prevalence_raw is None:
         distinct_sessions = len({e["session_id"] for e in evidence if e.get("session_id")})
@@ -1549,12 +1583,13 @@ def finalize_proposal(
     sanitized_justification = learnings_store.sanitize_content(justification)
 
     if sanitized_content:
-        # learning_add / learning_supersede: the proposed content itself is
-        # the correct dedup key -- a re-run with the SAME proposed change
-        # collides with itself (idempotent), and a DIFFERENT proposed
-        # change for the same target gets its own fingerprint via its own
-        # content hash.
-        key_basis = learnings_store.content_sha256(sanitized_content)
+        # learning_add / learning_supersede (#1098 3.3, R7): key on the
+        # evidence, not the prose. The reduce rewords the same finding every
+        # night, so a content hash never matched; the cited sessions plus
+        # the key terms shared by content and excerpts do.
+        key_basis = learnings_store.content_sha256(
+            loaded_context.evidence_key_basis(sanitized_content, evidence, target_id)
+        )
     else:
         # learning_verify / learning_contradict / learning_deprecate carry
         # no content -- they act on target_id alone. A bare target_id key
@@ -1590,6 +1625,7 @@ def finalize_proposal(
         "evidence": evidence,
         "justification": sanitized_justification,
         "trigger": trigger,
+        "novelty": novelty,
         "fingerprint": fingerprint,
         "generated_at": _utc_now_iso(),
         "status": "pending",
@@ -1632,28 +1668,19 @@ def finalize_proposal(
 
 
 def existing_fingerprints(exclude_path: Path | None = None) -> set[str]:
+    """Fingerprints of every prior proposals file, plain and gzipped (retention
+    compresses files older than 30 days; they must stay in the dedupe corpus)."""
     seen: set[str] = set()
-    pdir = proposals_dir()
-    if not pdir.is_dir():
-        return seen
-    for path in sorted(pdir.glob("*.jsonl")):
-        if exclude_path is not None and path.resolve() == exclude_path.resolve():
+    exclude_name = exclude_path.name if exclude_path is not None else None
+    exclude_dir = exclude_path.resolve().parent if exclude_path is not None else None
+    for path in loaded_context.proposal_files(proposals_dir()):
+        plain = path.name[:-3] if path.name.endswith(".gz") else path.name
+        if exclude_name is not None and plain == exclude_name and path.resolve().parent == exclude_dir:
             continue
-        try:
-            with path.open("r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        row = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    fp = row.get("fingerprint") if isinstance(row, dict) else None
-                    if fp:
-                        seen.add(fp)
-        except OSError:
-            continue
+        for row in loaded_context.read_proposal_rows(path):
+            fp = row.get("fingerprint")
+            if fp:
+                seen.add(fp)
     return seen
 
 
@@ -1692,13 +1719,12 @@ def existing_fingerprints(exclude_path: Path | None = None) -> set[str]:
 
 # Only learning_add / learning_supersede feed the composite eligibility gate's
 # verified_sessions signal (composite-eligibility plan.md §3.3, "for
-# learning_add and learning_supersede"), and their fingerprint is CONTENT-based
-# (content_sha256), never evidence-based -- so enriching their evidence is
-# provably fingerprint-neutral. verify/contradict/deprecate are deliberately
-# left untouched: their fingerprint DOES vary with the cited evidence session
-# ids (see finalize_proposal's key_basis), so their evidence must stay exactly
-# as the reduce phase emitted it or a re-run would compute a different
-# fingerprint from the same reduce output.
+# learning_add and learning_supersede"). Their fingerprint is computed in
+# finalize_proposal() from the evidence the reduce emitted, before this pass
+# runs, so enriching the stored evidence afterwards cannot change it: a re-run
+# over the same reduce output still computes the same fingerprint.
+# verify/contradict/deprecate are deliberately left untouched: their evidence
+# stays exactly as the reduce phase emitted it.
 ENRICHABLE_KINDS = frozenset({"learning_add", "learning_supersede"})
 
 
@@ -2087,16 +2113,62 @@ def _main(argv: list[str] | None, info: dict[str, Any]) -> int:
             cost = estimate_call_cost_usd(usage["input_tokens"], usage["output_tokens"], resolve_pricing(cfg, cfg.get("map_model", DEFAULT_MAP_MODEL)))
             _append_cost(cost_log_path(), today, usage["input_tokens"], usage["output_tokens"], cost, cfg.get("map_model", DEFAULT_MAP_MODEL))
 
-    total_candidates = sum(len(c) for c in map_results.values())
+    target_path = proposals_dir() / f"{today}.jsonl"
+    candidates_mapped = sum(len(c) for c in map_results.values())
     raw_proposals: list[dict[str, Any]] = []
     reduce_calls = 0
     reduce_ok = True
     reduce_truncated = False
     store_payload: dict[str, list[dict[str, Any]]] = {}
     store_by_id: dict[str, dict[str, dict[str, Any]]] = {}
+    pending_for_reduce: list[dict[str, Any]] = []
+    prefilter_drops: list[dict[str, Any]] = []
+
+    if candidates_mapped > 0:
+        store_payload, store_by_id = build_store_projection(planned_slugs, max_input_tokens=max_input_tokens)
+        # Prefilter between map and reduce (#1098 3.3): a candidate that a
+        # session already knows from its rules, CLAUDE.md files, memory or
+        # hook text, or that restates a pending proposal, never reaches the
+        # reduce prompt. The map output is already paid for; the reduce
+        # input, the larger share of the spend, shrinks.
+        roots = loaded_context.Roots.from_env(projects_root=args.projects_root, proposals_dir=proposals_dir())
+        hook_names = loaded_context.installed_hook_names(roots.hooks_dir)
+        threshold = float(cfg.get("prefilter_threshold", loaded_context.DEFAULT_THRESHOLD))
+        exclude_path = target_path if args.force_day else None
+        for slug in planned_slugs:
+            if not map_results.get(slug):
+                continue
+            corpus = loaded_context.build_corpus(
+                slug,
+                cwds=loaded_context.transcript_cwds(mined_offsets.get(slug, {})),
+                roots=roots,
+                store_rows={s: store_payload.get(s, []) for s in (slug, GLOBAL_SLUG)},
+                today=today,
+                exclude_proposal_path=exclude_path,
+            )
+            map_results[slug], dropped = loaded_context.prefilter_candidates(
+                map_results[slug], corpus, threshold=threshold, hook_names=hook_names, hooks_dir=roots.hooks_dir,
+            )
+            for record in dropped:
+                record["project"] = slug
+            prefilter_drops.extend(dropped)
+        pending_for_reduce = loaded_context.pending_proposals_for_reduce(
+            roots.proposals_dir, [*planned_slugs, GLOBAL_SLUG],
+            limit=int(cfg.get("reduce_pending_max", DEFAULT_REDUCE_PENDING_MAX)), exclude_path=exclude_path,
+        )
+
+    total_candidates = sum(len(c) for c in map_results.values())
+    dedupe_summary = {
+        "candidates_mapped": candidates_mapped,
+        "prefilter_dropped": {
+            loaded_context.ALREADY_ENCODED: sum(1 for d in prefilter_drops if d["reason"] == loaded_context.ALREADY_ENCODED),
+            loaded_context.HOOK_FRICTION: sum(1 for d in prefilter_drops if d["reason"] == loaded_context.HOOK_FRICTION),
+        },
+        "prefilter_drops": prefilter_drops,
+    }
+    prior_proposal_drops = sum(1 for d in prefilter_drops if d["category"] in loaded_context.PRIOR_PROPOSAL_CATEGORIES)
 
     if total_candidates > 0:
-        store_payload, store_by_id = build_store_projection(planned_slugs, max_input_tokens=max_input_tokens)
         instructions = None
         if instructions_path().is_file():
             try:
@@ -2107,7 +2179,7 @@ def _main(argv: list[str] | None, info: dict[str, Any]) -> int:
         raw_proposals, usage, reduce_ok, reduce_truncated = run_reduce(
             map_results, store_payload, cfg=cfg, reduce_system_prompt=reduce_system_prompt,
             api_key=api_key, api_url=api_url, offline_dir=offline_dir, instructions=instructions,
-            day=today,
+            day=today, pending_proposals=pending_for_reduce,
         )
         reduce_calls = 1
         if reduce_truncated:
@@ -2158,6 +2230,8 @@ def _main(argv: list[str] | None, info: dict[str, Any]) -> int:
             "proposals_written": 0,
             "proposals_rejected": 0,
             "proposals_deduped": 0,
+            **dedupe_summary,
+            "reduce_already_encoded": 0,
             "reduce_failed": True,
             "reduce_failure_detail": detail,
             "cost_breakdown": cost_breakdown,
@@ -2174,19 +2248,24 @@ def _main(argv: list[str] | None, info: dict[str, Any]) -> int:
         return 1
 
     proposal_schema = _load_proposal_schema()
-    target_path = proposals_dir() / f"{today}.jsonl"
     dedup_corpus = existing_fingerprints(exclude_path=target_path if args.force_day else None)
 
     written_rows: list[dict[str, Any]] = []
     rejected = 0
     triggers_unverified = 0
-    deduped = 0
+    reduce_already_encoded = 0
+    # Fingerprint hits plus candidates dropped for restating a prior proposal.
+    deduped = prior_proposal_drops
     for raw in raw_proposals:
         row, reason = finalize_proposal(raw, store_by_id=store_by_id, cfg=cfg, proposal_schema=proposal_schema)
         if row is None:
-            rejected += 1
-            if reason and reason.startswith(TRIGGER_UNVERIFIED):
-                triggers_unverified += 1
+            if reason and reason.startswith(ALREADY_ENCODED_PREFIX):
+                # A verdict, not a malformed proposal: counted on its own.
+                reduce_already_encoded += 1
+            else:
+                rejected += 1
+                if reason and reason.startswith(TRIGGER_UNVERIFIED):
+                    triggers_unverified += 1
             print(f"dream_analyze: dropped proposal: {reason}", file=sys.stderr)
             continue
         if row["fingerprint"] in dedup_corpus:
@@ -2199,8 +2278,8 @@ def _main(argv: list[str] | None, info: dict[str, Any]) -> int:
     # supporting sessions' verifiable excerpts from the bundle BEFORE signal
     # stamping (so a newly-cited session also gets started_at/tier stamped) and
     # BEFORE write. Like the stamping pass below, it runs AFTER every
-    # fingerprint is computed, and only ever touches content-fingerprinted
-    # add/supersede rows -- so it provably cannot perturb any fingerprint.
+    # fingerprint is computed (from the reduce-emitted evidence), and only ever
+    # touches add/supersede rows -- so it cannot perturb any fingerprint.
     enrich_proposal_evidence(written_rows, map_results, bundles)
 
     # Deterministic post-reduce signal stamping (composite-eligibility §3.8):
@@ -2249,6 +2328,8 @@ def _main(argv: list[str] | None, info: dict[str, Any]) -> int:
         "proposals_rejected": rejected,
         "triggers_unverified": triggers_unverified,
         "proposals_deduped": deduped,
+        **dedupe_summary,
+        "reduce_already_encoded": reduce_already_encoded,
         "cost_breakdown": cost_breakdown,
         "actual_input_tokens": total_input_tokens,
         "actual_output_tokens": total_output_tokens,
