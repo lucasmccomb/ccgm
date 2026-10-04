@@ -243,6 +243,17 @@ if [ -n "$weekly" ]; then
   sections+=("$wk_part")
 fi
 
+# Dreaming health: shown only when the nightly pipeline is red or yellow.
+# One file read; silent when dreaming is not installed or healthy.
+dream_health_file="${HOME}/.claude/dreaming/state/health.json"
+if [ -f "$dream_health_file" ]; then
+  dream_status=$(jq -r '.status // empty' "$dream_health_file" 2>/dev/null)
+  case "$dream_status" in
+    red) sections+=("$(printf "${RED}dream:red${RESET}")") ;;
+    yellow) sections+=("$(printf "${YELLOW}dream:yellow${RESET}")") ;;
+  esac
+fi
+
 # Join sections with pipe separator
 output=""
 for i in "${!sections[@]}"; do

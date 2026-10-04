@@ -217,6 +217,22 @@
       "target": "eval/tasks/fixtures/dreamed-noise-session-1.jsonl",
       "type": "content",
       "template": false
+    },
+    "lib/health.py": {
+      "target": "lib/health.py",
+      "type": "lib",
+      "template": false
+    },
+    "hooks/dreaming-health.py": {
+      "target": "hooks/dreaming-health.py",
+      "type": "hook",
+      "template": false
+    },
+    "settings.partial.json": {
+      "target": "settings.json",
+      "type": "config",
+      "merge": true,
+      "template": false
     }
   },
   "tags": [

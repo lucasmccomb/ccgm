@@ -3,8 +3,9 @@
 #
 # Compares Claude Code's own auto-memory (~/.claude/projects/*/memory/)
 # against the CCGM learnings store via lib/reconcile_automemory.py, then
-# APPENDS the resulting "## Reconciliation" section to the day's digest
-# markdown (~/.claude/dreaming/digests/{date}.md). Never writes to the
+# writes the resulting "## Reconciliation" report to
+# ~/.claude/dreaming/digests/{date}.reconcile.md and leaves one pointer line
+# in the day's digest ({date}.md) -- #1098 item 1.3. Never writes to the
 # auto-memory directory itself -- reconcile_automemory.py is read-only by
 # construction (see modules/dreaming/tests/test_reconcile_automemory.py's
 # write-guard test).
@@ -136,45 +137,46 @@ if [ ${PY_RC} -ne 0 ]; then
     exit 2
 fi
 
-# Idempotent append: strip any existing "## Reconciliation" section left by
-# a prior run against this SAME digest file before appending the freshly
-# computed one, so re-running this script (e.g. `dream-daily.sh
-# --force-day <date>` re-run while smoke testing, per dreaming.md's own
-# "Quick checks") always yields exactly one section instead of duplicating
-# it. Mirrors dream-digest.sh's own idempotent full-overwrite semantics,
-# but scoped to just this one section -- dream-reconcile.sh does not own
-# the rest of the digest file (header, canary banner, proposals, tally
-# belong to dream-digest.sh, chain step 2). Delegated to python for the
-# same BSD-vs-GNU portability reason the date resolution above already
-# documents (no sed/awk -i dialect differences between macOS and Linux CI).
-CCGM_RECONCILE_DIGEST_FILE="${DIGEST_FILE}" CCGM_RECONCILE_SECTION="${SECTION}" python3 - <<'PYEOF'
+
+# The report goes to its own file, digests/{date}.reconcile.md, so the digest
+# stays small (#1098 item 1.3: a 300-memory store used to add tens of KB to
+# every night's digest). The digest keeps one pointer line. Both writes are
+# idempotent, so re-running for the same day (e.g. `dream-daily.sh
+# --force-day <date>`) leaves exactly one pointer and one report. Any inline
+# "## Reconciliation" section left by an earlier version is stripped.
+# Delegated to python for the same BSD-vs-GNU portability reason the date
+# resolution above documents.
+SIDECAR_FILE="${DIGESTS_DIR}/${TARGET_DATE}.reconcile.md"
+CCGM_RECONCILE_DIGEST_FILE="${DIGEST_FILE}" CCGM_RECONCILE_SIDECAR_FILE="${SIDECAR_FILE}" \
+    CCGM_RECONCILE_SECTION="${SECTION}" python3 - <<'PYEOF'
 import os
 import re
 
 digest_file = os.environ["CCGM_RECONCILE_DIGEST_FILE"]
+sidecar_file = os.environ["CCGM_RECONCILE_SIDECAR_FILE"]
 section = os.environ["CCGM_RECONCILE_SECTION"]
+
+with open(sidecar_file, "w", encoding="utf-8") as fh:
+    fh.write(section.rstrip("\n") + "\n")
 
 with open(digest_file, "r", encoding="utf-8") as fh:
     content = fh.read()
 
-# The Reconciliation section runs from its own "## Reconciliation" heading
-# up to (but not including) the next top-level "## " heading, or end of
-# file when it is the last section (the common case -- this step always
-# runs last in dream-daily.sh's chain, after dream-digest.sh). re.sub
-# replaces every non-overlapping match, so this also self-heals a digest
-# that was already duplicated by a pre-fix run.
+# Drop an inline section (runs to the next top-level "## " heading or EOF)
+# and any earlier pointer line, then append the one pointer.
 content = re.sub(r"\n?## Reconciliation\n.*?(?=\n## |\Z)", "", content, flags=re.DOTALL)
-
-content = content.rstrip("\n") + "\n\n" + section.rstrip("\n") + "\n"
+content = re.sub(r"\n?Reconciliation report: `[^`]*`\n?", "\n", content)
+pointer = "Reconciliation report: `%s`" % os.path.basename(sidecar_file)
+content = content.rstrip("\n") + "\n\n" + pointer + "\n"
 
 with open(digest_file, "w", encoding="utf-8") as fh:
     fh.write(content)
 PYEOF
 PY_APPEND_RC=$?
 if [ ${PY_APPEND_RC} -ne 0 ]; then
-    echo "dream-reconcile: failed to write reconciliation section (exit ${PY_APPEND_RC})" >&2
+    echo "dream-reconcile: failed to write reconciliation report (exit ${PY_APPEND_RC})" >&2
     exit 2
 fi
 
-echo "reconciliation appended: ${DIGEST_FILE}" >&2
+echo "reconciliation written: ${SIDECAR_FILE}" >&2
 exit 0

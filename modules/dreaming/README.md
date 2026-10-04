@@ -299,6 +299,54 @@ Epics 4-8 and are built today (`/dream-apply`, `bin/dream-daily.sh`,
 auto-integration engine on top of all of it is covered in its own section
 above.
 
+## A broken pipeline announces itself (health)
+
+Dreaming once sat broken for 87 days with every signal in a file nobody opens.
+Now each chain run ends by recomputing `~/.claude/dreaming/state/health.json`
+from scratch (`lib/health.py`, called from an EXIT trap in `bin/dream-daily.sh`,
+so a crash still writes it). Nothing in it is sticky: fix the cause and the next
+run reads green.
+
+The `dreaming-health.py` SessionStart hook reads that file (no network, no
+subprocess) and, when status is red or the last success is older than 36h,
+injects `<dreaming-health status="red">` with the top two reasons and a fix
+command each. After 3 red nights running it also tells the agent to mention the
+problem once. Green and yellow inject nothing. With dreaming enabled but no
+`health.json`, it says the pipeline has never run. The statusline shows
+`dream:red` or `dream:yellow` from the same file.
+
+Shared top-level shape (autoheal's `health.json` uses the same four keys):
+`status`, `generated_at`, `last_success_at`, `reasons[{code, message, fix}]`.
+Dreaming adds `analyze_rc`, `gate`, `breaker`, `pending_count`,
+`oldest_pending`, `nights_since_last_integration`, `spend_7d`, `spend_30d`,
+`budget_30d`, `eval_last_run`, `eval_last_cost`, `eval_budget_abort` and
+`consecutive_red_nights` (counted from `state/health-history.jsonl`, one status
+per date).
+
+| Code | Red | Yellow |
+|------|-----|--------|
+| `no_recent_success` / `success_aging` | no good run in 36h, or ever | last good run 26 to 36h ago |
+| `analyze_failed` | analyze step exited non-zero this run | |
+| `breaker_suspended` | suspended 3+ nights | suspended 0 to 2 nights |
+| `gate_closed` | closed 3+ nights in a row | closed 1 to 2 nights |
+| `no_terminal_outcomes` / `pending_backlog` | oldest pending 7+ nights, nothing integrated or discarded in 7 nights | oldest pending 3+ nights |
+| `spend_near_budget` | 30-day spend over 80% of budget | over 60% |
+| `eval_budget_abort` | an eval budget-abort in the last 7 days with no later results | |
+
+Gate, breaker and backlog rules apply only when `optimistic_integration` is
+`shadow` or `active`. `remine_ratio` is not written: the mining cursors store
+byte offsets and `cost.log` stores token totals, so neither records which input
+repeated. `python3 ~/.claude/lib/health.py` rewrites the file on demand.
+
+The chain also runs the weekly scorecard on Sundays (`scorecards/<date>.md`),
+and `bin/dream-reconcile.sh` writes its report to `digests/<date>.reconcile.md`
+with one pointer line in the digest, so the digest stays small.
+
+**Bring-up:** installing the module copies the hook, but a new SessionStart hook
+must be registered in the live `~/.claude/settings.json` (re-run
+`./start.sh --add dreaming`, which merges `settings.partial.json`). Open a new
+session to load it.
+
 ## The eval harness fails loud
 
 `bin/dream-eval.sh` runs `eval/memory_eval.py`, whose `--gate` mode is the
