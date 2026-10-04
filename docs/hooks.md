@@ -24,7 +24,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 14 hooks, 6 Python libraries, and a settings partial. Eight other modules add the rest: **advisor-mode** 4, **self-improving** 3, **subagent-patterns** 2, **relevance-injection** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, and **commands-preamble**. Total: 29 hooks across 9 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 35).
+The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. Eight other modules add the rest: **advisor-mode** 4, **self-improving** 3, **subagent-patterns** 2, **relevance-injection** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, and **commands-preamble**. Total: 30 hooks across 9 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 36).
 
 This count excludes `hooks/plugin-rule-inject.py`, which brings the true `"type": "hook"` file total to 36. It is the **plugin-marketplace** module's own hook, copied into every other rules-bearing module's `hooks/` directory so each module's generated Claude Code plugin manifest can register it independently - see [plugin-marketplace](../modules/plugin-marketplace/README.md) for what it does.
 
@@ -288,6 +288,18 @@ Pauses destructive Bash commands for confirmation. Catches `rm -rf`, SQL `DROP`/
 Scope-locks file edits to a frozen directory. When `~/.claude/freeze-dir.txt` contains a directory path, any Edit or Write outside that directory is denied. Paths are normalised (symlinks resolved, `..` collapsed) before the containment check.
 
 **Activation**: `/freeze <dir>` to set, `/unfreeze` to clear.
+
+---
+
+### read-budget.py
+
+**Type**: PreToolUse:Read
+**Module**: hooks
+**Can block**: Yes (once per file per session)
+
+Denies the first Read of a large file that has no `offset` and no `limit`, and suggests Grep or a ranged Read. A repeat full Read of the same file in the same session is allowed. "Large" means over 2000 lines or 100 KB. Images, PDFs, notebooks, binaries, and missing files are never denied, and any internal error lets the Read through.
+
+**Activation**: on by default. `CCGM_READ_BUDGET=off` disables it; `CCGM_READ_BUDGET_LINES` and `CCGM_READ_BUDGET_BYTES` set the thresholds.
 
 ---
 
