@@ -134,6 +134,11 @@ mkdir -p ~/.claude/lib
 cp lib/xplan-status-gather.sh ~/.claude/lib/xplan-status-gather.sh
 cp lib/xplan-web-review.py ~/.claude/lib/xplan-web-review.py
 chmod +x ~/.claude/lib/xplan-web-review.py
+
+# Copy the /etp receipt verifier
+mkdir -p ~/.claude/bin
+cp bin/ccgm-etp-receipts ~/.claude/bin/ccgm-etp-receipts
+chmod +x ~/.claude/bin/ccgm-etp-receipts
 ```
 
 ### Plans Directory

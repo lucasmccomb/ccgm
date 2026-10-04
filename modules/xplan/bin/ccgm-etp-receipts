@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""ccgm-etp-receipts: re-check /etp merge receipts against GitHub.
+
+Usage: ccgm-etp-receipts verify <receipt-dir>
+
+Each *.receipt.json is the output of the projection in etp.md Phase 4.4
+(PROJECTION below). For every receipt the PR is re-fetched with gh and must
+be MERGED, with the same mergeCommit and headRefOid, and every check must
+conclude SUCCESS, SKIPPED or NEUTRAL.
+
+Exit: 0 all receipts verified, 1 any mismatch, 2 usage error or no receipts.
+"""
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+FIELDS = "number,url,state,mergedAt,headRefOid,mergeCommit,closingIssuesReferences,statusCheckRollup"
+PROJECTION = (
+    "{number,url,state,mergedAt,headRefOid,mergeCommit:.mergeCommit.oid,"
+    "issues:[.closingIssuesReferences[].number],"
+    "checks:[.statusCheckRollup[]|{name:(.name//.context),conclusion,state}]}"
+)
+REQUIRED = ("number", "url", "state", "headRefOid", "mergeCommit", "checks")
+GREEN = {"SUCCESS", "SKIPPED", "NEUTRAL"}
+
+
+def fetch(url):
+    p = subprocess.run(["gh", "pr", "view", url, "--json", FIELDS, "--jq", PROJECTION],
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        raise RuntimeError(f"gh failed: {p.stderr.strip()}")
+    return json.loads(p.stdout)
+
+
+def check_green(check):
+    # CheckRun has `conclusion`; a legacy StatusContext has only `state`.
+    return (check.get("conclusion") or check.get("state") or "") in GREEN
+
+
+def verify_one(path):
+    """Return a list of problems; empty means the receipt verified."""
+    try:
+        rec = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        return [f"invalid receipt file: {e}"]
+    if not isinstance(rec, dict):
+        return ["invalid receipt file: not a JSON object"]
+    missing = [k for k in REQUIRED if k not in rec]
+    if missing:
+        return [f"receipt missing fields: {', '.join(missing)}"]
+    try:
+        live = fetch(rec["url"])
+    except (RuntimeError, ValueError) as e:
+        return [str(e)]
+    problems = []
+    if live.get("state") != "MERGED":
+        problems.append(f"state is {live.get('state')}, expected MERGED")
+    for key in ("mergeCommit", "headRefOid"):
+        if live.get(key) != rec[key]:
+            problems.append(f"{key} mismatch: receipt {rec[key]}, GitHub {live.get(key)}")
+    for c in live.get("checks", []):
+        if not check_green(c):
+            got = c.get("conclusion") or c.get("state") or "no result"
+            problems.append(f"check {c.get('name')}: {got}")
+    return problems
+
+
+def main(argv):
+    if len(argv) != 3 or argv[1] != "verify":
+        print(__doc__, file=sys.stderr)
+        return 2
+    d = Path(argv[2])
+    if not d.is_dir():
+        print(f"not a directory: {d}", file=sys.stderr)
+        return 2
+    files = sorted(d.glob("*.receipt.json"))
+    if not files:
+        print(f"no *.receipt.json files in {d}", file=sys.stderr)
+        return 2
+    failed = 0
+    for f in files:
+        problems = verify_one(f)
+        if problems:
+            failed += 1
+            print(f"FAIL {f.name}")
+            for p in problems:
+                print(f"  - {p}")
+        else:
+            print(f"OK   {f.name}")
+    print(f"{len(files) - failed}/{len(files)} receipts verified")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

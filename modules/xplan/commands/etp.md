@@ -325,6 +325,17 @@ git worktree prune
 
 Removing the worktree does not delete the branch or the merged work — only the checkout (and its build tree). If the non-force remove refuses (unexpected for a just-merged clean unit), do not force it blindly; leave it for the Phase 8 sweep to classify. A unit that ran in a reused clone (multi-clone setup) is not a worktree — reset that clone to `origin/main` instead of removing anything.
 
+**Write the unit's merge receipt** right after the merge, before moving to the next unit. The receipt is the machine-checkable record that the unit is done; the final report cites it instead of restating PR state from memory. It is one plain `gh` command, so the lead can run it in advisor mode (the redirect target is an allowed write root):
+
+```bash
+mkdir -p <receipt-dir>
+gh pr view <PR> --json number,url,state,mergedAt,headRefOid,mergeCommit,closingIssuesReferences,statusCheckRollup \
+  --jq '{number,url,state,mergedAt,headRefOid,mergeCommit:.mergeCommit.oid,issues:[.closingIssuesReferences[].number],checks:[.statusCheckRollup[]|{name:(.name//.context),conclusion,state}]}' \
+  > <receipt-dir>/<issue>.receipt.json
+```
+
+`<receipt-dir>` is `~/code/plans/<plan>/receipts/` for a plan run, and `~/.claude/etp-receipts/<repo>/<YYYY-MM-DD>/` for an issue or batch run. `<issue>` is the unit's issue number (or the unit id when it has none). Read the file back once: `state` must be `MERGED` and `mergeCommit` non-null. A unit with no receipt is not done.
+
 ### 4.5 Bring-up & integration verification (when applicable)
 
 If the work specifies bring-up (migrations, dependency installs, type regen, env/secret sets, dev-server/worker restarts, deploys), execute it and verify every layer is actually live - DB migrated, backend responding, frontend loading, workers running, deploy current - then run the **autonomous E2E suite against the running system**, not just CI. For a plan, that is its Section 8 suite; for an issue, the E2E tests covering the changed surface. The E2E suite (not a bare smoke test) is the certainty gate: green ⇒ clean / mergeable, red ⇒ broken. A single issue usually has no bring-up; confirm that is true rather than assuming. A plan wave does not advance against a degraded system or a red suite.
@@ -371,6 +382,7 @@ Loop Phases 4-6 until every condition holds:
 - All units DONE or explicitly escalated as blocked.
 - All in-scope follow-ups DONE.
 - All PRs merged (or frozen-and-recorded as blocked); all target issues closed by their merged PRs.
+- Every merged unit has a receipt (4.4) in the run's receipt directory.
 - Every merged PR reached CI-green via the bounded loop (4.35); any PR that could not be driven green within the bound is among the frozen-and-recorded blockers, not silently merged.
 - CI green, no uncommitted changes in any clone, no unexpected open PRs.
 - No merged unit's worktree left behind — each removed at 4.4, and `/worktree-sweep` (Phase 8) reclaimed any leak.
@@ -396,11 +408,19 @@ gh issue list --state open
 /worktree-sweep        # removes only clean worktrees; preserves any with unsaved work; prunes stale metadata
 ```
 
+**Verify the receipts.** Re-check every merged unit's receipt against GitHub. This is a script, so a verifier subagent runs it (or the lead with advisor mode off):
+
+```bash
+ccgm-etp-receipts verify <receipt-dir>   # exit 0 all verified, 1 any mismatch, 2 no receipts
+```
+
+A non-zero exit means a unit is not done as claimed: report the per-receipt failure, and treat the unit as unfinished (a PR that merged red, or a head SHA that changed after review).
+
 Report what it reclaimed and anything it preserved (a preserved worktree means unsaved work an implementer left behind — surface it, do not force it away). **Run this even when the run exits early** (a blocker halts a unit, a gate stops the run): teardown must not depend on reaching a clean completion — that is the whole lesson of the incident.
 
 ### 8.2 Report to the user
 
-- **Completed**: units finished, PRs merged, issues closed - with evidence (test output, **autonomous E2E suite result (green)**, live URLs).
+- **Completed**: units finished, PRs merged, issues closed - cite each unit's receipt file and the `ccgm-etp-receipts verify` output rather than restating PR state from memory; add other evidence (test output, **autonomous E2E suite result (green)**, live URLs).
 - **Blocked**: each blocker, why, and the exact human action that unblocks it.
 - **Deferred**: out-of-scope follow-ups logged but intentionally not done.
 - **Live state**: the verification that the system actually runs end-to-end (where applicable).
