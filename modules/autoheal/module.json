@@ -130,6 +130,11 @@
       "type": "script",
       "template": false
     },
+    "bin/autoheal-aggregate.py": {
+      "target": "bin/autoheal-aggregate.py",
+      "type": "script",
+      "template": false
+    },
     "lib/event-schema.json": {
       "target": "lib/event-schema.json",
       "type": "lib",
