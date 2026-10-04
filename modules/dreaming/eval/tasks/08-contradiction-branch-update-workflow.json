@@ -1,6 +1,7 @@
 {
   "id": "contradiction-01-branch-update-workflow",
   "kind": "contradiction",
+  "smoke": true,
   "prompt": "Update the \"Branch Updates\" section of docs/CONTRIBUTING.md so it accurately describes this repo's current, correct workflow for bringing a feature branch up to date with main.",
   "fixture": {
     "files": {
@@ -163,6 +164,12 @@
     "The platform prefers boring, well-understood technology on its core path and confines experiments to clearly bounded, low-risk areas, because operational familiarity during an incident is worth more than the marginal benefit of a novel tool.",
     "Every asynchronous message carries a schema version so a consumer can handle an older or newer shape gracefully, and a breaking change to a message format is rolled out by supporting both shapes until every consumer has been upgraded."
   ],
+  "grader": {
+    "checks": [
+      {"id": "recommends git rebase origin/main", "kind": "regex", "path": "docs/CONTRIBUTING.md", "pattern": "git rebase origin/main"},
+      {"id": "does not recommend merge --no-ff", "kind": "not_regex", "path": "docs/CONTRIBUTING.md", "pattern": "^(?!.*\\b(?:no longer|not|never|instead|superseded|old|don't|do not|replaced|avoid)\\b).*git merge origin/main --no-ff", "flags": "im"}
+    ]
+  },
   "criteria": [
     "The updated Branch Updates section recommends git rebase origin/main as the way to bring a feature branch up to date, not git merge --no-ff.",
     "The section does not present the old merge --no-ff approach as the current recommendation (it may be omitted entirely, or explicitly marked as a superseded/old approach)."

@@ -7,7 +7,7 @@
   },
   "uplift-01-migration-reserved-keywords": {
     "baseline":     {"score": 3.2, "input_tokens": 950,  "output_tokens": 190, "turns": 3, "cost_usd": 0.004},
-    "treatment":    {"score": 8.7, "input_tokens": 1020, "output_tokens": 210, "turns": 3, "cost_usd": 0.005},
+    "treatment":    {"score": 8.7, "input_tokens": 1020, "output_tokens": 210, "turns": 3, "cost_usd": 0.005, "files": {"supabase/migrations/0002_add_order_tracking.sql": "CREATE TABLE IF NOT EXISTS order_tracking (\n  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n  \"order\" integer NOT NULL,\n  \"position\" integer NOT NULL\n);\n"}},
     "full_context": {"score": 6.1, "input_tokens": 1350, "output_tokens": 210, "turns": 3, "cost_usd": 0.006}
   },
   "uplift-02-env-example-sync": {
@@ -31,8 +31,8 @@
     "full_context": {"score": 6.0, "input_tokens": 1290, "output_tokens": 195, "turns": 3, "cost_usd": 0.006}
   },
   "canary-01-unrelated-rename": {
-    "baseline":     {"score": 8.8, "input_tokens": 700,  "output_tokens": 130, "turns": 2, "cost_usd": 0.003},
-    "treatment":    {"score": 8.6, "input_tokens": 760,  "output_tokens": 140, "turns": 2, "cost_usd": 0.003},
+    "baseline":     {"score": 8.8, "input_tokens": 700,  "output_tokens": 130, "turns": 2, "cost_usd": 0.003, "files": {"src/utils/date.ts": "export function formatDateTime(iso) {\n  return new Date(iso).toLocaleString();\n}\n", "src/components/Timestamp.tsx": "import { formatDateTime } from \"../utils/date\";\n\nexport function Timestamp({ iso }) {\n  return <span>{formatDateTime(iso)}</span>;\n}\n"}},
+    "treatment":    {"score": 8.6, "input_tokens": 760,  "output_tokens": 140, "turns": 2, "cost_usd": 0.003, "files": {"src/utils/date.ts": "export function formatDateTime(iso) {\n  return new Date(iso).toLocaleString();\n}\n", "src/components/Timestamp.tsx": "import { formatDateTime } from \"../utils/date\";\n\nexport function Timestamp({ iso }) {\n  return <span>{formatDateTime(iso)}</span>;\n}\n"}},
     "full_context": {"score": 8.7, "input_tokens": 1000, "output_tokens": 140, "turns": 2, "cost_usd": 0.004}
   },
   "canary-02-unrelated-math-util": {
@@ -42,12 +42,12 @@
   },
   "contradiction-01-branch-update-workflow": {
     "baseline":     {"score": 4.2, "input_tokens": 820,  "output_tokens": 160, "turns": 3, "cost_usd": 0.004},
-    "treatment":    {"score": 8.2, "input_tokens": 900,  "output_tokens": 180, "turns": 3, "cost_usd": 0.005},
+    "treatment":    {"score": 8.2, "input_tokens": 900,  "output_tokens": 180, "turns": 3, "cost_usd": 0.005, "files": {"docs/CONTRIBUTING.md": "# Contributing\n\n## Branch Updates\n\nRun `git rebase origin/main`, then `git push --force-with-lease`.\n"}},
     "full_context": {"score": 6.0, "input_tokens": 1220, "output_tokens": 180, "turns": 3, "cost_usd": 0.005}
   },
   "dreamed-01-pipeline-end-to-end": {
-    "baseline":     {"score": 3.4, "input_tokens": 950,  "output_tokens": 190, "turns": 3, "cost_usd": 0.004},
-    "treatment":    {"score": 8.3, "input_tokens": 1020, "output_tokens": 210, "turns": 3, "cost_usd": 0.005},
+    "baseline":     {"score": 3.4, "input_tokens": 950,  "output_tokens": 190, "turns": 3, "cost_usd": 0.004, "files": {"supabase/migrations/0002_add_items_review.sql": "CREATE TABLE IF NOT EXISTS items_review (\n  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n  passed boolean NOT NULL DEFAULT false\n);\n"}},
+    "treatment":    {"score": 8.3, "input_tokens": 1020, "output_tokens": 210, "turns": 3, "cost_usd": 0.005, "files": {"supabase/migrations/0002_add_items_review.sql": "CREATE TABLE IF NOT EXISTS items_review (\n  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n  passed boolean NOT NULL DEFAULT false,\n  _synced_at timestamptz\n);\n"}},
     "full_context": {"score": 6.2, "input_tokens": 1350, "output_tokens": 210, "turns": 3, "cost_usd": 0.006}
   }
 }

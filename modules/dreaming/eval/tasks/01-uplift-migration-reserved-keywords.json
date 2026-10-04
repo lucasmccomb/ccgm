@@ -1,6 +1,7 @@
 {
   "id": "uplift-01-migration-reserved-keywords",
   "kind": "uplift",
+  "smoke": true,
   "prompt": "Add a new file at supabase/migrations/0002_add_order_tracking.sql that creates a table order_tracking with columns: id (uuid primary key default gen_random_uuid()), order (integer not null) -- the display order/position within a shipment -- and position (integer not null) -- the position within order. Use CREATE TABLE IF NOT EXISTS.",
   "fixture": {
     "files": {
@@ -15,6 +16,15 @@
       "tags": ["supabase", "migrations", "postgresql"]
     }
   ],
+  "grader": {
+    "checks": [
+      {"id": "migration file exists", "kind": "file_exists", "path": "supabase/migrations/0002_add_order_tracking.sql"},
+      {"id": "creates order_tracking", "kind": "regex", "path": "supabase/migrations/0002_add_order_tracking.sql", "pattern": "order_tracking", "flags": "i"},
+      {"id": "quotes the order column", "kind": "regex", "path": "supabase/migrations/0002_add_order_tracking.sql", "pattern": "\"order\"\\s+integer", "flags": "i"},
+      {"id": "quotes the position column", "kind": "regex", "path": "supabase/migrations/0002_add_order_tracking.sql", "pattern": "\"position\"\\s+integer", "flags": "i"},
+      {"id": "uses IF NOT EXISTS", "kind": "regex", "path": "supabase/migrations/0002_add_order_tracking.sql", "pattern": "CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS", "flags": "i"}
+    ]
+  },
   "criteria": [
     "The new migration file supabase/migrations/0002_add_order_tracking.sql exists.",
     "The column named order is written as the double-quoted identifier \"order\" in the CREATE TABLE statement, not the bare word order.",

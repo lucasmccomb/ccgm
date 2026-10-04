@@ -95,7 +95,8 @@ analyzer below:
 - `bin/dream-daily.sh` -- the nightly chain gained an eval-refresh step and
   an `optimistic-integrate` step, both config- and eval-gated (eval-refresh
   also needs `optimistic_integration.eval_refresh_enabled: true`, default
-  `false`, because one full live run cost about $21), placed
+  `false`; the step runs the weekly regression smoke, see "The regression
+  smoke" below), placed
   BEFORE the digest step (so tonight's just-integrated batch is reported
   while its dwell window is still entirely ahead of it).
 - `bin/dream-eval.sh` -- extended with poisoning negative-control fixtures
@@ -157,10 +158,14 @@ session), `eval:judge:<model>` and `eval:mine:<model>` rows, manual
 - `memory_eval.py` keeps a running total over one run and stops before the
   call that would cross `--max-total-usd` (default config
   `eval_run_cost_cap_usd`, 5.0, and never more than what is left of the
-  30-day budget). A preflight estimate (sessions x $0.08, a judge call per
-  session, $0.50 per dreamed task) refuses to start when it exceeds the cap.
-  A stopped run writes `evals/<date>.budget-abort` and restores the results
-  file it found; the marker pauses `--gate` until a later run writes results.
+  30-day budget). A preflight estimate refuses to start when it exceeds the
+  cap: for the smoke, 24 sessions x $0.06 plus $0.50 for the dreamed task's
+  mining ($1.94, no judge); for `--full`, sessions x $0.08 plus a judge call
+  per session. A stopped run writes `evals/<date>.budget-abort` and restores
+  the results file it found; the marker pauses `--gate` until a later run
+  writes results.
+- The weekly refresh uses its own cap, `optimistic_integration.eval_refresh_cost_cap_usd`
+  (default 2.0), passed to `memory_eval.py` as `--max-total-usd`.
 
 The **nightly map->reduce analyzer**, on top of Epic 2's miner:
 
@@ -532,6 +537,108 @@ with one pointer line in the digest, so the digest stays small.
 must be registered in the live `~/.claude/settings.json` (re-run
 `./start.sh --add dreaming`, which merges `settings.partial.json`). Open a new
 session to load it.
+
+## The regression smoke
+
+`dream-eval.sh` runs a small regression smoke by default, in place of the
+suite that cost about $21 a run (270 `claude -p` sessions plus 270 Opus judge
+calls, on nine tasks most of which score at the ceiling). The gate only needs
+one answer: does treatment fail a check that baseline passes?
+
+- **Tasks.** The four tasks marked `"smoke": true` in `eval/tasks/*.json`: one
+  uplift (`uplift-01`), one canary (`canary-01`), `contradiction-01`, and
+  `dreamed-01`. The other five stay on disk for `--full`.
+- **Arms and size.** Baseline and treatment, 3 runs each, on the configured
+  `map_model` (Sonnet): 4 x 2 x 3 = **24 sessions**. No `full_context` arm.
+- **Deterministic graders.** Each task carries `grader.checks` (the dreamed
+  task's sit under `follow_up`): `file_exists`, `regex`, `not_regex` and
+  `glob_empty` checks on the agent's finished workdir, such as "contains
+  `"order"` quoted", "contains `_synced_at timestamptz`", "uses
+  `IF NOT EXISTS`". A run passes when every check passes; its score is 10 x
+  the share that passed. There is no judge call, so the 270 judge calls are
+  gone. A check on a missing file fails.
+- **Cost.** 24 sessions at about $0.06, plus the dreamed task's mining,
+  with a $0.25 `--max-budget-usd` per session. The preflight estimate is
+  **$1.59** (24 x $0.06 = $1.44, plus $0.15 for mining), against the $2.00
+  `eval_refresh_cost_cap_usd`: $0.41 of headroom on the estimate. The hard
+  stop is stricter than the estimate: before each session it reserves the
+  $0.25 `--max-budget-usd` worst case, so the 24th session still starts only
+  if the 23 before it plus mining cost $1.75 or less. In practice the run
+  survives an average session of about $0.07 (about 17% over the $0.06
+  estimate); above that it aborts and pauses the gate. Mining runs once per
+  eval run, not once per arm run, and in the
+  eval's sandbox only its reduce step uses the map model (Sonnet) instead of
+  Opus; the nightly analyzer's config is untouched. The hard stop and the
+  30-day module budget apply unchanged.
+- **Gate.** Rows carry `seed_fingerprint`, pass rates and, per run, the result
+  of each check (`run_results[].checks: [{id, pass}]`). `--gate` closes on a
+  supported regression on a canary or on a task whose seed changed: **a
+  check** that baseline passes in at least 2 of 3 runs and treatment fails in
+  at least 2 of 3. The check-level rule matters when the baseline fails other
+  checks of the same task (the uplift tasks), where a whole-task pass rate
+  sees nothing. The gate reason names the regressed check ids. It is open
+  otherwise.
+- **Artifacts.** `evals/<date>/<task>/<model>/<arm>-<run>/` holds
+  `output.txt` (the agent's final message), `workdir.diff` (what it changed
+  against the fixture), `grader.json` (each check) and `result.json` (turns,
+  tokens, auth, cost). The dreamed task adds `evals/<date>/<task>/mining/`:
+  `proposals.jsonl` (everything mining wrote), and `applied.json` (what was
+  applied and the exact text injected into the treatment arm). A "dreamed
+  no-lift" result is diagnosable from these: compare the proposal text with
+  what treatment's diff did. (Directories, not `*.jsonl` files, so the gate's
+  results glob ignores them.)
+- **`--full`** runs the old suite: every task, three arms, the Opus judge,
+  both backbones, 5 runs.
+
+### Weekly refresh: opt in
+
+The nightly chain's eval-refresh step runs the smoke once the newest results
+are 7 days old (`eval_refresh_min_age_days`, default 7), which is what the
+gate's 7-day freshness bound (`eval_freshness_days`) expects. It is off until
+you turn it on, in `~/.claude/dreaming/config.json`:
+
+```json
+{
+  "optimistic_integration": {
+    "eval_refresh_enabled": true,
+    "eval_refresh_cost_cap_usd": 2.0
+  }
+}
+```
+
+The step also needs `optimistic_integration.enabled` to be `active` and an
+`ANTHROPIC_API_KEY` (dreaming `.env`): the dreamed task mines with the
+Messages API.
+
+### Subscription auth for the arms (#1038)
+
+By default the arms bill the API account through `ANTHROPIC_API_KEY`. To bill
+the subscription instead, mint a long-lived token once, in a terminal:
+
+```bash
+claude setup-token
+```
+
+Then give it to dreaming in one of these places (checked in this order):
+
+1. `CLAUDE_CODE_OAUTH_TOKEN=<token>` in the environment or in
+   `~/.claude/dreaming/.env`. The LaunchAgent has no shell environment, so use
+   the `.env` file for the nightly chain.
+2. A file holding the token, named by `CCGM_EVAL_OAUTH_TOKEN_FILE`, or by
+   `optimistic_integration.eval_oauth_token_file` in the config. Run
+   `chmod 600` on it; the token is a secret and must never be committed.
+
+With a token present, each arm gets `CLAUDE_CODE_OAUTH_TOKEN` and no
+`ANTHROPIC_API_KEY` (an API key in the environment outranks the token), the
+log says `arm auth: subscription`, rows carry `"auth": "subscription"`, and
+each session lands in `cost.log` as `eval:arm:subscription` at $0. Those
+sessions do not count against the run cap. The mining and the 30-day budget
+still use the API key. With no token the log says `arm auth: api_key`.
+
+The isolated arm config holds no login (`CLAUDE_CONFIG_DIR` and `HOME` are
+temp dirs), so the env token is the only way for an arm to authenticate with
+the subscription. `claude --bare` never reads OAuth, and the harness does not
+use it.
 
 ## The eval harness fails loud
 

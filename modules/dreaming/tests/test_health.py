@@ -223,7 +223,8 @@ class HealthComputeTest(unittest.TestCase):
         self.assertEqual((h["status"], h["gate"]["state"]), ("yellow", "paused"))
         self.assertEqual(h["gate"]["code"], "no_results")
         fix = self._reason(h, "gate_paused")["fix"]
-        self.assertIn("no fresh eval: eval-refresh is disabled until the Phase 4 smoke test lands", fix)
+        self.assertIn("no fresh eval: eval_refresh_enabled is false", fix)
+        self.assertIn("set optimistic_integration.eval_refresh_enabled=true to run the weekly regression smoke (~$1.50)", fix)
 
     def test_paused_gate_with_eval_refresh_enabled_points_at_the_next_refresh(self):
         build_green(self.root)

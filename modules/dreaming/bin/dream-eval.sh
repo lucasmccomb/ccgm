@@ -3,15 +3,28 @@
 #
 # Thin runner: resolves paths, verifies python3 is on PATH, then delegates
 # ALL orchestration -- task loading, isolated-config construction, the
-# three-arm claude -p A/B, the blind judge, the four-bucket classifier, the
-# mine->analyze->apply->A/B "dreamed" task, and the --gate contract -- to
-# eval/memory_eval.py. Keeping this logic in Python (not bash) makes it
-# directly unit-testable; see modules/dreaming/tests/test_memory_eval.py.
+# claude -p A/B, the graders, the mine->analyze->apply->A/B "dreamed" task,
+# and the --gate contract -- to eval/memory_eval.py. Keeping this logic in
+# Python (not bash) makes it directly unit-testable; see
+# modules/dreaming/tests/test_memory_eval.py and test_smoke_eval.py.
+#
+# The default is the regression smoke (#1098 item 4.2): the 4 tasks marked
+# `"smoke": true` x 2 arms (baseline, treatment) x 3 runs on the map model =
+# 24 sessions, graded by deterministic checks (no judge), about $1.50, with
+# per-run artifacts under evals/<date>/. `--full` runs the old 9-task,
+# 3-arm, LLM-judged suite (270 sessions plus 270 judge calls, about $21).
 #
 # Usage:
-#   dream-eval.sh [--tasks GLOB] [--runs N] [--backbone A,B] [--judge-model M]
-#                 [--offline DIR [--allow-real-dir]] [--gate] [--freshness-days N]
-#                 [--date YYYY-MM-DD]
+#   dream-eval.sh [--full] [--tasks GLOB] [--runs N] [--backbone A,B]
+#                 [--judge-model M] [--offline DIR [--allow-real-dir]]
+#                 [--gate] [--freshness-days N] [--date YYYY-MM-DD]
+#                 [--max-total-usd USD]
+#
+# Arm auth (#1038): with CLAUDE_CODE_OAUTH_TOKEN set (from `claude setup-token`;
+# in the environment, the dreaming .env, or a file named by
+# CCGM_EVAL_OAUTH_TOKEN_FILE or config optimistic_integration.eval_oauth_token_file)
+# the arms bill the subscription and are recorded as eval:arm:subscription at
+# $0. Otherwise they use ANTHROPIC_API_KEY.
 #
 # Every path the harness writes (evals/ results and markers, cost.log)
 # resolves from CCGM_DREAMING_DIR, default ~/.claude/dreaming. An --offline
@@ -22,7 +35,8 @@
 # Env vars (all optional; see eval/memory_eval.py path helpers for the full
 # list): CCGM_DREAMING_DIR, CCGM_DREAMING_TODAY, CCGM_DREAMING_ENV_FILE,
 # CCGM_DREAMING_AUTOHEAL_ENV_FILE, CCGM_LEARNINGS_DIR, CCGM_CLAUDE_PROJECTS_DIR,
-# CCGM_EVAL_CLAUDE_BIN (override the `claude` binary used for live arm runs).
+# CCGM_EVAL_CLAUDE_BIN (override the `claude` binary used for live arm runs),
+# CLAUDE_CODE_OAUTH_TOKEN, CCGM_EVAL_OAUTH_TOKEN_FILE (subscription auth).
 #
 # Exit codes:
 #   0  success (including "no API key configured, skipped" and, in --gate

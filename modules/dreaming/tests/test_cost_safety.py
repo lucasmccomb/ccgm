@@ -283,6 +283,7 @@ class FakeClaudeEvalTests(unittest.TestCase):
         with mock.patch.object(me, "_call_judge_api", return_value=({"pass": True, "score": 7.0}, usage)), \
                 contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(io.StringIO()):
             rc = me.main([
+                "--full",
                 "--tasks", str(self.tasks_dir / "*.json"),
                 "--backbone", "fixture-model",
                 "--claude-bin", str(self.fake_claude),

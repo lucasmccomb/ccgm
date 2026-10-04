@@ -8,11 +8,13 @@
 #      and independent of the eval gate (#1098 item 2.2).
 #   1. bin/dream-analyze.sh       (Epic 3) — mine + map/reduce -> proposals
 #   2. eval-refresh                — OFF by default (`eval_refresh_enabled`
-#      must be true; #1098 item 0.1). When opted in: weekly, live eval
-#      refresh under a hard total-cost stop so dream-eval.sh --gate's 7-day
-#      freshness bound stays met (fix (b) for adrev-opt-001). Runs BEFORE
-#      optimistic-integrate so a freshly-refreshed result is available to
-#      the SAME night's gate check.
+#      must be true; #1098 item 0.1). When opted in: once the newest results
+#      are 7 days old, run the regression smoke (4 tasks x 2 arms x 3 runs =
+#      24 sessions, deterministic graders, no judge, about $1.50; #1098 item
+#      4.2) under the hard `eval_refresh_cost_cap_usd` stop (default $2) so
+#      dream-eval.sh --gate's 7-day freshness bound stays met (fix (b) for
+#      adrev-opt-001). Runs BEFORE optimistic-integrate so a freshly-refreshed
+#      result is available to the SAME night's gate check.
 #   3. optimistic-integrate        — opt-in, config- AND eval-gated, and
 #      paused on a night the analyze step failed (see below). Every night it
 #      does not integrate records one infra or content anomaly. The full
@@ -197,6 +199,9 @@ _optimistic_integration_active() {
 
 # ---------------------------------------------------------------------
 # Step 2: weekly, cost-capped eval refresh (fix (b) for adrev-opt-001).
+# What it runs is memory_eval.py's default suite, the 24-session regression
+# smoke (#1098 item 4.2); the 270-session suite needs `dream-eval.sh --full`
+# by hand.
 #
 # Gated on _optimistic_integration_active() only -- the preconditions that
 # actually decide whether a refresh RUNS (eval_refresh_enabled, default
