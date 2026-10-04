@@ -3,7 +3,7 @@
 #
 # Epic 11: opt-in confidence-gated auto-apply.
 #
-# Reads today's proposals from ~/.claude/autoheal/proposals/{today}.jsonl,
+# Reads today's rows of the proposal ledger (~/.claude/autoheal/proposals.jsonl),
 # evaluates each against the strict auto-apply gate (plan.md §3.7), and
 # routes qualifying proposals through lib/apply-proposal.py. The apply
 # logic is shared with /permission-fix apply and /autoheal-apply <id>
@@ -20,7 +20,7 @@
 #   confidence            >= 9
 #   breadth_score         <= 1
 #   kind                  == "settings_allow_add"
-#   proposed_diff_target  startswith("modules/settings/")
+#   target                startswith("modules/settings/")
 #   snoozed_until         is null
 #   auto_apply_blocked    is false
 #   fix_surface           is not "check" (needs a demonstration; #1077)
@@ -33,7 +33,7 @@
 #
 # Env overrides (tests):
 #   CCGM_AUTOHEAL_CONFIG         default ~/.claude/autoheal/config.json
-#   CCGM_AUTOHEAL_PROPOSALS_DIR  default ~/.claude/autoheal/proposals
+#   CCGM_AUTOHEAL_LEDGER         default ~/.claude/autoheal/proposals.jsonl
 #   CCGM_AUTOHEAL_APPLIED_DIR    default ~/.claude/autoheal/applied
 #   CCGM_AUTOHEAL_LOGS_DIR       default ~/.claude/logs
 #   CCGM_AUTOHEAL_TODAY          default $(date -u +%Y-%m-%d)
@@ -58,7 +58,6 @@ EVAL_LIB="${MODULE_ROOT}/lib/proposal-eval.py"
 MODE_LIB="${MODULE_ROOT}/lib/autoheal_mode.py"
 
 CONFIG_FILE="${CCGM_AUTOHEAL_CONFIG:-${HOME}/.claude/autoheal/config.json}"
-PROPOSALS_DIR="${CCGM_AUTOHEAL_PROPOSALS_DIR:-${HOME}/.claude/autoheal/proposals}"
 APPLIED_DIR="${CCGM_AUTOHEAL_APPLIED_DIR:-${HOME}/.claude/autoheal/applied}"
 LOGS_DIR="${CCGM_AUTOHEAL_LOGS_DIR:-${HOME}/.claude/logs}"
 
@@ -68,7 +67,11 @@ else
     TODAY="$(python3 -c "import datetime; print(datetime.datetime.now(datetime.timezone.utc).date().isoformat())")"
 fi
 
-PROPOSALS_FILE="${PROPOSALS_DIR}/${TODAY}.jsonl"
+# Today's ledger rows in a scratch file; apply-proposal.py looks each id up in the
+# ledger itself.
+PROPOSALS_FILE="$(mktemp -t autoheal-auto-apply-rows.XXXXXX)"
+trap 'rm -f "${PROPOSALS_FILE}"' EXIT
+python3 "${MODULE_ROOT}/lib/ledger.py" day "${TODAY}" > "${PROPOSALS_FILE}" 2>/dev/null || true
 APPLIED_FILE="${APPLIED_DIR}/${TODAY}.jsonl"
 LOG_FILE="${LOGS_DIR}/autoheal-auto-apply-${TODAY}.log"
 
@@ -84,7 +87,6 @@ fi
 # Pass through the env knobs apply-proposal.py honors. These are already
 # exported in the daily-wrapper case, but re-exporting in tests keeps the
 # script self-contained.
-export CCGM_AUTOHEAL_PROPOSALS_DIR="${PROPOSALS_DIR}"
 export CCGM_AUTOHEAL_APPLIED_DIR="${APPLIED_DIR}"
 export CCGM_AUTOHEAL_TODAY="${TODAY}"
 
@@ -133,8 +135,8 @@ if [ "${MODE}" != "active" ] && [ "${MODE}" != "shadow" ]; then
     exit 0
 fi
 
-if [ ! -f "${PROPOSALS_FILE}" ]; then
-    log "no proposals file for ${TODAY}; nothing to apply"
+if [ ! -s "${PROPOSALS_FILE}" ]; then
+    log "no ledger rows for ${TODAY}; nothing to apply"
     exit 0
 fi
 
@@ -180,7 +182,7 @@ def gate(p):
     kind = p.get("kind")
     if kind != "settings_allow_add":
         return False, f"kind!=settings_allow_add (got {kind!r})"
-    target = p.get("proposed_diff_target") or ""
+    target = p.get("target") or ""
     if not isinstance(target, str) or not target.startswith("modules/settings/"):
         return False, f"target not under modules/settings/ (got {target!r})"
     if p.get("snoozed_until"):

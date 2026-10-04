@@ -60,6 +60,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/autoheal-session-notice.py",
+            "timeout": 5000
+          }
+        ]
+      }
     ]
   }
 }

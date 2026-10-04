@@ -12,7 +12,7 @@
 #   2. Run bin/autoheal-analyze.sh with tests/fixtures/fake-curl.py first on
 #      PATH, so no request reaches api.anthropic.com. The fake serves a
 #      count_tokens reply and a rule_insert answer.
-#      Expect: proposals/{today}.jsonl holds one rule_insert whose diff was
+#      Expect: proposals.jsonl holds one rule_insert whose diff was
 #      built by code against the fixture repo.
 #   3. Run bin/autoheal-digest.sh against those proposals.
 #      Expect: digests/{today}.md rendered with the proposals (5-cap
@@ -210,8 +210,8 @@ ANALYZE_RC=$?
 
 assert_eq "${ANALYZE_RC}" "0" "stage2: analyzer exits 0"
 
-PROPOSALS_FILE="${AUTOHEAL_DIR}/proposals/${TODAY}.jsonl"
-assert_file_exists "${PROPOSALS_FILE}" "stage2: proposals/{today}.jsonl written"
+PROPOSALS_FILE="${AUTOHEAL_DIR}/proposals.jsonl"
+assert_file_exists "${PROPOSALS_FILE}" "stage2: ledger written"
 assert_file_exists "${PROMPT_LOG}" "stage2: prompt log captured"
 
 # Shape check: one signature qualified, one proposal written.
@@ -242,7 +242,7 @@ assert_not_contains "${ANALYZE_ERR}" "Could not resolve host" "stage2: no DNS at
 # ---------------------------------------------------------------------------
 
 env \
-    CCGM_AUTOHEAL_PROPOSALS_DIR="${AUTOHEAL_DIR}/proposals" \
+    CCGM_AUTOHEAL_LEDGER="${AUTOHEAL_DIR}/proposals.jsonl" \
     CCGM_AUTOHEAL_DIGESTS_DIR="${AUTOHEAL_DIR}/digests" \
     CCGM_AUTOHEAL_SENT_DIR="${AUTOHEAL_DIR}/sent" \
     CCGM_AUTOHEAL_CONFIG="${AUTOHEAL_DIR}/config-missing.json" \
@@ -306,7 +306,7 @@ cat > "${CONFIG_FILE}" <<JSON
 JSON
 
 env \
-    CCGM_AUTOHEAL_PROPOSALS_DIR="${AUTOHEAL_DIR}/proposals" \
+    CCGM_AUTOHEAL_LEDGER="${AUTOHEAL_DIR}/proposals.jsonl" \
     CCGM_AUTOHEAL_DIGESTS_DIR="${AUTOHEAL_DIR}/digests" \
     CCGM_AUTOHEAL_SENT_DIR="${AUTOHEAL_DIR}/sent" \
     CCGM_AUTOHEAL_LOGS_DIR="${LOGS_DIR}" \

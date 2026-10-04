@@ -24,7 +24,7 @@ Hooks are registered in `settings.json` under the `hooks` key. Each hook specifi
 
 ## Installed hooks
 
-The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. Nine other modules add the rest: **advisor-mode** 4, **self-improving** 3, **subagent-patterns** 2, **relevance-injection** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, **commands-preamble**, and **persist**. Total: 31 hooks across 10 modules (the **autoheal** module's 6 observational hooks are documented in their own section below, bringing the installed total to 37). The **dreaming** module adds one more, `dreaming-health.py`, documented in the last section.
+The **hooks** module installs 15 hooks, 6 Python libraries, and a settings partial. Nine other modules add the rest: **advisor-mode** 4, **self-improving** 3, **subagent-patterns** 2, **relevance-injection** 2, and one each from **branch-guard**, **ask-context**, **startup-dashboard**, **commands-preamble**, and **persist**. Total: 31 hooks across 10 modules (the **autoheal** module's 6 hooks are documented in their own section below, bringing the installed total to 37). The **dreaming** module adds one more, `dreaming-health.py`, documented in the last section.
 
 This count excludes `hooks/plugin-rule-inject.py`, which brings the true `"type": "hook"` file total to 38. It is the **plugin-marketplace** module's own hook, copied into every other rules-bearing module's `hooks/` directory so each module's generated Claude Code plugin manifest can register it independently - see [plugin-marketplace](../modules/plugin-marketplace/README.md) for what it does.
 
@@ -563,6 +563,14 @@ Conservative auto-allow gate: fires only when ALL hold — `is_bypass_mode()` is
 **Can block**: Yes (`exit 2` wakes Claude mid-session)
 
 Strictly opt-in. Reads `~/.claude/autoheal/config.json` → if `realtime_alerts_enabled` is false or missing, exits 0 immediately without touching the patterns file. When enabled: applies 7 regexes (GitHub/AWS/Anthropic tokens in commit/echo; force-push-to-main without `ALLOW_MAIN_COMMIT`; `rm -rf /…`; `sudo` destructive; `DROP TABLE` against prod-tagged connection strings). On match: logs `realtime_security_alert` event and `exit 2` with an `<autoheal-security-alert>` envelope.
+
+### autoheal-session-notice.py
+
+**Type**: SessionStart (`startup|resume|clear`)
+**Module**: autoheal
+**Can block**: No (always exits 0)
+
+Prints one line to the user (`systemMessage`) plus a short `additionalContext` for the model, at most once per UTC day per machine, and nothing when there is nothing to say. It reads `~/.claude/autoheal/proposals.jsonl` for ready fixes (`autoheal: 2 fixes ready (...) — run /autoheal-review`), `health.json` for a run older than 26 hours or a `failed` status (`autoheal: last good run 3d ago (<reason>) — /autoheal doctor`; `paused` is silent), and, once a day with the result cached, `launchctl print` to check that the scheduled job's program exists (`autoheal: scheduled job runs <path>, which does not exist — /autoheal doctor`). Subagent worktree sessions (`/.claude/worktrees/`) stay silent and do not use up the day's notice. No network, no questions, files and one `launchctl` call only.
 
 ---
 

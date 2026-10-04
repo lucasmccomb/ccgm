@@ -67,7 +67,6 @@ trap 'rm -rf "${TMP}"' EXIT
 
 AUTOHEAL_DIR="${TMP}/autoheal"
 mkdir -p "${AUTOHEAL_DIR}/events" \
-         "${AUTOHEAL_DIR}/proposals" \
          "${AUTOHEAL_DIR}/digests" \
          "${AUTOHEAL_DIR}/applied" \
          "${AUTOHEAL_DIR}/sent"
@@ -100,7 +99,7 @@ ISO75="$(printf '%s' "${dates_json}" | python3 -c 'import sys,json; print(json.l
 # Create fixture files across multiple subdirs so we exercise each one.
 F_KEEP="${AUTOHEAL_DIR}/events/${ISO15}.jsonl"
 F_GZIP_EVENTS="${AUTOHEAL_DIR}/events/${ISO45}.jsonl"
-F_GZIP_PROPS="${AUTOHEAL_DIR}/proposals/${ISO45}.jsonl"
+F_GZIP_PROPS="${AUTOHEAL_DIR}/proposals.jsonl"   # the ledger: never gzipped, whatever its age
 F_DELETE_DIGEST="${AUTOHEAL_DIR}/digests/${ISO75}.md"
 F_DELETE_APPLIED="${AUTOHEAL_DIR}/applied/${ISO75}.jsonl"
 
@@ -126,7 +125,7 @@ touch -t "${D75}" "${F_DELETE_DIGEST}.gz" "${F_DELETE_APPLIED}.gz"
 # Verify the fixture is in the expected starting shape.
 assert_exists "${F_KEEP}"                "fixture: keep file exists"
 assert_exists "${F_GZIP_EVENTS}"         "fixture: events gzip candidate exists"
-assert_exists "${F_GZIP_PROPS}"          "fixture: proposals gzip candidate exists"
+assert_exists "${F_GZIP_PROPS}"          "fixture: ledger exists"
 assert_exists "${F_DELETE_DIGEST}.gz"    "fixture: digest delete candidate exists (.gz)"
 assert_exists "${F_DELETE_APPLIED}.gz"   "fixture: applied delete candidate exists (.gz)"
 
@@ -148,8 +147,8 @@ assert_absent "${F_KEEP}.gz"             "run1: 15-day file NOT gzipped"
 # 45-day files now gzipped.
 assert_absent "${F_GZIP_EVENTS}"         "run1: 45-day events raw gone"
 assert_exists "${F_GZIP_EVENTS}.gz"      "run1: 45-day events now .gz"
-assert_absent "${F_GZIP_PROPS}"          "run1: 45-day proposals raw gone"
-assert_exists "${F_GZIP_PROPS}.gz"       "run1: 45-day proposals now .gz"
+assert_exists "${F_GZIP_PROPS}"          "run1: 45-day-old ledger is kept as is"
+assert_absent "${F_GZIP_PROPS}.gz"       "run1: the ledger is not gzipped"
 
 # 75-day .gz files deleted.
 assert_absent "${F_DELETE_DIGEST}.gz"    "run1: 75-day digest deleted"

@@ -45,7 +45,7 @@ PY
     RESULT="$(CCGM_AUTOHEAL_DIR="${CASE}/ah" CCGM_AUTOHEAL_TODAY="${TODAY}" \
         python3 "${MODULE_ROOT}/lib/draft_proposals.py" finish --meta "${CASE}/meta.json" \
         --answer "${CASE}/answer.json" --date "${TODAY}" --rejected-log "${CASE}/rejected.log" 2>&1)"
-    ROWS="${CASE}/ah/proposals/${TODAY}.jsonl"
+    ROWS="${CASE}/ah/proposals.jsonl"
 }
 rule_insert() {
     python3 -c "

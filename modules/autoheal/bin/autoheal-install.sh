@@ -42,7 +42,6 @@ MINUTE="${CCGM_AUTOHEAL_MINUTE:-0}"
 mkdir -p \
     "${AUTOHEAL_DIR}" \
     "${AUTOHEAL_DIR}/events" \
-    "${AUTOHEAL_DIR}/proposals" \
     "${AUTOHEAL_DIR}/applied" \
     "${AUTOHEAL_DIR}/sent" \
     "${HOME}/.claude/logs"

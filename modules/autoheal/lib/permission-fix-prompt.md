@@ -96,8 +96,8 @@ distinct signature with at least 2 events in the input set:
   "kind": "settings_allow_add | settings_deny_remove | hook_narrow | rule_update",
   "title": "Short, paraphrased title (max 60 chars). Never quote raw command.",
   "rationale": "1-3 sentences. Paraphrased. Names the friction signature, not the verbatim command.",
-  "proposed_diff_target": "modules/{module}/{file}",
-  "proposed_diff": "Unified diff text",
+  "target": "modules/{module}/{file}",
+  "diff": "Unified diff text",
   "confidence": 1,
   "breadth_score": 1,
   "auto_applicable": false,
@@ -113,8 +113,8 @@ Field validation rules:
 - `auto_applicable`: `true` only when `confidence >= 9`,
   `breadth_score <= 1`, `kind == "settings_allow_add"`, AND the
   diff target lives under `modules/settings/`.
-- `proposed_diff`: must apply cleanly via `patch -p0` from repo root.
-- `proposed_diff_target`: must start with `modules/` (any other
+- `diff`: must apply cleanly via `patch -p0` from repo root.
+- `target`: must start with `modules/` (any other
   path is rejected at apply time).
 
 ---

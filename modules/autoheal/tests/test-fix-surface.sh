@@ -80,18 +80,18 @@ fx_answer "${FS_ROOT}/fake/messages.response.json" \
 env HOME="${FS_HOME}" PATH="${FS_ROOT}/bin:${PATH}" FAKE_CURL_DIR="${FS_ROOT}/fake" \
     CCGM_AUTOHEAL_DIR="${FS_AH}" CCGM_AUTOHEAL_TODAY="${TODAY}" ANTHROPIC_API_KEY="x" \
     bash "${ANALYZER}" >"${FS_ROOT}/run.out" 2>"${FS_ROOT}/run.err"
-FS_ROWS="${FS_AH}/proposals/${TODAY}.jsonl"
+FS_ROWS="${FS_AH}/proposals.jsonl"
 assert_eq "$(python3 -c "
 import json
 print(sorted((r['kind'], r['fix_surface']) for r in map(json.loads, open('${FS_ROWS}'))))")" \
     "[('issue', 'check'), ('rule_insert', 'rule')]" "analyzer: rule_insert is surface rule, hook-denial issue is surface check"
 
 # --- 3. digest ---------------------------------------------------------
-PROPS="${TMPROOT}/dg/proposals"
-mkdir -p "${PROPS}"
-jq -nc '{id:"prop_new",kind:"settings_allow_add",title:"New",rationale:"r",confidence:9,breadth_score:1,occurrence_count:3,fix_surface:"check"}' >> "${PROPS}/2026-06-01.jsonl"
-jq -nc '{id:"prop_old",kind:"rule_update",title:"Legacy",rationale:"r",confidence:5,breadth_score:1,occurrence_count:1}' >> "${PROPS}/2026-06-01.jsonl"
-CCGM_AUTOHEAL_PROPOSALS_DIR="${PROPS}" CCGM_AUTOHEAL_DIGESTS_DIR="${TMPROOT}/dg/d" \
+PROPS="${TMPROOT}/dg/proposals.jsonl"
+mkdir -p "${TMPROOT}/dg"
+jq -nc '{id:"prop_new",kind:"settings_allow_add",title:"New",rationale:"r",confidence:9,breadth_score:1,occurrence_count:3,fix_surface:"check",generated_at:"2026-06-01T08:00:00Z"}' >> "${PROPS}"
+jq -nc '{id:"prop_old",kind:"rule_update",title:"Legacy",rationale:"r",confidence:5,breadth_score:1,occurrence_count:1,generated_at:"2026-06-01T08:00:00Z"}' >> "${PROPS}"
+CCGM_AUTOHEAL_LEDGER="${PROPS}" CCGM_AUTOHEAL_DIGESTS_DIR="${TMPROOT}/dg/d" \
     CCGM_AUTOHEAL_SENT_DIR="${TMPROOT}/dg/s" CCGM_AUTOHEAL_CONFIG="${TMPROOT}/dg/none.json" \
     CCGM_AUTOHEAL_TODAY="2026-06-01" CCGM_AUTOHEAL_LIB_DIR="${REPO_ROOT}/modules/hooks/lib" \
     bash "${DIGEST}" >/dev/null 2>&1
@@ -102,7 +102,7 @@ assert_contains "${new_block}" '- **surface**: `check`' "digest: shows the propo
 assert_contains "${old_block}" '- **surface**: `rule`' "digest: legacy proposal without the field renders as rule"
 
 # --- 4. apply-proposal -------------------------------------------------
-APPLY_OUT="$(CCGM_AUTOHEAL_PROPOSALS_DIR="${TMPROOT}/ap/p" CCGM_AUTOHEAL_APPLIED_DIR="${TMPROOT}/ap/a" \
+APPLY_OUT="$(CCGM_AUTOHEAL_LEDGER="${TMPROOT}/ap/proposals.jsonl" CCGM_AUTOHEAL_APPLIED_DIR="${TMPROOT}/ap/a" \
     CCGM_AUTOHEAL_TODAY="2026-06-01" python3 - "${APPLY_LIB}" <<'PY'
 import importlib.util, json, os, sys
 spec = importlib.util.spec_from_file_location("ap", sys.argv[1])
@@ -118,8 +118,8 @@ out.append("noviol=" + str(ap.demonstration_problem({**good, "violation_exit": 0
 out.append("dirty=" + str(ap.demonstration_problem({**good, "clean_exit": 1}) is not None))
 out.append("unreverted=" + str(ap.demonstration_problem({**good, "reverted": False}) is not None))
 out.append("missing=" + str(ap.demonstration_problem(None) is not None))
-os.makedirs(os.environ["CCGM_AUTOHEAL_PROPOSALS_DIR"])
-with open(os.path.join(os.environ["CCGM_AUTOHEAL_PROPOSALS_DIR"], "2026-06-01.jsonl"), "w") as fh:
+os.makedirs(os.path.dirname(os.environ["CCGM_AUTOHEAL_LEDGER"]))
+with open(os.environ["CCGM_AUTOHEAL_LEDGER"], "w") as fh:
     fh.write(json.dumps({"id": "prop_chk", "fix_surface": "check"}) + "\n")
 r = ap.apply_proposal("prop_chk")
 out.append("refused=" + str(not r["success"] and "demonstration" in (r["error"] or "")))

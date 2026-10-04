@@ -155,26 +155,26 @@ mock_requests() {
 
 TODAY="2026-05-18"
 AUTOHEAL_DIR="${TMPROOT}/autoheal"
-mkdir -p "${AUTOHEAL_DIR}/proposals" \
+mkdir -p "${AUTOHEAL_DIR}" \
          "${AUTOHEAL_DIR}/events" \
          "${AUTOHEAL_DIR}/digests" \
          "${AUTOHEAL_DIR}/published" \
          "${TMPROOT}/logs"
 
-PROPOSAL_FILE="${AUTOHEAL_DIR}/proposals/${TODAY}.jsonl"
+PROPOSAL_FILE="${AUTOHEAL_DIR}/proposals.jsonl"
 EVENT_FILE="${AUTOHEAL_DIR}/events/${TODAY}.jsonl"
 
 jq -nc \
     '{id:"prop_001",kind:"settings_allow_add",title:"Allow t1",rationale:"r1",
       confidence:7,breadth_score:2,occurrence_count:3,session_ids:["s1","s2"],
-      proposed_diff_target:"modules/settings/settings.partial.json",
-      proposed_diff:"+ allow",fingerprint:"sha256-a",originating_clone:"test",
+      target:"modules/settings/settings.partial.json",
+      diff:"+ allow",fingerprint:"sha256-a",originating_clone:"test",
       generated_at:"2026-05-18T07:00:00Z"}' > "${PROPOSAL_FILE}"
 jq -nc \
     '{id:"prop_002",kind:"settings_allow_add",title:"Allow t2",rationale:"r2",
       confidence:8,breadth_score:1,occurrence_count:4,session_ids:["s3"],
-      proposed_diff_target:"modules/settings/settings.partial.json",
-      proposed_diff:"+ allow2",fingerprint:"sha256-b",originating_clone:"test",
+      target:"modules/settings/settings.partial.json",
+      diff:"+ allow2",fingerprint:"sha256-b",originating_clone:"test",
       generated_at:"2026-05-18T07:30:00Z"}' >> "${PROPOSAL_FILE}"
 
 jq -nc \

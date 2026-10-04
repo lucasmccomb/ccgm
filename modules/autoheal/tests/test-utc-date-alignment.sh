@@ -96,9 +96,9 @@ UTC_TODAY="$(date -u +%Y-%m-%d)"
 seed_proposals() {
     local autoheal_dir="$1"
     local day_iso="$2"
-    mkdir -p "${autoheal_dir}/proposals"
-    cat > "${autoheal_dir}/proposals/${day_iso}.jsonl" <<EOF
-{"id":"prop-utc-test-01","title":"UTC alignment regression seed","kind":"settings_allow_add","confidence":9,"breadth_score":1,"occurrence_count":3,"session_ids":["sess-utc-1"],"rationale":"Synthetic proposal for issue #520 regression test."}
+    mkdir -p "${autoheal_dir}"
+    cat > "${autoheal_dir}/proposals.jsonl" <<EOF
+{"id":"prop-utc-test-01","title":"UTC alignment regression seed","kind":"settings_allow_add","confidence":9,"breadth_score":1,"occurrence_count":3,"session_ids":["sess-utc-1"],"rationale":"Synthetic proposal for issue #520 regression test.","generated_at":"${day_iso}T08:00:00Z"}
 EOF
 }
 
@@ -116,7 +116,7 @@ EOF
 A1_HOME="${TMPROOT}/a1"
 A1_AUTOHEAL="${A1_HOME}/.claude/autoheal"
 A1_LOGS="${A1_HOME}/.claude/logs"
-mkdir -p "${A1_AUTOHEAL}/events" "${A1_AUTOHEAL}/proposals" \
+mkdir -p "${A1_AUTOHEAL}/events" \
          "${A1_AUTOHEAL}/digests" "${A1_AUTOHEAL}/sent" "${A1_LOGS}"
 # Empty config disables anything optional (resend, webhook).
 printf '{}\n' > "${A1_AUTOHEAL}/config.json"
@@ -164,7 +164,7 @@ esac
 # and UTC are different dates. We use the digest script directly (rather
 # than the whole daily wrapper) because it's the simplest stage that
 # proves the chain looks up files by the right date — it reads
-# proposals/{date}.jsonl and writes digests/{date}.md, both date-keyed.
+# the ledger rows for that date and writes digests/{date}.md.
 #
 # Setup: seed proposals at UTC-today. Run digest under TZ=America/Adak.
 # Assert: digest file appears at UTC-today, not at local-today. If we
@@ -172,14 +172,14 @@ esac
 # fixing.
 
 A2_AUTOHEAL="${TMPROOT}/a2/autoheal"
-mkdir -p "${A2_AUTOHEAL}/proposals" "${A2_AUTOHEAL}/digests" \
+mkdir -p "${A2_AUTOHEAL}/digests" \
          "${A2_AUTOHEAL}/sent"
 printf '{}\n' > "${A2_AUTOHEAL}/config.json"
 seed_proposals "${A2_AUTOHEAL}" "${UTC_TODAY}"
 
 env \
     TZ="America/Adak" \
-    CCGM_AUTOHEAL_PROPOSALS_DIR="${A2_AUTOHEAL}/proposals" \
+    CCGM_AUTOHEAL_LEDGER="${A2_AUTOHEAL}/proposals.jsonl" \
     CCGM_AUTOHEAL_DIGESTS_DIR="${A2_AUTOHEAL}/digests" \
     CCGM_AUTOHEAL_SENT_DIR="${A2_AUTOHEAL}/sent" \
     CCGM_AUTOHEAL_CONFIG="${A2_AUTOHEAL}/config.json" \
@@ -216,7 +216,7 @@ fi
 A3_HOME="${TMPROOT}/a3"
 A3_AUTOHEAL="${A3_HOME}/.claude/autoheal"
 A3_LOGS="${A3_HOME}/.claude/logs"
-mkdir -p "${A3_AUTOHEAL}/events" "${A3_AUTOHEAL}/proposals" \
+mkdir -p "${A3_AUTOHEAL}/events" \
          "${A3_AUTOHEAL}/digests" "${A3_AUTOHEAL}/sent" "${A3_LOGS}"
 printf '{}\n' > "${A3_AUTOHEAL}/config.json"
 

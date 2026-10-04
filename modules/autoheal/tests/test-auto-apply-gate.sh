@@ -111,7 +111,7 @@ trap 'rm -rf "${CLONE_ROOT}" "${PROPOSALS_DIR}" "${APPLIED_DIR}" "${LOGS_DIR}" "
 
 CONFIG_FILE="${CONFIG_DIR}/config.json"
 TODAY="2026-05-18"
-PROPOSALS_FILE="${PROPOSALS_DIR}/${TODAY}.jsonl"
+PROPOSALS_FILE="${PROPOSALS_DIR}/proposals.jsonl"
 APPLIED_FILE="${APPLIED_DIR}/${TODAY}.jsonl"
 
 # Seed the fake clone.
@@ -200,8 +200,8 @@ base = {
     "breadth_score": 1,
     "occurrence_count": 3,
     "session_ids": ["s1", "s2"],
-    "proposed_diff_target": "modules/settings/settings.partial.json",
-    "proposed_diff": diff_qualify,
+    "target": "modules/settings/settings.partial.json",
+    "diff": diff_qualify,
     "fingerprint": "stub",
     "originating_clone": "test-clone",
     "generated_at": "2026-05-18T00:00:00Z",
@@ -221,7 +221,7 @@ records = [
     with_id(id="prop_kind_04", kind="hook_narrow"),
     with_id(
         id="prop_target_05",
-        proposed_diff_target="modules/hooks/hooks/enforce-git-workflow.py",
+        target="modules/hooks/hooks/enforce-git-workflow.py",
     ),
     with_id(id="prop_snooze_06", snoozed_until="2099-01-01T00:00:00Z"),
     with_id(id="prop_blocked_07", auto_apply_blocked=True),
@@ -231,12 +231,11 @@ records = [
     {
         "id": "prop_ruleinsert_08", "signature_id": "prop_ruleinsert_08", "state": "ready",
         "kind": "rule_insert", "target": "modules/settings/settings.partial.json",
-        "proposed_diff_target": "modules/settings/settings.partial.json",
-        "proposed_diff": diff_qualify, "diff": diff_qualify, "fix_surface": "rule",
+        "diff": diff_qualify, "fix_surface": "rule", "generated_at": "2026-05-18T00:00:00Z",
     },
     {
         "id": "prop_skipped_09", "signature_id": "prop_skipped_09", "state": "skipped",
-        "kind": "skip", "fix_surface": "rule", "reason": "environmental",
+        "kind": "skip", "fix_surface": "rule", "reason": "environmental", "generated_at": "2026-05-18T00:00:00Z",
     },
 ]
 
@@ -264,7 +263,7 @@ rm -f "${APPLIED_FILE}"
 
 out=$(
     CCGM_AUTOHEAL_CONFIG="${CONFIG_FILE}" \
-    CCGM_AUTOHEAL_PROPOSALS_DIR="${PROPOSALS_DIR}" \
+    CCGM_AUTOHEAL_LEDGER="${PROPOSALS_FILE}" \
     CCGM_AUTOHEAL_APPLIED_DIR="${APPLIED_DIR}" \
     CCGM_AUTOHEAL_LOGS_DIR="${LOGS_DIR}" \
     CCGM_AUTOHEAL_TODAY="${TODAY}" \
@@ -309,7 +308,7 @@ rm -f "${APPLIED_FILE}"
 
 out=$(
     CCGM_AUTOHEAL_CONFIG="${CONFIG_FILE}" \
-    CCGM_AUTOHEAL_PROPOSALS_DIR="${PROPOSALS_DIR}" \
+    CCGM_AUTOHEAL_LEDGER="${PROPOSALS_FILE}" \
     CCGM_AUTOHEAL_APPLIED_DIR="${APPLIED_DIR}" \
     CCGM_AUTOHEAL_LOGS_DIR="${LOGS_DIR}" \
     CCGM_AUTOHEAL_TODAY="${TODAY}" \
@@ -423,7 +422,7 @@ assert_not_contains "${main_content}" "Bash(git diff)" \
 
 out=$(
     CCGM_AUTOHEAL_CONFIG="${CONFIG_FILE}" \
-    CCGM_AUTOHEAL_PROPOSALS_DIR="${PROPOSALS_DIR}" \
+    CCGM_AUTOHEAL_LEDGER="${PROPOSALS_FILE}" \
     CCGM_AUTOHEAL_APPLIED_DIR="${APPLIED_DIR}" \
     CCGM_AUTOHEAL_LOGS_DIR="${LOGS_DIR}" \
     CCGM_AUTOHEAL_TODAY="${TODAY}" \

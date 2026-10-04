@@ -62,12 +62,12 @@ seed() {
 import datetime as dt, json, os, sys
 ah, sid, ago, state, reason, today = sys.argv[1:7]
 day = dt.date.fromisoformat(today) - dt.timedelta(days=int(ago))
-os.makedirs(ah + "/proposals", exist_ok=True)
+os.makedirs(ah, exist_ok=True)
 row = {"id": sid, "signature_id": sid, "state": state, "kind": "rule_insert",
        "generated_at": day.isoformat() + "T12:00:00+00:00"}
 if reason != "-":
     row["drop_reason"] = reason
-with open(ah + "/proposals/" + day.isoformat() + ".jsonl", "a") as fh:
+with open(ah + "/proposals.jsonl", "a") as fh:
     fh.write(json.dumps(row) + "\n")
 PY
 }
@@ -165,7 +165,7 @@ assert_contains "${ERR}" "anchor_missing" "e2e: the drop is logged with its reas
 ROW="$(python3 -c "
 import json, sys
 r = json.loads(open(sys.argv[1]).readline()); print(r['state'], r['drop_reason'])
-" "${S_AH}/proposals/${TODAY}.jsonl")"
+" "${S_AH}/proposals.jsonl")"
 assert_eq "${ROW}" "dropped anchor_missing" "e2e: the dropped draft is stored"
 rm -f "${S_FAKE}/calls.log"
 run_analyzer
@@ -193,7 +193,7 @@ STREAK="$(python3 -c "
 import json, sys
 rows = [json.loads(l) for l in open(sys.argv[1])]
 print([r['consecutive_unavailable'] for r in rows], 'health_reason' in rows[1], 'health_reason' in rows[2])
-" "${S_AH}/proposals/${TODAY}.jsonl")"
+" "${S_AH}/proposals.jsonl")"
 assert_eq "${STREAK}" "[1, 2, 3] False True" "streak is recorded on each row; health_reason appears at three"
 
 echo ""

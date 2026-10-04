@@ -9,9 +9,9 @@ Input, under the autoheal data dir ($CCGM_AUTOHEAL_DIR, default
   events/{date}.jsonl   tool_failure and user_interrupt rows
   counts/{date}.json    per-tool call counters ({"Bash": 123, ...})
   snoozed.json          {"<signature_id or tool|head|class>": {"snoozed_until": ISO}}
-  proposals.jsonl       optional ledger; rows carrying `signature_id` cover that
-                        signature unless their state is "dropped"
-  proposals/{date}.jsonl  the drafting step's rows (same rule)
+  proposals.jsonl       the proposal ledger (lib/ledger.py); rows carrying
+                        `signature_id` cover that signature unless their state
+                        is "dropped"
 
 A dropped row covers its signature for a cooldown instead (item `excluded`:
 "cooldown", with `cooldown_until`), so a draft that cannot pass validation is
@@ -192,47 +192,37 @@ def _repo(cwd) -> str:
 
 
 def _ledger_rows(data_dir: str):
-    """(row, file date or None) for every row of the ledger and proposals/*.jsonl."""
-    paths = [os.path.join(data_dir, "proposals.jsonl")]
+    """Every row of the proposal ledger that names a signature."""
     try:
-        pdir = os.path.join(data_dir, "proposals")
-        paths += [os.path.join(pdir, f) for f in sorted(os.listdir(pdir)) if f.endswith(".jsonl")]
+        fh = open(os.path.join(data_dir, "proposals.jsonl"), "r", encoding="utf-8")
     except OSError:
-        pass
-    for path in paths:
-        try:
-            day = dt.date.fromisoformat(os.path.basename(path)[: -len(".jsonl")])
-        except ValueError:
-            day = None
-        try:
-            fh = open(path, "r", encoding="utf-8")
-        except OSError:
-            continue
-        with fh:
-            for line in fh:
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(row, dict) and isinstance(row.get("signature_id"), str):
-                    yield row, day
-
+        return
+    with fh:
+        for line in fh:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and isinstance(row.get("signature_id"), str):
+                yield row
 
 def _covered_ids(data_dir: str) -> set:
-    return {row["signature_id"] for row, _ in _ledger_rows(data_dir) if row.get("state") != "dropped"}
+    return {row["signature_id"] for row in _ledger_rows(data_dir) if row.get("state") != "dropped"}
 
 
 def drop_history(data_dir: str) -> dict:
     """{signature_id: [(drop date, drop_reason), ...]} oldest first, dropped rows only."""
     hist: dict = {}
-    for row, day in _ledger_rows(data_dir):
+    for row in _ledger_rows(data_dir):
         if row.get("state") != "dropped":
             continue
-        when = day
-        try:
-            when = dt.datetime.fromisoformat(str(row.get("generated_at"))).date()
-        except ValueError:
-            pass
+        when = None
+        for key in ("generated_at", "source_day"):
+            try:
+                when = dt.datetime.fromisoformat(str(row.get(key))).date()
+                break
+            except ValueError:
+                continue
         if when is None:
             continue
         hist.setdefault(row["signature_id"], []).append((when, str(row.get("drop_reason") or "")))

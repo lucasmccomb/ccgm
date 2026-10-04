@@ -138,7 +138,7 @@ def load_scenarios(path: str | None = None) -> list[dict]:
 # Allow-rule extraction.
 #
 # A settings_allow_add proposal adds entries to a permissions.allow array.
-# The proposed_diff is a unified diff against a settings JSON. We pull the
+# The diff is a unified diff against a settings JSON. We pull the
 # string literals added on '+' lines that look like permission rules
 # (e.g. "Bash(git diff:*)"). This is deliberately tolerant: we want every
 # allow-rule the diff introduces, however the analyzer formatted it.
@@ -152,7 +152,7 @@ _ADDED_RULE_RE = re.compile(r'^\+\s*"([^"]+)"\s*,?\s*$')
 def extract_added_rules(proposal: dict) -> list[str]:
     """Return the list of allow-rule strings the proposal would add.
 
-    Reads added ('+') lines from proposed_diff, ignoring the diff header
+    Reads added ('+') lines from diff, ignoring the diff header
     lines (+++ ...). Falls back to an explicit `added_rules` array on the
     proposal if present (lets the analyzer state rules directly without a
     diff parse round-trip).
@@ -161,7 +161,7 @@ def extract_added_rules(proposal: dict) -> list[str]:
     if isinstance(explicit, list) and explicit:
         return [r for r in explicit if isinstance(r, str) and r]
 
-    diff = proposal.get("proposed_diff") or ""
+    diff = proposal.get("diff") or ""
     rules: list[str] = []
     for line in diff.splitlines():
         if line.startswith("+++"):

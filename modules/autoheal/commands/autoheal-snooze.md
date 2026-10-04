@@ -15,10 +15,9 @@ re-occurs as a daily recommendation.
 
 ## What it does
 
-1. Resolve `proposal-id` against today's
-   `~/.claude/autoheal/proposals/{today}.jsonl` (and the previous 7
-   days if not found in today's file) to extract the proposal's
-   `fingerprint`. Snoozes are keyed by fingerprint, not by id, so that
+1. Resolve `proposal-id` against the ledger
+   `~/.claude/autoheal/proposals.jsonl` (the whole file, any age) to
+   extract the proposal's `fingerprint`. Snoozes are keyed by fingerprint, not by id, so that
    the next analyzer run cannot re-issue the same proposal under a new
    id and bypass the snooze.
 2. Compute the expiry timestamp:
@@ -75,8 +74,7 @@ entries (those whose timestamp is in the future) in human-readable form.
 This command is implemented as a small bash transform driven by the
 agent. The agent:
 
-1. Locates the proposal by id by scanning back through 7 days of
-   `~/.claude/autoheal/proposals/*.jsonl`.
+1. Locates the proposal by id in `~/.claude/autoheal/proposals.jsonl`.
 2. Reads its `fingerprint` field.
 3. Computes the expiry timestamp via `date -u` or a small Python
    snippet (Python is portable across BSD and GNU date).

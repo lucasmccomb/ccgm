@@ -122,8 +122,8 @@ write_proposal() {
             breadth_score: 2,
             occurrence_count: 3,
             session_ids: ["s1","s2"],
-            proposed_diff_target: "modules/settings/settings.partial.json",
-            proposed_diff: "+ allow",
+            target: "modules/settings/settings.partial.json",
+            diff: "+ allow",
             fingerprint: ("sha256-" + $id),
             originating_clone: "test",
             generated_at: "2026-05-18T08:00:00Z"
@@ -172,7 +172,7 @@ done
 
 # Shared dirs / today.
 SHARED_DIR="${TMPROOT}/shared"
-mkdir -p "${SHARED_DIR}/proposals" "${SHARED_DIR}/digests" \
+mkdir -p "${SHARED_DIR}/digests" \
          "${SHARED_DIR}/sent" "${SHARED_DIR}/logs"
 TODAY="2026-05-18"
 RECIPIENT="fail-then-ok@example.com"
@@ -184,9 +184,9 @@ EXPECTED_IDEM="ccgm-autoheal-${TODAY}-${REC_HASH}"
 # Seed proposals + render digest once. Both attempts use the same
 # digest body so the test mirrors a real "first attempt failed, second
 # attempt retried" sequence.
-write_proposal "${SHARED_DIR}/proposals/${TODAY}.jsonl" "prop_retry"
+write_proposal "${SHARED_DIR}/proposals.jsonl" "prop_retry"
 
-CCGM_AUTOHEAL_PROPOSALS_DIR="${SHARED_DIR}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${SHARED_DIR}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${SHARED_DIR}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${SHARED_DIR}/sent" \
 CCGM_AUTOHEAL_CONFIG="${SHARED_DIR}/digest-config-missing.json" \
@@ -222,7 +222,7 @@ FAIL_URL="http://127.0.0.1:${FAIL_PORT}/emails"
 curl -sS -X POST "http://127.0.0.1:${FAIL_PORT}/reset" >/dev/null
 
 set +e
-CCGM_AUTOHEAL_PROPOSALS_DIR="${SHARED_DIR}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${SHARED_DIR}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${SHARED_DIR}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${SHARED_DIR}/sent" \
 CCGM_AUTOHEAL_LOGS_DIR="${SHARED_DIR}/logs" \
@@ -281,7 +281,7 @@ OK_URL="http://127.0.0.1:${OK_PORT}/emails"
 curl -sS -X POST "http://127.0.0.1:${OK_PORT}/reset" >/dev/null
 
 set +e
-CCGM_AUTOHEAL_PROPOSALS_DIR="${SHARED_DIR}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${SHARED_DIR}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${SHARED_DIR}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${SHARED_DIR}/sent" \
 CCGM_AUTOHEAL_LOGS_DIR="${SHARED_DIR}/logs" \

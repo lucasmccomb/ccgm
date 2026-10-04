@@ -32,9 +32,9 @@ export TMPDIR="${ROOT}/tmp"
 mkdir -p "${TMPDIR}"
 export CCGM_AUTOHEAL_DIR="${ROOT}/state"
 export CCGM_AUTOHEAL_CONFIG="${ROOT}/config.json"
-export CCGM_AUTOHEAL_PROPOSALS_DIR="${ROOT}/proposals"
+export CCGM_AUTOHEAL_LEDGER="${ROOT}/state/proposals.jsonl"
 export CCGM_AUTOHEAL_APPLIED_DIR="${ROOT}/applied"
-mkdir -p "${CCGM_AUTOHEAL_DIR}" "${CCGM_AUTOHEAL_PROPOSALS_DIR}" "${CCGM_AUTOHEAL_APPLIED_DIR}"
+mkdir -p "${CCGM_AUTOHEAL_DIR}" "${CCGM_AUTOHEAL_APPLIED_DIR}"
 
 REPO="${ROOT}/repo"
 GITC=(git -C "${REPO}" -c core.hooksPath=/dev/null -c user.name=fx -c user.email=fx@example.com)
@@ -101,7 +101,6 @@ def row(target, anchor, lines, **kw):
     diff = dp.unified_diff(target, old, new)
     r = {"id": kw.pop("id", "p1"), "kind": "rule_insert", "state": "ready", "target": target,
          "anchor": anchor, "insert_markdown": "\n".join(lines), "diff": diff,
-         "proposed_diff": diff, "proposed_diff_target": target,
          "generated_at": NOW.isoformat()}
     r.update(kw); return r
 def show(label, res): print(label + "\t" + str(res[0]) + "\t" + res[1])
@@ -142,17 +141,17 @@ assert_contains "${OUT}" "pnc	False	path_not_candidate" "missing rule file is dr
 assert_contains "${OUT}" "pnc2	False	path_not_candidate" "a non-rule file is dropped as path_not_candidate"
 
 # 5. Rule budget: 20 lines per rolling 7 days across ready and applied rows.
-mkdir -p "${CCGM_AUTOHEAL_PROPOSALS_DIR}" "${CCGM_AUTOHEAL_APPLIED_DIR}"
+mkdir -p "${CCGM_AUTOHEAL_APPLIED_DIR}"
 OUT="$(py '
 def lines(n): return ["- budget line %d" % i for i in range(n)]
-def put(name, rows):
-    with open(os.path.join(os.environ["CCGM_AUTOHEAL_PROPOSALS_DIR"], name), "w") as fh:
+def put(rows):
+    with open(os.environ["CCGM_AUTOHEAL_LEDGER"], "w") as fh:
         for r in rows: fh.write(json.dumps(r) + "\n")
 old = (NOW - dt.timedelta(days=10)).isoformat()
 two = (NOW - dt.timedelta(days=2)).isoformat()
 alpha = "modules/alpha/rules/alpha.md"
 # 12 ready lines now, an old ready row (ignored), a 10-day-old row applied 2 days ago (8 lines).
-put("a.jsonl", [row(alpha, "Section A", lines(12), id="r1"),
+put([row(alpha, "Section A", lines(12), id="r1"),
                 row(alpha, "Section A", lines(8), id="old", generated_at=old),
                 row(alpha, "Section A", lines(8), id="app", generated_at=old, state="applied")])
 show("b_exact", ap.validate(row(alpha, "Section A", lines(8), id="new")))
@@ -174,7 +173,7 @@ assert_contains "${OUT}" "b_over25	False	rule_budget" "25 lines inside a week is
 assert_contains "${OUT}" "b_self	True	" "a row does not count against itself"
 assert_contains "${OUT}" "b_scoped	True	" "insertions into a paths-scoped rule file are not budgeted"
 assert_contains "${OUT}" "b_cfg	True	" "rule_budget_lines_per_week overrides the default"
-rm -f "${CCGM_AUTOHEAL_PROPOSALS_DIR}"/*.jsonl "${CCGM_AUTOHEAL_APPLIED_DIR}"/*.jsonl
+rm -f "${CCGM_AUTOHEAL_LEDGER}" "${CCGM_AUTOHEAL_APPLIED_DIR}"/*.jsonl
 
 # 6. Upstream drift. First a context line the diff relies on changes: the heading
 #    survives but the diff no longer applies.
@@ -232,7 +231,7 @@ assert_eq "$(find "${TMPDIR}" -mindepth 1 | wc -l | tr -d ' ')" "0" "no temp dir
 # 11. Drafting: `finish` stores a failing row as dropped with its reason, a clean
 #     one as ready.
 export CCGM_AUTOHEAL_TODAY="2026-10-04"
-DAY_FILE="${CCGM_AUTOHEAL_PROPOSALS_DIR}/${CCGM_AUTOHEAL_TODAY}.jsonl"
+DAY_FILE="${CCGM_AUTOHEAL_LEDGER}"
 py '
 tok = "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
 sig = {"signature_id": "sig000000001", "tool_name": "Bash", "cmd_head": "zsh", "error_class": "zsh_not_found",
@@ -272,8 +271,7 @@ assert_eq "${DIGEST_VISIBLE}" "1" "only the ready row passes the digest's state 
 BRANCHES="$(git -C "${REPO}" branch --list)"
 OUT="$(CCGM_CLONE_ROOT="${REPO}" py '
 tok = "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
-d = os.environ["CCGM_AUTOHEAL_PROPOSALS_DIR"]
-with open(d + "/2026-10-04.jsonl", "a") as fh:
+with open(os.environ["CCGM_AUTOHEAL_LEDGER"], "a") as fh:
     fh.write(json.dumps(row("modules/beta/rules/beta.md", "Section A", ["- " + tok], id="forged")) + "\n")
     fh.write(json.dumps(row("modules/beta/rules/beta.md", "Section A", ["- x"], id="dead", state="dropped")) + "\n")
 for pid in ("forged", "dead"):

@@ -4,11 +4,16 @@
 # Retention sweep (plan.md §1.3, §5 Epic 12).
 #
 # For each autoheal subdirectory that holds date-named records
-# (events/, proposals/, digests/, applied/, sent/):
+# (events/, digests/, applied/, sent/):
 #   - Files older than retention_gzip_days that are NOT yet gzipped →
 #     gzip in place (file.jsonl → file.jsonl.gz).
 #   - Files older than retention_delete_days that ARE gzipped (or that
 #     otherwise pass the deletion age threshold) → delete.
+#
+# The proposal ledger (proposals.jsonl) is a single file, not a dated directory.
+# Retention never deletes a `ready` row (nor snoozed, applied, rejected or
+# skipped rows, which keep their signature covered). It prunes only `dropped`
+# rows older than LEDGER_DROPPED_DAYS, which is past the 90-day cooldown cap.
 #
 # Idempotent: a second run on the same state produces no further changes
 # and emits no errors. Achieved via:
@@ -65,7 +70,7 @@ if [ ! -d "${AUTOHEAL_DIR}" ]; then
 fi
 
 # Directories with date-named records that participate in retention.
-SUBDIRS=(events proposals digests applied sent)
+SUBDIRS=(events digests applied sent)
 
 gzipped=0
 deleted=0
@@ -118,5 +123,10 @@ for sub in "${SUBDIRS[@]}"; do
         -mtime "+${DELETE_DAYS}" 2>/dev/null)
 done
 
+# Phase 3: prune old dropped rows from the proposal ledger.
+LEDGER_DROPPED_DAYS=120
+pruned="$(CCGM_AUTOHEAL_DIR="${AUTOHEAL_DIR}" python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/ledger.py" prune "${LEDGER_DROPPED_DAYS}" 2>/dev/null || echo 0)"
+
+echo "autoheal-retention: ledger_pruned=${pruned:-0}" >&2
 echo "autoheal-retention: gzipped=${gzipped} deleted=${deleted} errors=${errors} (gzip>${GZIP_DAYS}d, delete>${DELETE_DAYS}d)" >&2
 exit 0

@@ -4,12 +4,9 @@
 # The command itself is documented in modules/autoheal/commands/autoheal-apply.md
 # and is implemented in two halves:
 #
-#   - LIST mode: agent-driven read of past-7-days proposals files, skipping
-#     applied + snoozed. There is no executable for list mode; the agent
-#     follows the documented procedure. This test exercises the SAME read
-#     logic the agent should use, so a future implementation in code (e.g.
-#     a small `autoheal-apply-list.py`) can be wired without changing the
-#     contract.
+#   - LIST mode: the agent runs `lib/ledger.py ready`, which prints the ledger
+#     rows waiting for a decision (ready, plus snoozed rows whose snooze
+#     ended), whatever their age. This test runs that command.
 #
 #   - APPLY mode: routes through lib/apply-proposal.py — the gate test
 #     (test-auto-apply-gate.sh) covers that path end-to-end. This test
@@ -101,137 +98,36 @@ assert_contains "${bad_source}" "source must be" \
     "cli: rejects unknown source labels"
 
 # ---------------------------------------------------------------------
-# Test 3: LIST mode logic — read the last N days, skip applied, skip
-# future-snoozed. We do not run a list executable (the command is
-# agent-driven); we exercise the procedure the agent should follow.
+# Test 3: LIST mode reads the whole ledger: a 30-day-old ready row appears;
+# applied, rejected, legacy and still-snoozed rows do not.
 # ---------------------------------------------------------------------
 
-PROPOSALS_DIR="$(mktemp -d -t autoheal_list_proposals.XXXXXX)"
-APPLIED_DIR="$(mktemp -d -t autoheal_list_applied.XXXXXX)"
-trap 'rm -rf "${PROPOSALS_DIR}" "${APPLIED_DIR}"' EXIT
+LEDGER_DIR="$(mktemp -d -t autoheal_list_ledger.XXXXXX)"
+trap 'rm -rf "${LEDGER_DIR}"' EXIT
+LEDGER_FILE="${LEDGER_DIR}/proposals.jsonl"
 
-TODAY="2026-05-18"
-YDAY="2026-05-17"
-
-# Today: 3 proposals (1 normal, 1 future-snoozed, 1 already-applied).
-cat > "${PROPOSALS_DIR}/${TODAY}.jsonl" <<EOF
-{"id":"prop_today_a","kind":"settings_allow_add","title":"add A","confidence":9,"breadth_score":1,"occurrence_count":2,"session_ids":["s1"],"proposed_diff_target":"modules/settings/x","proposed_diff":"","fingerprint":"fa","originating_clone":"c","generated_at":"${TODAY}T00:00:00Z"}
-{"id":"prop_today_b","kind":"settings_allow_add","title":"add B","confidence":9,"breadth_score":1,"occurrence_count":2,"session_ids":["s1"],"proposed_diff_target":"modules/settings/x","proposed_diff":"","fingerprint":"fb","originating_clone":"c","generated_at":"${TODAY}T00:00:00Z","snoozed_until":"2099-01-01T00:00:00Z"}
-{"id":"prop_today_c","kind":"settings_allow_add","title":"add C","confidence":9,"breadth_score":1,"occurrence_count":2,"session_ids":["s1"],"proposed_diff_target":"modules/settings/x","proposed_diff":"","fingerprint":"fc","originating_clone":"c","generated_at":"${TODAY}T00:00:00Z"}
-EOF
-
-# Yesterday: 1 proposal (still pending).
-cat > "${PROPOSALS_DIR}/${YDAY}.jsonl" <<EOF
-{"id":"prop_yday_a","kind":"hook_narrow","title":"narrow X","confidence":7,"breadth_score":3,"occurrence_count":2,"session_ids":["s1"],"proposed_diff_target":"modules/hooks/x","proposed_diff":"","fingerprint":"fy","originating_clone":"c","generated_at":"${YDAY}T00:00:00Z"}
-EOF
-
-# Mark prop_today_c as already applied.
-cat > "${APPLIED_DIR}/${TODAY}.jsonl" <<EOF
-{"id":"app_prop_today_c","ts":"${TODAY}T01:00:00Z","proposal_id":"prop_today_c","method":"permission_fix","branch":"autoheal/prop_today_c","commit_sha":"abc","tests_passed":true,"rolled_back":false}
-EOF
-
-# The agent's list procedure:
-#   1. Walk proposals_dir for the last 8 days.
-#   2. Skip any whose snoozed_until is in the future (vs TODAY).
-#   3. Skip any whose id is present in applied_dir/*.jsonl.
-#   4. Emit a sorted table.
-list_output=$(
-    CCGM_AUTOHEAL_PROPOSALS_DIR="${PROPOSALS_DIR}" \
-    CCGM_AUTOHEAL_APPLIED_DIR="${APPLIED_DIR}" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    python3 - <<'PY'
-import datetime as dt
-import glob
-import json
-import os
-
-prop_dir = os.environ["CCGM_AUTOHEAL_PROPOSALS_DIR"]
-appl_dir = os.environ["CCGM_AUTOHEAL_APPLIED_DIR"]
-today_iso = os.environ["CCGM_AUTOHEAL_TODAY"]
-today = dt.date.fromisoformat(today_iso)
-
-# Applied id set.
-applied = set()
-for path in glob.glob(os.path.join(appl_dir, "*.jsonl")):
-    with open(path) as fh:
-        for line in fh:
-            try:
-                rec = json.loads(line)
-            except (json.JSONDecodeError, ValueError):
-                continue
-            pid = rec.get("proposal_id") or rec.get("id")
-            if pid:
-                applied.add(pid)
-
-now_iso = today_iso + "T23:59:59Z"
-
-pending = []
-for offset in range(0, 8):
-    day = (today - dt.timedelta(days=offset)).isoformat()
-    path = os.path.join(prop_dir, f"{day}.jsonl")
-    if not os.path.isfile(path):
-        continue
-    with open(path) as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except (json.JSONDecodeError, ValueError):
-                continue
-            pid = rec.get("id")
-            if not pid or pid in applied:
-                continue
-            snz = rec.get("snoozed_until")
-            if snz and snz > now_iso:
-                continue
-            pending.append(rec)
-
-pending.sort(
-    key=lambda r: (
-        -int(r.get("confidence") or 0),
-        int(r.get("breadth_score") or 99),
-        r.get("generated_at") or "",
-    )
-)
-
-for rec in pending:
-    print(
-        f"{rec['id']}\t{rec['kind']}\t{rec.get('confidence', '-')}/10\t"
-        f"{rec.get('breadth_score', '-')}\t{rec.get('title', '')}"
-    )
-
-print(f"--PENDING={len(pending)}")
+python3 - "${LEDGER_FILE}" <<'PY'
+import datetime as dt, json, sys
+def ago(n): return (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=n)).isoformat()
+base = {"kind": "rule_insert", "confidence": 9, "breadth_score": 1, "occurrence_count": 2}
+rows = [
+    {**base, "id": "prop_new", "state": "ready", "title": "add A", "generated_at": ago(0)},
+    {**base, "id": "prop_old", "state": "ready", "title": "add B", "generated_at": ago(30)},
+    {**base, "id": "prop_snoozed", "state": "snoozed", "snoozed_until": "2099-01-01T00:00:00Z", "generated_at": ago(1)},
+    {**base, "id": "prop_wake", "state": "snoozed", "snoozed_until": "2000-01-01T00:00:00Z", "generated_at": ago(40)},
+    {**base, "id": "prop_applied", "state": "applied", "generated_at": ago(2)},
+    {**base, "id": "prop_rejected", "state": "rejected", "generated_at": ago(2)},
+    {**base, "id": "prop_legacy", "state": "legacy", "generated_at": ago(60)},
+    {**base, "id": "prop_dropped", "state": "dropped", "generated_at": ago(2)},
+]
+open(sys.argv[1], "w").write("".join(json.dumps(r) + "\n" for r in rows))
 PY
-)
 
-assert_contains "${list_output}" "prop_today_a" \
-    "list: pending today proposal appears"
-assert_contains "${list_output}" "prop_yday_a"  \
-    "list: pending yesterday proposal appears"
-# prop_today_b is snoozed — must be skipped.
-case "${list_output}" in
-    *prop_today_b*)
-        FAIL=$((FAIL + 1))
-        echo "FAIL: list: snoozed proposal must be skipped"
-        ;;
-    *)
-        PASS=$((PASS + 1))
-        ;;
-esac
-# prop_today_c is already applied — must be skipped.
-case "${list_output}" in
-    *prop_today_c*)
-        FAIL=$((FAIL + 1))
-        echo "FAIL: list: already-applied proposal must be skipped"
-        ;;
-    *)
-        PASS=$((PASS + 1))
-        ;;
-esac
-assert_contains "${list_output}" "--PENDING=2" \
-    "list: pending count = 2"
+list_output="$(CCGM_AUTOHEAL_LEDGER="${LEDGER_FILE}" python3 "${MODULE_ROOT}/lib/ledger.py" ready | python3 -c '
+import json, sys
+print(" ".join(sorted(json.loads(l)["id"] for l in sys.stdin)))')"
+assert_eq "${list_output}" "prop_new prop_old prop_wake" \
+    "list: ready rows of any age and expired snoozes; nothing applied, rejected, legacy, dropped or still snoozed"
 
 echo ""
 echo "test-autoheal-apply-command.sh: ${PASS} passed, ${FAIL} failed"
