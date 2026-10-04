@@ -116,6 +116,32 @@ analyzer below:
 operator opts in on their own machine via `memory-setup.sh`, never a hand
 JSON edit.
 
+### Rollout: off, shadow, active
+
+`optimistic_integration.enabled` takes `"off"`, `"shadow"` or `"active"`.
+Configs written before shadow mode hold a boolean; `lib/rollout_mode.py`
+reads `true` as `active` and `false` as `off` and never rewrites the file.
+Every reader of the flag goes through its `resolve_mode`.
+
+- **shadow** runs the nightly decision pass (posture, floors, caps, anomaly
+  check, breaker read) and appends one record per decision to
+  `~/.claude/dreaming/state/shadow-optimistic.jsonl`:
+  `{ts, day, batch_id, proposal_id, kind, project, would_integrate, reason, posture}`.
+  It writes nothing to the learnings store, the apply-audit, the proposals
+  or the breaker state, makes no commit, and skips the paid eval refresh.
+  `memory-setup.sh` offers shadow first.
+- **Agreement.** `/dream-scorecard` compares each would-integrate decision
+  with your `/dream-apply` choice (the proposal's `accepted` or `rejected`
+  status): would-integrate and accepted, or would-skip and rejected, is
+  agreed; would-integrate and rejected is a false positive; would-skip and
+  accepted is a false negative; no decision yet is pending.
+- **Promotion bar.** Move to `active` only when the scorecard shows at least
+  20 decided (non-pending) decisions, at 90% agreement or better, with zero
+  false positives on evictions (`learning_contradict`, `learning_deprecate`).
+  The numbers are `PROMOTION_MIN_DECIDED`, `PROMOTION_MIN_AGREEMENT` and
+  `PROMOTION_MAX_GUARDED_FALSE_POSITIVES` in `lib/rollout_mode.py`; the
+  scorecard computes the verdict from them.
+
 ## What's implemented so far (Epic 3)
 
 The **nightly map->reduce analyzer**, on top of Epic 2's miner:

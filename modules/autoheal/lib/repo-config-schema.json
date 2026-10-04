@@ -55,12 +55,12 @@
       "description": "Whitelist of proposal kinds to retain for this repo. Empty array means 'no proposals from this repo'. Missing field means 'all kinds permitted'. Enum mirrors proposal-schema.json `kind`."
     },
     "realtime_alerts_enabled": {
-      "type": "boolean",
-      "description": "Per-repo override of the global realtime_alerts_enabled flag."
+      "enum": ["off", "shadow", "active", true, false],
+      "description": "Per-repo override of the global realtime_alerts_enabled flag. A boolean reads as active (true) or off (false)."
     },
     "auto_apply_enabled": {
-      "type": "boolean",
-      "description": "Per-repo override of the global auto_apply_enabled flag."
+      "enum": ["off", "shadow", "active", true, false],
+      "description": "Per-repo override of the global auto_apply_enabled flag. A boolean reads as active (true) or off (false)."
     }
   }
 }

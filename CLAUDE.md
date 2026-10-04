@@ -122,12 +122,12 @@ See `plan.md §9.1` for the full per-wave bring-up runbook.
 
 ### Config flags (`~/.claude/autoheal/config.json`)
 
-All four are **default OFF**. Autoheal stays observation-only until you opt in.
+All four are **default OFF**. The first two take `off|shadow|active` (a persisted boolean reads as active/off; shadow logs the decision and acts on nothing). Autoheal stays observation-only until you opt in.
 
 | Key | Default | What it gates |
 |-----|---------|---------------|
-| `realtime_alerts_enabled` | `false` | Mid-session `<autoheal-security-alert>` blocks on high-confidence patterns (`ghp_*` in commits, `rm -rf /`, force-push to main) |
-| `auto_apply_enabled` | `false` | Confidence-gated auto-apply (confidence ≥9, breadth ≤1, `settings_allow_add` only). Creates feature branch; never pushes |
+| `realtime_alerts_enabled` | `off` (`off\|shadow\|active`) | Mid-session `<autoheal-security-alert>` blocks on high-confidence patterns (`ghp_*` in commits, `rm -rf /`, force-push to main) |
+| `auto_apply_enabled` | `off` (`off\|shadow\|active`) | Confidence-gated auto-apply (confidence ≥9, breadth ≤1, `settings_allow_add` only). Creates feature branch; never pushes |
 | `email_enabled` | `false` | Resend-backed email digest (requires `digest_email` + `RESEND_API_KEY`) |
 | `webhook_url` | `null` | When set, daily run POSTs proposals/events/digests to `${webhook_url}/v1/ingest`. **Future-integration point for `dev.lem.work`** — receiver lives outside this repo. `webhook_token` (32-char Bearer) is generated at install time |
 
@@ -167,7 +167,7 @@ bash modules/self-improving/bin/memory-setup.sh       # activation prompts: read
 
 | Key | Default | What it gates |
 |-----|---------|---------------|
-| `optimistic_integration.enabled` | `false` | Opt-in auto-integration engine. A legacy `auto_apply_counters: true` config is migrated automatically (in-memory, on read) to `optimistic_integration.enabled: true` with the same conservative defaults |
+| `optimistic_integration.enabled` | `off` (`off\|shadow\|active`) | Opt-in auto-integration engine; shadow logs would-integrate and writes nothing (promote at 20+ decided decisions, 90%+ agreement, zero eviction false positives, per `/dream-scorecard`). A legacy `auto_apply_counters: true` config is migrated automatically (in-memory, on read) to `optimistic_integration.enabled: true` with the same conservative defaults |
 | `optimistic_integration.dwell_hours` | `24` | Hours a written `add`/`supersede`/`contradict`/`deprecate` row is excluded from `search()`/injection before going live |
 | `optimistic_integration.max_add_supersede_per_run` | `10` | Per-slug, per-night cap on `add` + `supersede` |
 | `optimistic_integration.max_eviction_absolute` / `max_eviction_fraction_per_run` | `3` / `0.20` | Per-slug, per-night cap on `contradict` + `deprecate` — the smaller of the two dominates |

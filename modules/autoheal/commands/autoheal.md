@@ -39,7 +39,7 @@ This command is a thin Claude reader, not a shell script. The agent:
 |---|---|
 | `/autoheal` | This overview. |
 | `/autoheal-digest [date]` | Render today's or a specific date's digest. |
-| `/autoheal-toggle [pause\|resume\|status\|realtime\|autoapply\|webhook] [on\|off\|status\|url <URL>]` | Flip config flags. |
+| `/autoheal-toggle [pause\|resume\|status\|realtime\|autoapply\|webhook] [on\|off\|shadow\|status\|url <URL>]` | Flip config flags. |
 | `/autoheal-snooze <id> [days]` | Snooze a proposal for N days (default 30). |
 | `/autoheal-apply [id\|list]` | Apply a proposal via the formal apply path (Epic 11). |
 | `/permission-fix [event-id\|latest]` | In-session root-cause sub-agent (Epic 4). |
@@ -48,8 +48,8 @@ This command is a thin Claude reader, not a shell script. The agent:
 ## Config flags
 
 See the autoheal rule (`~/.claude/skills/autoheal-reference/SKILL.md`) for the full config
-schema. Defaults: `realtime_alerts_enabled: false`, `auto_apply_enabled:
-false`, `email_enabled: false`, `digest_enabled: true`, `webhook_url:
+schema. Defaults: `realtime_alerts_enabled: "off"`, `auto_apply_enabled:
+"off"` (each takes `off|shadow|active`), `email_enabled: false`, `digest_enabled: true`, `webhook_url:
 null`.
 
 ## When NOT to invoke

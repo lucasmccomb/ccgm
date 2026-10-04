@@ -11,8 +11,8 @@ autoheal feature flags.
 /autoheal-toggle pause                              # paused: true
 /autoheal-toggle resume                             # paused: false
 
-/autoheal-toggle realtime on|off|status             # realtime_alerts_enabled
-/autoheal-toggle autoapply on|off|status            # auto_apply_enabled
+/autoheal-toggle realtime on|off|shadow|status      # realtime_alerts_enabled
+/autoheal-toggle autoapply on|off|shadow|status     # auto_apply_enabled
 /autoheal-toggle email on|off|status                # email_enabled
 /autoheal-toggle digest on|off|status               # digest_enabled
 
@@ -30,8 +30,17 @@ For every subcommand:
    - `pause` / `resume` set `paused: true|false`. When `paused: true`,
      the daily wrapper exits early before any sub-step (the bash script
      respects this flag in its preflight).
-   - `realtime on|off` flips `realtime_alerts_enabled` (Epic 10).
-   - `autoapply on|off` flips `auto_apply_enabled` (Epic 11).
+   - `realtime on|off|shadow` sets `realtime_alerts_enabled` (Epic 10) to
+     `active`, `off` or `shadow`. `active` is also accepted.
+   - `autoapply on|off|shadow` sets `auto_apply_enabled` (Epic 11) the same
+     way. Shadow computes and logs the decision and takes no action; see the
+     README's "Rollout: off, shadow, active" for the promotion bar.
+
+   These two run through `lib/autoheal_mode.py`, which validates the value,
+   keeps every other key, writes atomically, and prints the confirmation:
+   `python3 ~/.claude/lib/autoheal_mode.py set ~/.claude/autoheal/config.json autoapply shadow`
+   (`status` prints `{key} = {mode}`; a persisted boolean reads as active/off).
+   Do not hand-edit these two keys with `jq`.
    - `email on|off` flips `email_enabled` (Epic 7 sender gate).
    - `digest on|off` flips `digest_enabled` (Epic 7 renderer gate).
    - `webhook on|off` flips `webhook_enabled` (Epic 12 publisher gate).
@@ -48,8 +57,8 @@ For every subcommand:
 |---|---|---|
 | `pause` | `paused` | `false` |
 | `resume` | `paused` | (sets to `false`) |
-| `realtime` | `realtime_alerts_enabled` | `false` |
-| `autoapply` | `auto_apply_enabled` | `false` |
+| `realtime` | `realtime_alerts_enabled` | `off` |
+| `autoapply` | `auto_apply_enabled` | `off` |
 | `email` | `email_enabled` | `false` |
 | `digest` | `digest_enabled` | `true` |
 | `webhook` (`on`/`off`) | `webhook_enabled` | `false` |
@@ -69,6 +78,9 @@ value without changing anything.
 
 # Turn on real-time security alerts
 /autoheal-toggle realtime on
+
+# Log what auto-apply would do, without doing it
+/autoheal-toggle autoapply shadow
 
 # Check current auto-apply state
 /autoheal-toggle autoapply status

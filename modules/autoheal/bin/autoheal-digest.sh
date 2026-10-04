@@ -194,7 +194,15 @@ done
 #   - markdown rendering
 # Bash + jq is too cumbersome for templated multi-line markdown.
 
+# Shadow-mode agreement stats (#1087): empty unless a shadow log exists.
+# autoheal_mode.py sits in this module's lib/ (installed: ~/.claude/lib).
+SHADOW_REPORT=""
+if [ -f "${SCRIPT_DIR}/../lib/autoheal_mode.py" ]; then
+    SHADOW_REPORT="$(python3 "${SCRIPT_DIR}/../lib/autoheal_mode.py" report 2>/dev/null || true)"
+fi
+
 OUTPUT="$(
+    CCGM_SHADOW_REPORT="${SHADOW_REPORT}" \
     CCGM_PROPOSALS_FILE="${PROPOSALS_FILE}" \
     CCGM_DIGEST_TODAY="${TODAY}" \
     CCGM_BACKFILL_DAYS="${backfill_days}" \
@@ -351,6 +359,11 @@ if backfill_days:
     out.append("")
     for d in backfill_days:
         out.append(f"- `{d}` — see `/autoheal-digest {d}`")
+    out.append("")
+
+shadow_report = os.environ.get("CCGM_SHADOW_REPORT", "").strip()
+if shadow_report:
+    out.append(shadow_report)
     out.append("")
 
 out.append("---")

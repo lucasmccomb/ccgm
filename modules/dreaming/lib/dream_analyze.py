@@ -89,6 +89,7 @@ import transcript_miner as tm  # noqa: E402  (sibling module, same lib/ dir)
 # import (resolved via the sys.path.insert above), so it requires eligibility.py
 # to exist -- E2 depends on merged E1 at its acceptance boundary (adrev3-001).
 import eligibility  # noqa: E402  (sibling module, same lib/ dir; owned by Epic E1)
+import rollout_mode  # noqa: E402  (sibling module, same lib/ dir; off/shadow/active resolver)
 
 # learnings_store lives in a DIFFERENT module's lib/ dir (self-improving).
 # Reuse transcript_miner's own cross-module import helper rather than
@@ -573,6 +574,16 @@ OPTIMISTIC_POSTURE: dict[str, dict[str, Any]] = {
         "per_run_cap": ("max_eviction_absolute", "max_eviction_fraction_per_run"),
     },
 }
+
+
+def integration_mode(cfg: dict[str, Any] | None = None) -> str:
+    """The optimistic-integration rollout mode ("off", "shadow" or "active")
+    for `cfg`, or for the loaded config when `cfg` is None. The one reader of
+    `optimistic_integration.enabled` in Python; see rollout_mode.resolve_mode."""
+    if cfg is None:
+        cfg = load_config()
+    opt = cfg.get("optimistic_integration")
+    return rollout_mode.resolve_mode(opt.get("enabled") if isinstance(opt, dict) else None)
 
 
 def resolve_posture(kind: str, project: str) -> dict[str, Any]:

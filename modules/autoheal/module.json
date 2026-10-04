@@ -160,6 +160,11 @@
       "type": "lib",
       "template": false
     },
+    "lib/autoheal_mode.py": {
+      "target": "lib/autoheal_mode.py",
+      "type": "lib",
+      "template": false
+    },
     "lib/proposal-eval.py": {
       "target": "lib/proposal-eval.py",
       "type": "lib",

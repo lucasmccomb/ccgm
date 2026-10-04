@@ -63,6 +63,11 @@
       "type": "lib",
       "template": false
     },
+    "lib/rollout_mode.py": {
+      "target": "lib/rollout_mode.py",
+      "type": "lib",
+      "template": false
+    },
     "lib/scorecard.py": {
       "target": "lib/scorecard.py",
       "type": "lib",

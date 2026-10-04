@@ -74,6 +74,8 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+import rollout_mode
+
 # Effective-confidence bands for the store-health section. Documented here so
 # the thresholds are one obvious place, not scattered magic numbers. The
 # store's own read path skips entries below its deprecate_threshold (default
@@ -558,6 +560,8 @@ def render(
     # here rather than threaded as a new render() parameter so the .sh
     # wrapper's call site needs no change (plan.md Epic 7).
     optimistic_state_path = apply_audit_path.parent / "optimistic.json"
+    # Same sibling convention for the shadow-mode decision log (#1087).
+    shadow_log_path = apply_audit_path.parent / "shadow-optimistic.jsonl"
 
     start = _to_epoch(window_start)
     end = _to_epoch(window_end)
@@ -570,6 +574,7 @@ def render(
     injection_rows = _load_jsonl_dir(injection_log_dir)
     proposal_rows = _load_jsonl_dir(proposals_dir)
     audit_rows = _load_jsonl(apply_audit_path)
+    shadow_rows = _load_jsonl(shadow_log_path)
     optimistic_state = _load_json_object(optimistic_state_path)
 
     # --- Aggregate ---------------------------------------------------------
@@ -717,6 +722,20 @@ def render(
     else:
         out.append("- currently suspended: no")
     out.append("")
+
+    # --- 4c. Shadow integration (#1087) -------------------------------------
+    # Only when the shadow log exists. Cumulative, not window-scoped: the
+    # promotion bar needs the whole record. The human outcome is the
+    # proposal's current status (accepted / rejected via /dream-apply).
+    if shadow_rows:
+        outcomes = {
+            str(r["id"]): str(r.get("status")) for r in proposal_rows if r.get("id")
+        }
+        shadow_stats = rollout_mode.agreement(shadow_rows, outcomes)
+        out.append(f"## Shadow integration — {shadow_stats['decisions']} decisions logged")
+        out.append("")
+        out.extend(rollout_mode.render_lines(shadow_stats))
+        out.append("")
 
     # --- 5. Store health ---------------------------------------------------
     out.append(f"## Store health — {health['active']} active learnings")

@@ -1955,6 +1955,7 @@ def _process_one_proposal(
     heads: dict[str, dict[str, Any]] | None = None,
     session_cache: dict[str, SessionVerification] | None = None,
     session_citation_counts: dict[str, int] | None = None,
+    shadow: bool = False,
 ) -> dict[str, Any]:
     """Per-proposal posture/floor/cap/anomaly gate, then apply via the SAME
     `apply_proposal()` human accepts use (so the human-race lock and
@@ -1974,13 +1975,16 @@ def _process_one_proposal(
     guard, one layer up.
     """
     proposal_id = row.get("id")
+    # Shadow mode runs this same decision pass but writes no audit record and
+    # never reaches apply_proposal(); the caller logs the returned outcome.
+    audit = (lambda _record: None) if shadow else _write_audit
     try:
         kind = row.get("kind")
         project = row.get("project")
 
         posture = da.resolve_posture(kind, project)
         if posture["posture"] == "gated":
-            _write_audit({
+            audit({
                 "outcome": "skipped_gated", "batch_id": batch_id, "proposal_id": proposal_id,
                 "kind": kind, "project": project,
             })
@@ -2004,7 +2008,7 @@ def _process_one_proposal(
             if session_citation_counts is not None:
                 for sid in ev.cited_session_ids:
                     session_citation_counts[sid] = session_citation_counts.get(sid, 0) + 1
-            _write_audit(_eligibility_audit_record(
+            audit(_eligibility_audit_record(
                 batch_id=batch_id, proposal_id=proposal_id, kind=kind, project=project, row=row, ev=ev,
             ))
             if not ev.decision.eligible:
@@ -2021,7 +2025,7 @@ def _process_one_proposal(
             floor = int(cfg.get(floor_key, 0)) if floor_key else 0
             conf = _confidence_of(row)
             if conf < floor:
-                _write_audit({
+                audit({
                     "outcome": "skipped_floor", "batch_id": batch_id, "proposal_id": proposal_id,
                     "kind": kind, "project": project, "detail": f"confidence {conf} < floor {floor}",
                 })
@@ -2032,14 +2036,14 @@ def _process_one_proposal(
                 sessions = prevalence.get("sessions") if isinstance(prevalence, dict) else None
                 min_sessions = int(cfg.get("add_min_sessions", 2))
                 if not isinstance(sessions, int) or isinstance(sessions, bool) or sessions < min_sessions:
-                    _write_audit({
+                    audit({
                         "outcome": "skipped_prevalence", "batch_id": batch_id, "proposal_id": proposal_id,
                         "kind": kind, "project": project, "detail": f"sessions={sessions!r} < {min_sessions}",
                     })
                     return {"outcome": "skipped_prevalence", "proposal_id": proposal_id}
 
         if kind == "learning_supersede" and row.get("compaction_guard_failed"):
-            _write_audit({
+            audit({
                 "outcome": "skipped_compaction_guard", "batch_id": batch_id, "proposal_id": proposal_id,
                 "kind": kind, "project": project,
             })
@@ -2049,7 +2053,7 @@ def _process_one_proposal(
         is_eviction = isinstance(per_run_cap, tuple)
         if is_eviction:
             if slug in anomaly_slugs:
-                _write_audit({
+                audit({
                     "outcome": "skipped_anomaly", "batch_id": batch_id, "proposal_id": proposal_id,
                     "kind": kind, "project": project,
                 })
@@ -2057,7 +2061,7 @@ def _process_one_proposal(
             abs_key, frac_key = per_run_cap
             cap = min(float(cfg.get(abs_key, 0)), float(cfg.get(frac_key, 0)) * live_count)
             if eviction_counts[slug] >= cap:
-                _write_audit({
+                audit({
                     "outcome": "skipped_over_cap", "batch_id": batch_id, "proposal_id": proposal_id,
                     "kind": kind, "project": project, "detail": f"eviction cap {cap} reached for {slug!r}",
                 })
@@ -2065,13 +2069,25 @@ def _process_one_proposal(
         elif isinstance(per_run_cap, str):
             cap = float(cfg.get(per_run_cap, 0))
             if add_supersede_counts[slug] >= cap:
-                _write_audit({
+                audit({
                     "outcome": "skipped_over_cap", "batch_id": batch_id, "proposal_id": proposal_id,
                     "kind": kind, "project": project, "detail": f"add/supersede cap {cap} reached for {slug!r}",
                 })
                 return {"outcome": "skipped_over_cap", "proposal_id": proposal_id}
 
         dwell_hours = float(cfg.get("dwell_hours", 24)) if posture.get("needs_dwell") else None
+
+        if shadow:
+            # Count against the caps exactly as a real apply would, so later
+            # rows in the batch see the same budget they would see live.
+            if is_eviction:
+                eviction_counts[slug] += 1
+            elif isinstance(per_run_cap, str):
+                add_supersede_counts[slug] += 1
+            return {
+                "outcome": "would_integrate", "proposal_id": proposal_id,
+                "would_integrate": True, "posture": posture["posture"],
+            }
 
         result = apply_proposal(
             proposal_id, method="auto_apply", reviewed_by="optimistic-integrate",
@@ -2090,7 +2106,7 @@ def _process_one_proposal(
     except Exception:  # noqa: BLE001 -- deliberate: a malformed row's gating logic must never
         # abort the rest of the batch (mirrors apply_proposal()'s own handler-crash guard).
         detail = traceback.format_exc()
-        _write_audit({
+        audit({
             "outcome": "internal_error", "batch_id": batch_id, "proposal_id": proposal_id, "detail": detail,
         })
         return {"outcome": "internal_error", "proposal_id": proposal_id, "detail": detail}
@@ -2156,7 +2172,33 @@ def _sigterm_soft_stop():
                 pass
 
 
-def run_optimistic_integrate(day: str) -> dict[str, Any]:
+def shadow_log_path() -> Path:
+    return state_dir() / "shadow-optimistic.jsonl"
+
+
+def _log_shadow_decisions(
+    day: str, batch_id: str, by_slug: dict[str, list[dict[str, Any]]], results: list[dict[str, Any]],
+) -> None:
+    """Append one shadow record per engine decision (see run_optimistic_integrate).
+    `skipped_gated` rows are not engine decisions and are left out."""
+    rows_by_id = {r.get("id"): r for rows in by_slug.values() for r in rows}
+    ts = _utc_now_iso()
+    for res in results:
+        outcome = res.get("outcome")
+        if outcome == "skipped_gated":
+            continue
+        pid = res.get("proposal_id")
+        row = rows_by_id.get(pid) or {}
+        record = {
+            "ts": ts, "day": day, "batch_id": batch_id, "proposal_id": pid,
+            "kind": row.get("kind"), "project": row.get("project"),
+            "would_integrate": bool(res.get("would_integrate")),
+            "reason": outcome, "posture": res.get("posture"),
+        }
+        learnings_store.file_locked_append(str(shadow_log_path()), json.dumps(record, sort_keys=True))
+
+
+def run_optimistic_integrate(day: str, *, shadow: bool = False) -> dict[str, Any]:
     """The optimistic auto-integration engine (plan.md §5 Epic 3).
 
     Lock topology (adrev-opt-011): this function NEVER holds `_apply_lock()`
@@ -2176,6 +2218,13 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
     from an earlier run is never re-evaluated, so a `--force-day` re-run of
     a fully-integrated night applies nothing and adds no commit.
 
+    Shadow mode (`shadow=True`, rollout_mode "shadow"): runs the same decision
+    pass (posture, floors, caps, anomaly check, breaker read) and appends one
+    record per decided proposal to `shadow_log_path()`. It writes nothing to
+    the learnings store, the apply-audit, the proposals or the breaker state,
+    makes no commit, and does not auto-resume a suspended breaker. Proposals
+    in a "gated" posture are never engine decisions and are not logged.
+
     Never raises; a single proposal's failure (or malformation) does not
     abort the batch -- see `_process_one_proposal()`.
     """
@@ -2184,6 +2233,9 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
         "day": day, "batch_id": None, "evaluated": 0, "applied": 0, "skipped": 0,
         "failed": 0, "results": [], "anomalies": [], "circuit_breaker": None,
     }
+    if shadow:
+        summary["would_integrate"] = 0
+    audit = (lambda _record: None) if shadow else _write_audit
     if not path.is_file():
         return summary
 
@@ -2201,7 +2253,8 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
     with _apply_lock():
         state = _read_optimistic_state()
         was_suspended_before = bool(state.get("suspended"))
-        state = _maybe_auto_resume(state, cfg, batch_id)
+        if not shadow:  # auto-resume writes breaker state; shadow only reads it
+            state = _maybe_auto_resume(state, cfg, batch_id)
     if state.get("suspended"):
         summary["circuit_breaker"] = "suspended"
         return summary
@@ -2216,7 +2269,7 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
             # but a malformed/hand-edited row must not crash the whole
             # batch's slug-keyed bookkeeping below): treat like any other
             # proposal this engine declines to touch.
-            _write_audit({
+            audit({
                 "outcome": "skipped_malformed", "batch_id": batch_id, "proposal_id": row.get("id"),
                 "kind": row.get("kind"), "detail": f"invalid project field: {project!r}",
             })
@@ -2247,7 +2300,7 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
             anomaly_slugs.add(slug)
             run_anomaly_timestamps.append(_utc_now_iso())
             summary["anomalies"].append({"slug": slug, "kind": "batch_eviction_concentration"})
-            _write_audit({
+            audit({
                 "outcome": "batch_anomaly_eviction_concentration", "batch_id": batch_id,
                 "project": slug, "detail": f"{len(eviction_rows)} eviction proposal(s) concentrated",
             })
@@ -2258,7 +2311,7 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
     if _learnings_tree_dirty():
         run_anomaly_timestamps.append(_utc_now_iso())
         summary["anomalies"].append({"kind": "dirty_learnings_tree"})
-        _write_audit({
+        audit({
             "outcome": "dirty_learnings_tree", "batch_id": batch_id,
             "detail": "uncommitted learnings-store changes at run start (possible prior timeout kill)",
         })
@@ -2290,9 +2343,12 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
                     eviction_counts=eviction_counts, batch_id=batch_id,
                     heads=heads_by_slug[slug], session_cache=session_cache,
                     session_citation_counts=session_citation_counts,
+                    shadow=shadow,
                 )
                 summary["results"].append(outcome)
-                if outcome.get("applied"):
+                if outcome.get("would_integrate"):
+                    summary["would_integrate"] += 1
+                elif outcome.get("applied"):
                     summary["applied"] += 1
                 elif outcome.get("attempted"):
                     summary["failed"] += 1
@@ -2308,7 +2364,7 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
         run_anomaly_timestamps.append(_utc_now_iso())
         summary["anomalies"].append({"kind": "timeout"})
         summary["timed_out"] = True
-        _write_audit({
+        audit({
             "outcome": "timeout", "batch_id": batch_id,
             "detail": "SIGTERM received mid-batch; committing rows already applied",
         })
@@ -2322,7 +2378,7 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
         if top_count >= _SESSION_CITATION_ANOMALY_MIN:
             run_anomaly_timestamps.append(_utc_now_iso())
             summary["anomalies"].append({"kind": "session_citation_concentration", "count": top_count})
-            _write_audit({
+            audit({
                 "outcome": "session_citation_concentration", "batch_id": batch_id,
                 "detail": f"session cited {top_count} times in one batch",
             })
@@ -2334,11 +2390,15 @@ def run_optimistic_integrate(day: str) -> dict[str, Any]:
         if _rolling_rate_exceeded(slug, cfg):
             run_anomaly_timestamps.append(_utc_now_iso())
             summary["anomalies"].append({"slug": slug, "kind": "rolling_add_rate_exceeded"})
-            _write_audit({"outcome": "rolling_add_rate_exceeded", "batch_id": batch_id, "project": slug})
+            audit({"outcome": "rolling_add_rate_exceeded", "batch_id": batch_id, "project": slug})
 
     # Breaker-state write: ONE non-nested critical section (adrev-opt-011),
     # acquired AFTER every per-proposal apply_proposal() call above has
     # already released the lock.
+    if shadow:
+        _log_shadow_decisions(day, batch_id, by_slug, summary["results"])
+        return summary
+
     with _apply_lock():
         state = _read_optimistic_state()
         state.setdefault("anomaly_log", [])
@@ -2647,7 +2707,7 @@ def _cmd_optimistic_integrate(args: argparse.Namespace) -> int:
     # again here would either no-op (clean tree) or, worse, fold any
     # unrelated dirty state into a second, unlabeled commit.
     day = args.day or today_iso()
-    summary = run_optimistic_integrate(day)
+    summary = run_optimistic_integrate(day, shadow=args.shadow)
     print(json.dumps(summary, sort_keys=True))
     return 0
 
@@ -2723,6 +2783,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
              "plan.md Epic 3)",
     )
     opt_p.add_argument("--day", help="defaults to today (UTC, or CCGM_DREAMING_TODAY)")
+    opt_p.add_argument(
+        "--shadow", action="store_true",
+        help="decide and log would-integrate to state/shadow-optimistic.jsonl; write nothing else",
+    )
     opt_p.set_defaults(func=_cmd_optimistic_integrate)
 
     resume_p = sub.add_parser(

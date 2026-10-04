@@ -2,10 +2,13 @@
 """Real-time security scanner (Epic 10).
 
 Registered on PostToolUse via settings.partial.json. Reads
-~/.claude/autoheal/config.json -> realtime_alerts_enabled. If the flag is
-false or missing the hook is a strict no-op (sys.exit(0) BEFORE the
-patterns file is even read). Only when the user has explicitly opted in
-does the scanner load the 7 patterns from
+~/.claude/autoheal/config.json -> realtime_alerts_enabled, one of
+off | shadow | active (autoheal_mode.resolve_mode; a persisted boolean
+reads as active/off). If the mode is off or the flag is missing the hook
+is a strict no-op (sys.exit(0) BEFORE the patterns file is even read). In
+shadow it evaluates the patterns and appends a would_alert record to
+~/.claude/autoheal/shadow/realtime.jsonl, then exits 0 with no alert block
+and no event. Only in active does the scanner alert. It loads the 7 patterns from
 modules/autoheal/lib/realtime-security-patterns.json (installed to
 ~/.claude/lib/realtime-security-patterns.json) and scan the Bash command
 for matches.
@@ -51,6 +54,13 @@ import sys
 sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
 import hook_utils  # noqa: E402
 
+# autoheal_mode.py sits in this module's lib/ (installed: ~/.claude/lib, which
+# is already on sys.path; in the repo: ../lib next to this hook).
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib")
+)
+import autoheal_mode  # noqa: E402
+
 
 # Default location of the patterns file once installed. Tests override
 # via CCGM_REALTIME_PATTERNS so they can point at the in-repo source.
@@ -90,22 +100,14 @@ def _now_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat()
 
 
-def _is_enabled() -> bool:
-    """Read realtime_alerts_enabled from ~/.claude/autoheal/config.json.
+def _mode() -> str:
+    """Resolved mode ("off", "shadow" or "active") of realtime_alerts_enabled
+    in ~/.claude/autoheal/config.json.
 
-    Returns True ONLY when the config exists, is valid JSON, and has the
-    key set to True. Any other shape returns False — the scanner is
+    A missing, malformed or unrecognised config is "off" — the scanner is
     OPT-IN and the default posture is OFF.
     """
-    path = _config_path()
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            cfg = json.load(fh)
-    except (OSError, json.JSONDecodeError, ValueError):
-        return False
-    if not isinstance(cfg, dict):
-        return False
-    return cfg.get("realtime_alerts_enabled") is True
+    return autoheal_mode.read_mode(_config_path(), "realtime_alerts_enabled")
 
 
 def _load_patterns() -> list[dict]:
@@ -221,6 +223,22 @@ def _log_alert(data: dict, match: dict, command: str) -> None:
         pass
 
 
+def _log_shadow(data: dict, match: dict) -> None:
+    """Shadow mode: record that active mode would have alerted. Names the
+    pattern, never the command (same rule as the alert block). Errors are
+    swallowed: a shadow log failure must never affect the session."""
+    try:
+        autoheal_mode.log_shadow("realtime", {
+            "session_id": str(data.get("session_id", "")),
+            "pattern": match["name"],
+            "severity": match.get("severity", "high"),
+            "would_alert": True,
+            "cwd": data.get("cwd"),
+        })
+    except Exception:
+        pass
+
+
 def _emit_alert(match: dict) -> None:
     """Write the deny envelope + system reminder, then exit 2.
 
@@ -267,8 +285,9 @@ def _emit_alert(match: dict) -> None:
 
 
 def main() -> None:
-    # 1. Default-OFF gate. NEVER scan when the flag is not explicitly true.
-    if not _is_enabled():
+    # 1. Default-OFF gate. NEVER scan unless the mode is shadow or active.
+    mode = _mode()
+    if mode == autoheal_mode.MODE_OFF:
         sys.exit(0)
 
     # 2. Read hook input. Malformed JSON: exit 0 (never block).
@@ -300,7 +319,12 @@ def main() -> None:
     if match is None:
         sys.exit(0)
 
-    # 6. Log + alert. _emit_alert exits 2.
+    # 6. Shadow: log the would-alert decision and stop. No event, no alert.
+    if mode == autoheal_mode.MODE_SHADOW:
+        _log_shadow(data, match)
+        sys.exit(0)
+
+    # 7. Active: log + alert. _emit_alert exits 2.
     _log_alert(data, match, command)
     _emit_alert(match)
 

@@ -23,6 +23,7 @@
 #   proposed_diff_target  startswith("modules/settings/")
 #   snoozed_until         is null
 #   auto_apply_blocked    is false
+#   fix_surface           is not "check" (needs a demonstration; #1077)
 #
 # Every apply attempt — success OR failure — appends a record to
 # ~/.claude/autoheal/applied/{today}.jsonl. Failures additionally write
@@ -54,6 +55,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 APPLY_LIB="${MODULE_ROOT}/lib/apply-proposal.py"
 EVAL_LIB="${MODULE_ROOT}/lib/proposal-eval.py"
+MODE_LIB="${MODULE_ROOT}/lib/autoheal_mode.py"
 
 CONFIG_FILE="${CCGM_AUTOHEAL_CONFIG:-${HOME}/.claude/autoheal/config.json}"
 PROPOSALS_DIR="${CCGM_AUTOHEAL_PROPOSALS_DIR:-${HOME}/.claude/autoheal/proposals}"
@@ -111,38 +113,22 @@ if [ ! -f "${APPLY_LIB}" ]; then
 fi
 
 # ---------------------------------------------------------------------
-# Config gate: auto_apply_enabled must be true.
+# Config gate: auto_apply_enabled is off | shadow | active.
+#
+# lib/autoheal_mode.py is the one resolver (a persisted `true` reads as
+# active, `false` as off). Unreadable config, or a missing resolver, is off.
+#   off     skip the run.
+#   shadow  run the same eligibility logic, log would_apply to
+#           shadow/auto-apply.jsonl, apply nothing (no branch, no audit record).
+#   active  apply qualifying proposals.
 # ---------------------------------------------------------------------
 
-auto_apply_enabled() {
-    # Default false. We read with python so we do not depend on jq in the
-    # daily-wrapper environment (jq IS present for digest, but the gate
-    # script is the safer place to stay python-only).
-    if [ ! -f "${CONFIG_FILE}" ]; then
-        echo "false"
-        return 0
-    fi
-    python3 - "${CONFIG_FILE}" <<'PY'
-import json
-import sys
-
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as fh:
-        cfg = json.load(fh)
-except (OSError, json.JSONDecodeError):
-    print("false")
-    sys.exit(0)
-
-if not isinstance(cfg, dict):
-    print("false")
-    sys.exit(0)
-
-print("true" if bool(cfg.get("auto_apply_enabled", False)) else "false")
-PY
-}
-
-ENABLED="$(auto_apply_enabled)"
-if [ "${ENABLED}" != "true" ]; then
+if [ -f "${MODE_LIB}" ]; then
+    MODE="$(python3 "${MODE_LIB}" mode "${CONFIG_FILE}" auto_apply_enabled 2>/dev/null || echo off)"
+else
+    MODE="off"
+fi
+if [ "${MODE}" != "active" ] && [ "${MODE}" != "shadow" ]; then
     log "auto_apply_enabled=false (default off); skipping ${TODAY}"
     exit 0
 fi
@@ -201,6 +187,11 @@ def gate(p):
         return False, "snoozed"
     if p.get("auto_apply_blocked"):
         return False, "auto_apply_blocked"
+    # #1077: a `check` proposal needs a failing demonstration, and auto-apply
+    # supplies none. A missing fix_surface (proposal written before the field
+    # existed) reads as `rule`.
+    if p.get("fix_surface") == "check":
+        return False, "check-surface proposal needs a demonstration; auto-apply supplies none"
     return True, ""
 
 
@@ -298,6 +289,7 @@ PY
     fi
 
     local eval_out eval_rc reason
+    EVAL_REASON=""
     eval_out="$(printf '%s' "${record}" | python3 "${EVAL_LIB}" - 2>&1)"
     eval_rc=$?
 
@@ -310,6 +302,7 @@ except Exception:
     pass
 " 2>/dev/null)"
 
+    EVAL_REASON="${reason}"
     if [ "${eval_rc}" -eq 0 ]; then
         log "eval ${pid}: PASS (${reason:-passed})"
         return 0
@@ -326,7 +319,13 @@ GATE_OUTPUT="$(evaluate_gate 2>&1)"
 # Separate the per-row tab-delimited rows from the trailing stderr counter.
 ROWS="$(printf '%s\n' "${GATE_OUTPUT}" | grep -E '^(QUALIFY|SKIP|BAD_ROW)\t' || true)"
 
+shadow_decision() {
+    # Args: proposal id, true|false (would apply), reason. Never fails the run.
+    python3 "${MODE_LIB}" shadow-log auto-apply "${PROPOSALS_FILE}" "$1" "$2" "$3" 2>>"${LOG_FILE}" || true
+}
+
 EVALUATED=0
+SHADOW_WOULD_APPLY=0
 QUALIFIED=0
 APPLIED=0
 FAILED=0
@@ -342,6 +341,9 @@ while IFS= read -r row; do
     case "${status}" in
         SKIP|BAD_ROW)
             log "skip ${pid}: ${reason}"
+            if [ "${MODE}" = "shadow" ] && [ "${pid}" != "-" ]; then
+                shadow_decision "${pid}" false "${reason}"
+            fi
             ;;
         QUALIFY)
             QUALIFIED=$((QUALIFIED + 1))
@@ -355,6 +357,18 @@ while IFS= read -r row; do
             if [ "${eval_rc}" -ne 0 ]; then
                 EVAL_BLOCKED=$((EVAL_BLOCKED + 1))
                 log "block ${pid}: eval gate rejected (rc=${eval_rc}); not applying"
+                if [ "${MODE}" = "shadow" ]; then
+                    shadow_decision "${pid}" false "eval gate rejected (rc=${eval_rc}): ${EVAL_REASON:-no reason}"
+                fi
+                continue
+            fi
+
+            # Shadow stops here: the proposal cleared every gate, so active
+            # mode would apply it. Log that and touch nothing.
+            if [ "${MODE}" = "shadow" ]; then
+                SHADOW_WOULD_APPLY=$((SHADOW_WOULD_APPLY + 1))
+                log "shadow ${pid}: would apply (eval passed); nothing applied"
+                shadow_decision "${pid}" true "passed every gate; eval: ${EVAL_REASON:-passed}"
                 continue
             fi
 
@@ -424,7 +438,12 @@ done <<< "${ROWS}"
 # is visible without parsing the per-day file.
 # ---------------------------------------------------------------------
 
-printf 'autoheal-auto-apply: evaluated=%d qualified=%d eval_blocked=%d applied=%d failed=%d (today=%s)\n' \
-    "${EVALUATED}" "${QUALIFIED}" "${EVAL_BLOCKED}" "${APPLIED}" "${FAILED}" "${TODAY}" >&2
+if [ "${MODE}" = "shadow" ]; then
+    printf 'autoheal-auto-apply: shadow evaluated=%d qualified=%d eval_blocked=%d would_apply=%d applied=0 (today=%s)\n' \
+        "${EVALUATED}" "${QUALIFIED}" "${EVAL_BLOCKED}" "${SHADOW_WOULD_APPLY}" "${TODAY}" >&2
+else
+    printf 'autoheal-auto-apply: evaluated=%d qualified=%d eval_blocked=%d applied=%d failed=%d (today=%s)\n' \
+        "${EVALUATED}" "${QUALIFIED}" "${EVAL_BLOCKED}" "${APPLIED}" "${FAILED}" "${TODAY}" >&2
+fi
 
 exit 0
