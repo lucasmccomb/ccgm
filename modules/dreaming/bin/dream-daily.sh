@@ -4,9 +4,10 @@
 #
 # Full nightly chain (plan.md §5 Epic 3/6):
 #   1. bin/dream-analyze.sh       (Epic 3) — mine + map/reduce -> proposals
-#   2. eval-refresh                — opt-in, weekly, cost-capped live eval
-#      refresh so dream-eval.sh --gate's 14-day freshness bound stays met
-#      without manual intervention (fix (b) for adrev-opt-001). Runs BEFORE
+#   2. eval-refresh                — OFF by default (`eval_refresh_enabled`
+#      must be true; #1098 item 0.1). When opted in: weekly, live eval
+#      refresh under a hard total-cost stop so dream-eval.sh --gate's 14-day
+#      freshness bound stays met (fix (b) for adrev-opt-001). Runs BEFORE
 #      optimistic-integrate so a freshly-refreshed result is available to
 #      the SAME night's gate check.
 #   3. optimistic-integrate        — opt-in, config- AND eval-gated (see
@@ -150,7 +151,7 @@ run_step() {
 # `true` legacy flag into `optimistic_integration.enabled` is Epic 8's job
 # (memory-setup.sh offers optimistic mode as an explicit, logged opt-in
 # prompt, plan.md §3.5), not an implicit OR-bridge in this gate. Bridging
-# the two would let the new engine -- and its ~$2/night eval-refresh API
+# the two would let the new engine -- and its eval-refresh API
 # spend -- silently activate on a machine that only ever opted into the
 # OLD verify-only auto-apply step, without the operator ever seeing or
 # confirming the migration.
@@ -183,8 +184,9 @@ _optimistic_integration_active() {
 # Step 2: weekly, cost-capped eval refresh (fix (b) for adrev-opt-001).
 #
 # Gated on _optimistic_integration_active() only -- the preconditions that
-# actually decide whether a refresh RUNS (results-file age, API key
-# presence, its own eval_refresh_cost_cap_usd budget) live in
+# actually decide whether a refresh RUNS (eval_refresh_enabled, default
+# false; results-file age, API key presence, its own
+# eval_refresh_cost_cap_usd budget) live in
 # apply_dream_proposal.py's run_eval_refresh(), not here, so this step is
 # a thin, always-safe wrapper: it never blocks the rest of the chain and
 # never itself decides whether to spend money. Placed BEFORE

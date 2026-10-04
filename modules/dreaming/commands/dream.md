@@ -87,6 +87,9 @@ See `modules/dreaming/lib/dream_analyze.py`'s `DEFAULT_CONFIG` for the full
 schema. Defaults: `enabled: true`, `auto_apply_counters: false`,
 `map_model: "claude-sonnet-5"`, `reduce_model: "claude-opus-4-8"`,
 `max_output_tokens: 16000`, `daily_cost_cap_usd: 10.00`,
+`module_budget_usd_30d: 25.00` (rolling 30-day ceiling over all `cost.log`
+spend; the analyzer and the eval refuse to start at or above it),
+`eval_run_cost_cap_usd: 5.00`, `optimistic_integration.eval_refresh_enabled: false`,
 `promotion_min_sessions: 3`, `promotion_min_agents: 2`.
 
 `max_output_tokens` is a backstop, not a tuning knob: raise it if calls

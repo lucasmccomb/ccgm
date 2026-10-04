@@ -93,7 +93,9 @@ analyzer below:
   proposal it applies routes through the same `apply_proposal()` (and the
   same human-race lock) `/dream-apply` already uses.
 - `bin/dream-daily.sh` -- the nightly chain gained an eval-refresh step and
-  an `optimistic-integrate` step, both config- and eval-gated, placed
+  an `optimistic-integrate` step, both config- and eval-gated (eval-refresh
+  also needs `optimistic_integration.eval_refresh_enabled: true`, default
+  `false`, because one full live run cost about $21), placed
   BEFORE the digest step (so tonight's just-integrated batch is reported
   while its dwell window is still entirely ahead of it).
 - `bin/dream-eval.sh` -- extended with poisoning negative-control fixtures
@@ -143,6 +145,22 @@ Every reader of the flag goes through its `resolve_mode`.
   scorecard computes the verdict from them.
 
 ## What's implemented so far (Epic 3)
+
+**Cost safety.** Every billed call writes a `cost.log` row: analyzer map
+and reduce calls, and for the eval `eval:arm:<model>` (each `claude -p`
+session), `eval:judge:<model>` and `eval:mine:<model>` rows, manual
+`dream-eval.sh` runs included. Two caps apply on top of `daily_cost_cap_usd`:
+
+- `module_budget_usd_30d` (default 25.0) is a rolling 30-day ceiling summed
+  from `cost.log`. `dream_analyze.py` and `memory_eval.py` both refuse to
+  start at or above it.
+- `memory_eval.py` keeps a running total over one run and stops before the
+  call that would cross `--max-total-usd` (default config
+  `eval_run_cost_cap_usd`, 5.0, and never more than what is left of the
+  30-day budget). A preflight estimate (sessions x $0.08, a judge call per
+  session, $0.50 per dreamed task) refuses to start when it exceeds the cap.
+  A stopped run writes `evals/<date>.budget-abort`, restores the results
+  file it found, and leaves `--gate` exactly as it was.
 
 The **nightly map->reduce analyzer**, on top of Epic 2's miner:
 
