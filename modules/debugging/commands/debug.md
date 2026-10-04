@@ -177,7 +177,7 @@ Apply a minimal, targeted fix for the confirmed root cause only.
 1. Remove all `[DEBUG-xxxx]` instrumentation from source files (NOT the test file):
    ```bash
    # Verify what instrumentation remains
-   grep -rF 'DEBUG-xxxx' . --include='*.ts' --include='*.js' --include='*.py' --include='*.rs' --include='*.go' 2>/dev/null
+   grep -rnE '\[DEBUG-[0-9a-f]{4}\]' . --include='*.ts' --include='*.js' --include='*.py' --include='*.rs' --include='*.go' 2>/dev/null
    # Remove manually or revert only the instrumented lines
    ```
 2. Apply the fix:
@@ -208,7 +208,7 @@ Confirm the fix works and introduced no regressions.
 3. If new test failures appeared, the fix introduced a regression - diagnose and resolve before continuing
 4. Confirm no `[DEBUG-xxxx]` logs remain in source files:
    ```bash
-   grep -rF 'DEBUG-xxxx' . --include='*.ts' --include='*.js' --include='*.py' --include='*.rs' --include='*.go' 2>/dev/null && echo "INSTRUMENTATION STILL PRESENT" || echo "Clean"
+   grep -rnE '\[DEBUG-[0-9a-f]{4}\]' . --include='*.ts' --include='*.js' --include='*.py' --include='*.rs' --include='*.go' 2>/dev/null && echo "INSTRUMENTATION STILL PRESENT" || echo "Clean"
    ```
 
 ---

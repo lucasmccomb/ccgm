@@ -77,7 +77,7 @@ Two habits follow from the ladder:
 
 ### Debug Output Hygiene
 
-- Tag every temporary log line with one marker, `[DEBUG-xxxx]`, where `xxxx` is four random hex digits chosen for this session. Before commit, `grep -rn 'DEBUG-xxxx'` finds every line to remove. A bare `[DEBUG]` collides with logging that already exists.
+- Tag every temporary log line with one marker, `[DEBUG-xxxx]`, where `xxxx` is four random hex digits chosen for this session. Before commit, `grep -rnE '\[DEBUG-[0-9a-f]{4}\]' .` finds every line to remove, whatever digits were chosen. A bare `[DEBUG]` collides with logging that already exists.
 - Redact secrets and credentials (tokens, keys, passwords, cookies, authorization headers) as `<REDACTED>` before logs and traces go into a report, issue, PR, or commit.
 
 ## Defense-in-Depth Validation
