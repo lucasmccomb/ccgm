@@ -30,7 +30,7 @@ Evidence is an artifact the machine produced this session. A reasoned argument (
 
 ## One Check Is Not Another
 
-Lint passing does not mean types check; a type check is not a test run; 10 of 12 tests passing means 2 are failing. Check the exit code, scroll the full output, and read warnings even when the overall status is pass. Report honestly: one failure out of a hundred is not "tests pass," a build with warnings mentions the warnings, and a verification step you could not run is stated as not run. Hedge words in a completion claim ("should", "probably", "seems to") mean it is not verified; rewrite it with evidence or downgrade it. A `test.skip`, `.only`, or stub test added in the diff blocks the completion claim.
+Lint passing does not mean types check; a type check is not a test run; 10 of 12 tests passing means 2 are failing. Check the exit code, scroll the full output, and read warnings even when the overall status is pass. Report honestly: one failure out of a hundred is not "tests pass," a build with warnings mentions the warnings, and a verification step you could not run is stated as not run. Hedge words in a completion claim ("should", "probably", "seems to") mean it is not verified; rewrite it with evidence or downgrade it. A `test.skip`, `.only`, or stub test added in the diff blocks the completion claim. To decide whether a failure is new or already existed, run `ccgm-verify-baseline` (`--write-baseline` before work starts) and obey its exit code; do not compare by eye.
 
 ## When to Verify
 
