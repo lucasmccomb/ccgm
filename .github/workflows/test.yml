@@ -99,7 +99,7 @@ jobs:
           d=$(mktemp -d)
           echo '{ "auto_apply_enabled": true }' > "$d/config.json"
           python3 modules/autoheal/lib/autoheal_mode.py mode "$d/config.json" auto_apply_enabled || true
-          bash -x modules/autoheal/tests/test-auto-apply-gate.sh 2>&1 | sed -n 1,400p | grep -n -E "MODE|python3|autoheal_mode|skipping" || true
+          CCGM_AUTOHEAL_CONFIG="$d/config.json" CCGM_AUTOHEAL_PROPOSALS_DIR="$d/p" CCGM_AUTOHEAL_APPLIED_DIR="$d/a" CCGM_AUTOHEAL_LOGS_DIR="$d/l" CCGM_AUTOHEAL_TODAY=2026-05-18 bash -x modules/autoheal/bin/autoheal-auto-apply.sh 2>&1 | head -60 || true
           bash modules/autoheal/tests/run-all.sh
 
       - name: relevance-injection - pytest suites (issue #985)
@@ -281,6 +281,12 @@ jobs:
             bash "$t"
           done
 
+      - name: Install a current bash for the autoheal tests
+        # macOS ships bash 3.2; the autoheal test scripts use bash 4+ syntax.
+        run: |
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
       - name: Autoheal module tests
         # Never ran in CI before. The tests stub launchctl and the API; none
         # touches the real scheduler.
@@ -289,7 +295,7 @@ jobs:
           d=$(mktemp -d)
           echo '{ "auto_apply_enabled": true }' > "$d/config.json"
           python3 modules/autoheal/lib/autoheal_mode.py mode "$d/config.json" auto_apply_enabled || true
-          bash -x modules/autoheal/tests/test-auto-apply-gate.sh 2>&1 | sed -n 1,400p | grep -n -E "MODE|python3|autoheal_mode|skipping" || true
+          CCGM_AUTOHEAL_CONFIG="$d/config.json" CCGM_AUTOHEAL_PROPOSALS_DIR="$d/p" CCGM_AUTOHEAL_APPLIED_DIR="$d/a" CCGM_AUTOHEAL_LOGS_DIR="$d/l" CCGM_AUTOHEAL_TODAY=2026-05-18 bash -x modules/autoheal/bin/autoheal-auto-apply.sh 2>&1 | head -60 || true
           bash modules/autoheal/tests/run-all.sh
 
       - name: relevance-injection - pytest suites (issue #985)
