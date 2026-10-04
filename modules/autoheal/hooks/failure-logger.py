@@ -6,7 +6,7 @@ Registers on PostToolUseFailure. Claude Code sends this input shape:
     {hook_event_name, session_id, transcript_path, cwd, tool_name,
      tool_input, tool_use_id, error, is_interrupt, duration_ms}
 
-`error` carries the failure text (for Bash it ends with "Exit code N").
+`error` carries the failure text (for Bash it starts with "Exit code N" on its first line).
 `is_interrupt` is true when the user stopped the tool. There are no
 top-level `stderr` or `exit_code` fields.
 
