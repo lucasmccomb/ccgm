@@ -15,11 +15,11 @@ Find a working example of similar code, diff it against the broken version, list
 
 ## Phase 3: Hypothesis
 
-Form one specific hypothesis ("the failure occurs because X; changing Y should fix it"), test it with one minimal change, and verify the fix works and nothing else broke. If it fails, return to Phase 1; do not stack fixes.
+List 3 to 5 ranked candidate causes with the evidence for each. Look for the strongest evidence against the favored one, and pick the probe that tells the top two apart. State the leader as one specific hypothesis ("the failure occurs because X; changing Y should fix it"), test it with one minimal change, and verify the fix works and nothing else broke. If it fails, return to Phase 1; do not stack fixes.
 
 ## Phase 4: Implementation
 
-Write a failing test that reproduces the bug where possible, implement the single fix at the root cause, confirm the test and the existing suite pass, and document the root cause in the commit message. If the diagnosis took more than two attempts or the cause was surprising, record the pattern (see `self-improving.md`).
+Write a failing test that reproduces the bug where possible, implement the single fix at the root cause, confirm the test and the existing suite pass, and document the root cause in the commit message. Tag temporary debug output `[DEBUG-xxxx]` (four hex digits) and grep it out before commit; redact secrets and credentials from logs and traces. If the diagnosis took more than two attempts or the cause was surprising, record the pattern (see `self-improving.md`).
 
 ## Three-Strike Rule
 
