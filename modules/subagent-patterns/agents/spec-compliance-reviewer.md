@@ -51,9 +51,16 @@ The caller passes paths, not content. See `subagent-patterns` > "Pass Paths, Not
    - VIOLATED - the diff contains a change that breaks the constraint
    - INDETERMINATE - you cannot tell from the diff alone (e.g., "no new dependencies added" - check package.json)
 
-5. **Run fresh verification.** If the spec required tests to pass, run them yourself. Do not trust "all tests pass" from the report.
+5. **Grade each acceptance criterion.** For every acceptance criterion in the spec, mark:
+   - VERIFIED - you saw fresh evidence (test output, command result, file content) that it holds
+   - PARTIAL - some of it holds, or the evidence covers only part of the criterion
+   - MISSING - no evidence, or the criterion does not hold
 
-6. **Emit structured status.**
+6. **Scan the diff for disabled tests.** Grep the diff's added lines for `.skip(`, `.only(`, `xit(`, `fit(`, `fdescribe(`, `xdescribe(`, `@pytest.mark.skip`, and `skip` in bats or shell tests. A hit is a spec failure unless the spec allows it. Stub tests with no real assertions count the same.
+
+7. **Run fresh verification.** If the spec required tests to pass, run them yourself. Do not trust "all tests pass" from the report.
+
+8. **Emit structured status.**
 
 ## What Counts as Scope Creep
 
@@ -88,9 +95,9 @@ End with exactly one status:
 
 | Status | Emit when | Next step |
 |--------|-----------|-----------|
-| **DONE** | Every deliverable PRESENT, every constraint RESPECTED, no scope creep, fresh verification passed. | Stage 2 (`code-quality-reviewer`) can run. |
+| **DONE** | Every deliverable PRESENT, every criterion VERIFIED, every constraint RESPECTED, no scope creep, fresh verification passed. | Stage 2 (`code-quality-reviewer`) can run. |
 | **DONE_WITH_CONCERNS** | Spec compliance holds but you have doubts - a deliverable satisfies the letter of the spec while missing the intent, or a constraint was INDETERMINATE. | Caller decides: accept, clarify, or re-dispatch. |
-| **BLOCKED** | One or more deliverables MISSING or INCOMPLETE, a constraint VIOLATED, or scope creep that cannot be discarded non-destructively. | Caller re-dispatches the implementer with specific feedback. Do NOT run Stage 2. |
+| **BLOCKED** | One or more deliverables MISSING or INCOMPLETE, an acceptance criterion MISSING, a disabled test added without spec approval, a constraint VIOLATED, or scope creep that cannot be discarded non-destructively. | Caller re-dispatches the implementer with specific feedback. Do NOT run Stage 2. |
 | **NEEDS_CONTEXT** | You cannot verify because the spec is ambiguous or the artifact paths were not provided. | Caller clarifies the spec or resupplies evidence. |
 
 ## Output Shape
@@ -108,6 +115,15 @@ End with exactly one status:
 
 - {constraint 1} - RESPECTED | VIOLATED | INDETERMINATE
 - {constraint 2} - ...
+
+## Acceptance Criteria
+
+- {criterion 1} - VERIFIED | PARTIAL | MISSING
+  {evidence}
+
+## Disabled Tests
+
+{added skip/only/stub tests with file:line, or "none"}
 
 ## Scope Creep
 
