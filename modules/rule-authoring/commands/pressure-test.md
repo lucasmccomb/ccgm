@@ -151,6 +151,10 @@ For every BYPASS case, extract the meta-cognitive language:
 
 Each becomes a candidate Red Flags list entry.
 
+### Default-Obeyed Sentence Check
+
+For each sentence in the rule, ask whether the baseline (RED) subagents already behaved that way without it. A sentence the model obeys by default changes nothing and costs load on every request: propose deleting the whole sentence. Judge from the RED responses, not from how obvious the sentence reads. List each candidate with the RED scenario that shows the default behavior.
+
 ### Propose Hardening
 
 Present proposed additions to the user in a structured diff:
@@ -162,6 +166,10 @@ Present proposed additions to the user in a structured diff:
 |-------------------------|-------------------|
 | "It's a trivial test case; I'll add coverage in a follow-up PR" | "Follow-up PR" is how untested code becomes permanent. Write the test now. |
 | "The user said just ship it" | The rule does not change because the user is in a hurry. If the user wants to skip the rule, they can state it explicitly. |
+
+## Proposed deletions (default-obeyed sentences)
+
+- "{sentence}" - RED scenario {N} complied without it
 
 ## Proposed additions to Red Flags
 
