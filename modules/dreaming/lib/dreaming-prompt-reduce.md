@@ -40,6 +40,11 @@ A JSON object:
       ...
     ]
   },
+  "pending_proposals": [
+    {"id": "...", "kind": "learning_add", "project": "<slug or _global>", "target_id": null,
+     "content": "<first 240 chars, or null>", "sessions": ["<session id>", ...]},
+    ...
+  ],
   "instructions": "<optional operator-supplied curation guidance, or omitted entirely if none is configured>"
 }
 ```
@@ -48,6 +53,17 @@ A JSON object:
 `_global`. Treat entries you do not see here as not existing -- you may
 only reference a `target_id` that appears in `store_projection` for the
 `project` you assign to your proposal.
+
+Every candidate also carries `corpus_snippets`: up to three passages, each
+`{"source": <path or store:<slug>:<id>>, "category", "score", "text"}`, that
+are the closest matches to it among what every session already loads (rules,
+CLAUDE.md files, auto-memory, hook messages), the live store, and recent
+proposals. A deterministic prefilter already removed candidates that match
+those sources closely, so these snippets are near-misses. Judge whether the
+candidate's fact is really there.
+
+`pending_proposals` are proposals from earlier nights that nobody has applied
+yet. Treat them as already proposed.
 
 ## Your job
 
@@ -82,6 +98,26 @@ was abandoned and why) is the strongest basis for an `add`. An `add` that
 only restates a hook, guard or permission denial, or a tool error whose text
 already states the fix, teaches the agent nothing it was not already told:
 leave it out.
+
+### Already encoded, or new
+
+Every session loads its rules, CLAUDE.md files, auto-memory and hook
+messages, so a learning that restates one of them adds nothing. For each
+`learning_add` and `learning_supersede` you would otherwise emit:
+
+- If a snippet in `corpus_snippets` already states the fact (a different
+  wording of the same instruction counts), do not propose it. Emit it with
+  `already_encoded` set to that snippet's `source` and `novelty` set to
+  `null`. The runtime drops it and counts it.
+- If a `pending_proposals` entry already proposes it, skip it. If it
+  rediscovers a fact that has a row in `store_projection`, use
+  `learning_verify` on that row; otherwise leave it out.
+- Otherwise set `already_encoded` to `null` and `novelty` to one line saying
+  what the learning adds that none of the snippets, store rows or pending
+  proposals state. If you cannot write that line, leave the candidate out.
+
+For `learning_verify`, `learning_contradict` and `learning_deprecate`, set
+both `already_encoded` and `novelty` to `null`.
 
 Never invent a `target_id`. If you cannot find a matching existing row in
 `store_projection`, the only valid kind is `learning_add` (or leave the
@@ -120,7 +156,9 @@ you):
   "prevalence": {"sessions": <distinct session ids in evidence>, "agents": <distinct writer identities the evidence spans, usually 1>},
   "evidence": [{"session_id": "<from a map candidate>", "excerpt": "<reuse the candidate's excerpt verbatim -- already redacted>"}, ...],
   "justification": "<why this action is warranted, paraphrased, <=500 chars>",
-  "trigger": {"kind": "regex" | "command_prefix" | "path_glob" | "phrase_set", "value": "<string, or a list of strings for phrase_set>"} | null
+  "trigger": {"kind": "regex" | "command_prefix" | "path_glob" | "phrase_set", "value": "<string, or a list of strings for phrase_set>"} | null,
+  "already_encoded": "<source path from corpus_snippets, or null>",
+  "novelty": "<one line: what this adds that no snippet states; null for verify/contradict/deprecate and for already_encoded>"
 }
 ```
 
@@ -162,12 +200,13 @@ uncredited. (The runtime also deterministically back-fills any supporting
 session you omit when it can, but cite them yourself -- do not rely on it.)
 
 Field rules by kind:
-- `learning_add` / `learning_supersede`: `content`, `type` and `trigger` are
-  REQUIRED (non-null). `learning_supersede` additionally REQUIRES a
+- `learning_add` / `learning_supersede`: `content`, `type`, `trigger` and
+  exactly one of `already_encoded` / `novelty` are REQUIRED (non-null). `learning_supersede` additionally REQUIRES a
   `target_id` that resolves in `store_projection`.
 - `learning_verify` / `learning_contradict` / `learning_deprecate`:
   `target_id` is REQUIRED (non-null) and must resolve in
-  `store_projection`. `content`, `type` and `trigger` MUST be `null` --
+  `store_projection`. `content`, `type`, `trigger`, `already_encoded` and
+  `novelty` MUST be `null` --
   these operations act on an existing id, they do not carry new prose.
 
 ## When there is nothing to propose

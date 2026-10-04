@@ -61,7 +61,13 @@ def _isolate_env(test: unittest.TestCase) -> Path:
     build_store_projection()), so there is no cross-test store
     contamination to guard against in the first place."""
     tmp = tempfile.mkdtemp(prefix="ccgm-dreaming-test-")
+    # The loaded-context corpus reads rules, hooks, CLAUDE.md files and
+    # auto-memory; point every root at an empty temp tree so no test sees
+    # the host's real ~/.claude.
+    claude_home = Path(tmp) / "claude-home"
+    claude_home.mkdir()
     overrides = {
+        "CCGM_DREAMING_CLAUDE_HOME": str(claude_home),
         "CCGM_DREAMING_DIR": tmp,
         "CCGM_DREAMING_ENV_FILE": str(Path(tmp) / "nonexistent.env"),
         "CCGM_DREAMING_AUTOHEAL_ENV_FILE": str(Path(tmp) / "nonexistent-autoheal.env"),
@@ -128,6 +134,8 @@ class FinalizeProposalTests(unittest.TestCase):
             "evidence": [{"session_id": "s-1", "excerpt": "hook exited 1: blocked outside business hours"}],
             "justification": "Observed in a real deploy failure.",
             "trigger": {"kind": "phrase_set", "value": ["blocked outside business hours"]},
+            "already_encoded": None,
+            "novelty": "Names the business-hours hook as the real cause of a deploy failure that looks like a permission error.",
         }
         raw.update(overrides)
         return raw
@@ -736,6 +744,7 @@ class StampProposalSignalsTests(unittest.TestCase):
             ],
             "justification": "Observed across sessions.",
             "trigger": {"kind": "phrase_set", "value": ["friction excerpt for"]},
+            "novelty": "Adds the cause behind the recurring friction.",
         }
         raw.update(overrides)
         row, reason = da.finalize_proposal(
@@ -848,6 +857,7 @@ class EnrichProposalEvidenceTests(unittest.TestCase):
             "evidence": [{"session_id": sid, "excerpt": f"cited excerpt for {sid}"} for sid in session_ids],
             "justification": "Observed.",
             "trigger": {"kind": "phrase_set", "value": ["cited excerpt for"]},
+            "novelty": "Adds the business-hours cause of the recurring failure.",
         }
         raw.update(overrides)
         row, reason = da.finalize_proposal(
@@ -1067,6 +1077,7 @@ class ProposalSchemaStampedFieldsTests(unittest.TestCase):
             "evidence": [{"session_id": "s-1", "excerpt": "hook blocked deploy"}],
             "justification": "Observed.",
             "trigger": {"kind": "phrase_set", "value": ["hook blocked deploy"]},
+            "novelty": "Names the hook as the real cause of the blocked deploy.",
             "fingerprint": "deadbeefcafe",
             "generated_at": "2026-07-07T00:00:00.000Z",
             "status": "pending",
@@ -1346,6 +1357,9 @@ class OutputSchemaTests(unittest.TestCase):
     # `required` set must be in the envelope, or the model stops being
     # asked for a field the validator still demands.
     RUNTIME_ASSIGNED_FIELDS = {"id", "fingerprint", "generated_at", "status"}
+    # Asked of the reduce model, checked and dropped by finalize_proposal(),
+    # never stored on the row.
+    REDUCE_ONLY_FIELDS = {"already_encoded"}
 
     def test_envelope_offers_exactly_what_the_proposal_schema_requires(self):
         # Stage-2 finding 7: autoheal derives its envelope from its schema
@@ -1355,7 +1369,7 @@ class OutputSchemaTests(unittest.TestCase):
         file_schema = json.loads(
             (Path(da.__file__).resolve().parent / "proposal-schema.json").read_text(encoding="utf-8")
         )
-        expected = set(file_schema["required"]) - self.RUNTIME_ASSIGNED_FIELDS
+        expected = (set(file_schema["required"]) - self.RUNTIME_ASSIGNED_FIELDS) | self.REDUCE_ONLY_FIELDS
         item = da.PROPOSALS_ENVELOPE_SCHEMA["properties"]["proposals"]["items"]
         self.assertEqual(
             set(item["required"]), expected,
@@ -1593,8 +1607,27 @@ class MainIntegrationTests(unittest.TestCase):
         self.assertEqual(len(day2_lines), 0, "every proposal on day 2 should have deduped against day 1's fingerprints")
 
         run2_summary = json.loads((dreaming_dir / "state" / "runs" / "2026-01-02.json").read_text(encoding="utf-8"))
-        self.assertEqual(run2_summary["proposals_deduped"], 3)
+        # Day 1's proposals are now pending corpus units, so the prefilter
+        # catches the re-mined candidate before the reduce runs; either
+        # path (prefilter or fingerprint) must count as a dedupe.
+        self.assertGreater(run2_summary["proposals_deduped"], 0)
         self.assertEqual(run2_summary["proposals_written"], 0)
+
+    def test_fingerprint_dedup_catches_same_evidence_when_the_prefilter_is_off(self):
+        dreaming_dir = _isolate_env(self)
+        _write_config(dreaming_dir, {"prefilter_threshold": 2.0})  # > 1: nothing can match
+        projects_root_1 = _make_projects_root("fpdedup1")
+        projects_root_2 = _make_projects_root("fpdedup2")
+        self.addCleanup(lambda: __import__("shutil").rmtree(projects_root_1, ignore_errors=True))
+        self.addCleanup(lambda: __import__("shutil").rmtree(projects_root_2, ignore_errors=True))
+        common = ["--offline", str(OFFLINE_FIXTURES), "--slugs", "widget-app"]
+        self.assertEqual(da.main(common + ["--force-day", "2026-01-01", "--projects-root", str(projects_root_1)]), 0)
+        os.environ["CCGM_DREAMING_TODAY"] = "2026-01-02"
+        self.addCleanup(lambda: os.environ.pop("CCGM_DREAMING_TODAY", None))
+        self.assertEqual(da.main(common + ["--projects-root", str(projects_root_2)]), 0)
+        run2 = json.loads((dreaming_dir / "state" / "runs" / "2026-01-02.json").read_text(encoding="utf-8"))
+        self.assertEqual(run2["proposals_deduped"], 3)
+        self.assertEqual(run2["proposals_written"], 0)
 
     def test_force_day_overwrites_and_excludes_itself_from_dedup_corpus(self):
         dreaming_dir = _isolate_env(self)
@@ -1911,6 +1944,271 @@ class CanaryStateTests(unittest.TestCase):
         self.assertIn(slug, canary.get("active_incidents", {}))
         detail = canary["active_incidents"][slug]["detail"]
         self.assertIn("friction_events", detail, "the recorded detail must name the broken extraction")
+
+
+# ---------------------------------------------------------------------------
+# Loaded-context dedupe (#1098 Phase 3.3): prefilter between map and reduce,
+# reduce-time already_encoded check, pending-aware reduce, evidence-based
+# fingerprints, gz-aware dedupe corpus.
+# ---------------------------------------------------------------------------
+
+RULE_TEXT = (
+    "# Branch Guard\n\n"
+    "No edits, staging, or commits while HEAD is on a repo's default branch. Branch first, then work. "
+    "A PreToolUse hook hard-blocks these operations before the first edit rather than at commit time.\n"
+)
+RULE_PARAPHRASE = (
+    "Commits and edits are blocked while HEAD sits on the repo default branch; branch first, then work. "
+    "A PreToolUse hook blocks these operations before the first edit."
+)
+NOVEL_CANDIDATE = (
+    "The staging database pooler drops idle connections after 30 seconds, so long-running migrations "
+    "need keepalive settings or they fail midway."
+)
+
+
+def _fixture_copy(test: unittest.TestCase) -> Path:
+    import shutil
+
+    fixtures = Path(tempfile.mkdtemp(prefix="ccgm-dreaming-test-fixtures-"))
+    test.addCleanup(lambda: shutil.rmtree(fixtures, ignore_errors=True))
+    shutil.copytree(OFFLINE_FIXTURES, fixtures, dirs_exist_ok=True)
+    return fixtures
+
+
+def _rewrite_fixture(path: Path, key: str, value) -> None:
+    outer = json.loads(path.read_text(encoding="utf-8"))
+    inner = json.loads(outer["content"][0]["text"])
+    inner[key] = value
+    outer["content"][0]["text"] = json.dumps(inner)
+    path.write_text(json.dumps(outer), encoding="utf-8")
+
+
+def _candidate(content: str, excerpt: str = "deploy.sh: line 12: permission denied") -> dict:
+    return {
+        "type": "pitfall", "content": content,
+        "evidence": [{"session_id": "fixture-friction-0001", "excerpt": excerpt}],
+        "occurrence_count": 1, "notes": None,
+    }
+
+
+class LoadedContextChainTests(unittest.TestCase):
+    def setUp(self):
+        self.dreaming_dir = _isolate_env(self)
+        self.claude_home = Path(os.environ["CCGM_DREAMING_CLAUDE_HOME"])
+        self.fixtures = _fixture_copy(self)
+        self.projects_root = _make_projects_root("loadedctx")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.projects_root, ignore_errors=True))
+
+    def _run(self, *extra):
+        rc = da.main([
+            "--offline", str(self.fixtures), "--force-day", "2026-01-01",
+            "--slugs", "widget-app", "--projects-root", str(self.projects_root), *extra,
+        ])
+        summary = json.loads((self.dreaming_dir / "state" / "runs" / "2026-01-01.json").read_text(encoding="utf-8"))
+        return rc, summary
+
+    def _rows(self):
+        path = self.dreaming_dir / "proposals" / "2026-01-01.jsonl"
+        if not path.is_file():
+            return []
+        return [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+    def _set_candidates(self, *candidates):
+        _rewrite_fixture(self.fixtures / "map-widget-app.json", "candidates", list(candidates))
+
+    def test_candidate_paraphrasing_a_rule_is_dropped_already_encoded_with_the_rule_path(self):
+        rule = self.claude_home / "rules" / "branch-guard.md"
+        rule.parent.mkdir()
+        rule.write_text(RULE_TEXT, encoding="utf-8")
+        self._set_candidates(_candidate(RULE_PARAPHRASE))
+        rc, summary = self._run()
+        self.assertEqual(rc, 0)
+        self.assertEqual(summary["prefilter_dropped"], {"already_encoded": 1, "installed_hook_friction": 0})
+        self.assertEqual(summary["prefilter_drops"][0]["source"], str(rule))
+        self.assertEqual(summary["prefilter_drops"][0]["reason"], "already_encoded")
+        self.assertEqual(summary["reduce_calls"], 0, "nothing survived, so the reduce is never paid for")
+        self.assertEqual(self._rows(), [])
+
+    def test_novel_candidate_passes_the_prefilter_and_reaches_the_reduce(self):
+        rule = self.claude_home / "rules" / "branch-guard.md"
+        rule.parent.mkdir()
+        rule.write_text(RULE_TEXT, encoding="utf-8")
+        self._set_candidates(_candidate(NOVEL_CANDIDATE))
+        rc, summary = self._run()
+        self.assertEqual(rc, 0)
+        self.assertEqual(summary["prefilter_dropped"], {"already_encoded": 0, "installed_hook_friction": 0})
+        self.assertEqual(summary["reduce_calls"], 1)
+        self.assertTrue(self._rows())
+
+    def test_candidate_whose_evidence_is_all_installed_hook_errors_is_dropped(self):
+        hook = self.claude_home / "hooks" / "auto-approve-bash.py"
+        hook.parent.mkdir()
+        hook.write_text('"""Approves safe Bash."""\n', encoding="utf-8")
+        hook_error = "PreToolUse:Bash hook error: [$HOME/.claude/hooks/auto-approve-bash.py]: Force-deleting a branch is blocked."
+        self._set_candidates(_candidate(NOVEL_CANDIDATE, hook_error))
+        rc, summary = self._run()
+        self.assertEqual(rc, 0)
+        self.assertEqual(summary["prefilter_dropped"], {"already_encoded": 0, "installed_hook_friction": 1})
+        self.assertEqual(summary["prefilter_drops"][0]["source"], str(hook))
+        self.assertEqual(summary["reduce_calls"], 0)
+
+    def test_reduce_marking_a_proposal_already_encoded_drops_and_counts_it(self):
+        self._set_candidates(_candidate(NOVEL_CANDIDATE, "hook exited 1: blocked outside business hours"))
+        reduce_path = self.fixtures / "reduce.json"
+        inner = json.loads(json.loads(reduce_path.read_text(encoding="utf-8"))["content"][0]["text"])
+        inner["proposals"][0]["already_encoded"] = "/home/x/.claude/rules/deploy.md"
+        inner["proposals"][0]["novelty"] = None
+        _rewrite_fixture(reduce_path, "proposals", inner["proposals"])
+        rc, summary = self._run()
+        self.assertEqual(rc, 0)
+        self.assertEqual(summary["reduce_already_encoded"], 1)
+        rows = self._rows()
+        self.assertTrue(all("already_encoded" not in r for r in rows))
+        self.assertNotIn("Running ./deploy.sh --env prod", " ".join(r["content"] or "" for r in rows))
+
+    def test_pending_proposals_and_corpus_snippets_appear_in_the_reduce_request(self):
+        pdir = self.dreaming_dir / "proposals"
+        pdir.mkdir(parents=True, exist_ok=True)
+        pending = {
+            "id": "pend00000001", "kind": "learning_add", "project": "widget-app", "target_id": None,
+            "content": "Retry the nightly export with exponential backoff when the warehouse API returns 429.",
+            "evidence": [{"session_id": "older-session", "excerpt": "429 from warehouse"}], "status": "pending",
+        }
+        import gzip
+
+        with gzip.open(pdir / "2025-12-31.jsonl.gz", "wt", encoding="utf-8") as fh:
+            fh.write(json.dumps(pending) + "\n")
+        rule = self.claude_home / "rules" / "branch-guard.md"
+        rule.parent.mkdir()
+        rule.write_text(RULE_TEXT, encoding="utf-8")
+        self._set_candidates(_candidate(NOVEL_CANDIDATE))
+
+        captured = []
+        real = da.get_model_response
+
+        def spy(**kwargs):
+            captured.append(kwargs)
+            return real(**kwargs)
+
+        with mock.patch.object(da, "get_model_response", side_effect=spy):
+            rc, _ = self._run()
+        self.assertEqual(rc, 0)
+        reduce_call = [c for c in captured if c["offline_candidates"] == ("reduce.json",)]
+        self.assertEqual(len(reduce_call), 1)
+        request = reduce_call[0]["user_obj"]
+        self.assertEqual([p["id"] for p in request["pending_proposals"]], ["pend00000001"])
+        self.assertEqual(request["pending_proposals"][0]["sessions"], ["older-session"])
+        candidate = request["map_candidates"][0]["candidates"][0]
+        self.assertLessEqual(len(candidate["corpus_snippets"]), 3)
+        self.assertTrue(candidate["corpus_snippets"])
+
+    def test_gz_pending_proposal_drops_a_re_mined_candidate(self):
+        pdir = self.dreaming_dir / "proposals"
+        pdir.mkdir(parents=True, exist_ok=True)
+        import gzip
+
+        pending = {
+            "id": "pend00000002", "kind": "learning_add", "project": "widget-app", "target_id": None,
+            "content": NOVEL_CANDIDATE, "evidence": [], "status": "pending",
+        }
+        with gzip.open(pdir / "2025-12-31.jsonl.gz", "wt", encoding="utf-8") as fh:
+            fh.write(json.dumps(pending) + "\n")
+        self._set_candidates(_candidate(NOVEL_CANDIDATE))
+        rc, summary = self._run()
+        self.assertEqual(rc, 0)
+        self.assertEqual(summary["prefilter_drops"][0]["category"], "pending_proposal")
+        self.assertTrue(summary["prefilter_drops"][0]["source"].endswith("2025-12-31.jsonl.gz#pend00000002"))
+        self.assertGreater(summary["proposals_deduped"], 0)
+
+
+class EvidenceFingerprintTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg = dict(da.DEFAULT_CONFIG)
+        self.schema = da._load_proposal_schema()  # noqa: SLF001
+        self.store_by_id = {"widget-app": {}, da.GLOBAL_SLUG: {}}
+
+    def _add(self, content, sessions=("s-1",)):
+        return {
+            "kind": "learning_add", "project": "widget-app", "target_id": None, "content": content,
+            "type": "pitfall", "confidence": 8, "prevalence": {"sessions": len(sessions), "agents": 1},
+            "evidence": [{"session_id": s, "excerpt": "pooler timeout killed the deploy script retry"} for s in sessions],
+            "justification": "Seen in a real deploy.",
+            "trigger": {"kind": "phrase_set", "value": ["pooler timeout"]},
+            "already_encoded": None, "novelty": "Names the pooler timeout as the cause.",
+        }
+
+    def _fp(self, raw):
+        row, reason = da.finalize_proposal(raw, store_by_id=self.store_by_id, cfg=self.cfg, proposal_schema=self.schema)
+        self.assertIsNone(reason)
+        return row["fingerprint"]
+
+    def test_reworded_content_over_the_same_evidence_has_the_same_fingerprint(self):
+        a = self._fp(self._add("The pooler timeout kills the deploy script, so retry it."))
+        b = self._fp(self._add("Retry the deploy script when a pooler timeout kills it."))
+        self.assertEqual(a, b)
+
+    def test_different_evidence_sessions_change_the_fingerprint(self):
+        a = self._fp(self._add("The pooler timeout kills the deploy script, so retry it.", ("s-1",)))
+        b = self._fp(self._add("The pooler timeout kills the deploy script, so retry it.", ("s-2",)))
+        self.assertNotEqual(a, b)
+
+    def test_session_order_does_not_change_the_fingerprint(self):
+        a = self._fp(self._add("The pooler timeout kills the deploy script, so retry it.", ("s-1", "s-2")))
+        b = self._fp(self._add("The pooler timeout kills the deploy script, so retry it.", ("s-2", "s-1")))
+        self.assertEqual(a, b)
+
+
+class ReduceVerdictTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg = dict(da.DEFAULT_CONFIG)
+        self.schema = da._load_proposal_schema()  # noqa: SLF001
+        self.store_by_id = {"widget-app": {}, da.GLOBAL_SLUG: {}}
+
+    def _raw(self, **overrides):
+        raw = FinalizeProposalTests._valid_add(None, **overrides)  # noqa: SLF001
+        return raw
+
+    def _finalize(self, raw):
+        return da.finalize_proposal(raw, store_by_id=self.store_by_id, cfg=self.cfg, proposal_schema=self.schema)
+
+    def test_already_encoded_proposal_is_rejected_with_its_source(self):
+        row, reason = self._finalize(self._raw(already_encoded="/x/.claude/rules/deploy.md", novelty=None))
+        self.assertIsNone(row)
+        self.assertEqual(reason, "already_encoded: /x/.claude/rules/deploy.md")
+
+    def test_add_without_a_novelty_statement_is_rejected(self):
+        for missing in (None, "", "   "):
+            with self.subTest(novelty=missing):
+                row, reason = self._finalize(self._raw(novelty=missing))
+                self.assertIsNone(row)
+                self.assertTrue(reason.startswith("novelty_missing"), reason)
+
+    def test_novelty_is_stored_on_the_row_and_passes_the_schema(self):
+        row, reason = self._finalize(self._raw())
+        self.assertIsNone(reason)
+        self.assertTrue(row["novelty"].startswith("Names the business-hours hook"))
+        self.assertNotIn("already_encoded", row)
+
+    def test_verify_rows_carry_null_novelty(self):
+        self.store_by_id["widget-app"]["abc123"] = {"id": "abc123", "content": "x", "type": "pattern"}
+        raw = self._raw(kind="learning_verify", content=None, type=None, target_id="abc123", trigger=None, novelty=None)
+        row, reason = self._finalize(raw)
+        self.assertIsNone(reason)
+        self.assertIsNone(row["novelty"])
+
+
+class GzipFingerprintCorpusTests(unittest.TestCase):
+    def test_existing_fingerprints_reads_gzipped_proposal_files(self):
+        import gzip
+
+        dreaming_dir = _isolate_env(self)
+        pdir = dreaming_dir / "proposals"
+        pdir.mkdir()
+        with gzip.open(pdir / "2026-01-01.jsonl.gz", "wt", encoding="utf-8") as fh:
+            fh.write(json.dumps({"fingerprint": "fp-gz", "id": "1"}) + "\n")
+        (pdir / "2026-01-02.jsonl").write_text(json.dumps({"fingerprint": "fp-plain", "id": "2"}) + "\n", encoding="utf-8")
+        self.assertEqual(da.existing_fingerprints(), {"fp-gz", "fp-plain"})
 
 
 if __name__ == "__main__":
