@@ -94,7 +94,13 @@ jobs:
       - name: Autoheal module tests
         # Never ran in CI before. The tests stub launchctl and the API; none
         # touches the real scheduler.
-        run: bash modules/autoheal/tests/run-all.sh
+        run: |
+          python3 --version
+          d=$(mktemp -d)
+          echo '{ "auto_apply_enabled": true }' > "$d/config.json"
+          python3 modules/autoheal/lib/autoheal_mode.py mode "$d/config.json" auto_apply_enabled || true
+          bash -x modules/autoheal/tests/test-auto-apply-gate.sh 2>&1 | sed -n 1,400p | grep -n -E "MODE|python3|autoheal_mode|skipping" || true
+          bash modules/autoheal/tests/run-all.sh
 
       - name: relevance-injection - pytest suites (issue #985)
         # The whole tests/ directory, not one file: test_loaded_log.py,
@@ -278,7 +284,13 @@ jobs:
       - name: Autoheal module tests
         # Never ran in CI before. The tests stub launchctl and the API; none
         # touches the real scheduler.
-        run: bash modules/autoheal/tests/run-all.sh
+        run: |
+          python3 --version
+          d=$(mktemp -d)
+          echo '{ "auto_apply_enabled": true }' > "$d/config.json"
+          python3 modules/autoheal/lib/autoheal_mode.py mode "$d/config.json" auto_apply_enabled || true
+          bash -x modules/autoheal/tests/test-auto-apply-gate.sh 2>&1 | sed -n 1,400p | grep -n -E "MODE|python3|autoheal_mode|skipping" || true
+          bash modules/autoheal/tests/run-all.sh
 
       - name: relevance-injection - pytest suites (issue #985)
         # The whole tests/ directory, not one file: test_loaded_log.py,
