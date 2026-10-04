@@ -8,6 +8,7 @@
     "slugs",
     "session_count",
     "sessions",
+    "signals",
     "clusters",
     "friction_cluster_count",
     "routine_cluster_count",
@@ -48,6 +49,10 @@
         "properties": {
           "session_id": { "type": ["string", "null"] },
           "slug": { "type": "string" },
+          "parent_session_id": {
+            "type": ["string", "null"],
+            "description": "For a subagent transcript (<project>/<session-id>/subagents/agent-*.jsonl), the session that dispatched it; null for a top-level session. A subagent line's own sessionId is already the parent's, so session_id and parent_session_id agree there."
+          },
           "git_branch": { "type": ["string", "null"] },
           "started_at": { "type": ["string", "null"] },
           "ended_at": { "type": ["string", "null"] },
@@ -122,6 +127,44 @@
           }
         }
       }
+    },
+    "signals": {
+      "type": "array",
+      "description": "Knowledge-bearing signals from the four deterministic extractors (transcript_miner.py, #1098 Phase 3.1), in budget-priority order: redirection, struggle_arc, conclusion, abandoned_work, rediscovery. They take token budget before friction clusters. `excerpt` is the cited text (redacted, <=400 chars, one contiguous transcript span); `context` is what preceded it (the assistant turn, or for a conclusion the friction event or redirection that opened its window).",
+      "items": {
+        "type": "object",
+        "required": ["kind", "session_id", "excerpt"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["redirection", "struggle_arc", "conclusion", "abandoned_work", "rediscovery"] },
+          "session_id": { "type": ["string", "null"] },
+          "session_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "rediscovery only: every session that explored the target."
+          },
+          "timestamp": { "type": ["string", "null"] },
+          "line": { "type": "integer", "minimum": 1 },
+          "excerpt": { "type": "string" },
+          "context": {
+            "type": "string",
+            "description": "redirection and abandoned_work: the assistant turn before the excerpt (may be empty). conclusion: the friction excerpt or human redirection that opened its 8-turn window."
+          },
+          "signature": {
+            "type": "string",
+            "description": "struggle_arc only: the repeated attempt signature (path:, test:, or cmd: prefix)."
+          },
+          "failure_count": {
+            "type": "integer",
+            "minimum": 3,
+            "description": "struggle_arc only: failed attempts before the success."
+          }
+        }
+      }
+    },
+    "signals_dropped": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Signals cut because they exceeded their share of the token budget (lowest-priority kinds first)."
     },
     "clusters": {
       "type": "array",

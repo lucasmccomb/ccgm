@@ -191,6 +191,24 @@ The **nightly map->reduce analyzer**, on top of Epic 2's miner:
   the shape, so the prompts document it rather than pleading for it.
 - `lib/proposal-schema.json` -- the per-change proposal row contract every
   written row is validated against before it touches disk.
+- `lib/triggers.py` -- the deterministic trigger matcher. Every
+  `learning_add` / `learning_supersede` proposal carries
+  `trigger: {"kind", "value"}` (null for the other kinds):
+
+  | kind | value | fires when the text |
+  |------|-------|---------------------|
+  | `regex` | string, 3-200 chars | matches it (`re.search`, ignoring case) |
+  | `command_prefix` | string | contains the command at a word boundary |
+  | `path_glob` | glob string | contains a path (or its basename) that matches |
+  | `phrase_set` | list of strings, 3+ chars each | contains any phrase, ignoring case |
+
+  The finalizer validates the trigger against the proposal's own cited
+  evidence: a missing or malformed trigger is rejected as `trigger_invalid`,
+  one that fires on none of its evidence excerpts as `trigger_unverified`
+  (counted as `triggers_unverified` in the run summary). Triggers that match
+  everything (`.*`, `*`, one-letter values) and nested-quantifier regexes
+  are invalid. Phase 4's recurrence metric imports `triggers.matches()` to
+  scan later transcripts.
 - `bin/dream-digest.sh` -- renders `~/.claude/dreaming/digests/{date}.md`:
   proposals grouped by project/kind with evidence, prevalence, and
   confidence; a durable canary banner for schema-drift/reduce-failure
@@ -213,15 +231,55 @@ The **deterministic transcript miner** -- pure Python stdlib, no network
 calls, no LLM calls, no scheduling:
 
 - `discover(slugs, cursors=...)` -- enumerate transcript files under
-  `~/.claude/projects/*/` whose owning learnings-store slug (re-derived from
-  each transcript's own `cwd` field) is in the wanted set and that hold
-  bytes past their per-file cursor (`state/mining-cursors.json`, byte
+  `~/.claude/projects/*/`, including each session's subagent transcripts
+  (`<session-id>/subagents/agent-*.jsonl`; where most failures, struggles
+  and stated findings happen -- the `.meta.json` siblings and
+  `tool-results/` are not transcripts). A subagent file resolves its slug
+  from its own `cwd`; a `cwd` under `<repo>/.claude/worktrees/` resolves
+  from the repo, so a torn-down worktree still maps to the repo's slug
+  instead of `agent-<hash>`. `mine()` reports `parent_session_id` for them,
+  and no user turn in a subagent transcript is ever a human turn (it is the
+  dispatcher). Cursors are per file, so the watermark-to-cursor migration
+  seeds subagent files like any other, and an unseeded file stays inside
+  the `lookback_days` mtime window. Only files whose owning learnings-store
+  slug (re-derived from each transcript's own `cwd` field) is in the
+  wanted set and that hold bytes past their per-file cursor are returned (`state/mining-cursors.json`, byte
   offsets). A timestamp-less append (`file-history-snapshot`) is not new
   content, and a file shorter than its cursor is re-read from 0. Slugs
   dreamed before cursors existed are seeded once from `last-dreamed.json`.
 - `mine(path, start_offset=0)` -- extract friction events (tool errors, hook errors,
   prevented-continuation), user-correction sequences, PR links, token
-  totals + cache-read ratio, and session identity from one transcript.
+  totals + cache-read ratio, session identity, and the five **signals**
+  below, from one transcript.
+- **Signals** -- five deterministic extractors for knowledge the agent does
+  not already carry (hook friction goes to friction clusters, not here):
+  `redirection` (a human-typed turn that corrects or redirects, with or
+  without a nearby tool error; the excerpt is the human's text and
+  `context` is the assistant turn before it), `struggle_arc` (three or
+  more consecutive failures on one file path, test name or three-word
+  command prefix, then a success; the excerpt is the assistant's
+  conclusion, preferring "root cause" / "the fix" / "turns out" /
+  "because" sentences), `conclusion` (a sentence of assistant prose, text
+  blocks only, that states a finding -- markers: "root cause", "turns out",
+  "the fix is/was", "the problem is/was", "the actual", "the reason",
+  "because", "doesn't support", "only works when", "so ... requires/needs/
+  must" -- within 8 turns after a friction event or a human redirection;
+  sentences under 40 characters, ones that restate a friction excerpt (60%
+  token overlap), and near-duplicates are dropped; at most 6 per session;
+  the excerpt is the sentence plus one neighbour as a contiguous span and
+  `context` is the friction or redirection that opened the window),
+  `abandoned_work` (a clean `git revert` or
+  `git reset --hard` that is not a sync to `origin/`, or a human asking to
+  undo or revert), and `rediscovery` (the same Read/Grep/Glob target in two
+  or more sessions of one slug in the mining window; built in
+  `mine_to_evidence_bundle()`). Only genuinely human turns count: the
+  existing `human_origin` gate, minus `<system-reminder>` blocks, harness
+  wrappers, `isMeta` lines, anything over 800 characters, and the session's
+  opening prompt. Every excerpt goes through `make_excerpt()`. Signals
+  take token budget before friction clusters (at most 80% of it; the
+  lowest-priority kinds drop first and `signals_dropped` counts them).
+  Priority: redirection, struggle_arc, conclusion, abandoned_work,
+  rediscovery.
 - `cluster(events)` -- group events by `(event_kind, tool_name,
   command_prefix)`.
 - `budget(clusters, max_input_tokens)` -- trim to a token cap without ever
@@ -337,6 +395,17 @@ Schema, validated by both this module's `--self-check` and, in Epic 3,
       "friction_field_presence": 4
     }
   ],
+  "signals": [
+    {
+      "kind": "redirection",
+      "session_id": "<uuid>",
+      "timestamp": "<ISO or null>",
+      "line": 7,
+      "excerpt": "<what the human typed; redacted, <=400 chars>",
+      "context": "<the assistant turn before it; redacted, <=240 chars>"
+    }
+  ],
+  "signals_dropped": 0,
   "clusters": [
     {
       "event_kind": "tool_error",
