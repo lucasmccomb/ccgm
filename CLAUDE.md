@@ -91,6 +91,10 @@ bash tests/test-installer.sh
 5. Add to relevant presets in `presets/`
 6. Run tests
 
+### Shared Prompt Sections
+
+Passages repeated across `modules/*/agents/` and `modules/*/commands/` files live once in `prompts/sections/<name>.md` (repo root, not installed). A file uses one by wrapping the expansion in `<!-- ccgm:section <name> -->` and `<!-- /ccgm:section <name> -->`; the section text is inlined between them, so installed files stay plain markdown. Edit the section, then run `python3 lib/compose-sections.py` before committing to rewrite every block. CI runs `python3 lib/compose-sections.py --check` and fails on drift. Rule files are out of scope.
+
 ### Editing Module Files via Symlinks
 
 CCGM module files are installed at `~/.claude/{commands,lib,hooks,rules}/` as **symlinks** pointing at `~/code/ccgm/modules/.../`. The Edit tool tracks reads by absolute path and does NOT follow symlinks — reading an installed copy does not satisfy Edit's read-gate for the workspace source path.

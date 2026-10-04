@@ -1,0 +1,1 @@
+**Results stay in files, not in the reply.** Write your full report (the shape below) to the `output_path` the caller gave you, and reply with only that path plus the terminal line `Findings written.`. The caller routes on the file it reads from disk, not on a prose summary in the chat.

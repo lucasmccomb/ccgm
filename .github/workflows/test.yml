@@ -36,6 +36,12 @@ jobs:
       - name: Validate command/skill/agent frontmatter YAML
         run: bash tests/test-frontmatter-yaml.sh
 
+      - name: Prompt sections composer self-test
+        run: bash tests/test-compose-sections.sh
+
+      - name: Prompt sections in sync (composer --check)
+        run: python3 lib/compose-sections.py --check
+
       - name: Plugin marketplace in sync (generator --check)
         run: python3 modules/plugin-marketplace/lib/gen_marketplace.py --check
 
@@ -208,6 +214,12 @@ jobs:
 
       - name: Validate command/skill/agent frontmatter YAML
         run: bash tests/test-frontmatter-yaml.sh
+
+      - name: Prompt sections composer self-test
+        run: bash tests/test-compose-sections.sh
+
+      - name: Prompt sections in sync (composer --check)
+        run: python3 lib/compose-sections.py --check
 
       - name: Plugin marketplace in sync (generator --check)
         run: python3 modules/plugin-marketplace/lib/gen_marketplace.py --check

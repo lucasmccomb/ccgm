@@ -83,9 +83,11 @@ Three levels. Do not inflate.
 
 If you find yourself writing more than three `nit`s, delete all of them. Nits dilute blocking and recommend items.
 
+<!-- ccgm:section status-protocol-intro -->
 ## The Four-State Status Protocol
 
-End with exactly one status:
+End every report with exactly one of these statuses. No free-form summary, no preamble:
+<!-- /ccgm:section status-protocol-intro -->
 
 | Status | Emit when | Next step |
 |--------|-----------|-----------|
@@ -96,7 +98,9 @@ End with exactly one status:
 
 ## Output Shape
 
+<!-- ccgm:section reviewer-results-in-files -->
 **Results stay in files, not in the reply.** Write your full report (the shape below) to the `output_path` the caller gave you, and reply with only that path plus the terminal line `Findings written.`. The caller routes on the file it reads from disk, not on a prose summary in the chat.
+<!-- /ccgm:section reviewer-results-in-files -->
 
 ```
 ## Findings
