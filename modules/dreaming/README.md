@@ -505,9 +505,9 @@ Shared top-level shape (autoheal's `health.json` uses the same four keys):
 Dreaming adds `analyze_rc`, `gate`, `breaker`, `pending_count`,
 `oldest_pending`, `expired_last_night`, `discarded_last_night`,
 `recent_changes`, `nights_since_last_integration`, `spend_7d`, `spend_30d`,
-`budget_30d`, `eval_last_run`, `eval_last_cost`, `eval_budget_abort` and
+`budget_30d`, `eval_last_run`, `eval_last_cost`, `eval_budget_abort`,
 `consecutive_red_nights` (counted from `state/health-history.jsonl`, one status
-per date).
+per date) and `recurrence` (the summary described in the next section).
 
 | Code | Red | Yellow |
 |------|-----|--------|
@@ -532,6 +532,46 @@ repeated. `python3 ~/.claude/lib/health.py` rewrites the file on demand.
 The chain also runs the weekly scorecard on Sundays (`scorecards/<date>.md`),
 and `bin/dream-reconcile.sh` writes its report to `digests/<date>.reconcile.md`
 with one pointer line in the digest, so the digest stays small.
+
+## Does a learning change behavior? (recurrence, #1098 4.1)
+
+Every dreamed learning carries the `trigger` its proposal was validated with,
+copied onto the store row at integration. Each night `lib/recurrence.py` (chain
+step 3c, after expire-pending) scans the transcript bytes appended since its
+last run for those triggers, joins the hits with `injection-log/`, and compares
+each learning's hit rate in sessions it was injected into against its hit rate
+in the 30 days before integration. It makes no API calls.
+
+It scans assistant tool inputs (`command`, `file_path`, `path`, `pattern`,
+`url`), error tool results, and typed human turns. It skips assistant prose,
+successful tool output and system reminders: the injected learning reaches the
+model through a reminder, and the agent restates it in prose, so scanning those
+would make every exposed session hit its own learning. A subagent's tool calls
+count toward the parent session, which is the one the injection log names.
+
+| Outcome | Rule | Action |
+|---------|------|--------|
+| avoided | 5+ exposed sessions and the exposed hit rate is at most half the baseline rate (baseline needs a hit) | auto `verify`, audited |
+| ineffective | 5+ exposed sessions, 2+ exposed hits, and the exposed rate is at or above the baseline rate (at or above 0.5 with no baseline sessions) | auto `deprecate` with the engine's dwell, under the per-slug eviction cap |
+| dormant | integrated 45+ days ago, no hit in the last 45 days | none; decay retires it |
+| spike | a batch integrated in the last 7 days whose 3+ exposed sessions show 3+ hits across all measured learnings, at least twice what their baselines predict | `recurrence_spike` content anomaly, which reverts the batch |
+
+Below 5 exposed sessions nothing happens. After a verify, the next decision
+waits for 5 new exposed sessions. Store writes need `optimistic_integration`
+`active` and a breaker that is not suspended; otherwise the decision is held and
+recorded. `_global` learnings are measured in every slug but held, since the
+store refuses unattended writes to `_global`. Writes are audited in the
+engine's shape (`outcome: applied`, `method: auto_apply`, `posture:
+recurrence`), so the daily notice reports a recurrence deprecation as a
+retirement.
+
+State lives in `state/recurrence.json`: per-file byte cursors over the miner's
+discovery, a 120-day session table, and the per-learning registry. Only a new
+learning triggers a one-time scan of its 30-day baseline; nothing else is
+rescanned. With no learning carrying a trigger, nothing is scanned. Rows logged
+in-session (`observed`) carry no trigger and stay unmeasured; the scorecard
+counts them. `python3 ~/.claude/lib/recurrence.py summary` prints the summary
+that `health.json` and the weekly scorecard headline use.
 
 **Bring-up:** installing the module copies the hook, but a new SessionStart hook
 must be registered in the live `~/.claude/settings.json` (re-run

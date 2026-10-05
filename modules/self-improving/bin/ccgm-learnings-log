@@ -29,6 +29,10 @@ Fields:
     --auto              mark this write as unattended (dreaming auto-integration), for
                          audit/reporting -- available on every subcommand (add/verify/
                          contradict/deprecate/supersede)
+    --trigger <json>    add/supersede: the learning's deterministic matcher,
+                         {"kind": ..., "value": ...} (#1098 Phase 4.1; dreaming's
+                         recurrence metric scans later transcripts for it). A
+                         supersede without it inherits the old entry's trigger.
     --dwell-hours <N>   stamp dwell_until = utcnow() + N hours (optimistic-memory §3.2):
                          the row is written but excluded from search()/injection until
                          the window closes. On verify/contradict/deprecate/supersede this
@@ -67,7 +71,23 @@ sys.path.insert(0, str(_HERE.parent / "lib"))
 import learnings_store as ls  # noqa: E402
 
 
+def _parse_trigger(raw: str | None) -> tuple[dict | None, str | None]:
+    """(trigger, None) for a --trigger JSON object, or (None, error)."""
+    if raw is None:
+        return None, None
+    try:
+        trigger = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return None, f"--trigger is not valid JSON: {e}"
+    reason = ls.trigger_shape_error(trigger)
+    return (None, f"--trigger: {reason}") if reason else (trigger, None)
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
+    trigger, err = _parse_trigger(args.trigger)
+    if err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
     if args.from_json:
         payload = json.loads(args.from_json)
     elif args.stdin:
@@ -88,6 +108,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
             "key": args.key,
             "source_session": args.session,
             "evidence_sessions": args.evidence_session or [],
+            "trigger": trigger,
         }
 
     dwell_until = ls.dwell_until_from_hours(args.dwell_hours) if args.dwell_hours is not None else None
@@ -105,6 +126,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
             source_session=payload.get("source_session"),
             evidence_sessions=payload.get("evidence_sessions") or [],
             dwell_until=dwell_until,
+            trigger=payload.get("trigger"),
         )
     except ls.ValidationError as e:
         print(f"error: {e}", file=sys.stderr)
@@ -164,6 +186,10 @@ def _cmd_deprecate(args: argparse.Namespace) -> int:
 
 
 def _cmd_supersede(args: argparse.Namespace) -> int:
+    trigger, err = _parse_trigger(args.trigger)
+    if err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
     dwell_until = ls.dwell_until_from_hours(args.dwell_hours) if args.dwell_hours is not None else None
     try:
         new_entry = ls.supersede_entry(
@@ -180,6 +206,7 @@ def _cmd_supersede(args: argparse.Namespace) -> int:
             source_session=args.session,
             auto=args.auto,
             dwell_until=dwell_until,
+            trigger=trigger,
         )
     except ls.ValidationError as e:
         print(f"error: {e}", file=sys.stderr)
@@ -233,6 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--session", help="claude session uuid this write originated from (provenance)")
     p.add_argument("--evidence-session", action="append",
                     help="repeatable; session uuid(s) cited as promotion evidence")
+    p.add_argument("--trigger", help='deterministic matcher JSON, {"kind": ..., "value": ...}')
     p.add_argument("--from-json", help="raw JSON payload instead of flags")
     p.add_argument("--stdin", action="store_true", help="read JSON payload from stdin")
     p.add_argument(
@@ -309,6 +337,7 @@ def build_parser() -> argparse.ArgumentParser:
                      help="repeatable; overrides old files if provided")
     sup.add_argument("--project")
     sup.add_argument("--reason", help="free-form note on why the supersede happened")
+    sup.add_argument("--trigger", help="deterministic matcher JSON; defaults to the old entry's trigger")
     sup.add_argument("--session", help="claude session uuid (required to raise the source tier)")
     sup.add_argument("--expected-sha", required=True,
                       help="CAS: sha256 of the target's current content, as last read")

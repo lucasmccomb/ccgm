@@ -686,6 +686,14 @@ def _write_audit(record: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _trigger_args(row: dict[str, Any]) -> list[str]:
+    """`--trigger <json>` when the proposal carries a trigger (#1098 Phase
+    4.1): the store row keeps the matcher so the nightly recurrence metric
+    (lib/recurrence.py) can scan later transcripts for it."""
+    trigger = row.get("trigger")
+    return ["--trigger", json.dumps(trigger, sort_keys=True)] if isinstance(trigger, dict) else []
+
+
 def _first_evidence_session(row: dict[str, Any]) -> str | None:
     for e in row.get("evidence") or []:
         sid = e.get("session_id") if isinstance(e, dict) else None
@@ -707,6 +715,7 @@ def _apply_learning_add(
         "--confidence", str(row["confidence"]),
         "--source", DEFAULT_MINED_SOURCE,
         "--project", row["project"],
+        *_trigger_args(row),
     ]
     if method == "auto_apply":
         # adrev-opt-008: tag the engine's own optimistic writes `auto: true`
@@ -764,6 +773,7 @@ def _apply_global_add(
         "confidence": row["confidence"],
         "tags": [],
         "files": [],
+        "trigger": row.get("trigger") if isinstance(row.get("trigger"), dict) else None,
     }
     try:
         new_entry = learnings_store.promote_to_global(
@@ -961,6 +971,7 @@ def _apply_learning_supersede(
         ]
         if row.get("justification"):
             args += ["--reason", row["justification"]]
+        args += _trigger_args(row)
         if auto:
             args.append("--auto")
         if dwell_hours is not None:
