@@ -162,6 +162,73 @@ class TestInstallNewFiles(FixtureCase):
         self.assertFalse(os.path.lexists(self.fx.path("lib/new.py")))
 
 
+class TestPulledRangeOnly(FixtureCase):
+    """Only targets added to module.json in the pulled range are installed (#1134)."""
+
+    def test_preexisting_missing_target_stays_uninstalled(self):
+        # Pushed and pulled earlier; the operator never installed it.
+        self.fx.push_files({"lib/trimmed.py": entry("lib/trimmed.py")})
+        git(self.fx.canonical, "pull", "-q", "--ff-only", "origin", "main")
+        self.fx.push_files({"lib/other.py": entry("lib/other.py")},
+                           extra={"modules/mod/lib/trimmed.py": "v2\n"})
+        # push_files rebuilds module.json from old.py plus the given files, so
+        # re-declare trimmed.py by hand to keep it in the map.
+        write(os.path.join(self.fx.pusher, "modules/mod/module.json"), module_json({
+            "lib/old.py": entry("lib/old.py"),
+            "lib/trimmed.py": entry("lib/trimmed.py"),
+            "lib/other.py": entry("lib/other.py")}))
+        self.fx.commit("map")
+        git(self.fx.pusher, "push", "-q", "origin", "main")
+        r = self.fx.run_hook()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.lexists(self.fx.path("lib/trimmed.py")))
+        self.assertTrue(os.path.islink(self.fx.path("lib/other.py")))
+
+    def test_target_added_in_range_installed(self):
+        self.fx.push_files({"lib/new.py": entry("lib/new.py")})
+        self.fx.run_hook()
+        self.assertTrue(os.path.islink(self.fx.path("lib/new.py")))
+
+    def test_old_missing_target_not_installed_when_nothing_added(self):
+        os.remove(self.fx.path("lib/old.py"))
+        self.fx.push_files({}, extra={"modules/mod/lib/old.py": "v2\n"})
+        self.fx.run_hook()
+        self.assertFalse(os.path.lexists(self.fx.path("lib/old.py")))
+
+    def test_new_file_in_module_not_in_manifest_not_installed(self):
+        self.fx.write_manifest(modules=("other",))
+        self.fx.push_files({"lib/new.py": entry("lib/new.py")})
+        self.fx.run_hook()
+        self.assertFalse(os.path.lexists(self.fx.path("lib/new.py")))
+
+    def test_new_module_not_auto_installed(self):
+        write(os.path.join(self.fx.pusher, "modules/fresh/lib/f.py"), "f\n")
+        write(os.path.join(self.fx.pusher, "modules/fresh/module.json"),
+              json.dumps({"name": "fresh", "scope": ["global"],
+                          "files": {"lib/f.py": entry("lib/f.py")}}))
+        self.fx.commit("fresh module")
+        git(self.fx.pusher, "push", "-q", "origin", "main")
+        self.fx.run_hook()
+        self.assertFalse(os.path.lexists(self.fx.path("lib/f.py")))
+
+
+class TestRepoLibSource(FixtureCase):
+    def test_source_symlink_into_repo_lib_is_skipped_not_unsafe(self):
+        write(os.path.join(self.fx.pusher, "lib/statusline.sh"), "echo hi\n")
+        self.fx.push_files({})
+        os.symlink("../../lib/statusline.sh",
+                   os.path.join(self.fx.pusher, "modules/mod/statusline-command.sh"))
+        write(os.path.join(self.fx.pusher, "modules/mod/module.json"), module_json({
+            "lib/old.py": entry("lib/old.py"),
+            "statusline-command.sh": entry("statusline-command.sh")}))
+        self.fx.commit("statusline")
+        git(self.fx.pusher, "push", "-q", "origin", "main")
+        out = (lambda r: r.stdout + r.stderr)(self.fx.run_hook())
+        self.assertIn("skipped statusline-command.sh in mod/module.json (source outside module dir)", out)
+        self.assertNotIn("refused unsafe", out)
+        self.assertFalse(os.path.lexists(self.fx.path("statusline-command.sh")))
+
+
 class TestPathContainment(FixtureCase):
     """module.json paths are untrusted: nothing may be created outside claude_dir,
     and a source may not leave its module directory."""

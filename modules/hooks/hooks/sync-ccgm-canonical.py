@@ -15,8 +15,8 @@ Triggers when:
 Behavior:
 - Runs `git fetch origin main && git pull --ff-only origin main` in the
   canonical clone
-- On success, symlinks module files the pull newly added to installed modules
-  (link-mode installs only, never overwrites; see lib/ccgm_sync_install.py) and
+- On success, symlinks module files the pulled range added to installed modules' module.json
+  (link-mode installs only, never overwrites, never files that predate the pull; see lib/ccgm_sync_install.py) and
   reports hook commands in changed settings.partial.json files that the live
   settings.json does not register (settings are never auto-merged)
 - On a refused pull, reports how many commits the canonical clone is behind
@@ -102,7 +102,7 @@ def post_pull_report(canonical_dir: str, old_head: str | None) -> list[str]:
         import ccgm_sync_install as inst
 
         claude_dir = os.path.join(os.path.expanduser("~"), ".claude")
-        created, refused = inst.install_new_files(claude_dir, canonical_dir)
+        created, refused = inst.install_new_files(claude_dir, canonical_dir, old_head)
         lines.extend(refused)
         if created:
             rel = [os.path.relpath(p, claude_dir) for p in created]
