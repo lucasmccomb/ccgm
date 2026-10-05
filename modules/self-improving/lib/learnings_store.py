@@ -25,7 +25,11 @@ Every line under `agents/` is an OP-EVENT, not a snapshot:
      "content_sha256": "...", "writer": "agent-w0-c0|human",
      "source_session": "<claude session uuid or null>",
      "expected_sha256": "<CAS, supersede/deprecate only>",
-     "supersede_reason": "...", "last_verified": "...", "deprecated": ...}
+     "supersede_reason": "...", "last_verified": "...", "deprecated": ...,
+     "trigger": {"kind": "...", "value": ...}}
+
+`trigger` is optional and appears only on add/supersede events of dreamed
+learnings (#1098 Phase 4.1); see `trigger_shape_error()`.
 
 Legacy v1 rows (no `op` field) are full-state snapshots and are projected
 VERBATIM (their `uses`/`contradictions`/`deprecated`/`superseded_by` fields
@@ -654,6 +658,33 @@ def validate_entry(entry: dict[str, Any]) -> None:
         if field in entry and not isinstance(entry[field], list):
             raise ValidationError(f"{field} must be a list")
 
+    trigger = entry.get("trigger")
+    if trigger is not None:
+        reason = trigger_shape_error(trigger)
+        if reason:
+            raise ValidationError(reason)
+
+
+def trigger_shape_error(trigger: Any) -> str | None:
+    """None when `trigger` has the {"kind", "value"} shape, else a reason.
+
+    A dreamed learning carries the deterministic matcher its proposal was
+    validated with (#1098 Phase 4.1), so the nightly recurrence metric can
+    scan later transcripts for it. The store checks only the shape: `kind` a
+    non-empty string, `value` a string or a list of strings. What each kind
+    means belongs to the dreaming module (lib/triggers.py)."""
+    if not isinstance(trigger, dict):
+        return "trigger must be an object with kind and value"
+    kind = trigger.get("kind")
+    if not isinstance(kind, str) or not kind.strip():
+        return "trigger.kind must be a non-empty string"
+    value = trigger.get("value")
+    if isinstance(value, str):
+        return None
+    if isinstance(value, list) and value and all(isinstance(v, str) for v in value):
+        return None
+    return "trigger.value must be a string or a non-empty list of strings"
+
 
 # ---------------------------------------------------------------------------
 # Write path
@@ -681,6 +712,7 @@ def build_entry(
     source_session: str | None = None,
     evidence_sessions: list[str] | None = None,
     dwell_until: str | None = None,
+    trigger: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Build a schema-valid, sanitized entry. Does NOT write.
@@ -691,6 +723,9 @@ def build_entry(
     `dwell_until` (optimistic-memory §3.2), if given, is carried on the
     returned dict and threaded into the `add` op-event by `append_entry()` --
     absent means "live immediately" (backward-compatible default).
+
+    `trigger` (#1098 Phase 4.1), if given, is the dreamed learning's
+    deterministic matcher; `validate_entry()` checks its shape.
     """
     sanitized = sanitize_content(content)
     sanitized_reason = sanitize_content(supersede_reason) if supersede_reason else None
@@ -715,6 +750,7 @@ def build_entry(
         "source_session": source_session,
         "evidence_sessions": list(evidence_sessions) if evidence_sessions else [],
         "dwell_until": dwell_until,
+        "trigger": trigger,
     }
     validate_entry(entry)
     return entry
@@ -792,6 +828,7 @@ def _build_op_row(
     event_id: str | None = None,
     auto: bool = False,
     dwell_until: str | None = None,
+    trigger: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a canonical v2 op-event row (§3.3 schema). Does not write.
 
@@ -837,6 +874,9 @@ def _build_op_row(
         row["auto"] = True
     if dwell_until is not None:
         row["dwell_until"] = dwell_until
+    if trigger is not None:
+        # #1098 Phase 4.1: written only when present, like `auto`.
+        row["trigger"] = trigger
     return row
 
 
@@ -872,6 +912,7 @@ def append_entry(entry: dict[str, Any], slug: str | None = None, *, auto: bool =
         confidence=entry["confidence"], tags=entry.get("tags", []), files=entry.get("files", []),
         key=entry.get("key"), source_session=entry.get("source_session"),
         event_id=entry["id"], auto=auto, dwell_until=entry.get("dwell_until"),
+        trigger=entry.get("trigger"),
     )
     if entry.get("evidence_sessions"):
         row["evidence_sessions"] = list(entry["evidence_sessions"])
@@ -1000,6 +1041,7 @@ def _seed_head_from_add_event(event: dict[str, Any]) -> dict[str, Any]:
         "writer": event.get("writer"),
         "source_session": event.get("source_session"),
         "dwell_until": event.get("dwell_until"),
+        "trigger": event.get("trigger"),
     }
 
 
@@ -1038,6 +1080,7 @@ def _seed_head_from_supersede_event(event: dict[str, Any], old_head: dict[str, A
         "writer": event.get("writer"),
         "source_session": event.get("source_session"),
         "dwell_until": _max_dwell(old_head.get("dwell_until"), event.get("dwell_until")),
+        "trigger": event.get("trigger") or old_head.get("trigger"),
     }
 
 
@@ -2027,6 +2070,7 @@ def supersede_entry(
     source_session: str | None = None,
     auto: bool = False,
     dwell_until: str | None = None,
+    trigger: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """
     Atomically replace one entry with a new one by appending a single
@@ -2049,6 +2093,9 @@ def supersede_entry(
     (`_seed_head_from_supersede_event`) takes `max(old_head.dwell_until,
     dwell_until)`, so a supersede can never shorten the target's existing
     dwell, only extend it.
+
+    `trigger` (#1098 Phase 4.1) replaces the old entry's matcher; when
+    absent the old one is inherited, like tags and files.
     """
     target_slug = slug or detect_project_slug()
     heads = load_all(target_slug)
@@ -2068,6 +2115,7 @@ def supersede_entry(
     inherited_conf = confidence if confidence is not None else old.get("confidence", DEFAULT_CONFIDENCE)
     inherited_tags = tags if tags is not None else list(old.get("tags", []))
     inherited_files = files if files is not None else list(old.get("files", []))
+    inherited_trigger = trigger if trigger is not None else old.get("trigger")
     target_proj = old.get("project") or target_slug
 
     if target_proj == GLOBAL_SLUG and not _is_global_admin():
@@ -2080,6 +2128,7 @@ def supersede_entry(
         type_=inherited_type, content=content, source=source, confidence=inherited_conf,
         tags=inherited_tags, files=inherited_files, project=target_proj,
         supersedes=old_id, supersede_reason=reason, dwell_until=dwell_until,
+        trigger=inherited_trigger,
     )
 
     # A tier-raising supersede is a transcript-verified, structurally
@@ -2098,7 +2147,7 @@ def supersede_entry(
         confidence=new_entry["confidence"], tags=new_entry["tags"], files=new_entry["files"],
         key=new_entry["key"], source_session=source_session,
         supersede_reason=new_entry["supersede_reason"], event_id=new_entry["id"],
-        auto=auto, dwell_until=dwell_until,
+        auto=auto, dwell_until=dwell_until, trigger=new_entry["trigger"],
     )
     file_locked_append(str(shard), json.dumps(row, sort_keys=True))
 
@@ -2169,6 +2218,7 @@ def promote_to_global(
         files=entry.get("files") or [],
         project=GLOBAL_SLUG,
         key=entry.get("key"),
+        trigger=entry.get("trigger"),
     )
 
     shard = agent_shard_path(GLOBAL_SLUG, writer)
@@ -2179,6 +2229,7 @@ def promote_to_global(
         confidence=new_entry["confidence"], tags=new_entry["tags"], files=new_entry["files"],
         key=new_entry["key"], source_session=resolved_session, event_id=new_entry["id"],
         auto=auto, dwell_until=dwell_until_from_hours(dwell_hours) if dwell_hours is not None else None,
+        trigger=new_entry["trigger"],
     )
     row["reviewed_by"] = reviewed_by
     row["evidence_sessions"] = list(evidence_sessions)

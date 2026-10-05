@@ -83,6 +83,11 @@
       "type": "lib",
       "template": false
     },
+    "lib/recurrence.py": {
+      "target": "lib/recurrence.py",
+      "type": "lib",
+      "template": false
+    },
     "lib/loaded_context.py": {
       "target": "lib/loaded_context.py",
       "type": "lib",

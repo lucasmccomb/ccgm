@@ -79,6 +79,7 @@ Each returned entry is a JSON object:
 | `superseded_by` | string | no | Id of the entry that replaced this one (set on the old entry) |
 | `supersede_reason` | string | no | Free-form note on why the replacement happened |
 | `dwell_until` | ISO 8601 UTC | no | Optimistic-integration only (see "Dwell Window" below); absent = immediately live |
+| `trigger` | `{"kind", "value"}` | no | Dreamed learnings only: the deterministic matcher the proposal was validated with (`modules/dreaming/lib/triggers.py`). Dreaming's nightly recurrence metric scans later transcripts for it. Set with `--trigger '<json>'` on add or supersede; a supersede without it inherits the old trigger. The store checks only the shape (`kind` a non-empty string, `value` a string or list of strings) |
 
 ### Type vocabulary
 

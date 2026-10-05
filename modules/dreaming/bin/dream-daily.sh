@@ -28,6 +28,11 @@
 #   3b. expire-pending             — active mode only, whatever the gate said:
 #      pending proposals older than 48h are discarded `expired` (#1098 2.3).
 #      With integration off or in shadow nothing is discarded.
+#   3c. recurrence                 — every night, no API calls: lib/recurrence.py
+#      scans the transcript bytes appended since its last run for each
+#      learning's trigger, joins the injection log, and auto-verifies or
+#      auto-deprecates (active mode, breaker not suspended) or reports a
+#      recurrence spike to the breaker (#1098 item 4.1).
 #   4. bin/dream-digest.sh        (Epic 3) — render today's digest
 #   5. bin/dream-reconcile.sh     (Epic 8) — read-only auto-memory reconciliation.
 #      Does not exist yet; run_step's "missing -> skip, return 0" makes this
@@ -88,6 +93,7 @@ LOGS_DIR="${CCGM_DREAMING_LOGS_DIR:-${HOME}/.claude/logs}"
 # ---------------------------------------------------------------------
 
 FORCE_DAY=""
+PROJECTS_ROOT=""
 ARGS=("$@")
 i=0
 while [ "${i}" -lt "${#ARGS[@]}" ]; do
@@ -99,6 +105,13 @@ while [ "${i}" -lt "${#ARGS[@]}" ]; do
             ;;
         --force-day=*)
             FORCE_DAY="${arg#--force-day=}"
+            ;;
+        --projects-root)
+            i=$((i + 1))
+            PROJECTS_ROOT="${ARGS[$i]:-}"
+            ;;
+        --projects-root=*)
+            PROJECTS_ROOT="${arg#--projects-root=}"
             ;;
     esac
     i=$((i + 1))
@@ -411,6 +424,24 @@ run_expire_step() {
 }
 
 # ---------------------------------------------------------------------
+# Step 3c: recurrence metric (#1098 item 4.1). Every night, whatever the mode:
+# measuring is free (no API calls) and its state is incremental. Store writes
+# (auto verify/deprecate) and the spike anomaly happen only in active mode;
+# lib/recurrence.py decides that itself. Always returns 0.
+# ---------------------------------------------------------------------
+
+run_recurrence_step() {
+    local root_args=() out rc
+    if [ -n "${PROJECTS_ROOT}" ]; then
+        root_args=(--projects-root "${PROJECTS_ROOT}")
+    fi
+    out="$(python3 "${MODULE_ROOT}/lib/recurrence.py" run --day "${TODAY}" "${root_args[@]+"${root_args[@]}"}" 2>&1)"
+    rc=$?
+    log "recurrence: exit=${rc} ${out}"
+    return 0
+}
+
+# ---------------------------------------------------------------------
 # Step 5: retention sweep — gzip >30d, delete >60d.
 #
 # A proposals file is deleted only through `retention-check` (#1098 2.3): in
@@ -582,6 +613,9 @@ run_optimistic_integrate_step || steps_failed=$((steps_failed + 1))
 
 steps_total=$((steps_total + 1))
 run_expire_step || steps_failed=$((steps_failed + 1))
+
+steps_total=$((steps_total + 1))
+run_recurrence_step || steps_failed=$((steps_failed + 1))
 
 # digest runs AFTER optimistic-integrate (chain order revised by
 # optimistic-memory plan.md Epic 3) so tonight's just-integrated batch is

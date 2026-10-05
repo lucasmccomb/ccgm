@@ -22,6 +22,13 @@ signals — the honest answer to "how do I know the memory system is working?"
 
 ## Sections
 
+- **Recurrence** (the headline) — recurrence reduction across measured
+  learnings, split into dreamed and observed, with learning and exposed-session
+  counts: how much less often a learning's trigger fires in sessions it was
+  injected into, against its 30-day pre-integration baseline (#1098 4.3, read
+  from `state/recurrence.json`). Also: auto-verify, auto-deprecate and dormant
+  totals, spikes reported to the breaker, and learnings with no trigger
+  (unmeasured). Cumulative over the metric's 120-day session window.
 - **Captured** — new learnings added in the window (store JSONL `add`/legacy
   op-events), grouped by type + project. In-window `supersede` refinements are
   surfaced as a separate sub-line (they are refinements, not new captures).

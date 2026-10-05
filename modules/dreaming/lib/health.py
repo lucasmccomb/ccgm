@@ -17,7 +17,11 @@ modules agree on it without importing each other):
 Dreaming adds: analyze_rc, gate, breaker, nights_since_last_integration,
 pending_count, oldest_pending, expired_last_night, discarded_last_night,
 recent_changes, spend_7d, spend_30d, budget_30d, eval_last_run,
-eval_last_cost, eval_budget_abort, consecutive_red_nights.
+eval_last_cost, eval_budget_abort, consecutive_red_nights, recurrence.
+
+`recurrence` is lib/recurrence.py's summary of state/recurrence.json: the
+recurrence reduction split into dreamed and observed learnings, with exposure
+counts (#1098 4.1). Informational; no status rule reads it yet.
 
 `recent_changes` lists the engine's own integrations and retirements from the
 last 7 days ({ts, change, project, content}); hooks/dreaming-health.py turns
@@ -66,8 +70,8 @@ stays analyze_failed red even during a budget pause.
   eval_budget_abort   R  an eval budget-abort marker from the last 7 days that
                           no later results file follows
 
-Python 3 standard library only, plus dream_analyze, rollout_mode and breaker
-from this directory.
+Python 3 standard library only, plus dream_analyze, rollout_mode, breaker and
+recurrence from this directory.
 """
 from __future__ import annotations
 
@@ -263,6 +267,7 @@ def compute(
     bad input files; each unreadable source reads as absent."""
     import breaker  # noqa: PLC0415
     import dream_analyze as da  # noqa: PLC0415
+    import recurrence  # noqa: PLC0415
     import rollout_mode  # noqa: PLC0415
 
     dreaming = Path(dreaming)
@@ -526,6 +531,7 @@ def compute(
         "eval_last_cost": eval_last_cost,
         "eval_budget_abort": abort.isoformat() if abort_live and abort else None,
         "analyze_rc": analyze_rc,
+        "recurrence": recurrence.summary(recurrence.read_state(state / recurrence.STATE_FILENAME)),
         "reasons": [{k: r[k] for k in ("code", "message", "fix")} for r in reasons],
     }
 

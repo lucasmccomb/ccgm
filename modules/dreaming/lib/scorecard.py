@@ -59,6 +59,12 @@ Data sources (all read-only):
     Until Epic 6 ships that write, this legitimately reads 0 -- an accurate
     "nothing reverted yet" answer, not a broken counter.
 
+  - Recurrence (#1098 4.3, the headline): ~/.claude/dreaming/state/
+    recurrence.json, the nightly recurrence metric's state (lib/recurrence.py),
+    a sibling of apply-audit.jsonl like optimistic.json. Cumulative over the
+    metric's 120-day session table, not window-scoped: the reduction needs
+    every exposed session, and a week holds too few.
+
 Every section degrades gracefully: a missing/empty source prints
 "_no data this window._" and never raises. The optimistic-integration
 section is the one exception to the "_no data_" fallback (matching Store
@@ -74,6 +80,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+import recurrence
 import rollout_mode
 
 # Effective-confidence bands for the store-health section. Documented here so
@@ -521,6 +528,41 @@ def _excerpt(text: str, limit: int = 90) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _recurrence_part(label: str, part: dict[str, Any]) -> str:
+    reduction = part.get("reduction")
+    value = "n/a" if reduction is None else f"{reduction:.0%}"
+    n = int(part.get("measured") or 0)
+    noun = "learning" if n == 1 else "learnings"
+    return f"{label} {value} ({n} {noun}, {int(part.get('exposed_sessions') or 0)} exposed sessions)"
+
+
+def _recurrence_headline(summary: dict[str, Any]) -> str:
+    """The scorecard's headline (#1098 4.3): how much less often the mistakes
+    a learning addresses recur in sessions it was injected into."""
+    return ("**Recurrence reduction: " + _recurrence_part("dreamed", summary["dreamed"]) + " · "
+            + _recurrence_part("observed", summary["observed"]) + "**")
+
+
+def _recurrence_lines(summary: dict[str, Any]) -> list[str]:
+    lines = ["## Recurrence — does an injected learning change behavior?", ""]
+    lines.append("_Trigger hits in sessions a learning was injected into, against its hit rate in the "
+                 "30 days before it was integrated. Cumulative over the last 120 days._")
+    lines.append("")
+    for origin in ("dreamed", "observed"):
+        part = summary[origin]
+        lines.append(
+            f"- {origin}: {part['measured']} measured of {part['tracked']} with a trigger · "
+            f"{part['exposed_sessions']} exposed sessions · "
+            f"{part['observed_hits']} hits vs {part['expected_hits']:g} expected · "
+            f"{part['unmeasured']} unmeasured (no trigger)")
+    lines.append(f"- auto-verified (avoided): {summary['verified_total']} · auto-deprecated (ineffective): "
+                 f"{summary['deprecated_total']} · dormant (no hit in 45 days): {summary['dormant']}")
+    lines.append(f"- recurrence spikes reported to the breaker: {summary['spikes_reported']}")
+    lines.append(f"- last measured: {summary['last_run'] or 'never'}")
+    lines.append("")
+    return lines
+
+
 def render(
     window_start: "datetime | date | str",
     window_end: "datetime | date | str",
@@ -560,8 +602,11 @@ def render(
     # here rather than threaded as a new render() parameter so the .sh
     # wrapper's call site needs no change (plan.md Epic 7).
     optimistic_state_path = apply_audit_path.parent / "optimistic.json"
-    # Same sibling convention for the shadow-mode decision log (#1087).
+    # Same sibling convention for the shadow-mode decision log (#1087) and
+    # the recurrence metric's state (#1098 4.3).
     shadow_log_path = apply_audit_path.parent / "shadow-optimistic.jsonl"
+    recurrence_summary = recurrence.summary(
+        recurrence.read_state(apply_audit_path.parent / recurrence.STATE_FILENAME))
 
     start = _to_epoch(window_start)
     end = _to_epoch(window_end)
@@ -614,12 +659,19 @@ def render(
         f"· generated {_fmt_dt(generated_at)}_"
     )
     out.append("")
+    out.append(_recurrence_headline(recurrence_summary))
+    out.append("")
     out.append(
         f"**{cap['captured_total']} captured · {inj['sessions']} sessions injected "
         f"· {cap['reused_learnings']} learnings reused ({cap['reused_events']} events) "
         f"· {app['applied_total']} applied**"
     )
     out.append("")
+
+    # --- 0. Recurrence (#1098 4.3) -----------------------------------------
+    # Always numeric, like Optimistic integration: an absent state file means
+    # nothing measured yet, which is a known answer.
+    out.extend(_recurrence_lines(recurrence_summary))
 
     # --- 1. Captured -------------------------------------------------------
     out.append(f"## Captured — {cap['captured_total']} new learnings this window")
