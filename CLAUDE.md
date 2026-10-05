@@ -155,12 +155,12 @@ Autoheal is opt-in by design. The default install only captures events and surfa
 
 ## Dreaming Module
 
-The `modules/dreaming/` directory holds CCGM's nightly, cost-capped transcript-mining pipeline. It mines session transcripts into evidence-tagged `self-improving` learnings-store proposals. Every proposal is human-reviewed via `/dream-apply` by default; an opt-in **optimistic auto-integration** engine (`optimistic_integration.enabled`, default `false`) can integrate them instead, behind a per-op-kind posture (immediate for `verify`, a dwell window for `add`/`supersede`/`contradict`/`deprecate`), per-slug blast-radius caps, a batch-anomaly check, and a windowed circuit breaker.
+The `modules/dreaming/` directory holds CCGM's nightly, cost-capped transcript-mining pipeline. It mines session transcripts into evidence-tagged `self-improving` learnings-store proposals. It mines what a session cannot see for itself (redirections, resolved struggles, conclusions, rediscovered facts, abandoned work), drops what the session already loads (rules, CLAUDE.md, auto-memory, hook text), and leaves tool and hook friction to autoheal. No human queue: with the opt-in **optimistic auto-integration** engine active (`optimistic_integration.enabled`, default `off`), every proposal ends integrated or discarded with a reason, behind a per-op-kind posture (immediate for `verify`, a dwell window for `add`/`supersede`/`contradict`/`deprecate`), per-slug blast-radius caps, a batch-anomaly check, an eval gate and a circuit breaker. With the engine off, proposals are held untouched and `/dream-apply` is the manual path. Each night writes `state/health.json`, a SessionStart hook surfaces a red status and a one-line daily notice, a recurrence metric (`lib/recurrence.py`, no API cost) auto-verifies or deprecates learnings, and an opt-in weekly regression smoke (about $1.50) guards against regressions.
 
 ### Dreaming bring-up
 
 ```bash
-bash start.sh --add dreaming                          # install lib/bin/commands/rules
+bash start.sh --add dreaming                          # install lib/bin/commands/hooks/skill
 bash modules/dreaming/bin/dream-install.sh            # register the macOS LaunchAgent
 bash modules/self-improving/bin/memory-setup.sh       # activation prompts: read path, dreaming, optimistic mode
 ```
@@ -171,10 +171,26 @@ bash modules/self-improving/bin/memory-setup.sh       # activation prompts: read
 
 | Key | Default | What it gates |
 |-----|---------|---------------|
-| `optimistic_integration.enabled` | `off` (`off\|shadow\|active`) | Opt-in auto-integration engine; shadow logs would-integrate and writes nothing (promote at 20+ decided decisions, 90%+ agreement, zero eviction false positives, per `/dream-scorecard`). A legacy `auto_apply_counters: true` config is migrated automatically (in-memory, on read) to `optimistic_integration.enabled: true` with the same conservative defaults |
+| `optimistic_integration.enabled` | `off` (`off\|shadow\|active`) | Opt-in auto-integration engine; shadow logs would-integrate and writes nothing, and `/dream-scorecard` tallies it. A legacy `auto_apply_counters: true` config is migrated automatically (in-memory, on read) to `optimistic_integration.enabled: true` with the same conservative defaults |
 | `optimistic_integration.dwell_hours` | `24` | Hours a written `add`/`supersede`/`contradict`/`deprecate` row is excluded from `search()`/injection before going live |
 | `optimistic_integration.max_add_supersede_per_run` | `10` | Per-slug, per-night cap on `add` + `supersede` |
 | `optimistic_integration.max_eviction_absolute` / `max_eviction_fraction_per_run` | `3` / `0.20` | Per-slug, per-night cap on `contradict` + `deprecate` — the smaller of the two dominates |
+| `optimistic_integration.pending_max_age_hours` | `48` | A proposal still pending this long is discarded as `expired` (active mode only) |
+| `optimistic_integration.eval_freshness_days` | `7` | Eval results older than this pause the gate |
+| `optimistic_integration.max_unevaluated_writes` | `15` | More dreaming auto writes than this since the last eval pause the gate |
+| `optimistic_integration.eval_refresh_enabled` | `false` | Nightly chain runs the weekly 24-session regression smoke (about $1.50) |
+| `optimistic_integration.eval_refresh_min_age_days` | `7` | Newest eval results must be this old before a refresh |
+| `optimistic_integration.eval_refresh_cost_cap_usd` | `2.0` | Hard stop for one refresh run |
+| `optimistic_integration.eval_oauth_token_file` | unset | File with a `claude setup-token` token, so the smoke's arms bill the subscription |
+| `module_budget_usd_30d` | `25.0` | Rolling 30-day ceiling over all `cost.log` spend (analyzer, eval, judge, manual runs); the analyzer and eval refuse to start at or above it |
+| `eval_run_cost_cap_usd` | `5.0` | Hard cap on one `memory_eval.py` run |
+| `daily_cost_cap_usd` | `10.0` | Preflight cap on one night's analyzer spend |
+| `prefilter_threshold` | `0.35` | Map candidates scoring at or above this against the loaded-context corpus are dropped as `already_encoded` (above 1 turns it off) |
+| `friction_threshold` | `0.35` | Friction-only candidates restating their tool error at or above this are dropped as `routed_to_autoheal` (above 1 turns it off) |
+| `promotion_min_sessions` / `promotion_min_slugs` | `3` / `2` | Sessions and project slugs a `_global` add's verified evidence must span to promote; otherwise it is rescoped to one slug |
+| `reduce_pending_max` | `100` | Most pending proposals the reduce sees |
+
+The module README's "Configuration reference" lists every key.
 
 ### Dreaming slash commands
 
@@ -182,9 +198,9 @@ bash modules/self-improving/bin/memory-setup.sh       # activation prompts: read
 |---------|---------|
 | `/dream` | Status overview + subcommand surface. Read-only |
 | `/dream-digest [date]` | Render today's (or a date's) digest |
-| `/dream-apply [id\|list]` | Always-available, human-gated apply — accept/reject a pending proposal |
+| `/dream-apply [id\|list]` | Manual override — accept/reject a pending proposal. The only path while integration is `off` or `shadow`; nothing waits for it when `active` |
 | `/dream-review [id\|list]` | Post-hoc review of auto-integrated and still-dwelling rows; veto one before it goes live |
-| `/dream-scorecard [week]` | Read-only weekly observability scorecard |
+| `/dream-scorecard [week]` | Read-only weekly observability scorecard; headline is the recurrence reduction |
 
 Rollback for a bad auto-integrated batch is `ccgm-learnings-sync revert <sha>` (in `self-improving`) — not a raw `git revert`, which is unsound against this store's `merge=union` shard files.
 
@@ -200,7 +216,7 @@ The judge is one Messages API call per run: no sampling parameters (current judg
 
 ### Dreaming posture
 
-Human-gated apply (`/dream-apply`) is always on and requires no opt-in. Optimistic auto-integration is opt-in and off by default; every gate (eval regression, blast-radius caps, anomaly check, circuit breaker) is designed to hold even if the daily report is never read — only *undoing* an already-integrated row needs a read. See `modules/dreaming/skills/dreaming/SKILL.md` for the full contract.
+Nothing waits on a person. Optimistic auto-integration is opt-in and off by default; with it off, proposals are held (never discarded) and `/dream-apply` is the manual path. With it on, every gate (eval regression, blast-radius caps, anomaly check, circuit breaker) is designed to hold even if the daily report is never read — only *undoing* an already-integrated row needs a read. The weekly regression smoke is a second opt-in (`eval_refresh_enabled`); until it runs, the gate pauses once results go stale, and a pause of 3 or more nights turns `health.json` red. See `modules/dreaming/skills/dreaming/SKILL.md` and the module README for the full contract.
 
 ## Commit Message Format
 

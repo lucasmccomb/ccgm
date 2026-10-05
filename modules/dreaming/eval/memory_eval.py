@@ -841,15 +841,79 @@ def write_run_artifacts(
         (run_dir / "grader.json").write_text(json.dumps(graded, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+@contextlib.contextmanager
+def capture_mining(capture: dict[str, Any]):
+    """Record what dream_analyze mines, maps and keeps while the block runs.
+
+    Fills `capture` with, per slug: `signals` (what the miner extracted),
+    `map_output` (the map call's candidates, before the prefilter) and `kept`
+    (what the prefilter let through to the reduce). The prefilter's drops, with
+    reasons, are in the run summary dream_analyze writes (`prefilter_drops`).
+    dream_analyze itself is not modified: its three stage functions are
+    wrapped and restored on exit."""
+    capture.update(signals={}, map_output={}, kept={}, skip_reasons={})
+    real_mine, real_map, real_reduce = da.mine_due_slugs, da.run_map, da.run_reduce
+
+    def mine(*args: Any, **kwargs: Any):
+        bundles, skip_reasons = real_mine(*args, **kwargs)
+        capture["skip_reasons"].update(skip_reasons)
+        for slug, bundle in bundles.items():
+            capture["signals"][slug] = bundle.get("signals", [])
+        return bundles, skip_reasons
+
+    def run_map(slug: str, *args: Any, **kwargs: Any):
+        result = real_map(slug, *args, **kwargs)
+        capture["map_output"][slug] = result[0]
+        return result
+
+    def run_reduce(map_results: dict[str, Any], *args: Any, **kwargs: Any):
+        capture["kept"] = {slug: list(cands) for slug, cands in map_results.items()}
+        return real_reduce(map_results, *args, **kwargs)
+
+    da.mine_due_slugs, da.run_map, da.run_reduce = mine, run_map, run_reduce
+    try:
+        yield
+    finally:
+        da.mine_due_slugs, da.run_map, da.run_reduce = real_mine, real_map, real_reduce
+
+
 def write_mining_artifacts(
     task_id: str, *, proposals_path: Path, applied_info: dict[str, Any], injected_facts: list[str],
+    capture: dict[str, Any] | None = None, run_summary_path: Path | None = None,
 ) -> None:
-    """The dreamed task's mined proposals and what was applied and injected:
-    the evidence that tells a "dreamed no-lift" result apart (R10)."""
+    """The dreamed task's mining stages, proposals, and what was applied and
+    injected: the evidence that tells a "dreamed no-lift" result apart (R10).
+
+    Under `mining/`: `signals.json` (miner output), `map-output.json` (map
+    candidates), `prefilter.json` (kept and dropped candidates, with reasons),
+    `proposals.jsonl` and `applied.json`. A run that mines nothing can then be
+    read stage by stage without a live re-run."""
     mining_dir = artifact_dir_for(task_id, "mining")
     if mining_dir is None:
         return
     mining_dir.mkdir(parents=True, exist_ok=True)
+    if capture is not None:
+        summary: dict[str, Any] = {}
+        if run_summary_path is not None and run_summary_path.is_file():
+            try:
+                summary = json.loads(run_summary_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                summary = {}
+        stages = {
+            "signals.json": capture.get("signals", {}),
+            "map-output.json": capture.get("map_output", {}),
+            "prefilter.json": {
+                "candidates_mapped": summary.get("candidates_mapped"),
+                "kept": capture.get("kept", {}),
+                "dropped": summary.get("prefilter_drops", []),
+                "dropped_counts": summary.get("prefilter_dropped", {}),
+                "map_calls": summary.get("map_calls"),
+                "reduce_calls": summary.get("reduce_calls"),
+                "skip_reasons": capture.get("skip_reasons", {}),
+            },
+        }
+        for filename, payload in stages.items():
+            (mining_dir / filename).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     proposals = proposals_path.read_text(encoding="utf-8") if proposals_path.is_file() else ""
     (mining_dir / "proposals.jsonl").write_text(proposals, encoding="utf-8")
     (mining_dir / "applied.json").write_text(
@@ -2047,7 +2111,7 @@ def apply_proposal_row(row: dict[str, Any], *, learnings_dir: Path) -> dict[str,
 
 def _mine_and_analyze(
     *, slugs: list[str], projects_root: Path, dreaming_state_dir: Path, offline_dir: Path | None, api_key: str | None,
-    force_day: str,
+    force_day: str, capture: dict[str, Any] | None = None,
 ) -> Path:
     """Run the REAL Epic 2/3 pipeline (transcript_miner + dream_analyze,
     imported, never modified) against a temp --projects-root, writing
@@ -2075,7 +2139,8 @@ def _mine_and_analyze(
         os.environ["CCGM_DREAMING_DIR"] = str(dreaming_state_dir)
         if api_key:
             os.environ["ANTHROPIC_API_KEY"] = api_key
-        da.main(argv)
+        with capture_mining(capture) if capture is not None else contextlib.nullcontext():
+            da.main(argv)
     finally:
         if prev_dreaming_dir is None:
             os.environ.pop("CCGM_DREAMING_DIR", None)
@@ -2143,11 +2208,12 @@ def run_dreamed_task(
         dreamed_offline_dir = (offline_dir.parent / "offline-responses-dreamed") if offline_dir else None
 
     mine_date = today_iso()
+    mining_capture: dict[str, Any] = {}
     with _learnings_store_pointed_at(store_root, claude_projects_dir=projects_root):
         proposals_path = _mine_and_analyze(
             slugs=[signal["slug"], noise["slug"]], projects_root=projects_root, dreaming_state_dir=dreaming_state_dir,
             offline_dir=dreamed_offline_dir if offline else None, api_key=(None if offline else api_key),
-            force_day=mine_date,
+            force_day=mine_date, capture=mining_capture,
         )
         all_proposals = _read_proposals(proposals_path)
         signal_proposals = [p for p in all_proposals if p.get("project") == signal["slug"]]
@@ -2164,6 +2230,7 @@ def run_dreamed_task(
         # "dreamed no-lift" result cannot be told apart (R10).
         write_mining_artifacts(
             task_id, proposals_path=proposals_path, applied_info=applied_info, injected_facts=follow_up_facts,
+            capture=mining_capture, run_summary_path=dreaming_state_dir / "state" / "runs" / f"{mine_date}.json",
         )
 
     project_slug = signal["slug"]

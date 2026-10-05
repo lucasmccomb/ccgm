@@ -4,11 +4,14 @@ Nightly, cost-capped dreaming service that mines Claude Code session
 transcripts for cross-session failure patterns and proposes evidence-tagged
 memory-store changes. Extends the `self-improving` learnings store with an
 out-of-band analyzer -- `autoheal`'s capture-analyze-propose pipeline,
-retargeted at session transcripts instead of permission events. Every
-proposal is human-reviewed via `/dream-apply` by default; an opt-in
-`optimistic_integration` mode (default off) auto-integrates instead, behind
-a per-op-kind posture engine, a dwell window, blast-radius caps, an eval
-gate, and a circuit breaker -- see "The gate and the breaker" below.
+retargeted at session transcripts instead of permission events. Nobody
+reviews a queue: with `optimistic_integration` active (opt-in, default off)
+every proposal ends integrated or discarded with a reason, behind a
+per-op-kind posture engine, a dwell window, blast-radius caps, an eval gate
+and a circuit breaker (see "The gate and the breaker" and "No human queue").
+With it off, proposals are held untouched and `/dream-apply` is the manual
+path. Nightly health, a recurrence metric and a weekly regression smoke
+report whether any of it changes behavior.
 
 Status: **beta**. This module ships incrementally; see "What's implemented
 so far" below.
@@ -20,14 +23,68 @@ so far" below.
 mines the richer session-transcript JSONL directly -- tool errors, hook
 errors, user corrections, token/cache economics, PR links. `dreaming` closes
 that gap: a nightly job reads the transcripts every session already writes,
-extracts patterns a single in-session agent cannot see, and proposes
-per-change memory-store updates for a human to accept/reject, or for the
-opt-in optimistic engine to integrate on its own, subject to its own gates.
+extracts what a single in-session agent cannot see (your redirections,
+struggles resolved after several attempts, conclusions, facts rediscovered
+across sessions, abandoned work), drops what the session already loads
+(rules, CLAUDE.md, auto-memory, hook text) and what autoheal already logs
+(tool and hook friction), and proposes per-change memory-store updates that
+the opt-in optimistic engine integrates or discards on its own, subject to
+its own gates.
 
 Full design: `~/code/plans/ccgm-durable-memory-system/plan.md` (the mining /
 map-reduce analyzer / apply path / eval harness / scheduler foundation) and
 `~/code/plans/ccgm-optimistic-memory/plan.md` (the dwell-window,
 per-op-kind-posture optimistic auto-integration engine built on top of it).
+
+## Configuration reference
+
+`~/.claude/dreaming/config.json`. Every key is optional; a missing key takes
+the default below (`dream_analyze.DEFAULT_CONFIG`). A partial
+`optimistic_integration` block is merged over its defaults, not substituted.
+Nothing creates the file; `memory-setup.sh` writes the opt-ins.
+
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `enabled` | `true` | Runs the mining and analysis pipeline. A different flag from `optimistic_integration.enabled` |
+| `map_model` / `reduce_model` | `claude-sonnet-5` / `claude-opus-4-8` | Models for the two analyzer calls |
+| `max_input_tokens` | `200000` | Evidence-bundle token budget per slug. Signals take at most 80% of it |
+| `max_output_tokens` | `16000` | Output cap per call. A call that hits it is a failed extraction: the slug's cursors hold and it is re-mined |
+| `daily_cost_cap_usd` | `10.0` | Preflight cap on one night's analyzer spend |
+| `module_budget_usd_30d` | `25.0` | Rolling 30-day ceiling over everything in `cost.log` (analyzer, eval arms, judge, in-eval mining, manual runs). The analyzer and the eval both refuse to start at or above it |
+| `eval_run_cost_cap_usd` | `5.0` | Hard cap on one `memory_eval.py` run (preflight estimate plus running total), never more than what is left of the 30-day budget |
+| `lookback_days` | `7` | How far back mining looks for transcripts with no cursor yet, and the recurrence scan window |
+| `scopes` | `[]` | Project slugs to dream on. Empty means every slug that has a learnings store |
+| `prefilter_threshold` | `0.35` | A map candidate scoring at or above this against the loaded-context corpus (rules, CLAUDE.md, auto-memory, hook text, pending and discarded proposals) is dropped as `already_encoded`. Above 1 turns the prefilter off |
+| `friction_threshold` | `0.35` | A candidate whose evidence is all tool-error friction, and whose content scores at or above this against the error text, is dropped as `routed_to_autoheal`. Above 1 turns the rule off |
+| `reduce_pending_max` | `100` | Most pending proposals (newest first) the reduce sees, so it can verify or skip them |
+| `promotion_min_sessions` | `3` | Sessions a `_global` add's verified evidence must span to promote |
+| `promotion_min_agents` | `2` | Agents the evidence must span |
+| `promotion_min_slugs` | `2` | Project slugs the `_global` add's verified evidence must span; short of that it is rescoped to one slug |
+| `cost_pricing` | `{}` | Per-model price overrides for the cost estimate |
+| `auto_apply_counters` | `false` | Legacy verify-only flag; `true` is read as `optimistic_integration.enabled: true` (in memory, never rewritten) |
+
+`optimistic_integration` (the opt-in engine and its eval):
+
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `enabled` | `false` | `off`, `shadow` or `active`; a boolean reads as `active` or `off` |
+| `dwell_hours` | `24` | Hours a written add, supersede, contradict or deprecate row stays out of `search()` and injection |
+| `max_add_supersede_per_run` | `10` | Per-slug, per-night cap on adds plus supersedes |
+| `max_eviction_absolute` / `max_eviction_fraction_per_run` | `3` / `0.20` | Per-slug, per-night cap on contradicts plus deprecates; the smaller dominates |
+| `confidence_floor_verify` / `confidence_floor_content` | `7` / `8` | Confidence floors |
+| `add_min_sessions` | `2` | Verified sessions an add needs under the flat floor |
+| `batch_anomaly_max_same_tag_fraction` | `0.6` | Eviction-concentration threshold for the batch-anomaly check |
+| `circuit_breaker_window_nights` / `circuit_breaker_max_anomalies` | `7` / `2` | Content anomalies within the window that suspend integration |
+| `circuit_breaker_auto_resume_nights` | `7` | Quiet nights before the breaker resumes |
+| `rolling_add_rate_window_nights` / `rolling_add_rate_max` | `14` / `40` | Cross-night add and supersede volume check |
+| `pending_max_age_hours` | `48` | A proposal still pending this long is discarded as `expired` (active mode only) |
+| `eval_freshness_days` | `7` | Eval results older than this pause the gate |
+| `max_unevaluated_writes` | `15` | More dreaming auto writes than this since the last eval pause the gate |
+| `eval_refresh_enabled` | `false` | Runs the weekly regression smoke from the nightly chain (about $1.50) |
+| `eval_refresh_min_age_days` | `7` | Newest eval results must be this old before the chain refreshes |
+| `eval_refresh_cost_cap_usd` | `2.0` | Hard stop for one refresh run, passed to `memory_eval.py` as `--max-total-usd` |
+| `eval_oauth_token_file` | unset | File holding a `claude setup-token` OAuth token, so the smoke's arms bill the subscription (see "Subscription auth for the arms"). `CCGM_EVAL_OAUTH_TOKEN_FILE` overrides it |
+| `eligibility` | `{enabled: false, ...}` | The composite eligibility gate; see "What's implemented so far (composite-eligibility)" |
 
 ## What's implemented so far (composite-eligibility)
 
@@ -133,17 +190,14 @@ Every reader of the flag goes through its `resolve_mode`.
   It writes nothing to the learnings store, the apply-audit, the proposals
   or the breaker state, makes no commit, and skips the paid eval refresh.
   `memory-setup.sh` offers shadow first.
-- **Agreement.** `/dream-scorecard` compares each would-integrate decision
-  with your `/dream-apply` choice (the proposal's `accepted` or `rejected`
-  status): would-integrate and accepted, or would-skip and rejected, is
-  agreed; would-integrate and rejected is a false positive; would-skip and
-  accepted is a false negative; no decision yet is pending.
-- **Promotion bar.** Move to `active` only when the scorecard shows at least
-  20 decided (non-pending) decisions, at 90% agreement or better, with zero
-  false positives on evictions (`learning_contradict`, `learning_deprecate`).
-  The numbers are `PROMOTION_MIN_DECIDED`, `PROMOTION_MIN_AGREEMENT` and
-  `PROMOTION_MAX_GUARDED_FALSE_POSITIVES` in `lib/rollout_mode.py`; the
-  scorecard computes the verdict from them.
+- **Scorecard.** `/dream-scorecard` tallies the log: decisions logged, how
+  many would integrate, how many would skip (`rollout_mode.shadow_tally`, the
+  latest record per proposal). It does not score the decisions. The old
+  agreement statistic and 20-decision / 90% promotion bar compared each
+  decision with a `/dream-apply` accept or reject; with no human queue (see
+  "No human queue") there are no such outcomes, so both were retired. Read the
+  shadow log and the health and recurrence output, then set `active` when
+  you are satisfied.
 
 ## What's implemented so far (Epic 3)
 
@@ -212,7 +266,7 @@ The **nightly map->reduce analyzer**, on top of Epic 2's miner:
   one that fires on none of its evidence excerpts as `trigger_unverified`
   (counted as `triggers_unverified` in the run summary). Triggers that match
   everything (`.*`, `*`, one-letter values) and nested-quantifier regexes
-  are invalid. Phase 4's recurrence metric imports `triggers.matches()` to
+  are invalid. The recurrence metric imports `triggers.matches()` to
   scan later transcripts.
 - `lib/loaded_context.py` -- the loaded-context corpus and prefilter
   (#1098 3.3). Every session already loads its rules, CLAUDE.md files,
@@ -417,8 +471,8 @@ that never opened. Both now work as follows.
   since the suspension, it resumes and clears the content anomalies only.
   Integration still needs that night's gate to be open.
 - `optimistic-resume` stays as the manual override.
-- `recurrence_spike` is the seam for the Phase 4 recurrence metric:
-  `apply_dream_proposal.py record-anomaly --reason recurrence_spike
+- `recurrence_spike` is recorded by the recurrence metric (`lib/recurrence.py`),
+  or by hand: `apply_dream_proposal.py record-anomaly --reason recurrence_spike
   --batch-id <optbatch_id>`.
 
 **Existing history.** Before #1098, `anomaly_log` held bare timestamps, and
@@ -515,14 +569,14 @@ per date) and `recurrence` (the summary described in the next section).
 | `analyze_failed` | analyze step exited non-zero this run | |
 | `breaker_suspended` | suspended 3+ nights | suspended 0 to 2 nights. The fix says what clears it (7 nights with no content anomaly) and the date that falls on |
 | `gate_closed` | closed (a supported regression) 3+ nights in a row | closed 1 to 2 nights |
-| `gate_paused` | | the gate is paused; the fix names the cause, e.g. "no fresh eval: eval-refresh is disabled until the Phase 4 smoke test lands" |
+| `gate_paused` | paused 3+ nights (nothing integrates, and expire-pending discards proposals unseen after 48h) | paused 1 to 2 nights. The fix names the cause, e.g. "no fresh eval: eval_refresh_enabled is false; set it to true to run the weekly regression smoke" |
 | `no_terminal_outcomes` / `pending_backlog` | oldest pending 7+ nights, nothing integrated or discarded in 7 nights | oldest pending 3+ nights |
 | `spend_near_budget` | 30-day spend over 80% of budget (below 100%) | over 60% |
 | `budget_paused` | | 30-day spend at or above budget (from `cost.log`). Replaces `spend_near_budget`; the message gives the resume date. It hides nothing by itself |
 | `daily_cap_reached` | | `state/last-run.json` says the analyzer stopped at its daily cap; clears tomorrow |
+| `eval_budget_abort` | an eval budget-abort in the last 7 days with no later results | |
 
 `dream_analyze.py` writes `state/last-run.json` (`date`, `rc`, `outcome`, `spent_30d`, `budget`) with outcome `ok`, `budget_refused`, `daily_cap_refused` or `failed`. Exit code 2 is shared by both refusals and by real failures, so health never infers a refusal from it. Only a recorded `budget_refused` for today's date suppresses `no_recent_success`, `success_aging` and `analyze_failed`; a missing file or outcome `failed` stays red, even during a budget pause.
-| `eval_budget_abort` | an eval budget-abort in the last 7 days with no later results | |
 
 Gate, breaker and backlog rules apply only when `optimistic_integration` is
 `shadow` or `active`. `remine_ratio` is not written: the mining cursors store
@@ -621,12 +675,27 @@ one answer: does treatment fail a check that baseline passes?
 - **Artifacts.** `evals/<date>/<task>/<model>/<arm>-<run>/` holds
   `output.txt` (the agent's final message), `workdir.diff` (what it changed
   against the fixture), `grader.json` (each check) and `result.json` (turns,
-  tokens, auth, cost). The dreamed task adds `evals/<date>/<task>/mining/`:
-  `proposals.jsonl` (everything mining wrote), and `applied.json` (what was
-  applied and the exact text injected into the treatment arm). A "dreamed
-  no-lift" result is diagnosable from these: compare the proposal text with
-  what treatment's diff did. (Directories, not `*.jsonl` files, so the gate's
-  results glob ignores them.)
+  tokens, auth, cost). The dreamed task adds `evals/<date>/<task>/mining/`,
+  one file per mining stage:
+
+  | File | Holds |
+  |------|-------|
+  | `signals.json` | per slug, the signals the miner extracted from the synthetic transcripts |
+  | `map-output.json` | per slug, the map call's candidates, before the prefilter |
+  | `prefilter.json` | `kept` (what reached the reduce), `dropped` (each with `reason`, `source`, `category`, `score`), `candidates_mapped`, `map_calls`, `reduce_calls`, `skip_reasons` |
+  | `proposals.jsonl` | everything mining wrote |
+  | `applied.json` | what was applied and the exact text injected into the treatment arm |
+
+  A "dreamed no-lift" result is diagnosable from these without a live re-run:
+  no signals means the fixtures never reached the miner as a signal; candidates
+  all dropped names the rule that dropped them; proposals that were kept but did
+  not lift means comparing their text with what treatment's diff did.
+  (Directories, not `*.jsonl` files, so the gate's results glob ignores them.)
+  The dreamed task's synthetic transcripts
+  (`eval/tasks/fixtures/dreamed-*.jsonl`) carry the `_synced_at` fact as a
+  human redirection and an assistant conclusion, the shapes the miner
+  extracts; as bare error-then-fix friction it would be dropped as autoheal's.
+  `tests/test_smoke_dreamed_fixtures.py` pins that offline.
 - **`--full`** runs the old suite: every task, three arms, the Opus judge,
   both backbones, 5 runs.
 
@@ -872,6 +941,10 @@ python3 -m pytest modules/dreaming/tests/test_dream_analyze.py -q
 # Builds its own throwaway ~/.claude/projects/-shaped temp directory --
 # see the script for the exact layout dream-analyze.sh expects.
 bash modules/dreaming/tests/test-dream-pipeline.sh
+
+# The reconcile step writes digests/<date>.reconcile.md plus one pointer line in
+# the digest, and a re-run leaves exactly one of each. Temp dirs only; CI runs it.
+bash modules/dreaming/tests/test-dream-reconcile.sh
 ```
 
 ## When NOT to invoke this module's internals directly

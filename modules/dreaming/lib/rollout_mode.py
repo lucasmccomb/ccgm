@@ -11,8 +11,7 @@ compares the raw value.
            learnings store.
   active   the engine integrates.
 
-The module also holds the agreement arithmetic and the promotion bar the
-scorecard reports, so "ready for active" is computed, not prose.
+The module also holds the shadow-decision tally the scorecard reports.
 
 Pure and dependency-free: scorecard.py, dream_analyze.py and dream-daily.sh
 all import it.
@@ -26,18 +25,6 @@ MODE_OFF = "off"
 MODE_SHADOW = "shadow"
 MODE_ACTIVE = "active"
 MODES = (MODE_OFF, MODE_SHADOW, MODE_ACTIVE)
-
-# Promotion bar: suggest `active` only when the shadow record shows at least
-# this many decided (non-pending) decisions, at this agreement rate or better,
-# with no more than this many false positives on guarded items. For dreaming
-# the guarded items are evictions (contradict / deprecate), which remove
-# knowledge from the store.
-PROMOTION_MIN_DECIDED = 20
-PROMOTION_MIN_AGREEMENT = 0.90
-PROMOTION_MAX_GUARDED_FALSE_POSITIVES = 0
-
-GUARDED_KINDS = ("learning_contradict", "learning_deprecate")
-
 
 def resolve_mode(value: Any) -> str:
     """Map a persisted flag value to "off", "shadow" or "active".
@@ -53,81 +40,30 @@ def resolve_mode(value: Any) -> str:
     return MODE_OFF
 
 
-def agreement(
-    decisions: Iterable[dict[str, Any]], outcomes: dict[str, str],
-) -> dict[str, int]:
-    """Compare shadow decisions with what the human later did.
+def shadow_tally(decisions: Iterable[dict[str, Any]]) -> dict[str, int]:
+    """Count shadow decisions for the scorecard.
 
-    `decisions`: records with `proposal_id`, `would_integrate` (bool) and
-    `kind`. A proposal decided more than once counts once, by its latest
-    record. `outcomes` maps proposal_id to "accepted" or "rejected"; any other
-    or missing value leaves the decision pending.
-
-    would-integrate + accepted  -> agreed
-    would-integrate + rejected  -> false positive
-    would-skip      + accepted  -> false negative
-    would-skip      + rejected  -> agreed
+    `decisions`: records with `proposal_id` and `would_integrate` (bool). A
+    proposal decided more than once counts once, by its latest record. There is
+    no human outcome to compare against: proposals are never queued for review
+    (#1098 2.3), so shadow mode reports what the engine would do and nothing more.
     """
     latest: dict[str, dict[str, Any]] = {}
     for rec in decisions:
         pid = rec.get("proposal_id")
         if isinstance(pid, str) and pid:
             latest[pid] = rec
-    stats = {
-        "decisions": len(latest), "agreed": 0, "false_positives": 0,
-        "false_negatives": 0, "pending": 0, "guarded_false_positives": 0,
-    }
-    for pid, rec in latest.items():
-        outcome = outcomes.get(pid)
-        if outcome not in ("accepted", "rejected"):
-            stats["pending"] += 1
-            continue
-        would = bool(rec.get("would_integrate"))
-        accepted = outcome == "accepted"
-        if would == accepted:
-            stats["agreed"] += 1
-        elif would:
-            stats["false_positives"] += 1
-            if rec.get("kind") in GUARDED_KINDS:
-                stats["guarded_false_positives"] += 1
-        else:
-            stats["false_negatives"] += 1
-    return stats
-
-
-def promotion_verdict(stats: dict[str, int]) -> dict[str, Any]:
-    """Apply the promotion bar to `agreement()` output."""
-    decided = stats["agreed"] + stats["false_positives"] + stats["false_negatives"]
-    rate = stats["agreed"] / decided if decided else 0.0
-    reasons: list[str] = []
-    if decided < PROMOTION_MIN_DECIDED:
-        reasons.append(f"{decided} of {PROMOTION_MIN_DECIDED} decided decisions")
-    if decided and rate < PROMOTION_MIN_AGREEMENT:
-        reasons.append(f"agreement {rate:.0%} is below {PROMOTION_MIN_AGREEMENT:.0%}")
-    if stats["guarded_false_positives"] > PROMOTION_MAX_GUARDED_FALSE_POSITIVES:
-        reasons.append(f"{stats['guarded_false_positives']} false positive(s) on guarded items")
-    return {"ready": not reasons, "decided": decided, "agreement": rate, "reasons": reasons}
+    would = sum(1 for rec in latest.values() if rec.get("would_integrate"))
+    return {"decisions": len(latest), "would_integrate": would, "would_skip": len(latest) - would}
 
 
 def render_lines(stats: dict[str, int]) -> list[str]:
     """Markdown lines for the scorecard's shadow section."""
-    verdict = promotion_verdict(stats)
-    lines = [
+    return [
         f"- shadow decisions: {stats['decisions']}",
-        f"- agreed: {stats['agreed']}",
-        f"- disagreed: {stats['false_positives'] + stats['false_negatives']} "
-        f"({stats['false_positives']} false positive, {stats['false_negatives']} false negative)",
-        f"- pending (no human outcome yet): {stats['pending']}",
-        f"- guarded false positives (evictions): {stats['guarded_false_positives']}",
+        f"- would integrate: {stats['would_integrate']}",
+        f"- would skip: {stats['would_skip']}",
     ]
-    if verdict["ready"]:
-        lines.append(
-            f"- promotion bar met ({verdict['decided']} decided, {verdict['agreement']:.0%} agreement): "
-            "safe to suggest `active`"
-        )
-    else:
-        lines.append(f"- promotion bar not met: {'; '.join(verdict['reasons'])}")
-    return lines
 
 
 if __name__ == "__main__":

@@ -249,16 +249,35 @@ class HealthComputeTest(unittest.TestCase):
                 fix = self._reason(compute(self.root, gate_fn=paused_gate(code)), "gate_paused")["fix"]
                 self.assertIn(needle, fix)
 
-    def test_paused_gate_stays_yellow_however_long_it_lasts(self):
+    def _pause_nights(self, n):
+        (self.root / "state" / "apply-audit.jsonl").write_text("".join(
+            json.dumps({"outcome": "anomaly_recorded", "reason": "eval_gate_paused", "class": "infra", "ts": ts(i)}) + "\n"
+            for i in range(n)), encoding="utf-8")
+
+    def test_paused_gate_two_nights_is_yellow(self):
         build_green(self.root)
-        audit = self.root / "state" / "apply-audit.jsonl"
-        audit.write_text("".join(
-            json.dumps({"outcome": "anomaly_recorded", "reason": "eval_gate_paused", "class": "infra", "ts": ts(n)}) + "\n"
-            for n in range(10)), encoding="utf-8")
+        self._pause_nights(2)
         h = compute(self.root, gate_fn=paused_gate("no_results"))
-        self.assertEqual(h["status"], "yellow")
+        self.assertEqual((h["status"], h["gate"]["consecutive_closed_nights"]), ("yellow", 2))
+
+    def test_paused_gate_three_nights_is_red(self):
+        # Nothing integrates while paused, and expire-pending discards each
+        # night's proposals unseen after 48h, so a long pause loses work.
+        build_green(self.root)
+        self._pause_nights(10)
+        h = compute(self.root, gate_fn=paused_gate("no_results"))
+        self.assertEqual(h["status"], "red")
         self.assertEqual(h["gate"]["consecutive_closed_nights"], 10)
-        self.assertIn("10 night(s)", self._reason(h, "gate_paused")["message"])
+        reason = self._reason(h, "gate_paused")
+        self.assertIn("10 night(s)", reason["message"])
+
+    def test_paused_gate_is_silent_when_integration_is_off(self):
+        build_green(self.root)
+        write_json(self.root / "config.json",
+                   {"enabled": True, "optimistic_integration": {"enabled": False}})
+        self._pause_nights(5)
+        h = compute(self.root, gate_fn=paused_gate("no_results"))
+        self.assertNotIn("gate_paused", codes(h))
 
     def test_breaker_fix_says_resume_is_due_when_quiet_long_enough(self):
         build_red(self.root)

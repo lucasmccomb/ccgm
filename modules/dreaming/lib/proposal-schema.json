@@ -115,7 +115,7 @@
           "description": "A string for regex, command_prefix and path_glob; a non-empty list of strings for phrase_set."
         }
       },
-      "description": "REQUIRED object for learning_add and learning_supersede, null for the other kinds. A small deterministic matcher for the situation the learning is about (lib/triggers.py owns the semantics). dream_analyze.py's finalizer rejects the proposal as `trigger_unverified` when the trigger matches none of its own cited evidence excerpts, and as `trigger_invalid` when it is missing or malformed. Phase 4's recurrence metric scans later transcripts with the same matcher."
+      "description": "REQUIRED object for learning_add and learning_supersede, null for the other kinds. A small deterministic matcher for the situation the learning is about (lib/triggers.py owns the semantics). dream_analyze.py's finalizer rejects the proposal as `trigger_unverified` when the trigger matches none of its own cited evidence excerpts, and as `trigger_invalid` when it is missing or malformed. The recurrence metric (lib/recurrence.py) scans later transcripts with the same matcher."
     },
     "novelty": {
       "type": ["string", "null"],

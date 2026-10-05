@@ -3,8 +3,8 @@
 
 Every `learning_add` / `learning_supersede` proposal carries a `trigger`: a
 small matcher that fires on the situation the learning is about. The
-finalizer checks it against the proposal's own cited evidence; the Phase 4
-recurrence metric will import `matches()` to scan later transcripts.
+finalizer checks it against the proposal's own cited evidence; the recurrence
+metric (lib/recurrence.py) imports `matches()` to scan later transcripts.
 
 Schema:  {"kind": <kind>, "value": <value>}
 

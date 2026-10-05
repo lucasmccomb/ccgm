@@ -56,11 +56,11 @@ signals — the honest answer to "how do I know the memory system is working?"
     (`state/optimistic.json`).
 - **Shadow integration** — only when `optimistic_integration.enabled` has run
   in `"shadow"` (the log `state/shadow-optimistic.jsonl` exists). All-time, not
-  window-scoped, because the promotion bar needs the whole record. Shows
-  decisions, agreed, disagreed (false positives and false negatives), pending
-  (no `/dream-apply` outcome yet), false positives on evictions, and whether
-  the promotion bar is met (20 decided decisions, 90% agreement, zero eviction
-  false positives; constants in `lib/rollout_mode.py`).
+  window-scoped. Shows decisions logged (the latest record per proposal), how
+  many would integrate and how many would skip (`rollout_mode.shadow_tally`).
+  It does not score them: the old agreement statistic and promotion bar
+  compared decisions with `/dream-apply` outcomes, which the no-human-queue
+  design (#1098 2.3) no longer produces.
 - **Store health** — total active learnings, effective-confidence bands, and
   deprecated/superseded counts.
 
@@ -94,5 +94,5 @@ window + wall clock. The library never reads the wall clock itself.
 
 - Generator: `~/.claude/bin/dream-scorecard.sh` → `lib/scorecard.py`
 - `/dream-digest [date]` — per-day proposal digest.
-- `/dream-apply [id|list]` — the human-gated write path for proposals.
+- `/dream-apply [id|list]` — the manual write path for proposals.
 - Injection telemetry: `~/.claude/dreaming/injection-log/*.jsonl` (#782).

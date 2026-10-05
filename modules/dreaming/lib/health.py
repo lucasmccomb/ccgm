@@ -49,9 +49,10 @@ optimistic_integration is shadow or active):
                           (lib/breaker.py), and the date that falls on.
   gate_closed         R  closed 3+ nights      Y  closed 1-2 nights (a supported
                           regression)
-  gate_paused         Y  the gate is paused (no usable eval: missing, stale,
-                          broken, budget-aborted). Never red by itself; the fix
-                          names the cause.
+  gate_paused         R  paused 3+ nights   Y  paused 1-2 nights (no usable eval:
+                          missing, stale, broken, budget-aborted). Nothing
+                          integrates while paused, and expire-pending discards
+                          proposals unseen after 48h. The fix names the cause.
   no_terminal_outcomes R oldest pending is 7+ nights old and no proposal in the
                           last 7 nights was integrated, accepted or rejected
   pending_backlog     Y  oldest pending is 3+ nights old (and not red above)
@@ -443,12 +444,15 @@ def compute(
                 cursor -= timedelta(days=1)
         gate = {"state": gate_state, "code": gate_code, "reason": gate_reason, "consecutive_closed_nights": streak}
         if gate_state == "paused":
-            # Infra, not content: yellow however long it lasts. The fix names
-            # the cause, which is usually that no eval has run.
+            # Infra, not content, so a short pause is yellow. A pause of
+            # GATE_RED_NIGHTS or more is red: nothing integrates and
+            # expire-pending discards each night's proposals unseen after 48h.
+            # The fix names the cause, which is usually that no eval has run.
             refresh_on = bool((opt_cfg if isinstance(opt_cfg, dict) else {}).get("eval_refresh_enabled", False))
             nights = f" {streak} night(s)" if streak else ""
             reasons.append(_reason(
-                "gate_paused", "yellow", f"eval gate paused{nights}, nothing integrates: {gate_reason}",
+                "gate_paused", "red" if streak >= GATE_RED_NIGHTS else "yellow",
+                f"eval gate paused{nights}, nothing integrates: {gate_reason}",
                 _paused_fix(str(gate_code), refresh_on)))
         elif streak:
             reasons.append(_reason(

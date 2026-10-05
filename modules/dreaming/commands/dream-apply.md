@@ -1,10 +1,11 @@
 # /dream-apply - List, Apply, or Reject Dreaming Proposals
 
 Inspect the queue of pending dreaming proposals, or accept/reject a single
-proposal by id through `lib/apply_dream_proposal.py`. This is the ONLY
-human-gated write path from a mined proposal into the learnings store —
-including the ONE path a `_global` proposal can ever be promoted through
-(`learnings_store.promote_to_global()`, invoked here after your accept).
+proposal by id through `lib/apply_dream_proposal.py`. This is the only
+manual write path from a mined proposal into the learnings store, and the
+one path that promotes an under-evidenced `_global` proposal
+(`learnings_store.promote_to_global()`, invoked here after your accept). The
+optimistic engine is the other writer.
 
 **Manual override, not a queue (#1098 item 2.3).** Nothing waits for this
 command. With optimistic integration `active`, every proposal reaches a
@@ -31,8 +32,9 @@ integrated, use **`/dream-review`**.
 
 ## When to invoke
 
-- The daily digest landed and you want to review the proposal queue before
-  applying anything.
+- Integration is `off` or `shadow`, the daily digest landed, and you want to
+  apply a held proposal by hand. With integration `active` there is no queue
+  to review: the engine decides each proposal itself.
 - You want to accept or reject a specific proposal `/dream-digest` surfaced.
 - A proposal shows `needs_manual_promotion` (an under-prevalence `_global`
   candidate) — accepting it here IS the promotion mechanism; there is no

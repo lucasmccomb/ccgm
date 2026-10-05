@@ -758,7 +758,7 @@ Synthesizes what shipped in a time window by walking the git log, surfacing hots
 
 ## Dreaming commands
 
-Installed by the **dreaming** module. Dreaming mines session transcripts nightly into evidence-tagged proposals against the self-improving learnings store. Every proposal is human-gated by default (`/dream-apply`); an opt-in optimistic auto-integration engine can apply proposals unattended instead, behind a dwell window and blast-radius caps.
+Installed by the **dreaming** module. Dreaming mines session transcripts nightly into evidence-tagged proposals against the self-improving learnings store. No human queue: an opt-in optimistic auto-integration engine integrates or discards every proposal on its own, behind a dwell window, blast-radius caps, an eval gate and a circuit breaker. With the engine off, proposals are held and `/dream-apply` applies one by hand.
 
 ---
 
@@ -793,7 +793,7 @@ Prints the markdown digest generated from that day's mined proposals. Falls back
 
 **List, apply, or reject pending dreaming proposals.**
 
-The always-available, human-gated write path from a mined proposal into the learnings store — including the only path a `_global` proposal can ever be promoted through. `/dream-apply` (no args) lists pending proposals; `/dream-apply <id>` shows and applies one; `/dream-apply <id> reject` dismisses it without a store write.
+The manual write path from a mined proposal into the learnings store, and the path that promotes an under-evidenced `_global` proposal. Nothing waits for it when auto-integration is active. `/dream-apply` (no args) lists pending proposals; `/dream-apply <id>` shows and applies one; `/dream-apply <id> reject` dismisses it without a store write.
 
 **Usage**:
 ```

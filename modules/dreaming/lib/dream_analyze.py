@@ -433,10 +433,10 @@ DEFAULT_OPTIMISTIC_INTEGRATION: dict[str, Any] = {
     # Beyond either bound the gate pauses until the next (weekly) eval.
     "eval_freshness_days": 7,
     "max_unevaluated_writes": 15,
-    # Off until the Phase 4 smoke test replaces the 270-session eval (one
-    # full run cost ~$21). The step stays in the chain; only an explicit
-    # `eval_refresh_enabled: true` runs it, and then under the hard
-    # `eval_refresh_cost_cap_usd` total-cost stop in memory_eval.py.
+    # Off by default. When on, the eval-refresh step runs the weekly 24-session
+    # regression smoke (~$1.50; the old 270-session eval cost ~$21 a run), under
+    # the hard `eval_refresh_cost_cap_usd` total-cost stop in memory_eval.py.
+    # Only an explicit `eval_refresh_enabled: true` runs it.
     "eval_refresh_enabled": False,
     "eval_refresh_min_age_days": 7,
     "eval_refresh_cost_cap_usd": 2.00,
@@ -1560,7 +1560,7 @@ def finalize_proposal(
 
     # Trigger (#1098 3.4): add/supersede must say, deterministically, when the
     # learning applies, and the trigger has to fire on the proposal's own
-    # cited evidence as stored. Phase 4's recurrence metric scans later
+    # cited evidence as stored. The recurrence metric scans later
     # transcripts with the same matcher; a trigger that cannot find its own
     # evidence would never find a recurrence either.
     trigger = None

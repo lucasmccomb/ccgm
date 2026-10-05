@@ -2,7 +2,7 @@
 """
 Tests for optimistic integration's off/shadow/active rollout (#1087):
   - rollout_mode.resolve_mode: boolean back-compat + fail-closed
-  - rollout_mode.agreement / promotion_verdict arithmetic
+  - rollout_mode.shadow_tally arithmetic
   - run_optimistic_integrate(shadow=True): decides and logs, writes nothing
   - scorecard shadow section
   - dream-daily.sh routes the three modes
@@ -56,67 +56,21 @@ def _d(pid, would, kind="learning_add"):
     return {"proposal_id": pid, "would_integrate": would, "kind": kind}
 
 
-class AgreementTests(unittest.TestCase):
-    def test_all_four_cells_and_pending(self):
-        decisions = [
-            _d("agree-yes", True), _d("agree-no", False),
-            _d("fp", True), _d("fn", False), _d("pend", True),
-        ]
-        outcomes = {"agree-yes": "accepted", "agree-no": "rejected", "fp": "rejected", "fn": "accepted"}
-        s = rm.agreement(decisions, outcomes)
-        self.assertEqual(s["decisions"], 5)
-        self.assertEqual(s["agreed"], 2)
-        self.assertEqual(s["false_positives"], 1)
-        self.assertEqual(s["false_negatives"], 1)
-        self.assertEqual(s["pending"], 1)
-
-    def test_guarded_false_positive_counts_evictions_only(self):
-        decisions = [_d("e", True, "learning_deprecate"), _d("a", True, "learning_add")]
-        s = rm.agreement(decisions, {"e": "rejected", "a": "rejected"})
-        self.assertEqual(s["false_positives"], 2)
-        self.assertEqual(s["guarded_false_positives"], 1)
+class ShadowTallyTests(unittest.TestCase):
+    def test_counts_would_integrate_and_would_skip(self):
+        s = rm.shadow_tally([_d("a", True), _d("b", False), _d("c", True)])
+        self.assertEqual(s, {"decisions": 3, "would_integrate": 2, "would_skip": 1})
 
     def test_latest_record_per_proposal_wins(self):
-        decisions = [_d("p", False), _d("p", True)]
-        s = rm.agreement(decisions, {"p": "accepted"})
-        self.assertEqual((s["decisions"], s["agreed"]), (1, 1))
+        s = rm.shadow_tally([_d("p", False), _d("p", True)])
+        self.assertEqual(s, {"decisions": 1, "would_integrate": 1, "would_skip": 0})
 
-    def test_other_outcomes_stay_pending(self):
-        s = rm.agreement([_d("p", True)], {"p": "auto_applied"})
-        self.assertEqual(s["pending"], 1)
+    def test_records_without_a_proposal_id_are_ignored(self):
+        self.assertEqual(rm.shadow_tally([{"would_integrate": True}])["decisions"], 0)
 
-
-class PromotionBarTests(unittest.TestCase):
-    def _stats(self, agreed, fp=0, fn=0, guarded=0):
-        return {"decisions": agreed + fp + fn, "agreed": agreed, "false_positives": fp,
-                "false_negatives": fn, "pending": 0, "guarded_false_positives": guarded}
-
-    def test_constants_are_the_documented_bar(self):
-        self.assertEqual(rm.PROMOTION_MIN_DECIDED, 20)
-        self.assertEqual(rm.PROMOTION_MIN_AGREEMENT, 0.90)
-        self.assertEqual(rm.PROMOTION_MAX_GUARDED_FALSE_POSITIVES, 0)
-
-    def test_met_at_exactly_the_bar(self):
-        v = rm.promotion_verdict(self._stats(agreed=18, fn=2))
-        self.assertTrue(v["ready"], v)
-
-    def test_too_few_decisions(self):
-        v = rm.promotion_verdict(self._stats(agreed=19))
-        self.assertFalse(v["ready"])
-
-    def test_agreement_below_bar(self):
-        v = rm.promotion_verdict(self._stats(agreed=17, fn=3))
-        self.assertFalse(v["ready"])
-
-    def test_one_guarded_false_positive_blocks(self):
-        v = rm.promotion_verdict(self._stats(agreed=29, fp=1, guarded=1))
-        self.assertFalse(v["ready"])
-        self.assertTrue(any("guarded" in r for r in v["reasons"]))
-
-    def test_pending_does_not_count_as_decided(self):
-        s = self._stats(agreed=10)
-        s["pending"] = 50
-        self.assertFalse(rm.promotion_verdict(s)["ready"])
+    def test_agreement_statistic_is_retired(self):
+        for name in ("agreement", "promotion_verdict", "PROMOTION_MIN_DECIDED"):
+            self.assertFalse(hasattr(rm, name), name)
 
 
 class LoadConfigModeTests(toe.OptimisticEngineTestBase):
@@ -237,18 +191,16 @@ class ScorecardShadowTests(unittest.TestCase):
             store_api=ls, generated_at="2026-09-08",
         )
 
-    def test_section_shows_counts_and_promotion_status(self):
+    def test_section_tallies_would_integrate_and_would_skip(self):
         with tempfile.TemporaryDirectory() as d:
             shadow = [_d("p1", True), _d("p2", True), _d("p3", False), _d("p4", True)]
-            props = [{"id": "p1", "status": "accepted"}, {"id": "p2", "status": "rejected"},
-                     {"id": "p3", "status": "accepted"}, {"id": "p4", "status": "pending"}]
-            md = self._render(Path(d), shadow, props)
-        self.assertIn("## Shadow integration", md)
+            md = self._render(Path(d), shadow, [])
+        self.assertIn("## Shadow integration — 4 decisions logged", md)
         self.assertIn("- shadow decisions: 4", md)
-        self.assertIn("- agreed: 1", md)
-        self.assertIn("1 false positive, 1 false negative", md)
-        self.assertIn("- pending (no human outcome yet): 1", md)
-        self.assertIn("promotion bar not met", md)
+        self.assertIn("- would integrate: 3", md)
+        self.assertIn("- would skip: 1", md)
+        self.assertNotIn("promotion bar", md)
+        self.assertNotIn("agreed", md)
 
     def test_section_absent_without_a_shadow_log(self):
         with tempfile.TemporaryDirectory() as d:

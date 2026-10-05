@@ -80,3 +80,6 @@ jobs:
         run: |
           CCGM_DREAMING_DIR="$(mktemp -d)" CCGM_LEARNINGS_DIR="$(mktemp -d)" \
             bash modules/dreaming/bin/dream-eval.sh --offline modules/dreaming/tests/fixtures/offline-responses
+
+      - name: "(e) reconcile idempotency (sidecar report)"
+        run: bash modules/dreaming/tests/test-dream-reconcile.sh
