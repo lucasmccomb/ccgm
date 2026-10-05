@@ -160,12 +160,15 @@ def shadow_log_path(kind: str) -> str:
     return os.path.join(shadow_dir(), f"{kind}.jsonl")
 
 
-def _ledger():
-    spec = importlib.util.spec_from_file_location(
-        "autoheal_ledger", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ledger.py"))
+def _load(path: str, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _ledger():
+    return _load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ledger.py"), "autoheal_ledger")
 
 
 def now_utc() -> _dt.datetime:
@@ -353,7 +356,8 @@ def auto_apply_stats(cfg_path: str | None = None, now: _dt.datetime | None = Non
     since = _parse_ts(cfg.get(DEMOTED_KEY))
     stats = agreement(decisions, human_outcomes(rows), since)
     verdict = promotion_verdict(stats)
-    targets = cfg.get("auto_apply_targets")
+    targets = _load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "auto_apply.py"),
+                    "autoheal_auto_apply").target_patterns(cfg)
     return {
         "mode": auto_apply_mode_of(cfg),
         "promoted_at": cfg.get(PROMOTED_KEY),
@@ -366,7 +370,7 @@ def auto_apply_stats(cfg_path: str | None = None, now: _dt.datetime | None = Non
         "outcomes": outcome_counts(rows),
         "reverts_30d": recent_reverts(rows, now),
         "auto_applied": sum(1 for r in rows if r.get("applied_by") == "auto"),
-        "targets": targets if isinstance(targets, list) else [],
+        "targets": targets,
     }
 
 

@@ -109,7 +109,7 @@ Run `python3 lib/module-index.py` to see what resolves and the index text.
 ## Default posture
 
 - **Real-time security alerts: OFF.** Enable with `/autoheal-toggle realtime on` (or `realtime_alerts_enabled: "active"` in config). Try `/autoheal-toggle realtime shadow` first.
-- **Auto-apply: OFF.** Set `auto_apply_targets`, then `/autoheal-toggle autoapply shadow`. `active` has to be earned; see "Earned auto-apply".
+- **Auto-apply: OFF.** Try `/autoheal-toggle autoapply shadow` first. `active` has to be earned; see "Earned auto-apply".
 - **Email digest: OFF.** Local digest is always-on; opt into Resend with `digest_email` and `email_enabled: true` + `RESEND_API_KEY` in `~/.claude/autoheal/.env` (NOT shell rc — see "API keys" below).
 - **Webhook publisher: OFF.** Set `webhook_url` in config to enable.
 
@@ -130,7 +130,7 @@ The nightly `bin/autoheal-auto-apply.sh` (logic in `lib/auto_apply.py`) can appl
 | `shadow` | Each ready `rule_insert` row gets a decision `{ts, proposal_id, generated_at, signature_id, would_apply, reason, mode}` in `~/.claude/autoheal/shadow/auto-apply.jsonl`. No git, gh or ledger change. | `/autoheal-toggle autoapply shadow`, or automatic demotion |
 | `active` | Fixes measured harmful are reverted, then rows that pass the gate are applied through `/autoheal-review`'s path (PR, checks, squash-merge, `Autoheal-Id` and `Autoheal-Signature` trailers) and marked `applied_by: auto`. The next session's notice names each one with its undo command. | `/autoheal-toggle autoapply active`, refused below the promotion bar |
 
-- **Gate.** All of: kind `rule_insert`; `validate()` passes against `origin/main`; at least 10 occurrences across at least 3 sessions; target matches a glob in `auto_apply_targets` (default empty, so nothing qualifies until you list rule files).
+- **Gate.** All of: kind `rule_insert`; `validate()` passes against `origin/main`; at least 10 occurrences across at least 3 sessions; target matches a glob in `auto_apply_targets` (key absent: the default `["modules/*/rules/*.md"]`, every rule file, which is the set the drafter targets and `validate()` accepts; a narrower list of globs restricts it; an explicit `[]` lets nothing qualify).
 - **Agreement.** Each decision is matched to its ledger row by id and `generated_at`. Applied by you (applied, measured or reverted, not `applied_by: auto`) is accepted; rejected is rejected. Would-apply and accepted, or would-skip and rejected, agree; the rest disagree; rows still ready are pending. A proposal decided on several nights counts once, by its latest decision.
 - **Promotion bar.** `active` is refused, with exit 3 and the reasons, until there are at least 10 decided decisions at 90% agreement or better and no would-apply decision whose fix was later measured harmful or reverted. A successful switch records `auto_apply_promoted_at`; an `active` value without it (a hand edit) runs as shadow.
 - **Demotion.** 3 reverts within 30 days set the mode back to `shadow` and record `auto_apply_demoted_at` and `auto_apply_demoted_reason`. Only decisions logged after the demotion count toward the next promotion.

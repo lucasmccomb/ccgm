@@ -382,6 +382,35 @@ assert_eq "$(python3 "${MODE_PY}" status "${TMP}/legacy.json" autoapply)" "auto_
 python3 "${MODE_PY}" set "${TMP}/legacy.json" autoapply bogus >/dev/null 2>&1
 assert_eq "$?" "2" "g8: junk value rejected with exit 2"
 
+# --- g10: auto_apply_targets default ------------------------------------------------------
+# No key: the default glob modules/*/rules/*.md applies. An explicit [] means nothing.
+raw_config() { printf '%s\n' "$1" > "${AH}/config.json"; }
+add_outside_row() {
+    python3 - "${AH}/proposals.jsonl" <<'PY'
+import json, sys
+row = {"id": "outside00000", "signature_id": "outside00000", "state": "ready", "kind": "rule_insert",
+       "tool_name": "Bash", "cmd_head": "echo", "error_class": "class_outside",
+       "evidence": {"count": 12, "sessions": 4}, "title": "echo class_outside: add a rule to docs",
+       "target": "docs/rules.md", "anchor": "Shell Quoting", "insert_markdown": "- x", "diff": "x",
+       "generated_at": "2026-10-03T00:00:00+00:00"}
+open(sys.argv[1], "a").write(json.dumps(row) + "\n")
+PY
+}
+raw_config "{\"ccgm_repo_path\": \"${SRC}\", \"auto_apply_mode\": \"shadow\"}"
+seed
+add_outside_row
+run_gate >/dev/null
+assert_eq "$(decision good00000000 would_apply)" "True" "g10: default targets: a qualifying rule_insert on modules/git-workflow/rules/git-workflow.md would apply"
+assert_eq "$(decision notallowed00 would_apply)" "True" "g10: default targets cover every modules/*/rules/*.md file"
+assert_eq "$(decision outside00000 would_apply)" "False" "g10: default targets: a target outside modules/*/rules/ is skipped"
+assert_eq "$(contains "$(decision outside00000 reason)" "auto_apply_targets")" "yes" "g10: and the reason names the allowlist"
+assert_eq "$(python3 "${MODE_PY}" stats "${AH}/config.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["targets"])')" "['modules/*/rules/*.md']" "g10: stats shows the default targets"
+raw_config "{\"ccgm_repo_path\": \"${SRC}\", \"auto_apply_mode\": \"shadow\", \"auto_apply_targets\": []}"
+seed
+run_gate >/dev/null
+assert_eq "$(decision good00000000 would_apply)" "False" "g10: explicit [] means nothing qualifies"
+assert_eq "$(contains "$(decision good00000000 reason)" "empty")" "yes" "g10: reason says the allowlist is empty"
+
 # --- g9: tab safety -----------------------------------------------------------------------
 hits="$(grep -rnE 'grep.*\\t' "${MODULE_ROOT}/bin" "${MODULE_ROOT}/hooks" "${MODULE_ROOT}/lib" 2>/dev/null | grep -v '^[^:]*:[0-9]*:[[:space:]]*#' || true)"
 assert_eq "${hits}" "" "g9: no autoheal script passes a \\t escape to grep"

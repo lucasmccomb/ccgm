@@ -35,7 +35,8 @@ repair after you approve it.
    - measured outcomes: `outcomes.effective`, `outcomes.ineffective`,
      `outcomes.harmful`, `outcomes.unmeasurable`, plus `reverts_30d` (3 demote
      active to shadow) and `auto_applied`;
-   - the `targets` allowlist, or "empty: nothing can qualify" when it is empty.
+   - the `targets` allowlist (default `modules/*/rules/*.md`), or "empty:
+     nothing can qualify" when config sets an explicit `[]`.
 
 ## How it works
 
@@ -100,7 +101,7 @@ key or a stale heartbeat; those have no launchctl fix, so report them.
 
 See the autoheal rule (`~/.claude/skills/autoheal-reference/SKILL.md`) for the full config
 schema. Defaults: `realtime_alerts_enabled: "off"`, `auto_apply_mode:
-"off"` (each takes `off|shadow|active`), `auto_apply_targets: []`,
+"off"` (each takes `off|shadow|active`), `auto_apply_targets: ["modules/*/rules/*.md"]`,
 `email_enabled: false`, `digest_enabled: true`, `webhook_url: null`.
 
 ## When NOT to invoke

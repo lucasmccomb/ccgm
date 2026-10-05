@@ -18,7 +18,8 @@ bin/autoheal-auto-apply.sh runs this after the analyzer. The mode comes from
 The gate (every check must pass):
   kind == rule_insert
   >= MIN_OCCURRENCES occurrences across >= MIN_SESSIONS sessions (row evidence)
-  target matches a glob in config `auto_apply_targets` (empty: nothing qualifies)
+  target matches a glob in config `auto_apply_targets` (key absent: the default
+  modules/*/rules/*.md; an explicit [] lets nothing qualify)
   validate() from lib/apply-proposal.py passes against origin/main
 
 Before anything else, 3 reverts within 30 days demote active to shadow
@@ -43,6 +44,9 @@ import sys
 MIN_OCCURRENCES = 10
 MIN_SESSIONS = 3
 TARGETS_KEY = "auto_apply_targets"
+# Every rule file: the same set the drafter may target and validate() accepts
+# (a modules/*/rules/*.md path on origin/main, anchor present, within the rule budget).
+DEFAULT_TARGETS = ("modules/*/rules/*.md",)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -66,6 +70,15 @@ def _review():
     return _load(os.path.join(_HERE, "..", "bin", "autoheal-review.py"), "autoheal_review")
 
 
+def target_patterns(cfg: dict) -> list:
+    """The target allowlist: the configured globs, or DEFAULT_TARGETS when the key is
+    absent. An explicit [] (or a value that is not a list) allows nothing."""
+    if TARGETS_KEY not in cfg:
+        return list(DEFAULT_TARGETS)
+    targets = cfg.get(TARGETS_KEY)
+    return [p for p in targets if isinstance(p, str) and p] if isinstance(targets, list) else []
+
+
 def _int(value):
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
@@ -81,8 +94,7 @@ def gate(row: dict, cfg: dict, validate) -> tuple[bool, str]:
         return False, f"{count} occurrences; needs {MIN_OCCURRENCES}"
     if sessions is None or sessions < MIN_SESSIONS:
         return False, f"{sessions} sessions; needs {MIN_SESSIONS}"
-    targets = cfg.get(TARGETS_KEY)
-    patterns = [p for p in targets if isinstance(p, str) and p] if isinstance(targets, list) else []
+    patterns = target_patterns(cfg)
     target = row.get("target") or ""
     if not patterns:
         return False, f"target {target} not in {TARGETS_KEY} (the allowlist is empty)"

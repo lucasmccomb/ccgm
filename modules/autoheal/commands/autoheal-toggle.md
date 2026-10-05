@@ -39,8 +39,9 @@ For every subcommand:
      would-apply fix later measured harmful or reverted; a successful switch
      records `auto_apply_promoted_at`. Report a refusal to the user verbatim.
      Writing this key also deletes the retired `auto_apply_enabled` flag.
-     Set the rule-file allowlist `auto_apply_targets` (globs such as
-     `modules/git-workflow/rules/*.md`) before shadow, or nothing qualifies.
+     The rule-file allowlist `auto_apply_targets` defaults to every
+     `modules/*/rules/*.md`; narrow it with globs such as
+     `modules/git-workflow/rules/*.md`, or set `[]` to let nothing qualify.
      See the README's "Earned auto-apply".
 
    These two run through `lib/autoheal_mode.py`, which validates the value,

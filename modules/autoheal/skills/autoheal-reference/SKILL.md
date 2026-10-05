@@ -26,7 +26,7 @@ Autoheal is a CCGM module that observes how you and your agents interact with Cl
 |---|---|---|---|
 | `realtime_alerts_enabled` | `off\|shadow\|active` | `off` | Mid-session `<autoheal-security-alert>` blocks; shadow logs would-alert only (a persisted boolean reads as active/off) |
 | `auto_apply_mode` | `off\|shadow\|active` | `off` | Earned auto-apply of `rule_insert` fixes; shadow logs would-apply only; `active` only through `/autoheal-toggle` past the promotion bar. Replaces the retired `auto_apply_enabled` (read as off or shadow) |
-| `auto_apply_targets` | glob list | `[]` | Rule files auto-apply may change (e.g. `modules/git-workflow/rules/*.md`); empty means nothing qualifies |
+| `auto_apply_targets` | glob list | `["modules/*/rules/*.md"]` | Rule files auto-apply may change. Key absent: every `modules/*/rules/*.md`, the set `validate()` accepts. Narrow it with globs such as `modules/git-workflow/rules/*.md`; an explicit `[]` lets nothing qualify |
 | `auto_apply_promoted_at` / `auto_apply_demoted_at` / `auto_apply_demoted_reason` | written by autoheal | absent | Promotion and demotion record; do not hand-edit |
 | `email_enabled` | bool | `false` | Opt-in to Resend digest delivery |
 | `digest_email` | string OR string list | `null` | Recipient(s) for the optional email digest |
