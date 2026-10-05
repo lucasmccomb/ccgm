@@ -7,6 +7,7 @@
 #                                   git-workflow,cloudflare,branch-guard}/rules
 #   fx_home <home> <repo>           HOME whose ~/.claude/rules/*.md symlink
 #                                   into the repo (what `start.sh` installs)
+#   fx_err <class>                  error text that classifies as <class>
 #   fx_events <state> <end-date> <tool> <cmd_head> <class> <error> <rows>
 #                                   <sessions> [days]
 #                                   tool_failure rows spread over the last
@@ -93,6 +94,20 @@ fx_home() {
     for f in "${repo}"/modules/*/rules/*.md; do
         ln -s "${f}" "${home}/.claude/rules/$(basename "${f}")"
     done
+}
+
+# fx_err <class>: synthetic error text that classifies as <class>. The aggregator
+# classifies again from the stored error text, so a fixture row's text has to match.
+fx_err() {
+    case "$1" in
+        zsh_not_found) echo "(eval):1: ==== not found" ;;
+        zsh_no_matches) echo "zsh: no matches found: *.x" ;;
+        no_such_file) echo "x: No such file or directory" ;;
+        permission_denied) echo "x: Permission denied" ;;
+        pathspec_no_match) echo "error: pathspec 'x' did not match any file" ;;
+        command_not_found) echo "x: command not found" ;;
+        *) echo "boom $1" ;;
+    esac
 }
 
 fx_events() {

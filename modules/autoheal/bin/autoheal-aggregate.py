@@ -26,8 +26,19 @@ A `rejected` row covers its signature until its `suppressed_until` (90 days afte
 /autoheal-review rejected it); a `snoozed` row covers it while the row exists.
 
 Signature: (tool_name, cmd_head, error_class), from tool_failure rows only.
-Rows written before PR #1112 have no error_class; they become class
-"unknown" and never qualify. user_interrupt rows are tallied per tool in a
+A row's class is recomputed from its stored `error` text with the current
+lib/error_classes.json (shared with failure-logger.py through
+lib/error_classes.py), so class improvements apply to old rows. A class with
+"group_by_cmd_head": false (hook denials, harness refusals, shell quirks) has
+cmd_head "" in its signature; "other" and "exit_code" keep the split by command.
+Rows written before PR #1112 have no error text or class; they become class
+"unknown" and never qualify.
+
+Days: `min_days` counts distinct dates in the machine's local timezone, taken
+from each row's `timestamp` (the event files are named by UTC date, which
+rolls over at 8pm in New York, so file dates would count one evening as two
+days). The window itself stays keyed on event-file dates. A row with no
+usable timestamp counts under its file date. user_interrupt rows are tallied per tool in a
 separate `interrupts` list.
 
 Output: signatures/{date}.json, ranked by count x sessions.
@@ -168,14 +179,57 @@ def _rate(occurrences: int, calls: int):
     return occurrences / calls * 100 if calls > 0 else None
 
 
+def _classes():
+    """lib/error_classes.py, the classifier failure-logger.py also uses."""
+    import importlib.util
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    for path in (os.path.join(here, "..", "lib", "error_classes.py"),
+                 os.path.expanduser("~/.claude/lib/error_classes.py")):
+        if os.path.isfile(path):
+            spec = importlib.util.spec_from_file_location("autoheal_error_classes", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    raise ImportError("autoheal-aggregate: lib/error_classes.py not found")
+
+
+_ERROR_CLASSES = _classes()
+
+
 def row_signature(row: dict) -> tuple:
-    """(tool_name, cmd_head, error_class); blind legacy rows -> unknown."""
+    """(tool_name, cmd_head, error_class).
+
+    A row with error text is classified again from that text with the current
+    error_classes.json, so class changes apply to stored rows. A row with no
+    text keeps its stored class; a row with neither (pre-#1112) is unknown.
+    A class with group_by_cmd_head false drops cmd_head: its cause does not
+    depend on the command.
+    """
     tool = str(row.get("tool_name") or "")
-    cls = row.get("error_class")
+    err = row.get("error")
+    if isinstance(err, str) and err:
+        cls = _ERROR_CLASSES.classify(err)
+    else:
+        cls = row.get("error_class")
     if not isinstance(cls, str) or not cls or cls == UNKNOWN:
         return (tool, "", UNKNOWN)
+    if not _ERROR_CLASSES.groups_by_cmd_head(cls):
+        return (tool, "", cls)
     head = row.get("cmd_head")
     return (tool, head if isinstance(head, str) else "", cls)
+
+
+def local_day(row: dict, file_date: dt.date) -> str:
+    """The row's date in the machine's local timezone (ISO). Falls back to the
+    event-file date, which is UTC, when the row has no usable timestamp."""
+    try:
+        ts = dt.datetime.fromisoformat(str(row.get("timestamp")).replace("Z", "+00:00"))
+    except ValueError:
+        return file_date.isoformat()
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=dt.timezone.utc)
+    return ts.astimezone().date().isoformat()
 
 
 def signature_rate(data_dir: str, sig: tuple, start: dt.date, end: dt.date) -> dict:
@@ -306,7 +360,7 @@ def aggregate(data_dir: str, end: dt.date, cfg: dict) -> dict:
                                             {"count": 0, "sessions": set(), "days": set()})
                 rec["count"] += 1
                 rec["sessions"].add(sess)
-                rec["days"].add(iso)
+                rec["days"].add(local_day(row, d))
                 continue
             sig = row_signature(row)
             rec = stats.get(sig)
@@ -318,7 +372,7 @@ def aggregate(data_dir: str, end: dt.date, cfg: dict) -> dict:
             repo = _repo(row.get("cwd"))
             if repo:
                 rec["repos"].add(repo)
-            rec["days"].add(iso)
+            rec["days"].add(local_day(row, d))
             rec["last"] = iso  # days iterate in order
             err = row.get("error")
             if isinstance(err, str) and err:

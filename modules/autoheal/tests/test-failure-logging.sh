@@ -41,6 +41,7 @@ TMP_HOME=$(mktemp -d -t autoheal_failure.XXXXXX)
 trap 'rm -rf "${TMP_HOME}"' EXIT
 mkdir -p "${TMP_HOME}/.claude/lib"
 cp "${HOOK_LIB}/hook_utils.py" "${TMP_HOME}/.claude/lib/hook_utils.py"
+cp "${MODULE_ROOT}/lib/error_classes.py" "${TMP_HOME}/.claude/lib/error_classes.py"
 export HOME="${TMP_HOME}"
 export CCGM_AUTOHEAL_DIR="${TMP_HOME}/autoheal"
 export CCGM_ERROR_CLASSES="${MODULE_ROOT}/lib/error_classes.json"

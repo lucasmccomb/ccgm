@@ -382,7 +382,7 @@ assert_contains "${ERR}" "transport_exit_28" "t7d: names the reason"
 scenario t8
 for spec in "echo:zsh_not_found:5" "grep:zsh_no_matches:9" "ls:no_such_file:7" "cat:no_such_file:6" "cp:permission_denied:8"; do
     IFS=: read -r head cls n <<< "${spec}"
-    fx_events "${S_AH}" "${TODAY}" Bash "${head}" "${cls}" "boom ${cls}" "${n}" 2
+    fx_events "${S_AH}" "${TODAY}" Bash "${head}" "${cls}" "$(fx_err "${cls}")" "${n}" 2
 done
 fx_answer "${S_FAKE}/messages.response.json" '{"proposal":{"kind":"skip","reason":"no rule helps"}}'
 run_analyzer

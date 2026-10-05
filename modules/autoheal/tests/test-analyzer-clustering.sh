@@ -55,9 +55,9 @@ candidates_of() { json_get "${S_OUT}/item-$1.json" "' '.join(d['candidates'])"; 
 scenario rank
 for spec in "echo:zsh_not_found:5" "grep:zsh_no_matches:9" "ls:no_such_file:7" "cat:no_such_file:6" "cp:permission_denied:8"; do
     IFS=: read -r head cls n <<< "${spec}"
-    fx_events "${S_AH}" "${TODAY}" Bash "${head}" "${cls}" "boom" "${n}" 2
+    fx_events "${S_AH}" "${TODAY}" Bash "${head}" "${cls}" "$(fx_err "${cls}")" "${n}" 2
 done
-fx_events "${S_AH}" "${TODAY}" Bash rm no_such_file "below the bar" 4 2
+fx_events "${S_AH}" "${TODAY}" Bash rm no_such_file "$(fx_err no_such_file)" 4 2
 plan
 assert_eq "${PLAN_RC}" "0" "rank: plan exits 0"
 assert_eq "$(grep -c '^item' "${S_OUT}/plan.tsv")" "3" "rank: three items"
@@ -67,15 +67,15 @@ assert_eq "$(ls "${S_OUT}"/item-*.request.json | wc -l | tr -d ' ')" "3" "rank: 
 
 # --- coverage and snooze ---------------------------------------------
 scenario covered
-fx_events "${S_AH}" "${TODAY}" Bash echo zsh_not_found "boom" 8 2
-fx_events "${S_AH}" "${TODAY}" Bash grep zsh_no_matches "boom" 8 2
-fx_events "${S_AH}" "${TODAY}" Bash ls no_such_file "boom" 8 2
+fx_events "${S_AH}" "${TODAY}" Bash echo zsh_not_found "$(fx_err zsh_not_found)" 8 2
+fx_events "${S_AH}" "${TODAY}" Bash grep zsh_no_matches "$(fx_err zsh_no_matches)" 8 2
+fx_events "${S_AH}" "${TODAY}" Bash ls no_such_file "$(fx_err no_such_file)" 8 2
 COVERED_ID="$(python3 -c "
 import hashlib
-print(hashlib.sha256('\x1f'.join(('Bash','echo','zsh_not_found')).encode()).hexdigest()[:12])")"
+print(hashlib.sha256('\x1f'.join(('Bash','','zsh_not_found')).encode()).hexdigest()[:12])")"
 SNOOZED_ID="$(python3 -c "
 import hashlib
-print(hashlib.sha256('\x1f'.join(('Bash','grep','zsh_no_matches')).encode()).hexdigest()[:12])")"
+print(hashlib.sha256('\x1f'.join(('Bash','','zsh_no_matches')).encode()).hexdigest()[:12])")"
 mkdir -p "${S_AH}"
 printf '{"id":"%s","signature_id":"%s","state":"ready"}\n' "${COVERED_ID}" "${COVERED_ID}" > "${S_AH}/proposals.jsonl"
 printf '{"id":"%s","signature_id":"%s","state":"snoozed","snoozed_until":"2099-01-01T00:00:00Z"}\n' "${SNOOZED_ID}" "${SNOOZED_ID}" >> "${S_AH}/proposals.jsonl"
@@ -87,12 +87,12 @@ assert_eq "$(json_get "${S_OUT}/item-1.json" "d['signature']['cmd_head']")" "ls"
 # cand_case <name> <cmd_head> <error_class>: one signature in a fresh scenario.
 cand_case() {
     scenario "cand_$1"
-    fx_events "${S_AH}" "${TODAY}" Bash "$2" "$3" "boom" 6 3
+    fx_events "${S_AH}" "${TODAY}" Bash "$2" "$3" "$(fx_err "$3")" 6 3
     plan
 }
 cand_case shell echo zsh_not_found
 assert_eq "$(candidates_of 1)" "modules/code-quality/rules/code-quality.md modules/common-mistakes/rules/common-mistakes.md" "cands: shell error class -> code-quality and common-mistakes"
-cand_case gitzsh "git add" zsh_no_matches
+cand_case gitzsh "git add" no_such_file
 assert_eq "$(candidates_of 1)" "modules/git-workflow/rules/git-workflow.md modules/code-quality/rules/code-quality.md" "cands: git head first, then the error class, capped at 2"
 cand_case gitpath "git commit" pathspec_no_match
 assert_eq "$(candidates_of 1)" "modules/git-workflow/rules/git-workflow.md" "cands: git pathspec -> git-workflow only"
@@ -112,8 +112,8 @@ assert_not_contains "${USER_TEXT}" "Escape Hatch" "prompt: index headings stay i
 
 # --- cacheable prefix and schema ---------------------------------------
 scenario prefix
-fx_events "${S_AH}" "${TODAY}" Bash echo zsh_not_found "boom" 6 3
-fx_events "${S_AH}" "${TODAY}" Bash "git add" pathspec_no_match "boom" 8 3
+fx_events "${S_AH}" "${TODAY}" Bash echo zsh_not_found "$(fx_err zsh_not_found)" 6 3
+fx_events "${S_AH}" "${TODAY}" Bash "git add" pathspec_no_match "$(fx_err pathspec_no_match)" 8 3
 plan
 SYS_A="$(json_get "${S_OUT}/item-1.request.json" "json.dumps(d['system'], sort_keys=True)")"
 SYS_B="$(json_get "${S_OUT}/item-2.request.json" "json.dumps(d['system'], sort_keys=True)")"

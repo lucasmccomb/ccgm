@@ -69,12 +69,18 @@ def reset(name):
     return d
 
 
+ERR_FOR = {"zsh_no_matches": "zsh: no matches found: *.x",
+           "command_not_found": "x: command not found"}
+
+
 def row(kind="tool_failure", tool="Bash", head="echo", cls="zsh_no_matches",
         sess="s1", cwd="/Users/x/code/ccgm-workspaces/ccgm-w0/ccgm-w0-c1",
-        err="(eval):1: == not found", legacy=False):
+        err=None, legacy=False):
     r = {"kind": kind, "timestamp": "2026-10-01T00:00:00Z", "session_id": sess,
          "tool_name": tool, "cwd": cwd, "redacted_command": "echo ==",
          "exit_code": 1}
+    if err is None:  # error text that classifies as `cls` (rows are reclassified from it)
+        err = ERR_FOR.get(cls, "synthetic failure")
     if not legacy:
         r.update({"error": err, "error_class": cls,
                   "cmd_head": head if tool == "Bash" else None})
@@ -84,6 +90,7 @@ def row(kind="tool_failure", tool="Bash", head="echo", cls="zsh_no_matches",
 def write(d, date, rows):
     with open(os.path.join(d, "events", date + ".jsonl"), "a") as fh:
         for r in rows:
+            r["timestamp"] = date + "T12:00:00+00:00"  # days count by row timestamp
             fh.write(json.dumps(r) + "\n")
 
 
@@ -94,7 +101,7 @@ def counts(d, date, c):
 
 def run(d, extra=()):
     p = subprocess.run([sys.executable, AGG, "--date", END.isoformat(), *extra],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env=dict(os.environ, TZ="UTC"))
     out = os.path.join(d, "signatures", END.isoformat() + ".json")
     data = json.load(open(out)) if os.path.isfile(out) else None
     return p, data
@@ -149,7 +156,7 @@ check(p.returncode == 0, "exit 0 (got %s: %s)" % (p.returncode, p.stderr))
 check(data is not None, "signatures file written")
 if data:
     sigs = data["signatures"]
-    z = find(data, "Bash", "echo", "zsh_no_matches")
+    z = find(data, "Bash", "", "zsh_no_matches")
     check(z is not None, "zsh signature present")
     check(sigs[0] is z, "zsh signature ranks first")
     if z:
@@ -158,7 +165,7 @@ if data:
         check(z["days"] == 3, "zsh days 3")
         check(z["repos"] == 1, "zsh repos 1, got %s" % z["repos"])
         check(z["qualifies"] is True, "zsh qualifies")
-        check(z["signature_id"] == sid("Bash", "echo", "zsh_no_matches"), "signature_id hash")
+        check(z["signature_id"] == sid("Bash", "", "zsh_no_matches"), "signature_id hash")
         check(z["first_seen"] == day(3) and z["last_seen"] == day(1), "first/last seen")
         check(z["calls"] == 14000, "calls from counts")
         check(abs(z["rate_per_100_calls"] - 612 / 14000 * 100) < 1e-6,
@@ -209,18 +216,18 @@ os.unlink(os.environ["CCGM_AUTOHEAL_CONFIG"])
 spec = importlib.util.spec_from_file_location("agg", AGG)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
-res = mod.signature_rate(d, ("Bash", "echo", "zsh_no_matches"),
+res = mod.signature_rate(d, ("Bash", "", "zsh_no_matches"),
                          dt.date.fromisoformat(day(3)), dt.date.fromisoformat(day(1)))
 check(res["occurrences"] == 612 and res["calls"] == 3000, "signature_rate window: %s" % res)
 check(abs(res["rate_per_100_calls"] - 612 / 3000 * 100) < 1e-6, "signature_rate value")
-res0 = mod.signature_rate(d, ("Bash", "echo", "zsh_no_matches"),
+res0 = mod.signature_rate(d, ("Bash", "", "zsh_no_matches"),
                           dt.date.fromisoformat(day(40)), dt.date.fromisoformat(day(30)))
 check(res0["occurrences"] == 0 and res0["rate_per_100_calls"] is None, "no calls -> rate None")
 
 # ---- performance: 30 days, ~3k friction rows ---------------------------
 d = reset("perf")
 random.seed(7)
-heads = [("echo", "zsh_no_matches"), ("git add", "other"), ("rg", "command_not_found"),
+heads = [("", "zsh_no_matches"), ("git add", "other"), ("rg", "command_not_found"),
          ("npm", "other"), ("curl", "other")]
 for i in range(3000):
     h, c = random.choice(heads)
