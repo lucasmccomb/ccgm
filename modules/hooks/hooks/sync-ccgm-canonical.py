@@ -15,7 +15,13 @@ Triggers when:
 Behavior:
 - Runs `git fetch origin main && git pull --ff-only origin main` in the
   canonical clone
-- Logs success/failure to stderr
+- On success, symlinks module files the pull newly added to installed modules
+  (link-mode installs only, never overwrites; see lib/ccgm_sync_install.py) and
+  reports hook commands in changed settings.partial.json files that the live
+  settings.json does not register (settings are never auto-merged)
+- On a refused pull, reports how many commits the canonical clone is behind
+- Logs to stderr and, so the session sees it, emits the report lines as
+  PostToolUse additionalContext on stdout
 - Never blocks on errors (always exit 0)
 """
 
@@ -31,6 +37,11 @@ import sys
 CANONICAL_DIR_ENV = "CCGM_CANONICAL_DIR"
 DEFAULT_CANONICAL_DIR = os.path.expanduser("~/code/ccgm")
 CCGM_REPO_NAME = "ccgm"
+
+# The helper ships beside this hook in the canonical clone (hooks/ and lib/ are
+# siblings), so resolve through the symlink instead of relying on ~/.claude/lib
+# already containing a file this very change adds.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 
 
 def get_origin_url(cwd: str) -> str | None:
@@ -71,6 +82,52 @@ def is_ccgm_repo(cwd: str) -> bool:
     return repo_name == CCGM_REPO_NAME
 
 
+def git_out(canonical_dir: str, *args: str) -> str | None:
+    try:
+        r = subprocess.run(["git", "-C", canonical_dir, *args],
+                           capture_output=True, text=True, timeout=10, check=False)
+        return r.stdout.strip() if r.returncode == 0 else None
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def commits_behind(canonical_dir: str) -> str:
+    return git_out(canonical_dir, "rev-list", "--count", "HEAD..origin/main") or "an unknown number of"
+
+
+def post_pull_report(canonical_dir: str, old_head: str | None) -> list[str]:
+    """Install newly added module files and list unregistered hooks. Returns report lines."""
+    lines: list[str] = []
+    try:
+        import ccgm_sync_install as inst
+
+        claude_dir = os.path.join(os.path.expanduser("~"), ".claude")
+        created = inst.install_new_files(claude_dir, canonical_dir)
+        if created:
+            rel = [os.path.relpath(p, claude_dir) for p in created]
+            lines.append(f"installed {len(rel)} new CCGM file(s): {', '.join(rel)}")
+
+        manifest = inst.load_manifest(claude_dir)
+        new_head = git_out(canonical_dir, "rev-parse", "HEAD")
+        if manifest and old_head and new_head and old_head != new_head:
+            changed = git_out(canonical_dir, "diff", "--name-only", old_head, new_head) or ""
+            installed = set(manifest.get("modules") or [])
+            mods = sorted({
+                parts[1] for parts in (c.split("/") for c in changed.splitlines())
+                if len(parts) == 3 and parts[0] == "modules"
+                and parts[2] == "settings.partial.json" and parts[1] in installed
+            })
+            missing = inst.unregistered_hooks(claude_dir, canonical_dir, mods)
+            if missing:
+                lines.append(
+                    f"{len(missing)} hook command(s) in updated modules are not registered in "
+                    f"~/.claude/settings.json (settings are not auto-merged): {'; '.join(missing)}"
+                )
+    except Exception as e:  # the install step must never break the hook
+        lines.append(f"post-pull install step failed: {e}")
+    return lines
+
+
 def sync_canonical(canonical_dir: str) -> tuple[bool, str]:
     """Pull origin/main into canonical_dir. Returns (success, message)."""
     if not os.path.isdir(os.path.join(canonical_dir, ".git")):
@@ -89,7 +146,8 @@ def sync_canonical(canonical_dir: str) -> tuple[bool, str]:
             capture_output=True, text=True, timeout=30, check=False,
         )
         if pull.returncode != 0:
-            return False, f"pull failed (not fast-forward?): {pull.stderr.strip()}"
+            reason = " ".join(pull.stderr.split()) or "not fast-forward?"
+            return False, f"pull failed: {reason}"
 
         return True, pull.stdout.strip().splitlines()[-1] if pull.stdout.strip() else "up to date"
     except subprocess.TimeoutExpired:
@@ -126,12 +184,21 @@ def main() -> None:
     if os.path.realpath(cwd) == os.path.realpath(canonical_dir):
         sys.exit(0)
 
+    old_head = git_out(canonical_dir, "rev-parse", "HEAD")
     ok, msg = sync_canonical(canonical_dir)
     prefix = "sync-ccgm-canonical"
     if ok:
         sys.stderr.write(f"{prefix}: {canonical_dir} → {msg}\n")
+        report = post_pull_report(canonical_dir, old_head)
     else:
         sys.stderr.write(f"{prefix}: FAILED — {msg}\n")
+        report = [f"canonical CCGM clone is {commits_behind(canonical_dir)} commits behind origin/main: {msg}"]
+
+    if report:
+        text = "\n".join(f"{prefix}: {line}" for line in report)
+        sys.stderr.write(text + "\n")
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PostToolUse", "additionalContext": text}}))
 
     sys.exit(0)
 

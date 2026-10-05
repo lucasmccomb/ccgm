@@ -15,6 +15,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 python3 "${SCRIPT_DIR}/test_sync_ccgm_canonical.py" -v
 STATUS=$?
+if [ "${STATUS}" -eq 0 ]; then
+  # Fixture-repo tests for the post-pull install step (#1131)
+  python3 "${SCRIPT_DIR}/test_sync_install_new_files.py" -v
+  STATUS=$?
+fi
 
 if [ "${STATUS}" -eq 0 ]; then
   echo "test-sync-ccgm-canonical.sh: passed"
