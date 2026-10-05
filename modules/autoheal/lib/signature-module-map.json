@@ -1,5 +1,5 @@
 {
-  "_description": "Deterministic signature -> candidate module map for the autoheal drafting step. draft_proposals.py picks at most `max_files` rule files, in this order: by_cmd_head (first word of the signature's cmd_head), then by_error_class. Only when both give nothing does it fall back to keyword matching against the module index. Hook-denial classes are listed in hook_denial_modules: those signatures never go to the model; code files an `issue` proposal that names the denying hook's module. A module resolves to modules/<module>/rules/<module>.md when that file exists, else to the module's rule files in path order.",
+  "_description": "Deterministic signature -> candidate module map for the autoheal drafting step. draft_proposals.py picks at most `max_files` rule files, in this order: by_cmd_head (first word of the signature's cmd_head), then by_error_class. Only when both give nothing does it fall back to keyword matching against the module index. The harness_worktree_isolation class is drafted by the model like any recurring friction (a rule can prevent it), not filed as an issue. Hook-denial classes are listed in hook_denial_modules: those signatures never go to the model; code files an `issue` proposal that names the denying hook's module. A module resolves to modules/<module>/rules/<module>.md when that file exists, else to the module's rule files in path order.",
   "max_files": 2,
   "hook_denial_modules": {
     "hook_denial_branch_guard": "branch-guard",
@@ -18,7 +18,8 @@
     "command_not_found": ["code-quality", "common-mistakes"],
     "no_such_file": ["code-quality", "common-mistakes"],
     "permission_denied": ["code-quality", "common-mistakes"],
-    "pathspec_no_match": ["git-workflow"]
+    "pathspec_no_match": ["git-workflow"],
+    "harness_worktree_isolation": ["subagent-patterns", "multi-agent"]
   },
   "keyword_stopwords": [
     "other", "exit", "code", "found", "not", "such", "file", "directory",

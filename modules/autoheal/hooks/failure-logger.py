@@ -12,7 +12,7 @@ top-level `stderr` or `exit_code` fields.
 
 One row per failure:
   - kind "tool_failure": error (redacted, <= 400 chars), error_class
-    (lib/error_classes.json), cmd_head (first program of a Bash command,
+    (lib/error_classes.json, via lib/error_classes.py), cmd_head (first program of a Bash command,
     redacted), exit_code (parsed from "Exit code N").
   - kind "user_interrupt": the same fields, when is_interrupt is true.
 
@@ -30,13 +30,12 @@ import re
 import sys
 
 sys.path.insert(0, os.path.expanduser("~/.claude/lib"))
+import error_classes  # noqa: E402  (lib/error_classes.py, shared with the aggregator)
 import hook_utils  # noqa: E402
 
 _MAX_COMMAND_LEN = 500
 _MAX_ERROR_LEN = 400
 _MAX_HEAD_LEN = 60
-
-_DEFAULT_CLASSES_PATH = os.path.expanduser("~/.claude/lib/error_classes.json")
 
 # Programs whose second word is a subcommand worth keeping in cmd_head
 # ("git add", "wrangler d1"). For anything else the head is one word.
@@ -84,37 +83,8 @@ def _truncate(text: str, limit: int) -> str:
     return text[: max(0, limit - 5)] + "[...]"
 
 
-def _load_classes() -> tuple[list[tuple[str, "re.Pattern[str]"]], str]:
-    """Return ([(name, compiled)], default_name). Missing or malformed file
-    degrades to no classes and the default "other"."""
-    path = os.environ.get("CCGM_ERROR_CLASSES") or _DEFAULT_CLASSES_PATH
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):
-        return [], "other"
-    default = data.get("default") if isinstance(data, dict) else None
-    entries = data.get("classes") if isinstance(data, dict) else None
-    out: list[tuple[str, "re.Pattern[str]"]] = []
-    for entry in entries if isinstance(entries, list) else []:
-        if not isinstance(entry, dict):
-            continue
-        name, src = entry.get("name"), entry.get("regex")
-        if not isinstance(name, str) or not isinstance(src, str):
-            continue
-        try:
-            out.append((name, re.compile(src)))
-        except re.error:
-            continue
-    return out, default if isinstance(default, str) else "other"
-
-
 def classify_error(error: str) -> str:
-    classes, default = _load_classes()
-    for name, regex in classes:
-        if regex.search(error):
-            return name
-    return default
+    return error_classes.classify(error)
 
 
 def cmd_head(command: str) -> str | None:

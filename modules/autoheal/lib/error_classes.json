@@ -1,25 +1,35 @@
 {
-  "_description": "Ordered error classifiers for tool_failure rows. failure-logger.py runs each regex (case-sensitive, re.search) against the redacted error text and records the name of the first match as error_class. No match gives the default. Order matters: put specific shapes (hook denials, shell quirks) before broad ones (exit_code). Tests override the path via CCGM_ERROR_CLASSES.",
+  "_description": "Ordered error classifiers for tool_failure rows, read through lib/error_classes.py by failure-logger.py (at capture) and autoheal-aggregate.py (again at aggregation, from the stored error text, so edits here apply to old rows). Each regex (case-sensitive, re.search) runs against the redacted error text and the first match names the class. No match gives the default. Order matters: put specific shapes (hook denials, harness refusals, shell quirks) before broad ones (exit_code). \"group_by_cmd_head\": false marks a class whose cause does not depend on the command; the aggregator then keys its signature on (tool, \"\", class). Omitted means true. Tests override the path via CCGM_ERROR_CLASSES.",
   "default": "other",
   "classes": [
     {
       "name": "hook_denial_branch_guard",
       "regex": "BRANCH GUARD",
+      "group_by_cmd_head": false,
       "description": "branch-guard.py blocked an edit or commit on the default branch."
     },
     {
       "name": "hook_denial_advisor_guard",
       "regex": "advisor mode:",
+      "group_by_cmd_head": false,
       "description": "advisor-guard.py blocked a main-agent mutation."
     },
     {
       "name": "hook_denial_git_workflow",
       "regex": "Blocked: .* would destroy|protected branch|force-push",
+      "group_by_cmd_head": false,
       "description": "enforce-git-workflow.py or check-careful.py blocked a git operation."
+    },
+    {
+      "name": "harness_worktree_isolation",
+      "regex": "(?s)This agent is isolated in the worktree .*Refusing to run it",
+      "group_by_cmd_head": false,
+      "description": "Claude Code's harness refused a worktree-isolated subagent's command: too complex to verify that it stays inside the worktree (compound commands, loops, eval, here-documents), or aimed at paths outside it."
     },
     {
       "name": "zsh_no_matches",
       "regex": "no matches found",
+      "group_by_cmd_head": false,
       "description": "zsh expanded an unquoted glob that matched nothing (for example --include=*.sh)."
     },
     {
@@ -30,6 +40,7 @@
     {
       "name": "zsh_not_found",
       "regex": "\\(eval\\):\\d+: \\S+ not found",
+      "group_by_cmd_head": false,
       "description": "zsh =word expansion on an unquoted word that starts with = (for example echo ==== separators)."
     },
     {

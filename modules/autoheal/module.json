@@ -175,6 +175,11 @@
       "type": "lib",
       "template": false
     },
+    "lib/error_classes.py": {
+      "target": "lib/error_classes.py",
+      "type": "lib",
+      "template": false
+    },
     "lib/proposal-schema.json": {
       "target": "lib/proposal-schema.json",
       "type": "lib",

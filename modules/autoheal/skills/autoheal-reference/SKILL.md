@@ -33,7 +33,7 @@ Autoheal is a CCGM module that observes how you and your agents interact with Cl
 | `aggregation.window_days` | int | `14` | Days of events the aggregator counts |
 | `aggregation.min_occurrences` | int | `5` | Failures a signature needs to qualify |
 | `aggregation.min_sessions` | int | `2` | Distinct sessions it must span |
-| `aggregation.min_days` | int | `2` | Distinct days it must span |
+| `aggregation.min_days` | int | `2` | Distinct days it must span, counted in the machine's local timezone |
 | `aggregation.redraft_cooldown_days` | int | `14` | Days a signature stays covered after a draft is dropped for a content reason; each further drop doubles it, capped at 90. Infrastructure drops (`validation_unavailable`) wait 1 day |
 | `rule_budget_lines_per_week` | int | `20` | Most lines `validate()` lets fixes add to always-loaded rules (no `paths:` frontmatter) in 7 days, counting every ready or applied fix |
 | `validation_timeout_seconds` | int | `120` | Cap for each `validate()` check |
