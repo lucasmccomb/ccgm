@@ -76,6 +76,7 @@ mkdir -p ~/.claude/lib
 cp lib/hook_utils.py ~/.claude/lib/hook_utils.py
 cp lib/agent_tracking.py ~/.claude/lib/agent_tracking.py
 cp lib/agent_sessions.py ~/.claude/lib/agent_sessions.py
+cp lib/ccgm_sync_install.py ~/.claude/lib/ccgm_sync_install.py
 cp lib/sched_platform.py ~/.claude/lib/sched_platform.py
 cp lib/hook_dispatcher.py ~/.claude/lib/hook_dispatcher.py
 cp lib/pretooluse_bash_checks.py ~/.claude/lib/pretooluse_bash_checks.py
@@ -180,5 +181,6 @@ six standalone hook entries (`enforce-git-workflow`, `auto-approve-bash`,
 | `lib/hook_utils.py` | Shared hook I/O, redaction, locking, and bypass-mode detection — imported by every other hook module's hooks |
 | `lib/agent_tracking.py` | Python library for tracking CSV operations |
 | `lib/agent_sessions.py` | Python library for live session detection |
+| `lib/ccgm_sync_install.py` | Python library: post-pull install of new module files and unregistered-hook check, used by `sync-ccgm-canonical.py` |
 | `lib/sched_platform.py` | Platform abstraction for scheduled-job (launchd/cron) installation, used by `autoheal` and `dreaming`'s install scripts |
 | `settings.partial.json` | Hook wiring configuration to merge into settings.json |

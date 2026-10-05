@@ -51,6 +51,11 @@
       "type": "lib",
       "template": false
     },
+    "lib/ccgm_sync_install.py": {
+      "target": "lib/ccgm_sync_install.py",
+      "type": "lib",
+      "template": false
+    },
     "lib/agent_sessions.py": {
       "target": "lib/agent_sessions.py",
       "type": "lib",
