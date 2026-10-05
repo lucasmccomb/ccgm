@@ -62,6 +62,11 @@
 #   1  fatal setup error, or at least one call failed or was refused
 #   2  daily cost cap reached, or the configured model cannot do structured outputs
 #
+# Every run that gets past setup records how it ended in
+# ~/.claude/autoheal/last-run.json ({date, outcome, rc[, reason]}); outcome is
+# ok, daily_cap_refused or failed (reason unsupported_model or call_failed).
+# autoheal-daily.sh reads it to tell the deliberate cap stop from a failure.
+#
 # Invoked by `autoheal-daily.sh`; also runnable standalone.
 
 set -u
@@ -325,6 +330,28 @@ CLONE_ID="${CCGM_AUTOHEAL_CLONE_ID:-$(basename "${PWD}")}"
 TODAY_ISO="$(today_str)"
 DATE="${DATE_ARG:-${TODAY_ISO}}"
 
+# write_last_run <outcome> <rc> [reason]: say how this run ended, atomically,
+# in $AUTOHEAL_DIR/last-run.json. autoheal-daily.sh reads it to tell a
+# deliberate daily-cap stop from a failure; exit code 2 alone cannot (an
+# unsupported model also exits 2). Outcomes: ok, daily_cap_refused, failed.
+write_last_run() {
+    local outcome="$1" rc="$2" reason="${3:-}"
+    local dir path tmp
+    dir="$(autoheal_dir)"
+    path="${dir}/last-run.json"
+    tmp="${path}.tmp$$"
+    mkdir -p "${dir}" || return 0
+    if [ -n "${reason}" ]; then
+        printf '{"date": "%s", "outcome": "%s", "rc": %s, "reason": "%s"}\n' \
+            "${TODAY_ISO}" "${outcome}" "${rc}" "${reason}" > "${tmp}" || return 0
+    else
+        printf '{"date": "%s", "outcome": "%s", "rc": %s}\n' \
+            "${TODAY_ISO}" "${outcome}" "${rc}" > "${tmp}" || return 0
+    fi
+    mv -f "${tmp}" "${path}" || rm -f "${tmp}"
+    return 0
+}
+
 TMP_DIR="$(mktemp -d -t autoheal_analyze.XXXXXX)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
@@ -460,6 +487,7 @@ if [ "${RUN_SELECTED}" -eq 0 ]; then
     echo "autoheal-analyze: no qualifying signatures for ${DATE}; no API call." >&2
     write_run_summary
     mark_run_complete
+    write_last_run ok 0
     exit 0
 fi
 
@@ -467,6 +495,7 @@ if [ -z "${ITEMS}" ]; then
     echo "autoheal-analyze: nothing to send to the model for ${DATE} (${RUN_ISSUES} issue proposal(s) drafted)." >&2
     write_run_summary
     mark_run_complete
+    write_last_run ok 0
     exit 0
 fi
 
@@ -481,11 +510,13 @@ if ! supports_structured_outputs "${MODEL}"; then
     echo "autoheal-analyze: the analyzer sends output_config.format, which this model would reject." >&2
     echo "autoheal-analyze: set default_model in $(config_path) to one of: ${STRUCTURED_OUTPUT_MODELS}" >&2
     echo "autoheal-analyze: no call was made." >&2
+    write_last_run failed 2 unsupported_model
     exit 2
 fi
 
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
     echo "autoheal-analyze: ANTHROPIC_API_KEY not set; skipping model calls (local-only deployment is fine)." >&2
+    write_last_run ok 0
     exit 0
 fi
 
@@ -517,6 +548,7 @@ PY
 CURRENT_COST_CENTS="$(today_cost_cents)"
 if [ "${CURRENT_COST_CENTS}" -ge "${DAILY_COST_CAP_CENTS}" ]; then
     echo "autoheal-analyze: daily cost cap reached (${CURRENT_COST_CENTS}c >= ${DAILY_COST_CAP_CENTS}c); skipping." >&2
+    write_last_run daily_cap_refused 2
     exit 2
 fi
 
@@ -903,6 +935,9 @@ done <<< "${ITEMS}"
 write_run_summary
 if [ "${OVERALL_RC}" -eq 0 ]; then
     mark_run_complete
+    write_last_run ok 0
+else
+    write_last_run failed "${OVERALL_RC}" call_failed
 fi
 
 exit "${OVERALL_RC}"

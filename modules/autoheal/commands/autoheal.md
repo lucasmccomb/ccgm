@@ -2,12 +2,14 @@
 
 Inspect autoheal status and learn the slash command surface. Read-only:
 this command modifies no files. Use the listed subcommands for stateful
-actions.
+actions. The one exception is `/autoheal doctor`, which can run a launchd
+repair after you approve it.
 
 ## Usage
 
 ```
 /autoheal
+/autoheal doctor
 ```
 
 ## What it shows
@@ -33,11 +35,46 @@ This command is a thin Claude reader, not a shell script. The agent:
    `~/.claude/autoheal/sent/` to summarize state.
 3. Prints the rendered status table and the command surface.
 
+## `/autoheal doctor`
+
+Diagnose the daily job. When the argument is `doctor`, skip the overview
+and do this:
+
+1. Run the checks. They are a script, not your arithmetic:
+
+   ```bash
+   python3 ~/.claude/bin/autoheal-doctor.py
+   ```
+
+   (From a CCGM checkout: `python3 modules/autoheal/bin/autoheal-doctor.py`.)
+   It prints the loaded launchd plist path, whether the job's script exists
+   under the real `$HOME`, the last exit code, heartbeat status and age, whether
+   `ANTHROPIC_API_KEY` is set in `~/.claude/autoheal/.env` (never the value),
+   and the last `cost.log` row. Exit 0 means healthy.
+2. Exit 0: report the output and stop.
+3. Exit 1: the output ends with `problems:` and a `repair (run in order):`
+   block (`launchctl bootout` then `launchctl bootstrap` of the real plist).
+   Ask with AskUserQuestion before running it. The question payload must
+   stand alone (ask-context rules): put the evidence from the doctor output in
+   the question text (the loaded path or "not loaded", the missing file, the
+   last exit code, the heartbeat status and age) and the exact commands in
+   each option's description. Options:
+   - Run the repair: runs the printed bootout and bootstrap commands, then
+     re-runs the doctor and reports its output.
+   - Show only: print the commands and change nothing.
+4. If the doctor says the real plist does not exist, there is no bootstrap
+   to offer; the repair is `bash modules/autoheal/bin/autoheal-install.sh`.
+
+Never run `launchctl bootout`, `bootstrap` or `kickstart` without the user
+picking the repair option. The `problems:` line may also name a missing API
+key or a stale heartbeat; those have no launchctl fix, so report them.
+
 ## Command surface
 
 | Command | Purpose |
 |---|---|
 | `/autoheal` | This overview. |
+| `/autoheal doctor` | Diagnose the launchd job, heartbeat and API key; offer the repair. |
 | `/autoheal-review [id]` | Accept, edit, reject or snooze each ready fix. Apply opens and merges a PR. |
 | `/autoheal-digest [date]` | Render today's or a specific date's digest (an archive). |
 | `/autoheal-toggle [pause\|resume\|status\|realtime\|autoapply\|webhook] [on\|off\|shadow\|status\|url <URL>]` | Flip config flags. |

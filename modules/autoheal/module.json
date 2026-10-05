@@ -155,6 +155,16 @@
       "type": "script",
       "template": false
     },
+    "bin/autoheal-health.py": {
+      "target": "bin/autoheal-health.py",
+      "type": "script",
+      "template": false
+    },
+    "bin/autoheal-doctor.py": {
+      "target": "bin/autoheal-doctor.py",
+      "type": "script",
+      "template": false
+    },
     "lib/event-schema.json": {
       "target": "lib/event-schema.json",
       "type": "lib",
