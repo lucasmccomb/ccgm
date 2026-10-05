@@ -9,7 +9,7 @@ CCGM's durable, cross-session memory: a store that learns from your work and sur
 The memory system splits into two halves that share one store:
 
 - **Read path** — the [`self-improving`](../modules/self-improving/rules/self-improving.md) learnings store plus a `SessionStart` hook that surfaces the current project's top-ranked learnings at the start of each new session. **Local and free — no network calls.**
-- **Write path** — the [`dreaming`](../modules/dreaming/skills/dreaming/SKILL.md) module: a nightly analyzer that mines your session transcripts into evidence-tagged *proposals* for new learnings, behind a human gate. **Opt-in; spends Anthropic API tokens.**
+- **Write path** — the [`dreaming`](../modules/dreaming/skills/dreaming/SKILL.md) module: a nightly analyzer that mines your session transcripts into evidence-tagged *proposals* for new learnings, which an opt-in engine integrates or discards on its own. **Opt-in; spends Anthropic API tokens.**
 
 The read path is the valuable, always-safe half and is complete on its own. The write path is an optional layer that automates capture — you never need it to benefit from memory.
 
@@ -29,12 +29,12 @@ The read path is the valuable, always-safe half and is complete on its own. The 
 
 **Write path (dreaming, automated capture):**
 
-Nightly, the analyzer mines the day's transcripts into a redacted evidence bundle → proposes per-change deltas against the same store → writes them `pending` to `~/.claude/dreaming/proposals/{date}.jsonl`. From there, one of two things happens:
+Nightly, the analyzer mines the day's transcripts into a redacted evidence bundle → drops candidates the session already knows → proposes per-change deltas against the same store → writes them `pending` to `~/.claude/dreaming/proposals/{date}.jsonl`. Nobody reviews a queue. From there, one of two things happens:
 
-- **Human-gated (default)** — you review the digest and accept/reject with `/dream-apply`. Nothing reaches the store until you do.
-- **Optimistic auto-integration (opt-in)** — a per-op-kind engine writes the change immediately, holds it behind a dwell window before it can reach agent context, and reports it for a post-hoc veto or one-command rollback.
+- **Optimistic auto-integration (opt-in, default off)** — a per-op-kind engine decides every proposal the same night. It integrates the change behind a dwell window before it can reach agent context, or discards it with a recorded reason. A once-a-day session line reports what changed, and `/dream-review` vetoes a row or `ccgm-learnings-sync revert` rolls a batch back.
+- **Held (integration off or shadow)** — proposals stay `pending`, untouched. `/dream-apply` applies one by hand.
 
-Either way, an applied change feeds the same read path above once it's live.
+Either way, an integrated change feeds the same read path above once it's live.
 
 ### Architecture at a glance
 
@@ -47,10 +47,12 @@ Either way, an applied change feeds the same read path above once it's live.
 | Injection hook | `learnings-inject.py` (`SessionStart`) | Gated on `CCGM_LEARNINGS_INJECT` **and** `source == "startup"`; emits one `<ccgm-learnings-injection>` block of top-ranked learnings |
 | Reflection triggers | `reflection-trigger.py` (`PostToolUse`), `precompact-reflection.py` (`PreCompact`) | Nudge a reflection pass after merges/issue-closes and before context compaction |
 | Nightly analyzer | `dreaming` LaunchAgent → `dream_analyze.py` | Mines transcripts → evidence → proposals via direct Anthropic API (no nested agent) |
-| Digest / apply | `/dream-digest`, `/dream-apply` | Render the day's proposals; the always-available human-gated write path |
+| Digest / apply | `/dream-digest`, `/dream-apply` | Render the day's proposals; the manual write path (the only one while integration is off) |
 | Optimistic engine | `apply_dream_proposal.py` (opt-in) | Per-op-kind posture engine: dwell window, per-slug caps, batch-anomaly check, circuit breaker |
 | Post-hoc review | `/dream-review`, `ccgm-learnings-sync revert <sha>` | Veto a still-dwelling row; roll back a bad batch |
-| Eval gate | `dream-eval.sh --gate` | With/without-memory A/B regression gate optimistic integration must pass nightly |
+| Eval gate | `dream-eval.sh --gate` | Regression gate optimistic integration must pass nightly; open unless the weekly smoke shows a supported regression |
+| Health | `state/health.json`, `dreaming-health.py` (`SessionStart`) | Recomputed every nightly run; a red status and a one-line daily notice reach the next session |
+| Recurrence | `lib/recurrence.py` | Trigger hits in exposed sessions against a baseline; drives auto verify and deprecate at no API cost |
 | Scorecard | `/dream-scorecard` | Weekly, read-only observability of captured / injected / reused / applied + store health |
 
 The read path uses only the first six rows. The rest ship with `dreaming`.
@@ -229,14 +231,14 @@ When `/consolidate` rewrites an entry's content to save tokens, `compact_preserv
 
 # Part 4 — The write path (`dreaming`)
 
-Dreaming is a nightly, cost-capped, out-of-band pipeline that mines session transcripts into evidence-tagged *proposals* against the learnings store, behind a human gate. It never runs inside a Claude Code agent runtime — every model call is a direct `curl` to the Anthropic Messages API, which removes the nested-agent exec-escape surface. It runs headless under `launchd`.
+Dreaming is a nightly, cost-capped, out-of-band pipeline that mines session transcripts into evidence-tagged *proposals* against the learnings store, with no human review queue. It never runs inside a Claude Code agent runtime — every model call is a direct `curl` to the Anthropic Messages API, which removes the nested-agent exec-escape surface. It runs headless under `launchd`.
 
 ## Stage 1 — deterministic mining (no model)
 
 `transcript_miner.py` is pure stdlib. Its pipeline is `discover() → mine() → cluster() → budget()`:
 
-- **`discover()`** enumerates the session-transcript JSONLs under `~/.claude/projects/*/`. Crucially, it re-derives each transcript's owning learnings slug by *peeking the transcript's own recorded `cwd`* and running `detect_project_slug()` — never from the `~/.claude/projects/` directory name, which is keyed by encoded cwd path (one per clone) and does *not* agree with the git-remote slug. A per-slug watermark (epoch-compared, fcntl-locked, forward-only) skips already-mined transcripts; slugs with no watermark fall back to a 7-day lookback.
-- **`mine()`** extracts, in one deterministic forward pass: **friction events** (`tool_error` from `is_error`/non-zero Bash exit, `hook_error`, `prevented_continuation`), **user-correction events** (a human-origin user turn containing one of 22 negation phrases within 2 turns *after* a friction event), **PR links**, and **token economics** (per-session input/output/cache token sums + cache-read ratio). Every excerpt is redacted (secrets *then* PII) and truncated to 400 chars before storage.
+- **`discover()`** enumerates the session-transcript JSONLs under `~/.claude/projects/*/`. Crucially, it re-derives each transcript's owning learnings slug by *peeking the transcript's own recorded `cwd`* and running `detect_project_slug()` — never from the `~/.claude/projects/` directory name, which is keyed by encoded cwd path (one per clone) and does *not* agree with the git-remote slug. It includes each session's subagent transcripts (`<session>/subagents/agent-*.jsonl`). A per-file byte-offset cursor (`state/mining-cursors.json`) skips what was already mined, so appended lines are mined once and nothing is re-mined; slugs with no cursor fall back to a 7-day lookback.
+- **`mine()`** extracts, in one deterministic forward pass: five **signals**, the knowledge a session does not already carry (human **redirections**, struggles **resolved** after several attempts, assistant **conclusions** after a failure or a redirection, facts **rediscovered** across sessions, **abandoned work**); **friction events** (`tool_error` from `is_error`/non-zero Bash exit, `hook_error`, `prevented_continuation`); **PR links**; and **token economics** (per-session input/output/cache token sums + cache-read ratio). Only genuinely human-typed turns count as redirections. Signals take up to 80% of the token budget before friction. Every excerpt is redacted (secrets *then* PII) and truncated to 400 chars before storage.
 - **`cluster()`** groups events by `(kind, tool, normalized-command-prefix)`, friction-first. Friction clusters keep ≤3 exemplars; routine clusters carry none.
 - **`budget()`** trims to a token cap (default 200k) by round-robin down-sampling exemplars — but **never drops a friction cluster entirely** (each keeps ≥1 mandatory exemplar).
 - **`schema_canary()`** validates three field-level structural invariants (`friction_events`, `token_economics`, `turn_structure`), each gated on a corroborating signal so a genuinely quiet window doesn't false-trip. On real drift it **raises `SchemaDriftError`** naming the broken extraction, field, and observed versions, and the run records a durable canary incident and excludes that slug — rather than silently mining nothing. Benign version bumps pass silently (no allowlist to maintain).
@@ -250,17 +252,19 @@ Dreaming is a nightly, cost-capped, out-of-band pipeline that mines session tran
 
 Both calls send `output_config.format` with a JSON schema, so the response shape is enforced by the API rather than requested in prose. `max_tokens` is a backstop at 16000, not a tuning knob, paired with a 300s curl timeout so the cap is reachable. A map call that stops at the cap is a failed extraction: that slug's watermark is held so its evidence is re-mined next run, a durable incident lands in the canary banner, and the count reaches the run summary the digest renders. The preflight prices a call at a separate planning figure, so raising the backstop does not shrink the plan.
 
-A preflight cost plan walks due slugs *least-recently-dreamed first*, accumulating estimated map+reduce cost and stopping before it would exceed a `$10/day` cap (configurable). `--offline <dir>` replaces every `curl` with canned fixtures for deterministic, no-network testing. `load_config()` auto-migrates a legacy `auto_apply_counters: true` flag to `optimistic_integration.enabled: true` **in memory** (never rewriting disk) so a prior opt-in survives the rename.
+Between the map and the reduce, a deterministic prefilter (`loaded_context.py`, no model calls) drops a candidate that restates something the session already loads (rules, CLAUDE.md files, auto-memory, hook messages, pending or discarded proposals) as `already_encoded`, and a candidate whose evidence is all tool-error friction that restates the error as `routed_to_autoheal`: autoheal's failure logger records tool and hook failures first-hand, so dreaming leaves them alone. A cited signal keeps a candidate. Every add or supersede must carry a deterministic `trigger` that fires on its own cited evidence; the recurrence metric scans later transcripts with it.
+
+A preflight cost plan walks due slugs *least-recently-dreamed first*, accumulating estimated map+reduce cost and stopping before it would exceed a `$10/day` cap (configurable). A rolling 30-day budget (`module_budget_usd_30d`, default $25) caps all spend, the analyzer and the eval together. `--offline <dir>` replaces every `curl` with canned fixtures for deterministic, no-network testing. `load_config()` auto-migrates a legacy `auto_apply_counters: true` flag to `optimistic_integration.enabled: true` **in memory** (never rewriting disk) so a prior opt-in survives the rename.
 
 ## The proposal / evidence / gate contract
 
-Every proposal (`~/.claude/dreaming/proposals/{date}.jsonl`) is a **per-change delta** against the store — `learning_add | verify | contradict | supersede | deprecate` — never a whole-store swap. Each carries: the evidence sessions that support it (redacted, ≤400-char excerpts), a prevalence count, a confidence score, and a justification. Proposals are fingerprinted (`sha256(kind:project:key_basis)`) and deduped against all prior proposal files. Nothing is applied silently: a proposal starts `pending` and stays there until a human `/dream-apply` accepts it — or the opt-in optimistic engine acts on it under its own gates.
+Every proposal (`~/.claude/dreaming/proposals/{date}.jsonl`) is a **per-change delta** against the store — `learning_add | verify | contradict | supersede | deprecate` — never a whole-store swap. Each carries: the evidence sessions that support it (redacted, ≤400-char excerpts), a prevalence count, a confidence score, and a justification. Proposals are fingerprinted (`sha256(kind:project:key_basis)`, keyed on the cited evidence, not the model's wording) and deduped against all prior proposal files. Nothing is applied silently: a proposal starts `pending`, and with integration active the engine ends it as `auto_applied` or `discarded` (with a reason) within about 48 hours. With integration off or shadow it stays `pending` until `/dream-apply` acts on it.
 
 **Two-layer redaction** runs before anything leaves the machine: every evidence excerpt passes through secret-token redaction *and* PII redaction (email / phone / address), then is truncated to ≤400 chars — redaction always *before* truncation so a boundary can't split a redaction marker. Untrusted proposal text, excerpts, and justifications are sanitized before they ever reach a digest a human reads or an agent session.
 
-## Apply path A — human-gated (`/dream-apply`)
+## Apply path A — manual override (`/dream-apply`)
 
-Always available, no opt-in required. `/dream-apply list` shows pending proposals; `/dream-apply <id>` accepts or rejects one. `apply_proposal()` is the single write entry point for both human and engine applies: it holds an exclusive lock across read → not-pending-check → dispatch → status-rewrite (so a proposal is applied at most once), maps the kind to a `ccgm-learnings-log` op (with CAS retry for supersede/deprecate), and always writes an audit record. This is the **only** path a `_global` proposal can ever be promoted through: `promote_to_global()` is invoked only after a recorded human accept, verifies every cited evidence session resolves to a real transcript, and derives the writer from that transcript's cwd.
+Always available, no opt-in required; nothing waits for it when integration is active. `/dream-apply list` shows pending proposals; `/dream-apply <id>` accepts or rejects one. `apply_proposal()` is the single write entry point for both human and engine applies: it holds an exclusive lock across read → not-pending-check → dispatch → status-rewrite (so a proposal is applied at most once), maps the kind to a `ccgm-learnings-log` op (with CAS retry for supersede/deprecate), and always writes an audit record. `promote_to_global()` is the only way a `_global` row is written. It verifies every cited evidence session resolves to a real transcript and derives the writer from that transcript's cwd. It runs after a recorded `/dream-apply` accept, or automatically when the transcript-verified evidence spans `promotion_min_sessions` (3) sessions over `promotion_min_slugs` (2) project slugs.
 
 ## Apply path B — optimistic auto-integration (opt-in, default OFF)
 
@@ -273,9 +277,9 @@ Always available, no opt-in required. `/dream-apply list` shows pending proposal
 | `learning_supersede` | `optimistic-dwell` | yes | 8 (or composite gate) | shared with add |
 | `learning_contradict` | `dwell-quarantine` | yes | 8 | `min(max_eviction_absolute, fraction × live heads)` |
 | `learning_deprecate` | `dwell-quarantine` | yes | 8 | shared with contradict |
-| any → `_global` | `gated` | n/a | n/a | human accept stays required |
+| op on an existing `_global` row | `gated` | n/a | n/a | never automated; `/dream-apply` only |
 
-`learning_verify` integrates immediately because it's purely additive (bounded `+0.25/use`) and reversible by a later contradict — nothing to hold back. Everything else is written to the store *immediately* but carries a `dwell_until` (default 24h) that excludes it from every read path until the window elapses. Anything that misses its floor/cap, targets `_global`, or arrives on an anomalous/tripped run falls back to `pending` — never silently dropped.
+`learning_verify` integrates immediately because it's purely additive (bounded `+0.25/use`) and reversible by a later contradict — nothing to hold back. Everything else is written to the store *immediately* but carries a `dwell_until` (default 24h) that excludes it from every read path until the window elapses. A proposal that misses its floor or cap, or arrives on an anomalous run, is `discarded` with a recorded reason (`low_confidence`, `cap_exceeded`, `batch_anomaly`, ...); a suspended breaker, a timeout or an infra error leaves it `pending` for the next night, and `expire-pending` discards anything pending past `pending_max_age_hours` (48) as `expired`. With integration off or shadow nothing is discarded.
 
 ### The composite eligibility gate (add/supersede only, default OFF)
 
@@ -299,29 +303,29 @@ All caps are scoped **per project slug** (a legitimate focused night on one proj
 
 ### The eval gate
 
-Before optimistic integration may act **at all**, `dream-eval.sh --gate` must pass. It runs a three-arm A/B (`baseline`, `treatment` = with mined memory, `full_context` = the whole transcript dumped in) over a seed task suite, classifying each into four buckets (`regression > high_value > redundant > gap > inconclusive`). `gate_check()` fails **closed** on any of ten conditions — a harness-broken marker newer than the latest results (every agent run failed to launch), no results, stale results, results predating the last content-shaping store mutation, any regression row, no high-value row, no *live* (non-offline) dreamed high-value row, a nonzero judge-error rate, or a noise-only control that produced a high-value proposal. Missing or red ⇒ no integration that night, and a red gate is itself recorded as a breaker anomaly.
+Before optimistic integration may act, `dream-eval.sh --gate` must not be closed or paused. It prints one of three states: `open` (no supported regression), `closed` (a supported regression: on a canary task, or a task whose seed learning changed, treatment fails a check that baseline passes in at least 2 of 3 runs each), or `paused` (nothing usable was measured: no results, results older than `eval_freshness_days` (7), more than `max_unevaluated_writes` (15) dreaming writes since them, a harness-broken marker, a budget abort, or a launch failure on a checked row). No `high_value` row is required. A paused or closed gate means no integration that night; a pause is an infra anomaly and never counts toward a breaker trip.
 
-> **Today the gate stays deliberately closed** for capable models: the harness has not yet demonstrated that mined memory beats a full-context dump on outcome *or* clears the efficiency path on realistic agentic tasks (the injected facts block is a minority of each turn's input, dominated by Claude Code's own re-read system context). So `/dream-apply` (human review) remains the real write path; optimistic auto-integration is wired, gated, and off.
+The weekly **regression smoke** keeps the results fresh: 4 tasks x 2 arms (baseline, treatment) x 3 runs = 24 sessions, graded by deterministic checks with no judge call, about $1.50 against a $2 hard stop. It runs from the nightly chain only when `optimistic_integration.eval_refresh_enabled` is true (default false); the old 270-session suite cost about $21 a run. A gate paused 3 or more nights turns `health.json` red, since nothing integrates and `expire-pending` discards each night's proposals unseen after 48 hours.
 
 ## Poisoning defenses (why "promote what's prevalent" is safe here)
 
 - **Origin binding is transcript-verified, not caller-supplied.** A proposal's evidence must resolve to real transcript files; `writer` is derived from the transcript's recorded `cwd`, never from an exportable env var. A supersede can never *raise* an entry's source tier without an independently-verified new session.
-- **`_global` is promotion-only, through exactly one path** — `promote_to_global()`, invoked only after a recorded human accept. No automated `_global` add exists anywhere.
-- **Breadth is informational, not a bypass.** Under-prevalence `_global` proposals are labeled `needs_manual_promotion` in the digest — never dropped, never silently applied. (For a solo/single-clone user the "≥2 agents" breadth condition is realistically unsatisfiable, so treat fleet-wide auto-promotion as a latent multi-agent capability, not a solo-user outcome.)
+- **`_global` is written through exactly one path** — `promote_to_global()`, after a `/dream-apply` accept or a breadth-verified engine decision (3 verified sessions over 2 slugs; otherwise the add is rescoped to one slug or discarded). Ops on an existing `_global` row are never automated.
+- **Breadth is transcript-verified, never claimed.** The model's `prevalence` field plays no part in `_global` promotion; the cited sessions must resolve to real transcripts whose excerpts corroborate the claim.
 
 ## The nightly scheduler chain
 
 A `launchd` LaunchAgent (`com.$USER.ccgm.dreaming.daily`, default 03:30) runs `dream-daily.sh`, an exit-tolerant chain — one step's failure never kills the rest or trips a launchd cooldown:
 
 ```
-analyze → eval-refresh → optimistic-integrate → digest → reconcile → retention
+breaker-check → analyze → eval-refresh → optimistic-integrate → expire-pending → recurrence → digest → reconcile → scorecard (Sundays) → retention
 ```
 
-`digest` runs *after* `optimistic-integrate` so tonight's just-integrated batch is reported while its dwell window is still entirely ahead of it. `optimistic-integrate` is both config-gated (raw on-disk `enabled` read) and eval-gated (a missing eval script fails *closed*), and runs under a 600s timeout. `retention` gzips artifacts older than 30 days and deletes gzipped ones older than 60, scoped to `proposals/`, `digests/`, and `state/runs/` (never the perpetual state files).
+`digest` runs *after* `optimistic-integrate` so tonight's just-integrated batch is reported while its dwell window is still entirely ahead of it. `optimistic-integrate` is both config-gated (raw on-disk `enabled` read) and eval-gated (a missing eval script fails *closed*), and runs under a 600s timeout. An EXIT trap then recomputes `state/health.json`, so even a crashed run reports. `retention` gzips artifacts older than 30 days and deletes gzipped ones older than 60, scoped to `proposals/`, `digests/`, and `state/runs/` (never the perpetual state files).
 
 ## Reconciliation (read-only)
 
-`reconcile_automemory.py` compares Claude Code's own harness auto-memory (`~/.claude/projects/*/memory/`) against the learnings store and appends a `## Reconciliation` section to the day's digest: **import candidates** (auto-memory facts absent from the store) and **contradictions** (store rows that dispute a topic auto-memory still presents as current, flagged for `/consolidate`). It **never writes** to `~/.claude/projects/` — the harness's own consolidator owns that file, and colliding writers on it is exactly the failure class this whole system exists to prevent.
+`reconcile_automemory.py` compares Claude Code's own harness auto-memory (`~/.claude/projects/*/memory/`) against the learnings store and writes the report to `digests/{date}.reconcile.md` (the digest keeps one pointer line): **import candidates** (auto-memory facts absent from the store) and **contradictions** (store rows that dispute a topic auto-memory still presents as current, flagged for `/consolidate`). It **never writes** to `~/.claude/projects/` — the harness's own consolidator owns that file, and colliding writers on it is exactly the failure class this whole system exists to prevent.
 
 ---
 
@@ -331,6 +335,7 @@ analyze → eval-refresh → optimistic-integrate → digest → reconcile → r
 
 `/dream-scorecard` renders a deterministic, read-only weekly report to `~/.claude/dreaming/scorecards/{date}.md` — every number is a count of something already on disk; it never touches the store. Metrics, over a half-open 7-day window:
 
+- **Recurrence** (the headline) — how much less often a learning's trigger fires in sessions it was injected into, against its 30-day pre-integration baseline, split into dreamed and observed learnings (`lib/recurrence.py`, no API cost).
 - **Captured** — new `add` events, by type and project.
 - **Injected** — sessions that received memory, from the per-machine injection telemetry (IDs + counts only, never content).
 - **Reused** — `verify` events. **This is the key signal**: a reuse means a stored learning actually helped in a later session, which is the whole point.

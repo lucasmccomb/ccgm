@@ -15,8 +15,8 @@ Two anomaly classes (#1098 item 2.2):
              toward a trip.
 * content -- something dreaming wrote may be bad: a batch-anomaly fire, an
              eval regression attributable to a batch integrated since the
-             last green run, or a recurrence spike (the seam for the Phase 4
-             recurrence metric). Counts toward a trip; a trip reverts the
+             last green run, or a recurrence spike (recorded by
+             lib/recurrence.py). Counts toward a trip; a trip reverts the
              implicated batches.
 
 `anomaly_log` entries are `{ts, reason, class, batch_ids}`. Entries written
@@ -48,7 +48,7 @@ CONTENT_REASONS = frozenset({
     "batch_eviction_concentration",
     "session_citation_concentration",
     "rolling_add_rate_exceeded",
-    "recurrence_spike",  # Phase 4 recurrence metric; recorded via record-anomaly
+    "recurrence_spike",  # recorded by lib/recurrence.py via record-anomaly
 })
 
 # Reason given to a pre-#1098 bare timestamp the audit cannot explain.

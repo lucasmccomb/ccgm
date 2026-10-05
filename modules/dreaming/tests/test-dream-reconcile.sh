@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Idempotency test for dream-reconcile.sh (#775 Stage-2 Recommend).
 #
+# Since #1115 the report lives in digests/<date>.reconcile.md and the digest
+# keeps one "Reconciliation report: `<date>.reconcile.md`" pointer line.
+#
 # Coverage:
-#   - a same-day re-run does NOT duplicate the "## Reconciliation" section
+#   - a same-day re-run does NOT duplicate the report or the pointer line
 #     (dreaming.md's own "Quick checks" recommends re-running
 #     `dream-daily.sh --force-day <date>` for local smoke testing, which is
 #     exactly the scenario that trips this)
@@ -10,7 +13,9 @@
 #     "## Proposals") already present in the digest file survive a
 #     dream-reconcile.sh re-run untouched -- this step is scoped to just
 #     its own section, never the rest of the file
-#   - the re-run's freshly computed section reflects current state (not a
+#   - an inline "## Reconciliation" section left by an older version is
+#     stripped from the digest
+#   - the re-run's freshly computed report reflects current state (not a
 #     stale copy of the first run)
 #
 # Isolated: never touches the real ~/.claude/{dreaming,learnings} or
@@ -100,6 +105,8 @@ RUN_ENV=(
 
 DATE="2026-05-01"
 DIGEST_FILE="${DREAMING_DIR}/digests/${DATE}.md"
+SIDECAR_FILE="${DREAMING_DIR}/digests/${DATE}.reconcile.md"
+POINTER="Reconciliation report: \`${DATE}.reconcile.md\`"
 
 # Pre-seed the digest with content shaped like dream-digest.sh's own output
 # (chain step 2, which always runs immediately before dream-reconcile.sh)
@@ -121,6 +128,10 @@ _No proposals for this date._
 **Controls**
 
 - \`/dream\` — status
+
+## Reconciliation
+
+stale inline section from before #1115
 EOF
 
 # ---------------------------------------------------------------------
@@ -132,13 +143,16 @@ env "${RUN_ENV[@]}" bash "${DREAM_RECONCILE}" "${DATE}" \
 RUN1_RC=$?
 assert_eq "${RUN1_RC}" "0" "dream-reconcile.sh (run 1) exits 0"
 assert_file_exists "${DIGEST_FILE}" "digest file exists after run 1"
+assert_file_exists "${SIDECAR_FILE}" "reconcile sidecar exists after run 1"
 
-if [ -f "${DIGEST_FILE}" ]; then
+if [ -f "${DIGEST_FILE}" ] && [ -f "${SIDECAR_FILE}" ]; then
     BODY1="$(cat "${DIGEST_FILE}")"
-    RECON_COUNT_1="$(grep -c '^## Reconciliation$' "${DIGEST_FILE}")"
-    assert_eq "${RECON_COUNT_1}" "1" "exactly one Reconciliation section after run 1"
-    assert_contains "${BODY1}" "### idem-repo" "run 1 digest shows the idem-repo section"
-    assert_contains "${BODY1}" "idem-fact" "run 1 digest shows the fact"
+    SIDE1="$(cat "${SIDECAR_FILE}")"
+    assert_eq "$(grep -c '^## Reconciliation$' "${DIGEST_FILE}")" "0" "digest holds no inline Reconciliation section (old one stripped)"
+    assert_eq "$(grep -c '^## Reconciliation$' "${SIDECAR_FILE}")" "1" "exactly one Reconciliation section in the sidecar after run 1"
+    assert_contains "${BODY1}" "${POINTER}" "run 1 digest carries the pointer line"
+    assert_contains "${SIDE1}" "### idem-repo" "run 1 sidecar shows the idem-repo section"
+    assert_contains "${SIDE1}" "idem-fact" "run 1 sidecar shows the fact"
     assert_contains "${BODY1}" "## Run summary" "run 1 preserves the pre-existing Run summary section"
 fi
 
@@ -163,21 +177,15 @@ env "${RUN_ENV[@]}" bash "${DREAM_RECONCILE}" "${DATE}" \
 RUN3_RC=$?
 assert_eq "${RUN3_RC}" "0" "dream-reconcile.sh (run 3) exits 0"
 
-if [ -f "${DIGEST_FILE}" ]; then
+if [ -f "${DIGEST_FILE}" ] && [ -f "${SIDECAR_FILE}" ]; then
     BODY3="$(cat "${DIGEST_FILE}")"
-    RECON_COUNT_3="$(grep -c '^## Reconciliation$' "${DIGEST_FILE}")"
-    assert_eq "${RECON_COUNT_3}" "1" "exactly one Reconciliation section after 3 runs (no duplication)"
-
-    RUN_SUMMARY_COUNT="$(grep -c '^## Run summary$' "${DIGEST_FILE}")"
-    assert_eq "${RUN_SUMMARY_COUNT}" "1" "pre-existing Run summary section still appears exactly once (untouched by 3 reconcile re-runs)"
-
-    PROPOSALS_COUNT="$(grep -c '^## Proposals$' "${DIGEST_FILE}")"
-    assert_eq "${PROPOSALS_COUNT}" "1" "pre-existing Proposals section still appears exactly once"
-
-    IDEM_REPO_COUNT="$(grep -c '^### idem-repo$' "${DIGEST_FILE}")"
-    assert_eq "${IDEM_REPO_COUNT}" "1" "idem-repo subsection appears exactly once (not duplicated across runs)"
-
-    assert_contains "${BODY3}" "idem-fact" "content still present after 3 re-runs"
+    SIDE3="$(cat "${SIDECAR_FILE}")"
+    assert_eq "$(grep -c '^## Reconciliation$' "${SIDECAR_FILE}")" "1" "exactly one Reconciliation section in the sidecar after 3 runs (no duplication)"
+    assert_eq "$(grep -cF "${POINTER}" "${DIGEST_FILE}")" "1" "exactly one pointer line in the digest after 3 runs"
+    assert_eq "$(grep -c '^## Run summary$' "${DIGEST_FILE}")" "1" "pre-existing Run summary section still appears exactly once (untouched by 3 reconcile re-runs)"
+    assert_eq "$(grep -c '^## Proposals$' "${DIGEST_FILE}")" "1" "pre-existing Proposals section still appears exactly once"
+    assert_eq "$(grep -c '^### idem-repo$' "${SIDECAR_FILE}")" "1" "idem-repo subsection appears exactly once in the sidecar (not duplicated across runs)"
+    assert_contains "${SIDE3}" "idem-fact" "content still present in the sidecar after 3 re-runs"
     assert_contains "${BODY3}" "\`/dream\` — status" "Controls section (which contains an unrelated '/dream' line, not a heading) survives untouched"
 fi
 
@@ -204,12 +212,11 @@ env "${RUN_ENV[@]}" bash "${DREAM_RECONCILE}" "${DATE}" \
 RUN4_RC=$?
 assert_eq "${RUN4_RC}" "0" "dream-reconcile.sh (run 4, after a new fact appeared) exits 0"
 
-if [ -f "${DIGEST_FILE}" ]; then
-    BODY4="$(cat "${DIGEST_FILE}")"
-    RECON_COUNT_4="$(grep -c '^## Reconciliation$' "${DIGEST_FILE}")"
-    assert_eq "${RECON_COUNT_4}" "1" "still exactly one Reconciliation section after run 4"
-    assert_contains "${BODY4}" "idem-fact-two" "run 4 reflects the newly added fact (fresh recompute, not a stale cached section)"
-    assert_contains "${BODY4}" "2 auto-memory fact(s)" "fact count updates to 2 on the fresh run"
+if [ -f "${SIDECAR_FILE}" ]; then
+    SIDE4="$(cat "${SIDECAR_FILE}")"
+    assert_eq "$(grep -c '^## Reconciliation$' "${SIDECAR_FILE}")" "1" "still exactly one Reconciliation section after run 4"
+    assert_contains "${SIDE4}" "idem-fact-two" "run 4 reflects the newly added fact (fresh recompute, not a stale cached section)"
+    assert_contains "${SIDE4}" "2 auto-memory fact(s)" "fact count updates to 2 on the fresh run"
 fi
 
 # ---------------------------------------------------------------------
@@ -224,6 +231,7 @@ if [ "${FAIL}" -gt 0 ]; then
     echo "--- run3.err ---"; cat "${SANDBOX}/run3.err"
     echo "--- run4.err ---"; cat "${SANDBOX}/run4.err"
     echo "--- final digest ---"; cat "${DIGEST_FILE}" 2>/dev/null
+    echo "--- final sidecar ---"; cat "${SIDECAR_FILE}" 2>/dev/null
     exit 1
 fi
 exit 0

@@ -27,6 +27,13 @@ Print the markdown digest for today (default) or a specific past date.
      incident, surface that regardless of whether a digest exists for this
      specific date (the canary is durable, not day-scoped).
 
+The auto-memory reconciliation report is a sibling file,
+`~/.claude/dreaming/digests/{date}.reconcile.md`; the digest holds one pointer
+line to it (`Reconciliation report: ...`), so the digest stays small. Print the
+sibling file too when the user asks about reconciliation. The digest also
+prints "N friction-only candidates left to autoheal" when mining dropped any
+(#1098 3.2).
+
 ## When to invoke
 
 - The daily launchd job (03:30 local) has not yet fired and you want to see
@@ -56,7 +63,8 @@ modifies the proposals, state, or learnings-store files.
 ## Cross-references
 
 - Generator: `~/.claude/bin/dream-digest.sh`
-- `/dream-apply [id|list]` — the write path for the proposals this digest
-  summarizes.
+- `/dream-apply [id|list]` — the manual write path for the proposals this
+  digest summarizes (with integration `active`, the engine has already
+  integrated or discarded them).
 - Plan: `~/code/plans/ccgm-durable-memory-system/plan.md` §5 Epic 3 (digest
   renderer), §5 Epic 6 (apply path this digest points at).

@@ -138,7 +138,9 @@ class CorpusSourceTests(TmpTestCase):
         by_cat = {u.category: u.source for u in corpus.units}
         self.assertTrue(by_cat["pending_proposal"].endswith("2026-09-30.jsonl#p1"))
         self.assertTrue(by_cat["discarded_proposal"].endswith("2026-09-29.jsonl.gz#p2"))
-        self.assertNotIn("p3", " ".join(u.source for u in corpus.units))
+        # Compare the "#<id>" fragment, not a substring of the full path: the
+        # random tempdir name can contain "p3".
+        self.assertNotIn("p3", [u.source.rsplit("#", 1)[-1] for u in corpus.units if "#" in u.source])
 
     def test_old_proposal_files_are_skipped_and_the_excluded_path_is_honored(self):
         pdir = self.roots.proposals_dir

@@ -55,10 +55,17 @@ import json
 import math
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
+
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+from transcript_miner import _WORKTREE_SEGMENT  # noqa: E402  (sibling module, same lib/ dir)
 
 ALREADY_ENCODED = "already_encoded"
 ROUTED_TO_AUTOHEAL = "routed_to_autoheal"
@@ -296,9 +303,6 @@ def _file_date(path: Path) -> date | None:
 def encode_cwd(cwd: str) -> str:
     """Claude Code's project-directory name for a cwd."""
     return re.sub(r"[^A-Za-z0-9]", "-", cwd)
-
-
-_WORKTREE_SEGMENT = "/.claude/worktrees/"
 
 
 class Corpus:

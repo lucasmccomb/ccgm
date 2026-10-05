@@ -15,8 +15,13 @@ command modifies no files. Use the listed subcommands for stateful actions.
 2. The current config flags (`enabled`, `auto_apply_counters`, `map_model`,
    `reduce_model`, `daily_cost_cap_usd`, `promotion_min_sessions`,
    `promotion_min_agents`) read from `~/.claude/dreaming/config.json`.
-3. The watermark (`~/.claude/dreaming/state/last-dreamed.json`) — last mined
-   transcript timestamp per project slug.
+3. The mining position per project slug: the byte-offset cursors
+   (`~/.claude/dreaming/state/mining-cursors.json`) and the watermark
+   (`~/.claude/dreaming/state/last-dreamed.json`, last mined transcript
+   timestamp, which only orders slugs least-recently-dreamed first).
+   Health: `status` and the top reasons with their fix commands from
+   `~/.claude/dreaming/state/health.json` (red, yellow or green; recomputed
+   by every nightly chain run).
 4. Today's digest path and whether it exists yet
    (`~/.claude/dreaming/digests/{today}.md`).
 5. The count of `pending` proposals across the retained window (walk
@@ -79,7 +84,8 @@ This command is a thin Claude reader, not a shell script. The agent:
 | `/dream` | This overview. |
 | `/dream-digest [date]` | Render today's or a specific date's digest. |
 | `/dream-review [veto\|revert]` | Review auto-integrated + dwelling rows; veto a row or revert a batch. |
-| `/dream-apply [id\|list]` | Back-compat: list pending proposals, or apply/reject one by id (the `gated`/`_global` path). |
+| `/dream-scorecard [week]` | Weekly scorecard: recurrence reduction (the headline), captured, injected, reused, applied, optimistic-integration safety signals. |
+| `/dream-apply [id\|list]` | Manual override: list pending proposals, or apply/reject one by id (the `gated`/`_global` path; the only path while integration is `off` or `shadow`). Nothing waits for it when integration is `active`. |
 
 ## Config flags
 
@@ -89,8 +95,16 @@ schema. Defaults: `enabled: true`, `auto_apply_counters: false`,
 `max_output_tokens: 16000`, `daily_cost_cap_usd: 10.00`,
 `module_budget_usd_30d: 25.00` (rolling 30-day ceiling over all `cost.log`
 spend; the analyzer and the eval refuse to start at or above it),
-`eval_run_cost_cap_usd: 5.00`, `optimistic_integration.eval_refresh_enabled: false`,
-`promotion_min_sessions: 3`, `promotion_min_agents: 2`.
+`eval_run_cost_cap_usd: 5.00`, `optimistic_integration.eval_refresh_enabled: false`
+(when true, the nightly chain runs the weekly regression smoke, about $1.50),
+`optimistic_integration.eval_refresh_cost_cap_usd: 2.0`,
+`optimistic_integration.eval_freshness_days: 7`,
+`optimistic_integration.max_unevaluated_writes: 15`,
+`optimistic_integration.pending_max_age_hours: 48`,
+`prefilter_threshold: 0.35`, `friction_threshold: 0.35`,
+`reduce_pending_max: 100`, `promotion_min_sessions: 3`,
+`promotion_min_agents: 2`, `promotion_min_slugs: 2`. The README's
+"Configuration reference" lists every key.
 
 `max_output_tokens` is a backstop, not a tuning knob: raise it if calls
 start stopping at the cap (the digest counts those), and note that the

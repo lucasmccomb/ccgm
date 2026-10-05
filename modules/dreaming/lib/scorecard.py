@@ -776,14 +776,11 @@ def render(
     out.append("")
 
     # --- 4c. Shadow integration (#1087) -------------------------------------
-    # Only when the shadow log exists. Cumulative, not window-scoped: the
-    # promotion bar needs the whole record. The human outcome is the
-    # proposal's current status (accepted / rejected via /dream-apply).
+    # Only when the shadow log exists. Cumulative, not window-scoped. Shadow
+    # decisions have no human outcome to score against (#1098 2.3), so the
+    # section is a tally of what the engine would have done.
     if shadow_rows:
-        outcomes = {
-            str(r["id"]): str(r.get("status")) for r in proposal_rows if r.get("id")
-        }
-        shadow_stats = rollout_mode.agreement(shadow_rows, outcomes)
+        shadow_stats = rollout_mode.shadow_tally(shadow_rows)
         out.append(f"## Shadow integration — {shadow_stats['decisions']} decisions logged")
         out.append("")
         out.extend(rollout_mode.render_lines(shadow_stats))
