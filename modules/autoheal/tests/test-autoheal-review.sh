@@ -78,7 +78,14 @@ cat > "${BIN}/gh" <<'GH'
 printf '%s' "$*" | tr '\n' ' ' >> "${GHLOG}"
 printf '\n' >> "${GHLOG}"
 case "$1 $2" in
-    "pr create") echo "https://github.com/fixture/ccgm/pull/7" ;;
+    "pr create")
+        # Snapshot the pushed branch: a successful apply deletes it from origin afterward.
+        while [ $# -gt 0 ]; do
+            [ "$1" = "--head" ] && head="$2"
+            shift
+        done
+        git -C "${FAKE_ORIGIN}" update-ref "refs/snapshots/${head#autoheal/}" "refs/heads/${head}"
+        echo "https://github.com/fixture/ccgm/pull/7" ;;
     "pr checks") echo "all checks were successful"; exit "${FAKE_GH_CHECKS_RC:-0}" ;;
     "pr merge")
         if [ -n "${FAKE_GH_MERGE_FAIL:-}" ]; then
@@ -98,7 +105,7 @@ case "$1 $2" in
 esac
 GH
 chmod +x "${BIN}/gh"
-export GHLOG
+export GHLOG FAKE_ORIGIN="${ORIGIN}"
 export PATH="${BIN}:${PATH}"
 
 # --- autoheal data dir -----------------------------------------------------
@@ -238,17 +245,18 @@ assert_eq "$(echo "${row}" | jget 'd["pr_url"]')" "https://github.com/fixture/cc
 assert_eq "$(echo "${row}" | jget 'd["merge_sha"]')" "0123456789abcdef0123456789abcdef01234567" "t3: row stores the merge sha"
 assert_eq "$(echo "${row}" | jget 'd["baseline_rate"]')" "2.0" "t3: baseline_rate from the 14 days before"
 assert_eq "$(echo "${row}" | jget 'bool(d["merged_at"])')" "True" "t3: merged_at recorded"
-assert_eq "$(git -C "${ORIGIN}" log autoheal/aaaaaaaaaaaa -1 --format=%s)" "#auto: apply autoheal proposal aaaaaaaaaaaa" "t3: commit subject follows the #auto convention"
-msg="$(git -C "${ORIGIN}" log autoheal/aaaaaaaaaaaa -1 --format=%B)"
+assert_eq "$(git -C "${ORIGIN}" log refs/snapshots/aaaaaaaaaaaa -1 --format=%s)" "#auto: apply autoheal proposal aaaaaaaaaaaa" "t3: commit subject follows the #auto convention"
+msg="$(git -C "${ORIGIN}" log refs/snapshots/aaaaaaaaaaaa -1 --format=%B)"
 assert_eq "$(contains "${msg}" "Autoheal-Id: aaaaaaaaaaaa")" "yes" "t3: commit trailer Autoheal-Id"
 assert_eq "$(contains "${msg}" "Autoheal-Signature: Bash|echo|zsh_no_match")" "yes" "t3: commit trailer Autoheal-Signature"
-assert_eq "$(git -C "${ORIGIN}" show autoheal/aaaaaaaaaaaa:modules/git-workflow/rules/git-workflow.md | grep -c 'Quote any argument')" "1" "t3: pushed branch holds the rule"
+assert_eq "$(git -C "${ORIGIN}" show refs/snapshots/aaaaaaaaaaaa:modules/git-workflow/rules/git-workflow.md | grep -c 'Quote any argument')" "1" "t3: pushed branch holds the rule"
 assert_eq "$(git -C "${ORIGIN}" rev-parse main)" "$(git -C "${SRC}" rev-parse origin/main)" "t3: origin main untouched by the push"
 log="$(cat "${GHLOG}")"
 assert_eq "$(echo "${log}" | grep -c '^pr create')" "1" "t3: one gh pr create"
 assert_eq "$(echo "${log}" | grep -c '^pr merge.*--squash')" "1" "t3: gh pr merge --squash"
 assert_eq "$(echo "${log}" | grep -c -- '--admin')" "0" "t3: never --admin"
 assert_eq "$(echo "${log}" | grep '^pr merge' | grep -c 'Autoheal-Id: aaaaaaaaaaaa')" "1" "t3: squash body carries the trailer"
+assert_eq "$(git -C "${ORIGIN}" branch --list 'autoheal/aaaaaaaaaaaa' | grep -c autoheal)" "0" "t3: the merged branch is deleted from origin"
 assert_eq "$(src_state)" "${before}" "t3: source working tree, worktree list and branches unchanged"
 assert_eq "$(git -C "${SRC}" worktree list | wc -l | tr -d ' ')" "1" "t3: no worktree left"
 
@@ -263,8 +271,10 @@ assert_eq "$(echo "${row}" | jget 'd["state"]')" "ready" "t4: row stays ready"
 assert_eq "$(contains "$(echo "${row}" | jget 'd["apply_error"]')" "not mergeable")" "yes" "t4: apply_error records the refusal"
 assert_eq "$(echo "${row}" | jget 'd["pr_url"]')" "https://github.com/fixture/ccgm/pull/7" "t4: PR url kept so the PR is not lost"
 assert_eq "$(src_state)" "${before}" "t4: source repo unchanged after a failure"
+assert_eq "$(git -C "${ORIGIN}" branch --list 'autoheal/aaaaaaaaaaaa' | grep -c autoheal)" "1" "t4: the branch stays on origin while the PR is open"
 out="$(review apply aaaaaaaaaaaa)"; rc=$?
 assert_eq "${rc}" "0" "t4: retry merges"
+assert_eq "$(git -C "${ORIGIN}" branch --list 'autoheal/aaaaaaaaaaaa' | grep -c autoheal)" "0" "t4: the retry's merge deletes the branch"
 assert_eq "$(grep -c '^pr create' "${GHLOG}")" "1" "t4: retry opens no second PR"
 assert_eq "$(row_of aaaaaaaaaaaa | jget 'd["state"]')" "applied" "t4: retry applies the row"
 
@@ -287,8 +297,8 @@ seed
 printf -- '- Use single quotes around `==` in zsh.\n' > "${TMP}/edit.md"
 out="$(review apply aaaaaaaaaaaa --insert-file "${TMP}/edit.md")"; rc=$?
 assert_eq "${rc}" "0" "t5: edited apply exits 0"
-assert_eq "$(git -C "${ORIGIN}" show autoheal/aaaaaaaaaaaa:modules/git-workflow/rules/git-workflow.md | grep -c 'single quotes')" "1" "t5: edited text is what was pushed"
-assert_eq "$(git -C "${ORIGIN}" show autoheal/aaaaaaaaaaaa:modules/git-workflow/rules/git-workflow.md | grep -c 'Quote any argument')" "0" "t5: the original text is not"
+assert_eq "$(git -C "${ORIGIN}" show refs/snapshots/aaaaaaaaaaaa:modules/git-workflow/rules/git-workflow.md | grep -c 'single quotes')" "1" "t5: edited text is what was pushed"
+assert_eq "$(git -C "${ORIGIN}" show refs/snapshots/aaaaaaaaaaaa:modules/git-workflow/rules/git-workflow.md | grep -c 'Quote any argument')" "0" "t5: the original text is not"
 assert_eq "$(row_of aaaaaaaaaaaa | jget 'd["state"], d.get("edited")')" "applied True" "t5: row applied and marked edited"
 seed
 python3 -c "print('\n'.join('- line %d' % n for n in range(9)))" > "${TMP}/long.md"

@@ -359,6 +359,17 @@ def _merge(url: str, root: str, subject: str, body: str) -> None:
         raise Failure(f"merge refused: {_tail(out)}")
 
 
+def _delete_remote_branch(root: str, branch: str) -> None:
+    """Remove the merged branch from origin (the repo does not delete head branches).
+
+    `git push --delete` changes only the remote; the source repo's checkout stays as it is.
+    A failure is logged and never fails the apply: the merge already happened.
+    """
+    rc, out = run(["git", "-C", root, "push", "origin", "--delete", branch], root, 120)
+    if rc != 0:
+        sys.stderr.write(f"autoheal-review: could not delete origin/{branch}: {_tail(out)}\n")
+
+
 def _baseline(row: dict, merged: dt.datetime) -> dict:
     agg = _aggregate()
     day = merged.date()
@@ -458,6 +469,7 @@ def _apply_rule(led, row: dict, insert_text: str | None) -> dict:
         _merge(pr_url, root, _commit_subject(row), _body(row))
     except Failure as exc:
         return _fail(led, row, str(exc), pr_url=pr_url, **extra)
+    _delete_remote_branch(root, f"autoheal/{row['id']}")
     _, sha = run(["gh", "pr", "view", pr_url, "--json", "mergeCommit", "--jq", ".mergeCommit.oid"], root, 60)
     merged = _now()
     fields = {"applied_at": merged.isoformat(), "merged_at": merged.isoformat(), "pr_url": pr_url,
