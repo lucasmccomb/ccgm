@@ -1,153 +1,43 @@
-# /autoheal-apply - List or Apply Autoheal Proposals
+# /autoheal-apply - Alias for /autoheal-review
 
-Inspect the queue of pending autoheal proposals in the ledger,
-or apply a single proposal by id through the shared `lib/apply-proposal.py`
-path. Same workflow as `/permission-fix apply`: feature branch + diff +
-test gate + reversible commit. Never auto-pushes or auto-merges.
+`/autoheal-review` is the one place a user accepts an autoheal fix. This
+command forwards to it.
 
 ## Usage
 
 ```
-/autoheal-apply                          # list pending proposals
-/autoheal-apply list                     # same as above
-/autoheal-apply <proposal-id>            # apply a single proposal
+/autoheal-apply              # same as /autoheal-review
+/autoheal-apply list         # same as /autoheal-review
+/autoheal-apply <proposal-id>    # same as /autoheal-review <proposal-id>
 ```
 
-## When to invoke
+## What it does
 
-- The daily digest landed and you want to review the proposal queue
-  before applying anything.
-- You want to apply a specific proposal that was not picked up by
-  opt-in auto-apply (most proposals are NOT auto-apply-eligible: the
-  gate is intentionally strict).
-- A previous `/permission-fix apply <id>` attempt failed and you want
-  to retry after fixing the underlying issue.
+Run `/autoheal-review` with the same argument (`list` means no argument). It
+asks one AskUserQuestion per ready fix with the evidence and the exact diff,
+and on Apply opens a PR to the CCGM source repo from a temporary worktree,
+waits for checks, and squash-merges it. See `commands/autoheal-review.md`.
 
-## When NOT to invoke
+## Fixes that are not rules or issues
 
-- To configure flags (auto-apply, realtime, webhook) — use
-  `/autoheal-toggle`.
-- To suppress a proposal — use `/autoheal-snooze <id> [days]`.
-- To trigger the daily analyzer — it runs on its LaunchAgent
-  schedule; manual invocation is `bash modules/autoheal/bin/autoheal-analyze.sh`.
-
-## How it works
-
-### `/autoheal-apply` (no args) and `/autoheal-apply list`
-
-Read-only enumeration of pending proposals. List mode does not modify
-any files.
-
-1. Run `python3 ~/.claude/lib/ledger.py ready`. It prints the rows of
-   `~/.claude/autoheal/proposals.jsonl` waiting for a decision (state
-   `ready`, plus snoozed rows whose snooze has ended), whatever their age.
-2. Print one table row per remaining proposal:
-
-   ```
-   ID                  KIND                  SURFACE  CONFIDENCE  BREADTH  TITLE
-   prop_01HW3FQQX7     settings_allow_add    rule     9/10        1        add wrangler dev to safe-list
-   prop_01HW8KLLM4     hook_narrow           check    7/10        3        narrow git-workflow allow-list
-   ...
-   ```
-
-3. Sort by `(confidence desc, breadth_score asc, generated_at desc)`
-   so the proposals most likely to be worth applying surface first.
-4. After the table, print: `Found N pending proposal(s). Run
-   /autoheal-apply <id> to apply one.` If `N == 0`, print: `No
-   pending proposals.`
-
-### `/autoheal-apply <proposal-id>`
-
-The single write path. Routes through `lib/apply-proposal.py` so the
-branch shape, commit message, test gate, and audit record are
-identical to `/permission-fix apply <id>` and the opt-in
-`autoheal-auto-apply.sh`.
-
-1. Look up the proposal by id in the ledger,
-   `~/.claude/autoheal/proposals.jsonl`. The lookup covers the whole
-   file, so a proposal stays applicable until someone decides it. Only a
-   `ready` row applies; a successful apply moves the row to `applied`.
-2. Resolve the canonical CCGM clone path by walking up from `cwd`
-   until `start.sh` is found; fall back to `~/code/ccgm/`.
-3. Verify the working tree is clean on `main`. If dirty, commit any
-   WIP per the CCGM no-stash rule (commit message
-   `#auto: WIP before autoheal apply`).
-3a. If the proposal's `fix_surface` is `check` (a missing field means
-   `rule`), prove the check bites before applying. In a scratch copy,
-   run the check on clean code and confirm it passes, introduce one
-   deliberate violation and confirm it fails, then revert the
-   violation. Write the evidence to a JSON file:
-
-   ```json
-   {"command": "bash tests/test-x.sh", "clean_exit": 0,
-    "violation": "what you broke", "violation_exit": 1, "reverted": true}
-   ```
-
-   Pass it with `--demonstration <file>`. Without a valid file the apply
-   stops before it touches git, and the audit record stores the
-   demonstration alongside the apply.
-4. Create the feature branch `autoheal/{proposal-id}` (the `source`
-   argument is `"permission-fix"`; the auto-apply daemon uses
-   `"auto-apply"` which produces `autoheal/auto/{proposal-id}` —
-   different prefix on purpose, so the audit log can distinguish
-   manual from automatic applies).
-5. Apply the proposal's `diff` to its `target` via `git apply`.
-6. Run `tests/test-modules.sh` and `tests/test-no-personal-data.sh`.
-   If either fails: revert the branch (`git checkout main`,
-   `ALLOW_BRANCH_FORCE_DELETE=1 git branch -D autoheal/{id}`), surface the
-   failure, exit non-zero. The hatch is required because force-deleting a
-   branch is hard-blocked by default; discarding this just-created,
-   test-failing branch is exactly the intentional case it exists for.
-7. If tests pass: commit with message
-   `#auto: apply autoheal proposal {proposal-id}`. The `#auto:`
-   prefix is recognized by `enforce-git-workflow.py` as a non-issue
-   commit type.
-8. Append a record to `~/.claude/autoheal/applied/{today}.jsonl`
-   with `method: permission_fix` and the resulting branch + commit
-   sha.
-9. Print `git diff HEAD~1` to stdout.
-10. Print the line `To undo: git revert HEAD`.
-11. Print a suggested `gh pr create` command. Never auto-merge.
-
-The agent invoking this command should execute the apply through:
+`/autoheal-review` applies `rule_insert` and `issue` proposals. A `check`
+proposal (a new test or hook check) still needs a failing demonstration before
+it lands, and goes through the local apply path instead:
 
 ```bash
-python3 modules/autoheal/lib/apply-proposal.py <proposal-id> permission-fix \
-    [--demonstration <file.json>]
+python3 ~/.claude/lib/apply-proposal.py <proposal-id> permission-fix \
+    --demonstration <file.json>
 ```
 
-The CLI exits 0 on success, 1 on apply failure, 2 on usage error.
-
-## Output
-
-- `list` / no args: a one-row-per-proposal table (description above).
-- `<id>` apply: the unified diff + revert hint + PR-create suggestion,
-  plus a JSON status line that the caller can parse for a structured
-  result.
-
-## Constraints
-
-- Apply NEVER auto-merges. The user opens the PR via the printed
-  `gh pr create` command.
-- Apply NEVER writes to `~/.claude/settings.json` directly. It always
-  writes to the canonical CCGM clone under `modules/`. The next
-  `start.sh --reinstall` propagates the change.
-- A `check` proposal is never applied without a failing demonstration
-  (step 3a). The auto-apply daemon passes none, so it skips them.
-- Apply runs both `test-modules.sh` and `test-no-personal-data.sh`
-  before commit. A failing test is a hard stop, not a warning.
-- The list mode is read-only. It MUST NOT create branches, write to
-  the applied audit log, or modify any state.
+The demonstration file is JSON: `{"command": "bash tests/test-x.sh",
+"clean_exit": 0, "violation": "what you broke", "violation_exit": 1,
+"reverted": true}`. Run the check on clean code and confirm it passes, add one
+deliberate violation and confirm it fails, then revert the violation. Without a
+valid file the apply stops before it touches git. This path commits on a local
+branch `autoheal/<id>` and opens no PR.
 
 ## Cross-references
 
-- `/permission-fix apply <id>` — same shared apply path; preferred
-  entry point when you're acting on the proposal surfaced in
-  `<autoheal-suggestion>` in the current session.
-- `/autoheal-toggle autoapply on|off|status` — flip the opt-in
-  daemon (gated apply, never pushes).
-- `/autoheal-snooze <id> [days]` — suppress a proposal without
-  applying it.
-- Rule: `~/.claude/skills/autoheal-reference/SKILL.md` (apply path summary)
-- Plan: `~/code/plans/ccgm-autoheal/plan.md` §3.7 (gate predicate),
-  §3.9 (apply path), §5 Epic 11.
+- `/autoheal-review` - the interface
+- `/permission-fix apply <id>` - the same local apply path for a permission fix
+- `/autoheal-snooze <id> [days]` - suppress a proposal without applying it

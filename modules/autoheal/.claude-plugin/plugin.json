@@ -3,7 +3,7 @@
   "author": {
     "name": "CCGM"
   },
-  "description": "Captures permission requests, tool failures (with error text and class), interrupts, and user-correction signals, plus a daily per-tool call counter; aggregates recurring failure signatures with plain code, then drafts a small rule_insert against real rule files through a direct Anthropic API call (no call when nothing qualifies); keeps every proposal in one ledger with states, tells the next session about ready fixes and a dead job (one SessionStart line a day), and produces a local digest + opt-in Resend email; opt-in real-time security alerts and opt-in confidence-gated auto-apply. Cross-clone-safe via fcntl file locks. Webhook publisher seam is dormant by default.",
+  "description": "Captures permission requests, tool failures (with error text and class), interrupts, and user-correction signals, plus a daily per-tool call counter; aggregates recurring failure signatures with plain code, then drafts a small rule_insert against real rule files through a direct Anthropic API call (no call when nothing qualifies); keeps every proposal in one ledger with states, tells the next session about ready fixes and a dead job (one SessionStart line a day), lets /autoheal-review accept a fix in one answer (a merged PR from a temporary worktree), and produces a local digest + opt-in Resend email; opt-in real-time security alerts and opt-in confidence-gated auto-apply. Cross-clone-safe via fcntl file locks. Webhook publisher seam is dormant by default.",
   "displayName": "Autoheal: Self-Healing Observability Loop",
   "keywords": [
     "autoheal",

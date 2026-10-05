@@ -18,7 +18,7 @@ At a higher level, CCGM is an answer to a question: **what does a fully-configur
 |------|-------|
 | First commit | 2026-03-19 |
 | Modules | 81 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
-| Slash commands | 93 |
+| Slash commands | 94 |
 | Hooks | 38 Python hooks across 11 Claude Code events |
 | Presets | 5 (minimal, standard 16 modules, team, cloud-agent 55, full 77) |
 | Commits / issues | 430+ commits, 870+ issues and PRs in the first 4 months |
