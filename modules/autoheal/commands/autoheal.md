@@ -15,7 +15,7 @@ repair after you approve it.
 ## What it shows
 
 1. The set of autoheal slash commands and a one-line description of each.
-2. The current config flags (`realtime_alerts_enabled`, `auto_apply_enabled`,
+2. The current config flags (`realtime_alerts_enabled`, `auto_apply_mode`,
    `email_enabled`, `digest_enabled`, `webhook_url`) read from
    `~/.claude/autoheal/config.json`.
 3. Today's local digest path (whether it exists yet) and the last analyzer
@@ -23,6 +23,20 @@ repair after you approve it.
 4. The count of fixes waiting for a decision (`python3 ~/.claude/lib/ledger.py
    ready`, the whole ledger `~/.claude/autoheal/proposals.jsonl`, any age)
    and the path to today's event log under `~/.claude/autoheal/events/`.
+5. Auto-apply and outcomes, from `python3 ~/.claude/lib/autoheal_mode.py stats
+   ~/.claude/autoheal/config.json` (JSON). Show:
+   - `mode` (off, shadow or active), plus `promoted_at` or `demoted_at` and
+     `demoted_reason` when set;
+   - agreement: `agreed` of `decided` shadow decisions (`agreement` as a
+     percent), `pending`, and `harmful` (would-apply fixes later measured
+     harmful or reverted);
+   - whether the promotion bar is met (`ready_for_active`), else each entry
+     of `reasons`;
+   - measured outcomes: `outcomes.effective`, `outcomes.ineffective`,
+     `outcomes.harmful`, `outcomes.unmeasurable`, plus `reverts_30d` (3 demote
+     active to shadow) and `auto_applied`;
+   - the `targets` allowlist (default `modules/*/rules/*.md`), or "empty:
+     nothing can qualify" when config sets an explicit `[]`.
 
 ## How it works
 
@@ -75,9 +89,9 @@ key or a stale heartbeat; those have no launchctl fix, so report them.
 |---|---|
 | `/autoheal` | This overview. |
 | `/autoheal doctor` | Diagnose the launchd job, heartbeat and API key; offer the repair. |
-| `/autoheal-review [id]` | Accept, edit, reject or snooze each ready fix. Apply opens and merges a PR. |
+| `/autoheal-review [id]` | Accept, edit, reject or snooze each ready fix. Apply opens and merges a PR. `revert <id>` undoes a merged fix; `redraft <id>` asks for a new draft of a measured one. |
 | `/autoheal-digest [date]` | Render today's or a specific date's digest (an archive). |
-| `/autoheal-toggle [pause\|resume\|status\|realtime\|autoapply\|webhook] [on\|off\|shadow\|status\|url <URL>]` | Flip config flags. |
+| `/autoheal-toggle [pause\|resume\|status\|realtime\|autoapply\|webhook] [on\|off\|shadow\|active\|status\|url <URL>]` | Flip config flags. `autoapply active` is refused below the promotion bar. |
 | `/autoheal-snooze <id> [days]` | Snooze a proposal for N days (default 30). |
 | `/autoheal-apply [id\|list]` | Alias for `/autoheal-review`. |
 | `/permission-fix [event-id\|latest]` | In-session root-cause sub-agent (Epic 4). |
@@ -86,9 +100,9 @@ key or a stale heartbeat; those have no launchctl fix, so report them.
 ## Config flags
 
 See the autoheal rule (`~/.claude/skills/autoheal-reference/SKILL.md`) for the full config
-schema. Defaults: `realtime_alerts_enabled: "off"`, `auto_apply_enabled:
-"off"` (each takes `off|shadow|active`), `email_enabled: false`, `digest_enabled: true`, `webhook_url:
-null`.
+schema. Defaults: `realtime_alerts_enabled: "off"`, `auto_apply_mode:
+"off"` (each takes `off|shadow|active`), `auto_apply_targets: ["modules/*/rules/*.md"]`,
+`email_enabled: false`, `digest_enabled: true`, `webhook_url: null`.
 
 ## When NOT to invoke
 

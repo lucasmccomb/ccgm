@@ -64,7 +64,7 @@
     },
     "auto_apply_enabled": {
       "enum": ["off", "shadow", "active", true, false],
-      "description": "Per-repo override of the global auto_apply_enabled flag. A boolean reads as active (true) or off (false)."
+      "description": "Retired. Auto-apply reads only the global auto_apply_mode in ~/.claude/autoheal/config.json, which must be promoted to active through /autoheal-toggle; a per-repo value is ignored."
     }
   }
 }

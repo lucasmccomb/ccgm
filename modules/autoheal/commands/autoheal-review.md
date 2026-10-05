@@ -10,7 +10,31 @@ points here.
 ```
 /autoheal-review            # up to 5 ready fixes, oldest first
 /autoheal-review <id>       # one fix, by id
+/autoheal-review revert <id>    # undo a merged fix (a revert PR, checked and squash-merged)
+/autoheal-review redraft <id>   # ask for a new draft of a measured fix
 ```
+
+The SessionStart notice names `revert <id>` and `redraft <id>` when a fix was
+auto-applied or measured harmful or ineffective at +14 days.
+
+## Revert and redraft
+
+The user named the fix and the action in the command, so run it directly:
+
+- `revert <id>`: `python3 ~/.claude/bin/autoheal-review.py revert <id>`. It
+  takes a temporary worktree on `autoheal/revert-<id>` from `origin/main`, runs
+  `git revert` on the commit carrying `Autoheal-Id: <id>` (the row's
+  `merge_sha` when that is on `origin/main`), commits with an
+  `Autoheal-Revert: <id>` trailer, pushes, opens a PR, waits for checks,
+  squash-merges it (never `--admin`) and deletes the remote branch. The row
+  becomes `reverted`. Report "Reverted with <revert_pr_url>." or the `error`
+  verbatim; a failure keeps the row's state and records `revert_error`, and
+  running revert again merges the PR it already opened.
+- `redraft <id>`: `python3 ~/.claude/bin/autoheal-review.py redraft <id>`.
+  Only for a `measured` fix. The merged rule stays; the signature stops
+  counting as covered, so the next nightly run drafts it again from the newer
+  samples and the new draft comes back through this command. Say so in one
+  sentence.
 
 ## Steps
 
@@ -63,9 +87,12 @@ asks the questions and passes the answers back.
    then `gh pr merge --squash` (never `--admin`). A branch that is behind gets
    `gh pr update-branch --rebase` and one more try.
 5. Removes the worktree and temporary branch whatever happened.
-6. Marks the ledger row `applied` with `pr_url`, `merge_sha`, `merged_at` and
+6. Marks the ledger row `applied` with `pr_url`, `merge_sha`, `merged_at`,
+   `applied_by` (`review`, or `auto` from the auto-apply step) and
    `baseline_rate` (failures per 100 calls of the tool over the 14 days before
-   the merge), which the outcome measurement compares against later.
+   the merge). The nightly aggregator compares it with the 14 days after the
+   merge and marks the row `measured` as effective, ineffective, harmful or
+   unmeasurable.
 
 An `issue` fix (hook-denial signatures) files a GitHub issue on the source repo
 with the evidence instead, and marks the row `applied` with `issue_url`.
@@ -90,4 +117,4 @@ with the evidence instead, and marks the row `applied` with `issue_url`.
 - Ledger: `~/.claude/lib/ledger.py`, `~/.claude/autoheal/proposals.jsonl`
 - Notice: `~/.claude/hooks/autoheal-session-notice.py`
 - Rule: `~/.claude/skills/autoheal-reference/SKILL.md`
-- Plan: `~/code/plans/ccgm-learning-loops/autoheal-rca.md` (3.2, 3.4)
+- Plan: `~/code/plans/ccgm-learning-loops/autoheal-rca.md` (3.2, 3.4, 3.5, 3.6)

@@ -104,7 +104,8 @@ if [ ! -f "${AUTOHEAL_DIR}/config.json" ]; then
 {
   "email_enabled": false,
   "realtime_alerts_enabled": "off",
-  "auto_apply_enabled": "off",
+  "auto_apply_mode": "off",
+  "auto_apply_targets": ["modules/*/rules/*.md"],
   "digest_email": null,
   "webhook_url": null,
   "webhook_token": "${WEBHOOK_TOKEN}",

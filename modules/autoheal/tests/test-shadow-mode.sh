@@ -1,23 +1,19 @@
 #!/usr/bin/env bash
-# test-shadow-mode.sh (#1087)
+# test-shadow-mode.sh (#1087, #1099 Phase 4.2)
 #
-# autoheal's auto_apply_enabled and realtime_alerts_enabled take
-# off | shadow | active. In shadow the decision is computed and logged and
-# nothing else happens. Verifies:
-#   1. autoheal_mode.resolve_mode: persisted booleans read as active/off,
-#      strings pass through, anything else fails closed to off.
-#   2. agreement(): agree, false positive, false negative, pending; guarded
-#      (check-surface) false positives; latest decision per proposal wins.
-#   3. promotion_verdict(): the named-constant bar (20 decided, 90%, zero
-#      guarded false positives).
-#   4. autoheal-auto-apply.sh in shadow: logs would_apply with a reason, never
-#      creates a branch or an applied record; check-surface proposals are
-#      would_apply=false; active mode still applies.
-#   5. realtime-security-scanner.py in shadow: logs would_alert, emits no
+# realtime_alerts_enabled and auto_apply_mode take off | shadow | active. In
+# shadow the decision is computed and logged and nothing else happens. The
+# auto-apply step itself (gate, promotion, demotion, active apply) is covered by
+# test-auto-apply-gate.sh; this file covers the shared library pieces:
+#   1. resolve_mode / read_mode: persisted booleans read as active/off for
+#      realtime; auto_apply_mode migrates the legacy flag, never to active.
+#   2. agreement(): agree, false positive, false negative, pending, harmful;
+#      latest decision per proposal wins; decisions before a demotion are ignored.
+#   3. promotion_verdict(): the named-constant bar (10 decided, 90%, 0 harmful).
+#   4. realtime-security-scanner.py in shadow: logs would_alert, emits no
 #      <autoheal-security-alert> block, exits 0; active mode still alerts.
-#   6. autoheal-digest.sh shows the shadow counts and promotion status.
-#   7. The toggle (autoheal_mode.py set) writes shadow, on/off, and rejects
-#      junk, preserving other keys.
+#   5. autoheal-digest.sh shows the shadow counts and promotion status.
+#   6. The toggle writes realtime shadow/on/off and rejects junk.
 #
 # Run: bash modules/autoheal/tests/test-shadow-mode.sh
 
@@ -28,10 +24,8 @@ MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${MODULE_ROOT}/../.." && pwd)"
 LIB="${MODULE_ROOT}/lib"
 MODE_PY="${LIB}/autoheal_mode.py"
-AUTO_APPLY_SH="${MODULE_ROOT}/bin/autoheal-auto-apply.sh"
 DIGEST_SH="${MODULE_ROOT}/bin/autoheal-digest.sh"
 HOOK="${MODULE_ROOT}/hooks/realtime-security-scanner.py"
-SCENARIOS="${SCRIPT_DIR}/fixtures/eval-scenarios.json"
 
 PASS=0
 FAIL=0
@@ -89,176 +83,67 @@ echo 'not json' > "${TMPROOT}/cfg/bad.json"
 out="$(py - "${TMPROOT}" <<'PY'
 import sys, autoheal_mode as m
 d = sys.argv[1] + "/cfg/"
-print(m.read_mode(d + "a.json", "auto_apply_enabled"),
+print(m.read_mode(d + "a.json", "auto_apply_mode"),
       m.read_mode(d + "a.json", "realtime_alerts_enabled"),
       m.read_mode(d + "a.json", "missing_key"),
-      m.read_mode(d + "bad.json", "auto_apply_enabled"),
-      m.read_mode(d + "nope.json", "auto_apply_enabled"))
+      m.read_mode(d + "bad.json", "auto_apply_mode"),
+      m.read_mode(d + "nope.json", "realtime_alerts_enabled"))
 PY
 )"
-assert_eq "${out}" "active shadow off off off" "read_mode: true->active, string passthrough, missing/bad/absent -> off"
-assert_eq "$(py "${MODE_PY}" mode "${TMPROOT}/cfg/a.json" auto_apply_enabled)" "active" "CLI mode prints the resolved mode"
+assert_eq "${out}" "shadow shadow off off off" "read_mode: legacy auto-apply true -> shadow, realtime passthrough, missing/bad/absent -> off"
+assert_eq "$(py "${MODE_PY}" mode "${TMPROOT}/cfg/a.json" realtime_alerts_enabled)" "shadow" "CLI mode prints the resolved mode"
 
 # --- 2. agreement ------------------------------------------------------
 out="$(py - <<'PY'
+import datetime as dt
 import autoheal_mode as m
-d = lambda pid, would, surface="rule", fp=None: {"proposal_id": pid, "would_apply": would, "fix_surface": surface, "fingerprint": fp or "fp-" + pid}
+G = "2026-09-01T00:00:00+00:00"
+def d(pid, would, ts="2026-09-02T00:00:00+00:00"):
+    return {"proposal_id": pid, "generated_at": G, "would_apply": would, "ts": ts}
+def row(pid, state, **kw):
+    return {"id": pid, "generated_at": G, "state": state, **kw}
+rows = [row("agree-yes", "applied"), row("agree-no", "rejected"), row("fp", "rejected"),
+        row("fn", "measured", outcome="effective"), row("pend", "ready"),
+        row("harm", "reverted"), row("auto", "applied", applied_by="auto")]
 decisions = [d("agree-yes", True), d("agree-no", False), d("fp", True), d("fn", False), d("pend", True),
-             d("fp-check", True, "check")]
-outcomes = {"agree-yes": "accepted", "agree-no": "rejected", "fp": "rejected", "fn": "accepted", "fp-check": "rejected"}
-s = m.agreement(decisions, outcomes)
-print(s["decisions"], s["agreed"], s["false_positives"], s["false_negatives"], s["pending"], s["guarded_false_positives"])
-s = m.agreement([d("p", False), d("p", True)], {"p": "accepted"})
+             d("harm", True), d("auto", True)]
+s = m.agreement(decisions, m.human_outcomes(rows))
+print(s["decisions"], s["decided"], s["agreed"], s["false_positives"], s["false_negatives"], s["pending"], s["harmful"])
+s = m.agreement([d("p", False), d("p", True)], m.human_outcomes([row("p", "applied")]))
 print(s["decisions"], s["agreed"])
-# human_outcomes: applied -> accepted, snoozed fingerprint -> rejected, applied wins
-oc = m.human_outcomes([d("a", True), d("b", True), d("c", True), d("e", True, fp="fp-both")],
-                      applied_ids={"a", "e"}, snoozed_fingerprints={"fp-b", "fp-both"})
-print(oc.get("a"), oc.get("b"), oc.get("c"), oc.get("e"))
+since = dt.datetime(2026, 9, 3, tzinfo=dt.timezone.utc)
+s = m.agreement([d("old", True), d("new", True, ts="2026-09-04T00:00:00+00:00")],
+                m.human_outcomes([row("old", "applied"), row("new", "applied")]), since)
+print(s["decisions"], s["agreed"])
+# A redrafted signature reuses its id: the generated_at keeps the two proposals apart.
+s = m.agreement([{"proposal_id": "x", "generated_at": "g2", "would_apply": True, "ts": "t"}],
+                m.human_outcomes([{"id": "x", "generated_at": "g1", "state": "applied"},
+                                  {"id": "x", "generated_at": "g2", "state": "ready"}]))
+print(s["pending"])
 PY
 )"
-assert_eq "$(printf '%s\n' "${out}" | sed -n 1p)" "6 2 2 1 1 1" "agreement: counts per cell, pending, guarded false positive"
+assert_eq "$(printf '%s\n' "${out}" | sed -n 1p)" "7 5 3 1 1 2 1" "agreement: cells, auto-applied rows stay pending, reverted would-apply counts harmful"
 assert_eq "$(printf '%s\n' "${out}" | sed -n 2p)" "1 1" "agreement: latest record per proposal wins"
-assert_eq "$(printf '%s\n' "${out}" | sed -n 3p)" "accepted rejected None accepted" "human_outcomes: applied, snoozed, none; applied wins over snooze"
+assert_eq "$(printf '%s\n' "${out}" | sed -n 3p)" "1 1" "agreement: decisions before the last demotion are ignored"
+assert_eq "$(printf '%s\n' "${out}" | sed -n 4p)" "1" "agreement: decisions match rows by id and generated_at"
 
 # --- 3. promotion bar --------------------------------------------------
 out="$(py - <<'PY'
 import autoheal_mode as m
-def s(agreed, fp=0, fn=0, guarded=0, pending=0):
-    return {"decisions": agreed + fp + fn + pending, "agreed": agreed, "false_positives": fp,
-            "false_negatives": fn, "pending": pending, "guarded_false_positives": guarded}
+def s(agreed, fp=0, fn=0, harmful=0, pending=0):
+    return {"decisions": agreed + fp + fn + pending, "decided": agreed + fp + fn, "agreed": agreed,
+            "false_positives": fp, "false_negatives": fn, "pending": pending, "harmful": harmful}
 v = m.promotion_verdict
-print(m.PROMOTION_MIN_DECIDED, m.PROMOTION_MIN_AGREEMENT, m.PROMOTION_MAX_GUARDED_FALSE_POSITIVES)
-print(v(s(18, fn=2))["ready"], v(s(19))["ready"], v(s(17, fn=3))["ready"],
-      v(s(29, fp=1, guarded=1))["ready"], v(s(10, pending=50))["ready"])
+print(m.PROMOTION_MIN_DECIDED, m.PROMOTION_MIN_AGREEMENT, m.PROMOTION_MAX_HARMFUL,
+      m.DEMOTION_REVERTS, m.DEMOTION_WINDOW_DAYS)
+print(v(s(9, fn=1))["ready"], v(s(9))["ready"], v(s(8, fn=2))["ready"],
+      v(s(10, harmful=1))["ready"], v(s(5, pending=50))["ready"])
 PY
 )"
-assert_eq "$(printf '%s\n' "${out}" | sed -n 1p)" "20 0.9 0" "promotion: documented constants"
-assert_eq "$(printf '%s\n' "${out}" | sed -n 2p)" "True False False False False" "promotion: met at the bar; short, low agreement, guarded FP, pending-only all fail"
+assert_eq "$(printf '%s\n' "${out}" | sed -n 1p)" "10 0.9 0 3 30" "promotion: documented constants"
+assert_eq "$(printf '%s\n' "${out}" | sed -n 2p)" "True False False False False" "promotion: met at the bar; short, low agreement, harmful, pending-only all fail"
 
-# --- 4. auto-apply shadow ---------------------------------------------
-CLONE="${TMPROOT}/clone"
-mkdir -p "${CLONE}/tests" "${CLONE}/modules/settings"
-touch "${CLONE}/start.sh"
-printf '#!/usr/bin/env bash\nexit 0\n' > "${CLONE}/tests/test-modules.sh"
-printf '#!/usr/bin/env bash\nexit 0\n' > "${CLONE}/tests/test-no-personal-data.sh"
-cat > "${CLONE}/modules/settings/settings.partial.json" <<'EOF'
-{
-  "permissions": {
-    "allow": [
-      "Bash(git status)"
-    ]
-  }
-}
-EOF
-(
-    cd "${CLONE}"
-    git init -q -b main
-    git config user.email "test@example.invalid"
-    git config user.name "test"
-    git config commit.gpgsign false
-    git config core.hooksPath "${CLONE}/.git/empty-hooks"
-    mkdir -p "${CLONE}/.git/empty-hooks"
-    git add -A
-    git commit -q -m init
-)
-
-TODAY="2026-06-14"
-PROPS="${TMPROOT}/proposals.jsonl"
-python3 - "${PROPS}" <<'PY'
-import json, sys
-diff = lambda rule: (
-    "--- a/modules/settings/settings.partial.json\n+++ b/modules/settings/settings.partial.json\n"
-    "@@ -1,5 +1,6 @@\n {\n   \"permissions\": {\n     \"allow\": [\n"
-    "-      \"Bash(git status)\"\n+      \"Bash(git status)\",\n+      \"" + rule + "\"\n     ]\n   }\n }\n")
-base = {"kind": "settings_allow_add", "title": "t", "rationale": "r", "confidence": 9, "breadth_score": 1,
-        "occurrence_count": 3, "session_ids": ["s1", "s2"],
-        "target": "modules/settings/settings.partial.json",
-        "originating_clone": "c", "generated_at": "2026-06-14T00:00:00Z"}
-recs = [
-    {**base, "id": "prop_good", "fingerprint": "fp-good", "fix_surface": "rule", "diff": diff("Bash(git diff)")},
-    {**base, "id": "prop_regress", "fingerprint": "fp-regress", "fix_surface": "rule", "diff": diff("Bash(git:*)")},
-    {**base, "id": "prop_check", "fingerprint": "fp-check", "fix_surface": "check", "diff": diff("Bash(git diff)")},
-    {**base, "id": "prop_lowconf", "fingerprint": "fp-low", "fix_surface": "rule", "confidence": 5,
-     "diff": diff("Bash(git diff)")},
-    {**base, "id": "prop_legacy", "fingerprint": "fp-legacy", "diff": diff("Bash(git diff)")},
-]
-with open(sys.argv[1], "w") as fh:
-    for r in recs:
-        fh.write(json.dumps(r) + "\n")
-PY
-
-run_auto_apply() {
-    # Args: config-json.
-    local cfg="${TMPROOT}/auto-config.json"
-    printf '%s\n' "$1" > "${cfg}"
-    rm -rf "${TMPROOT}/applied" "${TMPROOT}/shadow" "${TMPROOT}/logs"
-    CCGM_AUTOHEAL_CONFIG="${cfg}" \
-    CCGM_AUTOHEAL_LEDGER="${PROPS}" \
-    CCGM_AUTOHEAL_APPLIED_DIR="${TMPROOT}/applied" \
-    CCGM_AUTOHEAL_SHADOW_DIR="${TMPROOT}/shadow" \
-    CCGM_AUTOHEAL_LOGS_DIR="${TMPROOT}/logs" \
-    CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    CCGM_AUTOHEAL_CLONE_ROOT="${CLONE}" \
-    CCGM_AUTOHEAL_EVAL_SCENARIOS="${SCENARIOS}" \
-    bash "${AUTO_APPLY_SH}" 2>&1
-}
-
-out="$(run_auto_apply '{"auto_apply_enabled": "shadow"}')"
-assert_eq "$(cd "${CLONE}" && git branch --list 'autoheal/auto/*')" "" "shadow auto-apply: no branch created"
-assert_eq "$(cd "${CLONE}" && git rev-parse --abbrev-ref HEAD)" "main" "shadow auto-apply: clone stays on main"
-assert_eq "$(ls "${TMPROOT}/applied" 2>/dev/null | wc -l | tr -d ' ')" "0" "shadow auto-apply: no applied record"
-assert_contains "${out}" "shadow" "shadow auto-apply: summary names shadow mode"
-SHADOW_LOG="${TMPROOT}/shadow/auto-apply.jsonl"
-get() { python3 - "${SHADOW_LOG}" "$1" "$2" <<'PY'
-import json, sys
-rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
-for r in rows:
-    if r["proposal_id"] == sys.argv[2]:
-        print(r.get(sys.argv[3]))
-        break
-else:
-    print("MISSING")
-PY
-}
-assert_eq "$(get prop_good would_apply)" "True" "shadow auto-apply: qualifying proposal -> would_apply true"
-assert_eq "$(get prop_regress would_apply)" "False" "shadow auto-apply: eval-blocked proposal -> would_apply false"
-assert_contains "$(get prop_regress reason)" "eval" "shadow auto-apply: eval-blocked reason names the eval"
-assert_eq "$(get prop_check would_apply)" "False" "shadow auto-apply: check-surface proposal skipped without a demonstration"
-assert_contains "$(get prop_check reason)" "demonstration" "shadow auto-apply: check reason names the demonstration"
-assert_eq "$(get prop_lowconf would_apply)" "False" "shadow auto-apply: low confidence -> would_apply false"
-assert_contains "$(get prop_lowconf reason)" "confidence" "shadow auto-apply: low-confidence reason"
-assert_eq "$(get prop_legacy would_apply)" "True" "shadow auto-apply: legacy proposal without fix_surface reads as rule"
-assert_eq "$(get prop_good fingerprint)" "fp-good" "shadow auto-apply: record carries the fingerprint"
-assert_eq "$(get prop_check fix_surface)" "check" "shadow auto-apply: record carries the surface"
-ts_present="$(python3 -c "import json; print(all('ts' in json.loads(l) for l in open('${SHADOW_LOG}') if l.strip()))")"
-assert_eq "${ts_present}" "True" "shadow auto-apply: every record has a ts"
-
-# A same-day re-run appends again; agreement counts each proposal once.
-run_auto_apply_rerun() {
-    CCGM_AUTOHEAL_CONFIG="${TMPROOT}/auto-config.json" CCGM_AUTOHEAL_LEDGER="${PROPS}" \
-    CCGM_AUTOHEAL_APPLIED_DIR="${TMPROOT}/applied" CCGM_AUTOHEAL_SHADOW_DIR="${TMPROOT}/shadow" \
-    CCGM_AUTOHEAL_LOGS_DIR="${TMPROOT}/logs" CCGM_AUTOHEAL_TODAY="${TODAY}" \
-    CCGM_AUTOHEAL_CLONE_ROOT="${CLONE}" CCGM_AUTOHEAL_EVAL_SCENARIOS="${SCENARIOS}" \
-    bash "${AUTO_APPLY_SH}" >/dev/null 2>&1
-}
-run_auto_apply_rerun
-rows="$(grep -c . "${SHADOW_LOG}")"
-assert_eq "${rows}" "10" "shadow auto-apply: re-run appends (5 proposals x 2 runs)"
-
-# Boolean back-compat: `true` still applies for real; `false` does nothing.
-out="$(run_auto_apply '{"auto_apply_enabled": true}')"
-assert_contains "$(cd "${CLONE}" && git branch --list 'autoheal/auto/prop_good')" "autoheal/auto/prop_good" "active (persisted true): applies"
-assert_eq "$(cd "${CLONE}" && git branch --list 'autoheal/auto/prop_check')" "" "active: check-surface proposal still not applied"
-assert_eq "$(ls "${TMPROOT}/shadow" 2>/dev/null | wc -l | tr -d ' ')" "0" "active: writes no shadow log"
-(cd "${CLONE}" && git checkout -q main && git branch -q -D autoheal/auto/prop_good autoheal/auto/prop_legacy 2>/dev/null)
-
-out="$(run_auto_apply '{"auto_apply_enabled": false}')"
-assert_eq "$(cd "${CLONE}" && git branch --list 'autoheal/auto/*')" "" "off (persisted false): nothing applied"
-assert_eq "$(ls "${TMPROOT}/shadow" 2>/dev/null | wc -l | tr -d ' ')" "0" "off: writes no shadow log"
-out="$(run_auto_apply '{"auto_apply_enabled": "off"}')"
-assert_eq "$(ls "${TMPROOT}/shadow" 2>/dev/null | wc -l | tr -d ' ')" "0" "off (string): writes no shadow log"
-
-# --- 5. realtime scanner shadow ---------------------------------------
+# --- 4. realtime scanner shadow ---------------------------------------
 RT_HOME="${TMPROOT}/rt-home"
 mkdir -p "${RT_HOME}/.claude/lib" "${RT_HOME}/autoheal"
 cp "${REPO_ROOT}/modules/hooks/lib/hook_utils.py" "${RT_HOME}/.claude/lib/hook_utils.py"
@@ -308,43 +193,48 @@ assert_eq "${orphan_out}" "" "missing autoheal_mode: no output"
 assert_eq "$(test -e "${RT_HOME}/autoheal/events" && echo yes || echo no)" "no" "missing autoheal_mode: no event written"
 assert_eq "$(test -e "${RT_HOME}/autoheal/shadow" && echo yes || echo no)" "no" "missing autoheal_mode: no shadow log"
 
-# --- 6. digest ---------------------------------------------------------
+# --- 5. digest ---------------------------------------------------------
 DG="${TMPROOT}/dg"
-mkdir -p "${DG}/shadow" "${DG}/applied"
-jq -nc '{id:"prop_x",kind:"settings_allow_add",title:"X",rationale:"r",confidence:9,breadth_score:1,occurrence_count:3,generated_at:"2026-06-01T08:00:00Z"}' > "${DG}/proposals.jsonl"
+mkdir -p "${DG}/shadow"
 python3 - "${DG}" <<'PY'
 import json, sys
 d = sys.argv[1]
+G = "2026-05-30T00:00:00+00:00"
 rows = [
-    {"ts": "t", "proposal_id": "a", "would_apply": True, "reason": "ok", "fingerprint": "fp-a", "fix_surface": "rule"},
-    {"ts": "t", "proposal_id": "b", "would_apply": True, "reason": "ok", "fingerprint": "fp-b", "fix_surface": "rule"},
-    {"ts": "t", "proposal_id": "c", "would_apply": False, "reason": "x", "fingerprint": "fp-c", "fix_surface": "rule"},
-    {"ts": "t", "proposal_id": "e", "would_apply": True, "reason": "ok", "fingerprint": "fp-e", "fix_surface": "rule"},
+    {"id": "a", "generated_at": G, "state": "applied", "kind": "rule_insert", "title": "A"},
+    {"id": "b", "generated_at": G, "state": "rejected", "kind": "rule_insert", "title": "B"},
+    {"id": "c", "generated_at": G, "state": "measured", "outcome": "effective", "kind": "rule_insert", "title": "C"},
+    {"id": "e", "generated_at": G, "state": "ready", "kind": "rule_insert", "title": "E"},
+    # A row from the digest day, so the digest renders at all; it has no decision.
+    {"id": "x", "generated_at": "2026-06-01T08:00:00Z", "state": "ready", "kind": "rule_insert", "title": "X"},
 ]
-open(d + "/shadow/auto-apply.jsonl", "w").write("".join(json.dumps(r) + "\n" for r in rows))
-open(d + "/applied/2026-06-01.jsonl", "w").write(
-    json.dumps({"proposal_id": "a", "tests_passed": True, "rolled_back": False}) + "\n" +
-    json.dumps({"proposal_id": "c", "tests_passed": True, "rolled_back": False}) + "\n" +
-    json.dumps({"proposal_id": "e", "tests_passed": False, "rolled_back": True}) + "\n")
-json.dump({"fp-b": "2026-07-01T00:00:00Z"}, open(d + "/snoozed.json", "w"))
+open(d + "/proposals.jsonl", "w").write("".join(json.dumps(r) + "\n" for r in rows))
+decs = [
+    {"ts": "2026-05-31T00:00:00+00:00", "proposal_id": "a", "generated_at": G, "would_apply": True},
+    {"ts": "2026-05-31T00:00:00+00:00", "proposal_id": "b", "generated_at": G, "would_apply": True},
+    {"ts": "2026-05-31T00:00:00+00:00", "proposal_id": "c", "generated_at": G, "would_apply": False},
+    {"ts": "2026-05-31T00:00:00+00:00", "proposal_id": "e", "generated_at": G, "would_apply": True},
+]
+open(d + "/shadow/auto-apply.jsonl", "w").write("".join(json.dumps(r) + "\n" for r in decs))
 open(d + "/shadow/realtime.jsonl", "w").write(
     json.dumps({"ts": "t", "session_id": "s", "pattern": "p", "would_alert": True}) + "\n")
+json.dump({"auto_apply_mode": "shadow"}, open(d + "/config.json", "w"))
 PY
 run_digest() {
-    CCGM_AUTOHEAL_LEDGER="${DG}/proposals.jsonl" CCGM_AUTOHEAL_DIGESTS_DIR="${DG}/digests" \
-    CCGM_AUTOHEAL_SENT_DIR="${DG}/sent" CCGM_AUTOHEAL_CONFIG="${DG}/none.json" \
-    CCGM_AUTOHEAL_SHADOW_DIR="${DG}/shadow" CCGM_AUTOHEAL_APPLIED_DIR="${DG}/applied" \
-    CCGM_AUTOHEAL_SNOOZED_FILE="${DG}/snoozed.json" \
+    CCGM_AUTOHEAL_DIR="${DG}" CCGM_AUTOHEAL_LEDGER="${DG}/proposals.jsonl" CCGM_AUTOHEAL_DIGESTS_DIR="${DG}/digests" \
+    CCGM_AUTOHEAL_SENT_DIR="${DG}/sent" CCGM_AUTOHEAL_CONFIG="${DG}/config.json" \
+    CCGM_AUTOHEAL_SHADOW_DIR="${DG}/shadow" \
     CCGM_AUTOHEAL_TODAY="2026-06-01" CCGM_AUTOHEAL_LIB_DIR="${REPO_ROOT}/modules/hooks/lib" \
     bash "${DIGEST_SH}" >/dev/null 2>&1
     cat "${DG}/digests/2026-06-01.md" 2>/dev/null
 }
 digest="$(run_digest)"
 assert_contains "${digest}" "## Shadow rollout" "digest: has a shadow section"
+assert_contains "${digest}" "auto-apply mode: shadow" "digest: mode"
 assert_contains "${digest}" "shadow auto-apply decisions: 4" "digest: decision count"
-assert_contains "${digest}" "agreed: 1" "digest: agreed (applied a)"
-assert_contains "${digest}" "1 false positive, 1 false negative" "digest: b snoozed is a false positive, c applied is a false negative"
-assert_contains "${digest}" "pending (no human outcome yet): 1" "digest: e's only apply record failed, so it stays pending"
+assert_contains "${digest}" "agreed: 1 of 3 decided" "digest: a applied agrees"
+assert_contains "${digest}" "1 false positive, 1 false negative" "digest: b rejected is a false positive, c applied is a false negative"
+assert_contains "${digest}" "pending (no review decision yet): 1" "digest: e is still ready"
 assert_contains "${digest}" "would-alert matches: 1" "digest: realtime would_alert count"
 assert_contains "${digest}" "promotion bar not met" "digest: promotion status"
 
@@ -352,25 +242,21 @@ rm -rf "${DG}/shadow"
 digest="$(run_digest)"
 assert_not_contains "${digest}" "Shadow rollout" "digest: no shadow section without shadow logs"
 
-# --- 7. toggle ---------------------------------------------------------
+# --- 6. toggle (realtime; autoapply is covered by test-auto-apply-gate.sh) ---
 TG="${TMPROOT}/toggle.json"
-echo '{"email_enabled": false, "auto_apply_enabled": false}' > "${TG}"
-out="$(py "${MODE_PY}" set "${TG}" autoapply shadow)"
-assert_eq "${out}" "set auto_apply_enabled = shadow" "toggle: autoapply shadow confirmation"
-assert_eq "$(jq -r .auto_apply_enabled "${TG}")" "shadow" "toggle: autoapply shadow written"
-assert_eq "$(jq -r .email_enabled "${TG}")" "false" "toggle: other keys preserved"
-py "${MODE_PY}" set "${TG}" realtime shadow >/dev/null
+echo '{"email_enabled": false}' > "${TG}"
+out="$(py "${MODE_PY}" set "${TG}" realtime shadow)"
+assert_eq "${out}" "set realtime_alerts_enabled = shadow" "toggle: realtime shadow confirmation"
 assert_eq "$(jq -r .realtime_alerts_enabled "${TG}")" "shadow" "toggle: realtime shadow written"
-py "${MODE_PY}" set "${TG}" autoapply on >/dev/null
-assert_eq "$(jq -r .auto_apply_enabled "${TG}")" "active" "toggle: on -> active"
-py "${MODE_PY}" set "${TG}" autoapply off >/dev/null
-assert_eq "$(jq -r .auto_apply_enabled "${TG}")" "off" "toggle: off -> off"
-py "${MODE_PY}" set "${TG}" autoapply active >/dev/null
-assert_eq "$(jq -r .auto_apply_enabled "${TG}")" "active" "toggle: active accepted"
-py "${MODE_PY}" set "${TG}" autoapply bogus >/dev/null 2>&1
+assert_eq "$(jq -r .email_enabled "${TG}")" "false" "toggle: other keys preserved"
+py "${MODE_PY}" set "${TG}" realtime on >/dev/null
+assert_eq "$(jq -r .realtime_alerts_enabled "${TG}")" "active" "toggle: on -> active"
+py "${MODE_PY}" set "${TG}" realtime off >/dev/null
+assert_eq "$(jq -r .realtime_alerts_enabled "${TG}")" "off" "toggle: off -> off"
+py "${MODE_PY}" set "${TG}" realtime bogus >/dev/null 2>&1
 assert_eq "$?" "2" "toggle: junk value is rejected with exit 2"
-assert_eq "$(jq -r .auto_apply_enabled "${TG}")" "active" "toggle: junk value leaves the file unchanged"
-assert_eq "$(py "${MODE_PY}" status "${TG}" autoapply)" "auto_apply_enabled = active" "toggle: status prints the mode"
+assert_eq "$(jq -r .realtime_alerts_enabled "${TG}")" "off" "toggle: junk value leaves the file unchanged"
+assert_eq "$(py "${MODE_PY}" status "${TG}" realtime)" "realtime_alerts_enabled = off" "toggle: status prints the mode"
 rm -f "${TMPROOT}/new.json"
 py "${MODE_PY}" set "${TMPROOT}/new.json" realtime shadow >/dev/null
 assert_eq "$(jq -r .realtime_alerts_enabled "${TMPROOT}/new.json")" "shadow" "toggle: creates a missing config"

@@ -11,8 +11,9 @@ One row per proposal, with a `state`:
   snoozed    deferred until `snoozed_until`
   dropped    drafted, then failed the validation gate; feeds the redraft cooldown
   skipped    the model declined to draft; the signature stays covered
-  measured   applied, and the +14 day outcome is recorded
-  reverted   applied, then undone
+  measured   applied, and the +14 day outcome is recorded (`outcome`: effective,
+             ineffective, harmful or unmeasurable)
+  reverted   applied (or measured), then undone by a merged revert PR
   legacy     written before the redesign; never shown
 
 Lookup by id covers the whole ledger. Rows with a `signature_id` also feed the
@@ -122,15 +123,21 @@ def _rewrite(path: str, mutate, skip=None) -> bool:
         os.close(lock_fd)
 
 
-def set_state(proposal_id: str, state: str, path: str | None = None, **fields) -> bool:
-    """Move the newest open row for an id to `state`, adding `fields`. False if none."""
+def set_state(proposal_id: str, state: str, path: str | None = None,
+              from_states: tuple = OPEN_STATES, **fields) -> bool:
+    """Move the newest row for an id whose state is in `from_states` (default: the
+    open states) to `state`, adding `fields`. False if there is none.
+
+    Outcome measurement moves `applied` rows to `measured`, and a revert moves
+    `applied` or `measured` rows to `reverted`, so those callers pass `from_states`.
+    """
     if state not in STATES:
         raise ValueError(f"unknown state {state!r}")
     path = path or ledger_path()
 
     def mutate(rows):
         for row in reversed(rows):
-            if row.get("id") == proposal_id and row.get("state", "ready") in OPEN_STATES:
+            if row.get("id") == proposal_id and row.get("state", "ready") in from_states:
                 row["state"] = state
                 row.update(fields)
                 return True
