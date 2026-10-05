@@ -3,7 +3,9 @@
 CCGM link-mode installs symlink each module file from ~/.claude into the
 canonical clone. A pull updates files already linked, but a file a PR newly
 adds to an installed module's module.json stays uninstalled. This module
-links those files and reports hook commands that are not yet registered.
+links the files added in the pulled commit range (and only those: a file that
+was already in module.json before the pull, then left uninstalled, stays
+uninstalled) and reports hook commands that are not yet registered.
 
 Target rules mirror start.sh and lib/modules.sh (get_module_files): every
 module.json "files" entry has a target, and `template` / `merge` flags. Only
@@ -15,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tempfile
 
 MANIFEST_NAME = ".ccgm-manifest.json"
@@ -45,8 +48,34 @@ def _plain_relative(rel) -> bool:
             and ".." not in rel.split("/"))
 
 
-def install_new_files(claude_dir: str, canonical_dir: str) -> tuple[list[str], list[str]]:
-    """Symlink module files missing from claude_dir.
+def _git_out(repo: str, *args: str) -> str | None:
+    try:
+        r = subprocess.run(["git", "-C", repo, *args], capture_output=True,
+                           text=True, timeout=10, check=False)
+        return r.stdout if r.returncode == 0 else None
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def _module_json_at(repo: str, rev: str, mod: str):
+    """module.json of `mod` at `rev`, or None if absent or unreadable."""
+    out = _git_out(repo, "show", f"{rev}:modules/{mod}/module.json")
+    if out is None:
+        return None
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def install_new_files(claude_dir: str, canonical_dir: str,
+                      old_head: str | None) -> tuple[list[str], list[str]]:
+    """Symlink the module files added to module.json between old_head and HEAD.
+
+    A file is new when its key is in a module's `files` map at HEAD and not in
+    the map at old_head (a module.json absent at old_head counts as an empty
+    map). Without an old_head, or when HEAD did not move, nothing is installed.
 
     Returns (created link paths, refused-entry descriptions).
 
@@ -55,7 +84,14 @@ def install_new_files(claude_dir: str, canonical_dir: str) -> tuple[list[str], l
     module.json paths are untrusted input: a target must stay inside claude_dir
     (checked lexically and through any symlinked parent) and a source must stay
     inside <canonical>/modules/<module>/. Anything else is refused, never linked.
+    A source that resolves inside the canonical repo but outside its module
+    directory (e.g. a symlink to repo-level lib/) is skipped with its own message.
     """
+    if not old_head:
+        return [], []
+    new_head = (_git_out(canonical_dir, "rev-parse", "HEAD") or "").strip()
+    if not new_head or new_head == old_head:
+        return [], []
     manifest = load_manifest(claude_dir)
     if not manifest or manifest.get("linkMode") is not True:
         return [], []
@@ -67,13 +103,17 @@ def install_new_files(claude_dir: str, canonical_dir: str) -> tuple[list[str], l
     refused: list[str] = []
     for mod in manifest.get("modules") or []:
         mod_dir = os.path.join(root, "modules", mod)
-        mj = _load_json(os.path.join(mod_dir, "module.json"))
-        if not isinstance(mj, dict):
+        mj = _module_json_at(canonical_dir, new_head, mod)
+        if mj is None:
             continue
         scopes = mj.get("scope") or ["global"]
         if "global" not in scopes:
             continue
+        old_mj = _module_json_at(canonical_dir, old_head, mod) or {}
+        old_files = old_mj.get("files") or {}
         for src_rel, spec in (mj.get("files") or {}).items():
+            if src_rel in old_files:
+                continue
             if not isinstance(spec, dict) or spec.get("template") or spec.get("merge"):
                 continue
             rel_target = spec.get("target")
@@ -82,8 +122,14 @@ def install_new_files(claude_dir: str, canonical_dir: str) -> tuple[list[str], l
             if not (_plain_relative(rel_target) and _inside(os.path.dirname(target), claude_dir)):
                 refused.append(f"refused unsafe target {rel_target} in {mod}/module.json")
                 continue
-            if not (_plain_relative(src_rel) and _inside(src, mod_dir)):
+            if not _plain_relative(src_rel):
                 refused.append(f"refused unsafe source {src_rel} in {mod}/module.json")
+                continue
+            if not _inside(src, mod_dir):
+                if _inside(src, root):
+                    refused.append(f"skipped {src_rel} in {mod}/module.json (source outside module dir)")
+                else:
+                    refused.append(f"refused unsafe source {src_rel} in {mod}/module.json")
                 continue
             if os.path.lexists(target) or not os.path.exists(src):
                 continue
