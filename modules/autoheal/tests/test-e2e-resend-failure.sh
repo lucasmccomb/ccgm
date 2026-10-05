@@ -115,7 +115,7 @@ write_proposal() {
         --arg id "${pid}" \
         '{
             id: $id,
-            kind: "settings_allow_add",
+            kind: "rule_insert",
             title: ("Allow " + $id),
             rationale: "Test fixture",
             confidence: 7,

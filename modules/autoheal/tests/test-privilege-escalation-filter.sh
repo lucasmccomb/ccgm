@@ -93,7 +93,7 @@ dropped_with empty insert_empty
 # Shape errors.
 finish_case notjson "this is not json"
 dropped_with notjson answer_not_json
-finish_case wrongkind '{"proposal": {"kind": "settings_allow_add", "id": "x"}}'
+finish_case wrongkind '{"proposal": {"kind": "hook_narrow", "id": "x"}}'
 dropped_with wrongkind answer_malformed
 finish_case flat '{"kind": "rule_insert", "target_path": "x"}'
 dropped_with flat answer_malformed

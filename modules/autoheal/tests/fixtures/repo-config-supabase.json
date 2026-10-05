@@ -5,13 +5,12 @@
     "Bash(supabase db:*)",
     "Bash(supabase migration:*)"
   ],
-  "calibration_days": 14,
   "thresholds": {
     "confidence_min": 8,
     "occurrence_min": 2
   },
   "kind_filters": [
-    "settings_allow_add",
-    "command_doc_tweak"
+    "rule_insert",
+    "issue"
   ]
 }

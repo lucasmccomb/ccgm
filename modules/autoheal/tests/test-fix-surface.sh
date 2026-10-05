@@ -89,7 +89,7 @@ print(sorted((r['kind'], r['fix_surface']) for r in map(json.loads, open('${FS_R
 # --- 3. digest ---------------------------------------------------------
 PROPS="${TMPROOT}/dg/proposals.jsonl"
 mkdir -p "${TMPROOT}/dg"
-jq -nc '{id:"prop_new",kind:"settings_allow_add",title:"New",rationale:"r",confidence:9,breadth_score:1,occurrence_count:3,fix_surface:"check",generated_at:"2026-06-01T08:00:00Z"}' >> "${PROPS}"
+jq -nc '{id:"prop_new",kind:"rule_insert",title:"New",rationale:"r",confidence:9,breadth_score:1,occurrence_count:3,fix_surface:"check",generated_at:"2026-06-01T08:00:00Z"}' >> "${PROPS}"
 jq -nc '{id:"prop_old",kind:"rule_update",title:"Legacy",rationale:"r",confidence:5,breadth_score:1,occurrence_count:1,generated_at:"2026-06-01T08:00:00Z"}' >> "${PROPS}"
 CCGM_AUTOHEAL_LEDGER="${PROPS}" CCGM_AUTOHEAL_DIGESTS_DIR="${TMPROOT}/dg/d" \
     CCGM_AUTOHEAL_SENT_DIR="${TMPROOT}/dg/s" CCGM_AUTOHEAL_CONFIG="${TMPROOT}/dg/none.json" \

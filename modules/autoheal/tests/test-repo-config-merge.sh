@@ -68,9 +68,8 @@ mkdir -p "${REPO}/.autoheal"
 cat > "${REPO}/.autoheal/config.json" <<'JSON'
 {
   "additional_allow_patterns": ["Bash(supabase:*)", "Bash(wrangler:*)"],
-  "calibration_days": 7,
   "thresholds": {"confidence_min": 6, "occurrence_min": 3},
-  "kind_filters": ["settings_allow_add"]
+  "kind_filters": ["rule_insert"]
 }
 JSON
 
@@ -96,9 +95,6 @@ assert_eq "${first_pat}" "Bash(supabase:*)" "additional_allow_patterns[0] preser
 second_pat="$(printf '%s' "${result_json}" | python3 -c 'import sys,json; print(json.load(sys.stdin)["additional_allow_patterns"][1])')"
 assert_eq "${second_pat}" "Bash(wrangler:*)" "additional_allow_patterns[1] preserved"
 
-cal_days="$(printf '%s' "${result_json}" | python3 -c 'import sys,json; print(json.load(sys.stdin)["calibration_days"])')"
-assert_eq "${cal_days}" "7" "calibration_days passed through"
-
 conf_min="$(printf '%s' "${result_json}" | python3 -c 'import sys,json; print(json.load(sys.stdin)["thresholds"]["confidence_min"])')"
 assert_eq "${conf_min}" "6" "thresholds.confidence_min passed through"
 
@@ -109,7 +105,7 @@ n_kinds="$(printf '%s' "${result_json}" | python3 -c 'import sys,json; print(len
 assert_eq "${n_kinds}" "1" "kind_filters list length"
 
 first_kind="$(printf '%s' "${result_json}" | python3 -c 'import sys,json; print(json.load(sys.stdin)["kind_filters"][0])')"
-assert_eq "${first_kind}" "settings_allow_add" "kind_filters[0] preserved"
+assert_eq "${first_kind}" "rule_insert" "kind_filters[0] preserved"
 
 # ---------------------------------------------------------------------------
 # 2. Missing config → {} . Use a sibling subtree with no .autoheal.
@@ -153,7 +149,6 @@ with open(os.environ["SCHEMA_PATH"]) as fh:
     s = json.load(fh)
 required_props = {
     "additional_allow_patterns",
-    "calibration_days",
     "thresholds",
     "kind_filters",
 }

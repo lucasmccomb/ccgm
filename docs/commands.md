@@ -845,7 +845,7 @@ Installed by the **autoheal** module. The autoheal pipeline observes hook events
 
 **Help / overview for the autoheal pipeline.**
 
-Lists every autoheal subcommand, the config flags (`realtime_alerts_enabled`, `auto_apply_enabled`, `email_enabled`, `webhook_url`), and the default-OFF posture for the three opt-in surfaces (real-time alerts, auto-apply, webhook publisher).
+Lists every autoheal subcommand, the config flags (`paused`, `realtime_alerts_enabled`, `auto_apply_mode`, `email_enabled`, `digest_enabled`, `webhook_url`) and the count of fixes waiting for a decision. Shows auto-apply state (mode, shadow agreement, promotion bar, measured outcomes) and the success metrics: run health over 30 days, acceptance rate, applied-effective rate and 30-day spend, with the ones not computable yet marked as such. `/autoheal doctor` diagnoses the launchd job, heartbeat, API key and module install (every `module.json` target present under `~/.claude`), and offers the repair after you approve it.
 
 **Installed by**: autoheal module
 
@@ -879,7 +879,7 @@ Reads `~/.claude/autoheal/digests/{date}.md` rendered by `autoheal-digest.sh` fr
 
 **Flip an autoheal config flag without editing `~/.claude/autoheal/config.json` directly.**
 
-Subcommands cover the opt-in surfaces — `pause | resume | status | realtime | autoapply | email | digest | webhook`. `realtime` and `autoapply` take `on | off | shadow | status`; shadow logs each decision to `~/.claude/autoheal/shadow/` without acting on it. The webhook variant accepts a URL setter (`/autoheal-toggle webhook url https://dev.lem.work/v1/ingest`).
+Subcommands cover `pause | resume | status | realtime | autoapply | email | digest | webhook`. `realtime` and `autoapply` take `on | off | shadow | active | status`; shadow logs each decision to `~/.claude/autoheal/shadow/` without acting on it, and `autoapply active` is refused until shadow decisions agree with your reviews. The webhook has no on/off flag: `webhook url <URL>` sets `webhook_url` (on) and `webhook url clear` unsets it (off).
 
 **Installed by**: autoheal module
 
@@ -887,9 +887,9 @@ Subcommands cover the opt-in surfaces — `pause | resume | status | realtime | 
 
 ### /autoheal-snooze
 
-**Suppress a specific proposal fingerprint for N days (default 30).**
+**Snooze one ready fix for N days (default 14).**
 
-Writes to `~/.claude/autoheal/snoozed.json` keyed by the proposal's fingerprint. Useful when the analyzer keeps re-proposing a change you have already decided against.
+Alias for the Snooze answer in `/autoheal-review`: it sets the proposal's ledger row to `snoozed`, so the row leaves the review list and the SessionStart count until the snooze ends, and the aggregator does not draft the signature again meanwhile. `/autoheal-snooze <id> 0` wakes it.
 
 **Installed by**: autoheal module
 

@@ -215,7 +215,6 @@ def load_repo_config(cwd: str | None = None) -> dict:
 
         {
           "additional_allow_patterns": [str, ...],
-          "calibration_days": int,
           "thresholds": {"confidence_min": int, "occurrence_min": int},
           "kind_filters": [str, ...]
         }

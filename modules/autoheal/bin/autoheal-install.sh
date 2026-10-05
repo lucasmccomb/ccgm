@@ -46,11 +46,6 @@ mkdir -p \
     "${AUTOHEAL_DIR}/sent" \
     "${HOME}/.claude/logs"
 
-# Default snoozed.json so the lookup never fails-open.
-if [ ! -f "${AUTOHEAL_DIR}/snoozed.json" ]; then
-    printf '{}\n' > "${AUTOHEAL_DIR}/snoozed.json"
-fi
-
 # ---------------------------------------------------------------------
 # Scoped API-key env file.
 #
@@ -125,7 +120,6 @@ if [ ! -f "${AUTOHEAL_DIR}/config.json" ]; then
     "claude-sonnet-4-6":  {"input_per_million": 3,    "output_per_million": 15},
     "claude-opus-4-7":    {"input_per_million": 5,    "output_per_million": 25}
   },
-  "max_input_tokens": 200000,
   "daily_cost_cap_usd": 10.00,
   "retention_gzip_days": 30,
   "retention_delete_days": 60
@@ -195,11 +189,6 @@ for _model_key in ("model", "default_model"):
 if "default_model" not in cfg:
     cfg["default_model"] = cfg.get("model", "claude-sonnet-5")
     dirty = True
-# Issue #517: backfill the new max_input_tokens key without overriding
-# a value the user has already chosen.
-if "max_input_tokens" not in cfg:
-    cfg["max_input_tokens"] = 200000
-    dirty = True
 # Issue #529: bump default cost cap to $10.00 from prior legacy
 # defaults ($0.50, $1.00), but only when the existing value is one of
 # those legacy defaults (don't silently rewrite a user-customized cap).
@@ -211,7 +200,7 @@ if dirty:
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=2)
         fh.write("\n")
-    print(f"autoheal-install: merged cost_pricing/default_model/max_input_tokens into {path}")
+    print(f"autoheal-install: merged cost_pricing/default_model into {path}")
 PY
 fi
 

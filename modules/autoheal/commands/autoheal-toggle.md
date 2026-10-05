@@ -16,7 +16,7 @@ autoheal feature flags.
 /autoheal-toggle email on|off|status                # email_enabled
 /autoheal-toggle digest on|off|status               # digest_enabled
 
-/autoheal-toggle webhook on|off|status              # webhook_enabled
+/autoheal-toggle webhook status                     # webhook_url (set = on, null = off)
 /autoheal-toggle webhook url <URL>                  # webhook_url
 /autoheal-toggle webhook url clear                  # webhook_url -> null
 ```
@@ -51,9 +51,9 @@ For every subcommand:
    active/off). Do not hand-edit these two keys with `jq`.
    - `email on|off` flips `email_enabled` (Epic 7 sender gate).
    - `digest on|off` flips `digest_enabled` (Epic 7 renderer gate).
-   - `webhook on|off` flips `webhook_enabled` (Epic 12 publisher gate).
-     `webhook url <URL>` writes the URL to `webhook_url`. `webhook url
-     clear` sets `webhook_url` to `null`.
+   - `webhook url <URL>` writes the URL to `webhook_url`; `webhook url
+     clear` sets it to `null`. The publisher has no other gate: a set URL is
+     on, `null` is off.
 3. Write the file back via `jq` so the on-disk JSON stays well-formed.
    For `status` queries, print the current value and exit without
    writing.
@@ -69,7 +69,6 @@ For every subcommand:
 | `autoapply` | `auto_apply_mode` | `off` |
 | `email` | `email_enabled` | `false` |
 | `digest` | `digest_enabled` | `true` |
-| `webhook` (`on`/`off`) | `webhook_enabled` | `false` |
 | `webhook url <URL>` | `webhook_url` | `null` |
 
 `status` (or no second argument) on any of the above prints the current
@@ -93,9 +92,8 @@ value without changing anything.
 # Check current auto-apply state
 /autoheal-toggle autoapply status
 
-# Wire up dev.lem.work webhook (Epic 12 / Human-Epic 2)
-/autoheal-toggle webhook url https://dev.lem.work/v1/ingest
-/autoheal-toggle webhook on
+# Send daily records to a webhook (posts to <url>/v1/ingest)
+/autoheal-toggle webhook url https://example.com/autoheal
 
 # Clear the webhook (revert to no-op)
 /autoheal-toggle webhook url clear

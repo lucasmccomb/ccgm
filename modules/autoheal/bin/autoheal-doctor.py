@@ -9,14 +9,19 @@ Read-only. Prints:
   - heartbeat age and status (health.json)
   - whether ANTHROPIC_API_KEY is set in autoheal's .env (never the value)
   - the last cost.log row
+  - whether every module.json file target of the autoheal module exists under
+    the real home's .claude (merge entries such as settings.json are skipped)
   - when something is wrong, the exact repair: bootout plus bootstrap of the
-    real plist. The doctor never runs the repair; /autoheal asks first.
+    real plist, or the command that links missing module files. The doctor never
+    runs a repair; /autoheal asks first.
 
 Exit 0 when every check passes, 1 otherwise.
 
 Env (tests): CCGM_DOCTOR_REAL_HOME (default: the passwd home of the current
 uid, not $HOME, which a temp-HOME run overrides), CCGM_AUTOHEAL_DIR,
-CCGM_AUTOHEAL_USERNAME (label owner, default $USER), CCGM_AUTOHEAL_LABEL.
+CCGM_AUTOHEAL_USERNAME (label owner, default $USER), CCGM_AUTOHEAL_LABEL,
+CCGM_DOCTOR_MANIFEST (module.json to check, default: the one beside this
+script's real path; with no manifest the install check is skipped).
 
 Python 3 standard library only.
 """
@@ -34,11 +39,42 @@ from pathlib import Path
 
 STALE_HOURS = 26
 SHELLS = {"sh", "bash", "zsh", "dash"}
+INSTALL_PROBLEM = "module files not installed"
 
 
 def real_home() -> Path:
     override = os.environ.get("CCGM_DOCTOR_REAL_HOME")
     return Path(override or pwd.getpwuid(os.getuid()).pw_dir)
+
+
+def manifest_path() -> Path:
+    override = os.environ.get("CCGM_DOCTOR_MANIFEST")
+    if override:
+        return Path(override)
+    return Path(os.path.realpath(__file__)).parent.parent / "module.json"
+
+
+def missing_files(manifest: Path, claude_dir: Path) -> "tuple[int, list[str]] | None":
+    """Return (files checked, targets missing under claude_dir), or None when
+    the manifest cannot be read. Entries with `merge` (settings.json) are not
+    files of their own and are skipped. A dangling symlink counts as missing."""
+    try:
+        files = json.loads(manifest.read_text(encoding="utf-8"))["files"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    targets = [e["target"] for e in files.values()
+               if isinstance(e, dict) and isinstance(e.get("target"), str) and not e.get("merge")]
+    return len(targets), [t for t in targets if not (claude_dir / t).exists()]
+
+
+def install_repair(manifest: Path, claude_dir: Path) -> "list[str]":
+    """The command that links the missing files. install_new_files only links;
+    it does nothing for a copy-mode install, which needs ./start.sh again."""
+    repo = manifest.resolve().parent.parent.parent
+    code = (f"import os,sys; sys.path.insert(0,{str(repo / 'modules' / 'hooks' / 'lib')!r}); "
+            f"import ccgm_sync_install as i; print(i.install_new_files({str(claude_dir)!r}, {str(repo)!r}))")
+    return ["install repair (links the missing files; a copy-mode install needs ./start.sh instead):",
+            f"  python3 -c {shlex.quote(code)}"]
 
 
 def label() -> str:
@@ -236,17 +272,35 @@ def main() -> int:
     row = last_cost_row(adir)
     out.append(f"last cost.log row: {row}" if row else f"last cost.log row: no cost.log rows in {adir / 'cost.log'}")
 
+    claude_dir = home / ".claude"
+    manifest = manifest_path()
+    checked = missing_files(manifest, claude_dir)
+    gaps: list[str] = []
+    if checked is None:
+        out.append(f"install: skipped, cannot read {manifest}")
+    else:
+        total, gaps = checked
+        if gaps:
+            out.append(f"install: {len(gaps)} of {total} module files missing under {claude_dir}")
+            out.extend(f"  missing: {t}" for t in gaps)
+            problems.append(INSTALL_PROBLEM)
+        else:
+            out.append(f"install: all {total} module files present under {claude_dir}")
+
     if problems:
         out.append("")
         out.append("problems: " + "; ".join(problems))
-        if real_plist.exists():
-            out.append("repair (run in order):")
-            if loaded:
-                out.append(f"  launchctl bootout gui/{os.getuid()}/{job}")
-            out.append(f"  launchctl bootstrap gui/{os.getuid()} {real_plist}")
-        else:
-            out.append(f"repair: the real plist {real_plist} does not exist; reinstall with")
-            out.append("  bash modules/autoheal/bin/autoheal-install.sh")
+        if any(p != INSTALL_PROBLEM for p in problems):
+            if real_plist.exists():
+                out.append("repair (run in order):")
+                if loaded:
+                    out.append(f"  launchctl bootout gui/{os.getuid()}/{job}")
+                out.append(f"  launchctl bootstrap gui/{os.getuid()} {real_plist}")
+            else:
+                out.append(f"repair: the real plist {real_plist} does not exist; reinstall with")
+                out.append("  bash modules/autoheal/bin/autoheal-install.sh")
+        if gaps:
+            out.extend(install_repair(manifest, claude_dir))
     print("\n".join(out))
     return 1 if problems else 0
 

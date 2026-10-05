@@ -78,7 +78,7 @@ import hashlib
 print(hashlib.sha256('\x1f'.join(('Bash','grep','zsh_no_matches')).encode()).hexdigest()[:12])")"
 mkdir -p "${S_AH}"
 printf '{"id":"%s","signature_id":"%s","state":"ready"}\n' "${COVERED_ID}" "${COVERED_ID}" > "${S_AH}/proposals.jsonl"
-printf '{"%s":{"snoozed_until":"2026-12-01T00:00:00Z"}}\n' "${SNOOZED_ID}" > "${S_AH}/snoozed.json"
+printf '{"id":"%s","signature_id":"%s","state":"snoozed","snoozed_until":"2099-01-01T00:00:00Z"}\n' "${SNOOZED_ID}" "${SNOOZED_ID}" >> "${S_AH}/proposals.jsonl"
 plan
 assert_eq "$(grep -c '^item' "${S_OUT}/plan.tsv")" "1" "covered: a covered and a snoozed signature are not chosen"
 assert_eq "$(json_get "${S_OUT}/item-1.json" "d['signature']['cmd_head']")" "ls" "covered: the remaining one is chosen"

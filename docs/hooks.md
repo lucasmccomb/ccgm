@@ -522,7 +522,7 @@ With no `~/.claude/persist/<session_id>.json` state file, it does nothing. While
 
 ## Autoheal hooks
 
-Installed by the **autoheal** module. They are registered alongside the core hooks but emit/log only — they do NOT enforce. Three opt-in surfaces (real-time alerts, auto-apply, webhook publisher) are gated by config flags in `~/.claude/autoheal/config.json` and default OFF.
+Installed by the **autoheal** module. They are registered alongside the core hooks but emit/log only — they do NOT enforce. Four opt-in surfaces (real-time alerts, auto-apply, email, webhook publisher) are gated by config flags in `~/.claude/autoheal/config.json` and default OFF.
 
 ### permission-event-logger.py
 
@@ -554,7 +554,7 @@ Pattern-matches 10 user-correction phrases ("no, not like that", "stop doing", "
 **Module**: autoheal
 **Can block**: Yes (auto-allow only)
 
-Conservative auto-allow gate: fires only when ALL hold — `is_bypass_mode()` is True, the `(tool, command-prefix)` signature has ≥3 prior approvals across ≥2 distinct sessions, and the signature is not in `~/.claude/autoheal/snoozed.json`. Otherwise exits silently.
+Conservative auto-allow gate: fires only when ALL hold — `is_bypass_mode()` is True, the `(tool, command-prefix)` signature has ≥3 prior approvals across ≥2 distinct sessions, so one rogue session cannot set a precedent. Otherwise exits silently.
 
 ### realtime-security-scanner.py
 

@@ -8,8 +8,8 @@
 ;;
 ;; The profile restricts the child process to exactly what the analyzer
 ;; needs: outbound TLS to api.anthropic.com, reads from /tmp for the
-;; pre-extracted excerpts, and writes to ~/.claude/autoheal/proposals/
-;; and ~/.claude/autoheal/cost.log. Everything else is denied.
+;; request bodies, and writes to ~/.claude/autoheal/cost.log and the
+;; autoheal logs. Everything else is denied.
 ;;
 ;; The wrapper is OPT-IN because Apple's sandbox-exec is still
 ;; technically deprecated and the syntax differs subtly between macOS
@@ -42,15 +42,14 @@
   (literal "/dev/urandom")
   (literal "/dev/random"))
 
-;; Excerpt files are pre-extracted into /tmp by a non-sandboxed Python
-;; phase. The analyzer process is only allowed to read them, not write.
+;; Request bodies are built into /tmp by a non-sandboxed phase. The
+;; analyzer process is only allowed to read them, not write.
 (allow file-read*
   (subpath "/tmp"))
 
 ;; Writes are strictly scoped to the autoheal output paths. We use a
 ;; regex over $HOME because the home path is user-specific.
 (allow file-write*
-  (regex #"^/Users/[^/]+/\.claude/autoheal/proposals/")
   (regex #"^/Users/[^/]+/\.claude/autoheal/cost\.log$")
   (regex #"^/Users/[^/]+/\.claude/logs/autoheal[^/]*\.log$"))
 

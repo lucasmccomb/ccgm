@@ -169,7 +169,23 @@ run_daily '{}'
 assert_eq "$(hj "d['status']")" "failed" "carry-forward: now failed"
 assert_eq "$(hj "d['last_success_at']")" "${FIRST_OK}" "carry-forward: last_success_at kept"
 
-# 12. The wrapper never touched launchctl.
+# 12. proposals counts today's ledger rows (proposals.jsonl), not the retired per-day files.
+reset_stubs
+printf '%s\n' '{"id":"a","state":"ready","source_day":"2026-01-02"}' \
+    '{"id":"b","state":"dropped","source_day":"2026-01-02"}' \
+    '{"id":"c","state":"ready","source_day":"2026-01-01"}' > "${AH}/proposals.jsonl"
+run_daily '{}'
+assert_eq "$(hj "d['proposals']")" "2" "proposals: today's ledger rows only"
+
+# 13. Every run appends {date, status} to health-history.jsonl (the 30-day run-health source).
+rm -f "${AH}/health-history.jsonl"
+reset_stubs
+run_daily '{}'
+stub analyze 127
+run_daily '{}'
+assert_eq "$(python3 -c "import json; print([ (r['date'], r['status']) for r in map(json.loads, open('${AH}/health-history.jsonl'))])")" "[('2026-01-02', 'ok'), ('2026-01-02', 'failed')]" "history: one row per run"
+
+# 14. The wrapper never touched launchctl.
 assert_eq "$([ -f "${TMP}/launchctl.argv" ] && echo called || echo untouched)" "untouched" "launchctl never called"
 
 echo ""

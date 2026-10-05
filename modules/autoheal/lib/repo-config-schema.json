@@ -15,11 +15,6 @@
       "default": [],
       "description": "Extra allow patterns appended (NOT subtracted) to the global allow list when working inside this repo. The only ADDITIVE field — cannot remove from the global deny list."
     },
-    "calibration_days": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Inert. Calibration mode was removed from the analyzer in #1099; the key is still accepted so existing per-repo configs stay valid."
-    },
     "thresholds": {
       "type": "object",
       "additionalProperties": false,
@@ -43,16 +38,12 @@
       "items": {
         "type": "string",
         "enum": [
-          "settings_allow_add",
-          "settings_deny_remove",
-          "hook_narrow",
-          "new_command",
-          "rule_update",
-          "command_doc_tweak"
+          "rule_insert",
+          "issue"
         ]
       },
       "uniqueItems": true,
-      "description": "Whitelist of proposal kinds to retain for this repo. Empty array means 'no proposals from this repo'. Missing field means 'all kinds permitted'. Enum mirrors proposal-schema.json `kind`."
+      "description": "Whitelist of proposal kinds to retain for this repo. Empty array means 'no proposals from this repo'. Missing field means 'all kinds permitted'. Enum is the set of ledger row kinds."
     },
     "paused": {
       "type": "boolean",
@@ -61,10 +52,6 @@
     "realtime_alerts_enabled": {
       "enum": ["off", "shadow", "active", true, false],
       "description": "Per-repo override of the global realtime_alerts_enabled flag. A boolean reads as active (true) or off (false)."
-    },
-    "auto_apply_enabled": {
-      "enum": ["off", "shadow", "active", true, false],
-      "description": "Retired. Auto-apply reads only the global auto_apply_mode in ~/.claude/autoheal/config.json, which must be promoted to active through /autoheal-toggle; a per-repo value is ignored."
     }
   }
 }
