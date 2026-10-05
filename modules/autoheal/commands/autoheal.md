@@ -18,9 +18,9 @@ actions.
    `~/.claude/autoheal/config.json`.
 3. Today's local digest path (whether it exists yet) and the last analyzer
    run timestamp from `~/.claude/autoheal/last-analyzed` if present.
-4. The count of unread proposals in
-   `~/.claude/autoheal/proposals/{today}.jsonl` and the path to today's
-   event log under `~/.claude/autoheal/events/`.
+4. The count of fixes waiting for a decision (`python3 ~/.claude/lib/ledger.py
+   ready`, the whole ledger `~/.claude/autoheal/proposals.jsonl`, any age)
+   and the path to today's event log under `~/.claude/autoheal/events/`.
 
 ## How it works
 
@@ -28,8 +28,8 @@ This command is a thin Claude reader, not a shell script. The agent:
 
 1. Reads `~/.claude/autoheal/config.json` (treating missing keys as
    defaults from the rule file `modules/autoheal/skills/autoheal-reference/SKILL.md`).
-2. Lists files under `~/.claude/autoheal/proposals/`,
-   `~/.claude/autoheal/events/`, `~/.claude/autoheal/digests/`, and
+2. Counts the ready rows in `~/.claude/autoheal/proposals.jsonl` and lists
+   files under `~/.claude/autoheal/events/`, `~/.claude/autoheal/digests/`, and
    `~/.claude/autoheal/sent/` to summarize state.
 3. Prints the rendered status table and the command surface.
 
@@ -38,10 +38,11 @@ This command is a thin Claude reader, not a shell script. The agent:
 | Command | Purpose |
 |---|---|
 | `/autoheal` | This overview. |
-| `/autoheal-digest [date]` | Render today's or a specific date's digest. |
+| `/autoheal-review [id]` | Accept, edit, reject or snooze each ready fix. Apply opens and merges a PR. |
+| `/autoheal-digest [date]` | Render today's or a specific date's digest (an archive). |
 | `/autoheal-toggle [pause\|resume\|status\|realtime\|autoapply\|webhook] [on\|off\|shadow\|status\|url <URL>]` | Flip config flags. |
 | `/autoheal-snooze <id> [days]` | Snooze a proposal for N days (default 30). |
-| `/autoheal-apply [id\|list]` | Apply a proposal via the formal apply path (Epic 11). |
+| `/autoheal-apply [id\|list]` | Alias for `/autoheal-review`. |
 | `/permission-fix [event-id\|latest]` | In-session root-cause sub-agent (Epic 4). |
 | `/permission-audit` | Static audit of installed hooks + settings (Epic 5). |
 
@@ -55,8 +56,8 @@ null`.
 ## When NOT to invoke
 
 - This is a status read-out, not a fix path. To loosen a specific friction
-  point, use `/permission-fix latest` or `/autoheal-apply <id>` after
-  reading the proposal.
+  point, use `/permission-fix latest`, or `/autoheal-review` for a fix
+  autoheal already drafted.
 - For audit alignment between hooks and settings, use `/permission-audit`.
 
 ## Cross-references

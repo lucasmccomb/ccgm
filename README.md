@@ -185,7 +185,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **argus** | workflow | `/argus` | Closed-loop visual-ATDD harness: deterministic gates plus a separate judge agent score UI renders against a design spec until convergence | subagent-patterns |
 | **ask-context** | core | - | Hard PreToolUse gate: no AskUserQuestion whose decision context is invisible to the user. Blocks deictic references, identical re-asks after pushback, and mid-workstream questions whose payload and turn text both lack context | settings |
 | **atdd** | workflow | `/atdd` | Agentic Test-Driven Development. /atdd reads Playwright vision specs, iteratively builds app code until all tests pass, then ships | - |
-| **autoheal** | workflow |  `/autoheal`, `/autoheal-apply`, `/autoheal-digest`, `/autoheal-reference`, `/autoheal-snooze`, `/autoheal-toggle`, `/permission-audit`, `/permission-fix`  | Self-healing observability loop: captures permission events, tool failures, and user-correction signals to a local JSONL log; daily analyzer (direct Anthropic API) surfaces a digest of proposed config fixes via `/autoheal-digest` and `/autoheal-apply`. Default-off opt-ins: `realtime_alerts_enabled` (mid-session security alerts), `auto_apply_enabled` (confidence-gated apply), `email_enabled` (Resend digest), `webhook_url` (future dev.lem.work seam). Bring-up: `bash start.sh --add autoheal` then `bash modules/autoheal/bin/autoheal-install.sh` | hooks |
+| **autoheal** | workflow |  `/autoheal`, `/autoheal-apply`, `/autoheal-digest`, `/autoheal-reference`, `/autoheal-review`, `/autoheal-snooze`, `/autoheal-toggle`, `/permission-audit`, `/permission-fix`  | Self-healing observability loop: captures permission events, tool failures, and user-correction signals to a local JSONL log; daily analyzer (direct Anthropic API) surfaces ready fixes through a SessionStart line and `/autoheal-review` (digest kept as an archive). Default-off opt-ins: `realtime_alerts_enabled` (mid-session security alerts), `auto_apply_enabled` (confidence-gated apply), `email_enabled` (Resend digest), `webhook_url` (future dev.lem.work seam). Bring-up: `bash start.sh --add autoheal` then `bash modules/autoheal/bin/autoheal-install.sh` | hooks |
 | **autonomy** | core | - | Claude as a fully autonomous engineer - executes tasks end-to-end without unnecessary questions | - |
 | **brainstorm** | commands | `/brainstorm` | Design-before-implementation gate: forbids code until a design spec with 2-3 approach tradeoffs is written and user-approved, then hands off to /xplan | - |
 | **branch-guard** | core | - | Hard PreToolUse gate: no edits or git mutations while HEAD is on the default branch. Fires before the first edit | settings |
@@ -368,7 +368,7 @@ The `docs/` directory contains comprehensive documentation:
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
 | [Module Catalog](docs/modules.md) | Detailed reference for all 81 modules |
-| [Commands Reference](docs/commands.md) | All 93 slash commands with usage examples |
+| [Commands Reference](docs/commands.md) | All 94 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 38 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |
 | [Installer](docs/installer.md) | How the installer works, updating, uninstalling |

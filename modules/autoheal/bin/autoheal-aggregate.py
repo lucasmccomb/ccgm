@@ -23,6 +23,8 @@ not paid for again every night:
   - validation_unavailable (infrastructure, not the proposal's fault): 1 day.
     Three such drops in a row start the 14-day cooldown.
 A model `skip` row is not dropped: it covers its signature with no expiry.
+A `rejected` row covers its signature until its `suppressed_until` (90 days after
+/autoheal-review rejected it); a `snoozed` row covers it while the row exists.
 
 Signature: (tool_name, cmd_head, error_class), from tool_failure rows only.
 Rows written before PR #1112 have no error_class; they become class
@@ -206,8 +208,20 @@ def _ledger_rows(data_dir: str):
             if isinstance(row, dict) and isinstance(row.get("signature_id"), str):
                 yield row
 
-def _covered_ids(data_dir: str) -> set:
-    return {row["signature_id"] for row in _ledger_rows(data_dir) if row.get("state") != "dropped"}
+def _suppression_over(row: dict, as_of: dt.date) -> bool:
+    """True for a rejected row whose `suppressed_until` (set by /autoheal-review) has passed."""
+    if row.get("state") != "rejected":
+        return False
+    try:
+        until = dt.datetime.fromisoformat(str(row.get("suppressed_until")).replace("Z", "+00:00"))
+    except ValueError:
+        return False  # a rejection with no end date stays in force
+    return as_of > until.date()
+
+
+def _covered_ids(data_dir: str, as_of: dt.date) -> set:
+    return {row["signature_id"] for row in _ledger_rows(data_dir)
+            if row.get("state") != "dropped" and not _suppression_over(row, as_of)}
 
 
 def drop_history(data_dir: str) -> dict:
@@ -313,7 +327,7 @@ def aggregate(data_dir: str, end: dt.date, cfg: dict) -> dict:
                 rec["samples"].pop(text, None)  # keep the latest occurrence last
                 rec["samples"][text] = True
 
-    covered = _covered_ids(data_dir)
+    covered = _covered_ids(data_dir, end)
     drops = drop_history(data_dir)
     as_of = dt.datetime.combine(end, dt.time(23, 59, 59), tzinfo=dt.timezone.utc)
     snoozed = _snoozed_keys(data_dir, as_of)

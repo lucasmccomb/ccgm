@@ -9,7 +9,7 @@ Self-healing observability loop for Claude Code. Captures permission events, too
   - **2 response hooks**: `permission-request-suppress.py` (PermissionRequest contextual auto-allow) and `realtime-security-scanner.py` (PostToolUse opt-in mid-session alerts).
   - **1 notice hook**: `autoheal-session-notice.py` (SessionStart). See "Session notice" below.
 - **Signature aggregator**: `bin/autoheal-aggregate.py [--date D]` counts recurring failures over a 14-day window with no model call and writes `signatures/{date}.json`, ranked by count x sessions. A signature qualifies at 5 or more occurrences across 2 or more sessions and 2 or more days (override under `aggregation` in `config.json`). `bin/autoheal-analyze.sh` runs it first.
-- **7 slash commands**: `/permission-fix`, `/permission-audit`, `/autoheal`, `/autoheal-digest`, `/autoheal-toggle`, `/autoheal-snooze`, `/autoheal-apply`.
+- **8 slash commands**: `/permission-fix`, `/permission-audit`, `/autoheal`, `/autoheal-review`, `/autoheal-digest`, `/autoheal-toggle`, `/autoheal-snooze`, `/autoheal-apply`. `/autoheal-review` is where a fix is accepted; `/autoheal-apply` is an alias for it and `/autoheal-digest` is an archive.
 - **Daily LaunchAgent** (macOS) calling `bin/autoheal-daily.sh` at 08:00 local. Linux scheduling is an architectural seam, not built in v1.
 
 ## How the analyzer drafts a fix
@@ -23,7 +23,7 @@ Self-healing observability loop for Claude Code. Captures permission events, too
 3. **Measure.** Before each call it measures the input with the Anthropic `count_tokens` endpoint (free). Input over 15,000 tokens is refused unsent and counted as a failed call.
 4. **Ask.** The model answers through structured outputs (`lib/proposal-schema.json`) with a `rule_insert` (`target_path` limited to the supplied candidates, `anchor_heading`, `insert_markdown` of 8 lines or fewer) or a `skip`. It returns no diff, id or fingerprint. The request uses `claude-sonnet-5` (or `default_model` from `config.json`), thinking off, `max_tokens` 2000. The prompt and module index form a cached prefix.
 5. **Build.** `lib/draft_proposals.py` checks that the path is a candidate and the anchor heading exists in the real file, then generates the unified diff. The id is the aggregator's `signature_id` (`sha256(signature)[:12]`). A failed check drops the answer with a counted reason (`anchor_missing`, `path_not_candidate`, `insert_too_long`, ...) in `runs/{today}.json` and the rejection log.
-6. **Validate.** `validate(proposal)` in `lib/apply-proposal.py` gates every `rule_insert` before it is stored as `ready`; `/autoheal-apply` runs the same function before it branches. It works on a throwaway copy of the source repo's `origin/main` (`git archive` into a temp dir), so the repo's working tree, index, refs and worktree list are only read, never changed. Checks run cheapest first, each capped by `validation_timeout_seconds` (default 120):
+6. **Validate.** `validate(proposal)` in `lib/apply-proposal.py` gates every `rule_insert` before it is stored as `ready`; `/autoheal-review` runs the same function before it branches. It works on a throwaway copy of the source repo's `origin/main` (`git archive` into a temp dir), so the repo's working tree, index, refs and worktree list are only read, never changed. Checks run cheapest first, each capped by `validation_timeout_seconds` (default 120):
 
    | Check | Drop reason |
    |---|---|
@@ -46,18 +46,18 @@ Self-healing observability loop for Claude Code. Captures permission events, too
    | Model `skip` (state `skipped`) | No expiry |
 
    Rows dropped as `validation_unavailable` carry `consecutive_unavailable`; at three, the row also carries `health_reason`, for the health writer to surface.
-7. **Write.** Rows go to `proposals/{today}.jsonl` with `signature_id`, `kind`, `target`, `anchor`, `insert_markdown`, `diff` and `evidence` (count, sessions, sample errors). `state` is `ready`, or `skipped` when the model declined; a skipped signature counts as covered, so it is not sent again. The digest, the session notice and `/autoheal-apply` read these rows.
+7. **Write.** Rows go to `proposals/{today}.jsonl` with `signature_id`, `kind`, `target`, `anchor`, `insert_markdown`, `diff` and `evidence` (count, sessions, sample errors). `state` is `ready`, or `skipped` when the model declined; a skipped signature counts as covered, so it is not sent again. The digest, the session notice and `/autoheal-review` read these rows.
 
 ## The proposal ledger
 
-Every proposal lives in one file, `~/.claude/autoheal/proposals.jsonl` (`lib/ledger.py`), one row per proposal. Lookup by id (`/autoheal-apply <id>`) searches the whole file, so a proposal stays applicable until someone decides it.
+Every proposal lives in one file, `~/.claude/autoheal/proposals.jsonl` (`lib/ledger.py`), one row per proposal. Lookup by id (`/autoheal-review <id>`) searches the whole file, so a proposal stays applicable until someone decides it.
 
 | State | Meaning |
 |---|---|
 | `ready` | Waiting for a decision |
-| `applied` | `/autoheal-apply` landed it |
-| `rejected` | The user said no |
-| `snoozed` | Deferred until `snoozed_until` |
+| `applied` | `/autoheal-review` landed it (merged PR or filed issue) |
+| `rejected` | The user said no; the signature is suppressed until `suppressed_until` (90 days) |
+| `snoozed` | Deferred until `snoozed_until` (14 days from `/autoheal-review`) |
 | `dropped` | Failed the validation gate; feeds the redraft cooldown |
 | `skipped` | The model declined to draft; the signature stays covered |
 | `measured` | Applied, and its +14 day outcome is recorded |
@@ -67,6 +67,19 @@ Every proposal lives in one file, `~/.claude/autoheal/proposals.jsonl` (`lib/led
 Retention (`bin/autoheal-retention.sh`) never deletes a `ready` row. It prunes only `dropped` rows older than 120 days, past the 90-day cooldown cap; applied, rejected and skipped rows keep their signature covered.
 
 **Migration.** Per-day files from before the ledger (`proposals/{date}.jsonl`) move in with `bin/autoheal-ledger-migrate.py`. It plans by default (`--dry-run`) and writes only with `--apply`. Rows without a `signature_id` become `legacy`; the script renames `proposals/` to `proposals.migrated/` afterwards and skips rows already in the ledger, so a second `--apply` adds nothing. Nothing runs it on install.
+
+## Reviewing fixes: `/autoheal-review`
+
+`/autoheal-review` takes up to 5 `ready` rows, oldest first, and asks one AskUserQuestion for each. The question text holds the signature (tool, command head, error class), the count, sessions and date range, two redacted sample errors, the target rule file and the anchor heading; the Apply option's preview is the exact diff; each option's description says what it will do. All computation is in `bin/autoheal-review.py` (`list`, `apply`, `reject`, `snooze`); the command only asks.
+
+| Answer | Result |
+|---|---|
+| Apply | `rule_insert`: re-runs `validate()`, then in a temporary worktree of the CCGM source repo (`ccgm_repo_path` or the rules symlinks) on `autoheal/<id>` from `origin/main`: applies the diff, commits `#auto: apply autoheal proposal <id>` with trailers `Autoheal-Id` and `Autoheal-Signature`, pushes, opens a PR, waits for checks and squash-merges it. Never `--admin`. The repo's own working tree is never touched, and the worktree is removed in a `finally`. The row becomes `applied` with `pr_url`, `merge_sha`, `merged_at` and `baseline_rate` (failures per 100 calls of the tool over the 14 days before the merge). `issue` (hook denials): files a GitHub issue on the source repo, no labels, and marks the row `applied` with `issue_url`. |
+| Edit then apply | The user types replacement lines (8 at most) under Other. They are rebuilt into a diff against `origin/main` and re-validated; a bad edit changes nothing. |
+| Reject | Records the reason; the aggregator skips the signature for 90 days. |
+| Snooze 14d | The signature is skipped and the row leaves the list for 14 days. |
+
+If checks fail or the merge is refused, the PR stays open, the row goes back to `ready` with an `apply_error`, and the next Apply merges that PR instead of opening another. A proposal that no longer fits `origin/main` (`anchor_missing`, `apply_conflict`, `personal_data`, `module_tests`, `path_not_candidate`) becomes `dropped` with its reason, so the aggregator redrafts it after the cooldown. The commit subject uses the `#auto:` convention of `lib/apply-proposal.py` because a drafted fix has no issue number. `apply_checks_timeout_seconds` in `config.json` (default 1800) caps the wait for checks. After a successful merge the script deletes `autoheal/<id>` from origin with `git push origin --delete` (a failure is logged, never fails the apply; the checkout is untouched); a branch whose PR is still open stays. A stale `autoheal/<id>` branch from an earlier apply is replaced with `--force-with-lease` pinned to its current tip.
 
 ## Session notice
 

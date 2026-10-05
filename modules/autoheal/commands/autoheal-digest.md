@@ -2,6 +2,9 @@
 
 Print the markdown digest for today (default) or a specific past date.
 
+The digest is an archive. To act on ready fixes, run `/autoheal-review`: it
+shows each fix with its evidence and diff and merges the one you accept.
+
 ## Usage
 
 ```
@@ -42,7 +45,7 @@ decisions, 90% agreement, zero `check` false positives). See the README's
 
 ## When NOT to invoke
 
-- To apply a specific proposal — use `/autoheal-apply <id>` (Epic 11) or
+- To apply a specific proposal — use `/autoheal-review <id>` or
   `/permission-fix apply <id>` (Epic 4) instead.
 - To toggle config flags — use `/autoheal-toggle`.
 - For dates older than the retention window (default: gzipped at 30 days,

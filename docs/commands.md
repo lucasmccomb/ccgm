@@ -851,6 +851,18 @@ Lists every autoheal subcommand, the config flags (`realtime_alerts_enabled`, `a
 
 ---
 
+### /autoheal-review
+
+**Accept, edit, reject or snooze each ready autoheal fix.**
+
+Asks one AskUserQuestion per ready fix (up to 5, oldest first). The question carries the signature, count, sessions, date range, two redacted sample errors, the target rule file and anchor heading; the Apply preview is the exact diff. Apply opens a PR to the CCGM source repo from a temporary worktree, waits for checks, and squash-merges it (never `--admin`), then records `baseline_rate` for the outcome measurement. Hook-denial fixes file a GitHub issue instead. Reject suppresses the signature for 90 days; Snooze hides it for 14. The SessionStart notice ("N fixes ready") points here.
+
+**Usage**: `/autoheal-review` or `/autoheal-review <id>`.
+
+**Installed by**: autoheal module
+
+---
+
 ### /autoheal-digest
 
 **Render today's autoheal digest (or one from a past date).**
@@ -885,9 +897,9 @@ Writes to `~/.claude/autoheal/snoozed.json` keyed by the proposal's fingerprint.
 
 ### /autoheal-apply
 
-**Apply a confidence-gated autoheal proposal to canonical CCGM source.**
+**Alias for `/autoheal-review`.**
 
-`/autoheal-apply` lists pending proposals from the past 8 days (skips snoozed + already-applied). `/autoheal-apply <id>` runs the shared apply path (`lib/apply-proposal.py`): resolves the canonical clone, creates branch `autoheal/{id}`, applies the diff, runs `tests/test-modules.sh` + `tests/test-no-personal-data.sh`, commits with `#auto:` prefix, prints diff + undo + `gh pr create` suggestion. Never auto-merges.
+Forwards to `/autoheal-review` with the same argument. Its doc also keeps the local apply path (`lib/apply-proposal.py ... --demonstration`) for `check` proposals, which need a failing demonstration before they land.
 
 **Installed by**: autoheal module
 

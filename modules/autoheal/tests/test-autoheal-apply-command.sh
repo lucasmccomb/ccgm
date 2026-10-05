@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Test suite for the /autoheal-apply slash command spec.
 #
-# The command itself is documented in modules/autoheal/commands/autoheal-apply.md
-# and is implemented in two halves:
+# /autoheal-apply is an alias for /autoheal-review (test-autoheal-review.sh
+# covers that path). Its doc keeps the local apply path for `check`
+# proposals, which need a failing demonstration. The command is documented
+# in modules/autoheal/commands/autoheal-apply.md and has two halves:
 #
 #   - LIST mode: the agent runs `lib/ledger.py ready`, which prints the ledger
 #     rows waiting for a decision (ready, plus snoozed rows whose snooze
@@ -73,14 +75,14 @@ assert_contains "${doc_content}" "/autoheal-apply list" \
     "doc: list subcommand documented"
 assert_contains "${doc_content}" "/autoheal-apply <proposal-id>" \
     "doc: apply-by-id subcommand documented"
+assert_contains "${doc_content}" "/autoheal-review" \
+    "doc: forwards to /autoheal-review"
+assert_contains "${doc_content}" "Alias" \
+    "doc: says it is an alias"
 assert_contains "${doc_content}" "lib/apply-proposal.py" \
-    "doc: routes through the shared apply library"
-assert_contains "${doc_content}" "autoheal/{proposal-id}" \
-    "doc: names the manual-apply branch shape"
-assert_contains "${doc_content}" "tests/test-modules.sh" \
-    "doc: test-gate references test-modules.sh"
-assert_contains "${doc_content}" "tests/test-no-personal-data.sh" \
-    "doc: test-gate references test-no-personal-data.sh"
+    "doc: keeps the local path for check proposals"
+assert_contains "${doc_content}" "autoheal/<id>" \
+    "doc: names the local-apply branch shape"
 
 # ---------------------------------------------------------------------
 # Test 2: the CLI exposes the documented usage string and rejects bad
