@@ -162,6 +162,55 @@ class TestInstallNewFiles(FixtureCase):
         self.assertFalse(os.path.lexists(self.fx.path("lib/new.py")))
 
 
+class TestPathContainment(FixtureCase):
+    """module.json paths are untrusted: nothing may be created outside claude_dir,
+    and a source may not leave its module directory."""
+
+    def outside(self):
+        # sibling of fake HOME, still inside the temp dir
+        return os.path.join(os.path.dirname(self.fx.home), "outside")
+
+    def assert_refused(self, files, needle):
+        self.fx.push_files(files)
+        r = self.fx.run_hook()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("refused unsafe", r.stdout + r.stderr)
+        self.assertIn(needle, r.stdout + r.stderr)
+        self.assertFalse(os.path.lexists(self.outside()))
+        self.assertFalse(os.path.lexists(os.path.join(self.fx.home, ".zshrc")))
+        self.assertFalse(os.path.lexists(os.path.join(self.fx.home, "evil.plist")))
+
+    def test_dotdot_target_refused(self):
+        self.assert_refused({"lib/a.py": entry("../.zshrc")}, "../.zshrc")
+
+    def test_nested_dotdot_target_refused(self):
+        self.assert_refused({"lib/a.py": entry("hooks/../../evil.plist")}, "evil.plist")
+
+    def test_absolute_target_refused(self):
+        abs_target = os.path.join(self.outside(), "x")
+        self.assert_refused({"lib/a.py": entry(abs_target)}, abs_target)
+
+    def test_symlinked_parent_escaping_claude_dir_refused(self):
+        os.makedirs(self.outside())
+        os.symlink(self.outside(), self.fx.path("escape"))
+        self.fx.push_files({"lib/a.py": entry("escape/a.py")})
+        r = self.fx.run_hook()
+        self.assertIn("refused unsafe target escape/a.py", r.stdout + r.stderr)
+        self.assertEqual(os.listdir(self.outside()), [])
+
+    def test_dotdot_source_refused(self):
+        # push_files writes pusher/secret.txt (outside modules/mod), which the pull brings in
+        self.fx.push_files({"../../secret.txt": entry("lib/s.txt")})
+        r = self.fx.run_hook()
+        self.assertIn("refused unsafe source", r.stdout + r.stderr)
+        self.assertFalse(os.path.lexists(self.fx.path("lib/s.txt")))
+
+    def test_safe_entry_still_installed_alongside_refused_one(self):
+        self.fx.push_files({"lib/a.py": entry("../.zshrc"), "lib/ok.py": entry("lib/ok.py")})
+        self.fx.run_hook()
+        self.assertTrue(os.path.islink(self.fx.path("lib/ok.py")))
+
+
 def partial(*cmds):
     return json.dumps({"hooks": {"PostToolUse": [{"hooks": [
         {"type": "command", "command": c} for c in cmds]}]}})

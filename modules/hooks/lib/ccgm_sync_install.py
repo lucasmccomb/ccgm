@@ -33,35 +33,63 @@ def load_manifest(claude_dir: str) -> dict | None:
     return m if isinstance(m, dict) else None
 
 
-def install_new_files(claude_dir: str, canonical_dir: str) -> list[str]:
-    """Symlink module files missing from claude_dir. Returns the new link paths.
+def _inside(path: str, base: str) -> bool:
+    """True if realpath(path) is realpath(base) or below it."""
+    real, real_base = os.path.realpath(path), os.path.realpath(base)
+    return real == real_base or real.startswith(real_base + os.sep)
+
+
+def _plain_relative(rel) -> bool:
+    """A non-empty relative path with no '..' segment."""
+    return (isinstance(rel, str) and rel != "" and not os.path.isabs(rel)
+            and ".." not in rel.split("/"))
+
+
+def install_new_files(claude_dir: str, canonical_dir: str) -> tuple[list[str], list[str]]:
+    """Symlink module files missing from claude_dir.
+
+    Returns (created link paths, refused-entry descriptions).
 
     No-op unless the manifest exists, is in link mode, and was installed from
     canonical_dir. Only global-scope modules recorded in the manifest are used.
+    module.json paths are untrusted input: a target must stay inside claude_dir
+    (checked lexically and through any symlinked parent) and a source must stay
+    inside <canonical>/modules/<module>/. Anything else is refused, never linked.
     """
     manifest = load_manifest(claude_dir)
     if not manifest or manifest.get("linkMode") is not True:
-        return []
+        return [], []
     root = manifest.get("ccgmRoot") or ""
     if not root or os.path.realpath(root) != os.path.realpath(canonical_dir):
-        return []
+        return [], []
 
     created: list[str] = []
+    refused: list[str] = []
     for mod in manifest.get("modules") or []:
-        mj = _load_json(os.path.join(root, "modules", mod, "module.json"))
+        mod_dir = os.path.join(root, "modules", mod)
+        mj = _load_json(os.path.join(mod_dir, "module.json"))
         if not isinstance(mj, dict):
             continue
         scopes = mj.get("scope") or ["global"]
         if "global" not in scopes:
             continue
         for src_rel, spec in (mj.get("files") or {}).items():
-            if spec.get("template") or spec.get("merge"):
+            if not isinstance(spec, dict) or spec.get("template") or spec.get("merge"):
                 continue
-            target = os.path.join(claude_dir, spec["target"])
-            src = os.path.join(root, "modules", mod, src_rel)
+            rel_target = spec.get("target")
+            target = os.path.join(claude_dir, rel_target) if isinstance(rel_target, str) else ""
+            src = os.path.join(mod_dir, src_rel)
+            if not (_plain_relative(rel_target) and _inside(os.path.dirname(target), claude_dir)):
+                refused.append(f"refused unsafe target {rel_target} in {mod}/module.json")
+                continue
+            if not (_plain_relative(src_rel) and _inside(src, mod_dir)):
+                refused.append(f"refused unsafe source {src_rel} in {mod}/module.json")
+                continue
             if os.path.lexists(target) or not os.path.exists(src):
                 continue
             try:
+                # Containment was checked against the resolved parent, so any
+                # directory created here stays under claude_dir.
                 os.makedirs(os.path.dirname(target), exist_ok=True)
                 os.symlink(src, target)
             except OSError:
@@ -70,7 +98,7 @@ def install_new_files(claude_dir: str, canonical_dir: str) -> list[str]:
 
     if created:
         _record_in_manifest(claude_dir, manifest, created)
-    return created
+    return created, refused
 
 
 def _record_in_manifest(claude_dir: str, manifest: dict, created: list[str]) -> None:

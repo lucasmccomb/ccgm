@@ -102,7 +102,8 @@ def post_pull_report(canonical_dir: str, old_head: str | None) -> list[str]:
         import ccgm_sync_install as inst
 
         claude_dir = os.path.join(os.path.expanduser("~"), ".claude")
-        created = inst.install_new_files(claude_dir, canonical_dir)
+        created, refused = inst.install_new_files(claude_dir, canonical_dir)
+        lines.extend(refused)
         if created:
             rel = [os.path.relpath(p, claude_dir) for p in created]
             lines.append(f"installed {len(rel)} new CCGM file(s): {', '.join(rel)}")
