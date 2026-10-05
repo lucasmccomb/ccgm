@@ -100,7 +100,6 @@ distinct signature with at least 2 events in the input set:
   "diff": "Unified diff text",
   "confidence": 1,
   "breadth_score": 1,
-  "auto_applicable": false,
   "snoozed_until": null,
   "fingerprint": "sha256 hex string",
   "originating_clone": "agent-w{N}-c{M} or unknown"
@@ -110,9 +109,6 @@ distinct signature with at least 2 events in the input set:
 Field validation rules:
 
 - `confidence` and `breadth_score`: integers 1-10 inclusive.
-- `auto_applicable`: `true` only when `confidence >= 9`,
-  `breadth_score <= 1`, `kind == "settings_allow_add"`, AND the
-  diff target lives under `modules/settings/`.
 - `diff`: must apply cleanly via `patch -p0` from repo root.
 - `target`: must start with `modules/` (any other
   path is rejected at apply time).

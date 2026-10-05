@@ -113,27 +113,34 @@ Habit: always Read the workspace `modules/` path before any Edit, even if you re
 
 ## Autoheal Module
 
-The `modules/autoheal/` directory holds CCGM's self-healing observability loop. It captures permission events, tool failures, and user-correction signals to a local JSONL log, runs a daily analyzer via direct Anthropic API call, and surfaces a digest of proposed configuration improvements.
+The `modules/autoheal/` directory holds CCGM's self-healing observability loop. Hooks log tool failures (with error text and class), interrupts, permission requests and user corrections to a local JSONL log. A deterministic aggregator counts recurring failure signatures with no model call. For each signature that qualifies, one direct Anthropic API call drafts a small `rule_insert` against a real rule file, and code builds and validates the diff. Every proposal lives in one ledger (`~/.claude/autoheal/proposals.jsonl`). A SessionStart line tells you about ready fixes and a dead job, and `/autoheal-review` merges the fix you accept through a PR. Applied fixes are measured 14 days later.
 
 ### Autoheal bring-up
 
 ```bash
 bash start.sh --add autoheal                         # install hooks/commands/rules/scripts
-bash modules/autoheal/bin/autoheal-install.sh        # register the macOS LaunchAgent (Epic 6)
+bash modules/autoheal/bin/autoheal-install.sh        # register the macOS LaunchAgent (refuses a foreign HOME)
 ```
 
-See `plan.md §9.1` for the full per-wave bring-up runbook.
+New module files reach an existing install through the `sync-ccgm-canonical.py` hook after a merge; `/autoheal doctor` reports any `module.json` target still missing under `~/.claude`. See `plan.md §9.1` for the per-wave bring-up runbook.
 
-### Config flags (`~/.claude/autoheal/config.json`)
+### Config (`~/.claude/autoheal/config.json`)
 
-All four are **default OFF**. The first two take `off|shadow|active` (a persisted boolean reads as active/off; shadow logs the decision and acts on nothing). Autoheal stays observation-only until you opt in.
+Autoheal drafts and reports by default. Mid-session alerts, auto-apply, email and the webhook are **default OFF** and each is a deliberate opt-in. `realtime_alerts_enabled` and `auto_apply_mode` take `off|shadow|active`; shadow logs the decision and acts on nothing. The full key list, with every default, is in `modules/autoheal/README.md` and `skills/autoheal-reference/SKILL.md`.
 
 | Key | Default | What it gates |
 |-----|---------|---------------|
-| `realtime_alerts_enabled` | `off` (`off\|shadow\|active`) | Mid-session `<autoheal-security-alert>` blocks on high-confidence patterns (`ghp_*` in commits, `rm -rf /`, force-push to main) |
-| `auto_apply_enabled` | `off` (`off\|shadow\|active`) | Confidence-gated auto-apply (confidence ≥9, breadth ≤1, `settings_allow_add` only). Creates feature branch; never pushes |
-| `email_enabled` | `false` | Resend-backed email digest (requires `digest_email` + `RESEND_API_KEY`) |
-| `webhook_url` | `null` | When set, daily run POSTs proposals/events/digests to `${webhook_url}/v1/ingest`. **Future-integration point for `dev.lem.work`** — receiver lives outside this repo. `webhook_token` (32-char Bearer) is generated at install time |
+| `paused` | `false` | `true`: the daily wrapper runs no step and makes no API call, and writes a `paused` heartbeat. A per-repo `.autoheal/config.json` can set it |
+| `realtime_alerts_enabled` | `off` | Mid-session `<autoheal-security-alert>` blocks on high-confidence patterns (`ghp_*` in commits, `rm -rf /`, force-push to main) |
+| `auto_apply_mode` | `off` | Earned auto-apply of `rule_insert` fixes. `shadow` logs would-apply; `active` needs 10 decided shadow decisions at 90% agreement and none later harmful, and applies through the same PR path as `/autoheal-review`. 3 reverts in 30 days demote it to shadow. The retired `auto_apply_enabled` is migrated on read to off or shadow |
+| `auto_apply_targets` | `["modules/*/rules/*.md"]` | Rule files auto-apply may change; `[]` lets nothing qualify |
+| `aggregation.*` | `window_days` 14, `min_occurrences` 5, `min_sessions` 2, `min_days` 2, `redraft_cooldown_days` 14 | Window and bar for a signature to qualify, and the cooldown after a dropped draft (doubles per drop, capped at 90) |
+| `rule_budget_lines_per_week` | `20` | Lines fixes may add to always-loaded rules in 7 days |
+| `validation_timeout_seconds` | `120` | Cap for each validation check |
+| `ccgm_repo_path` | unset | CCGM source repo for drafting and PRs; else found through the `~/.claude/rules` symlinks |
+| `daily_cost_cap_usd` | `10.00` | The analyzer stops calling the API once a day's spend reaches it |
+| `email_enabled` | `false` | Resend email digest (requires `digest_email` + `RESEND_API_KEY`) |
+| `webhook_url` | `null` | When set, the daily run POSTs the ledger's rows, events and digest to `${webhook_url}/v1/ingest`. **Future-integration point for `dev.lem.work`**; the receiver lives outside this repo. `webhook_token` (32-char Bearer) is generated at install time |
 
 Per-repo overrides live in `.autoheal/config.json` at the repo root. Both files are gitignored.
 
@@ -141,17 +148,19 @@ Per-repo overrides live in `.autoheal/config.json` at the repo root. Both files 
 
 | Command | Purpose |
 |---------|---------|
-| `/autoheal` | Help + status |
-| `/autoheal-digest [date]` | Render today's (or a date's) digest |
+| `/autoheal` | Status, auto-apply state and success metrics (30-day run health, acceptance rate, applied-effective rate, 30-day spend) |
+| `/autoheal doctor` | Diagnose the launchd job, heartbeat, API key and module install; offer the repair |
+| `/autoheal-review [id]` | The one place a fix is accepted: Apply (PR, checks, squash-merge), Edit, Reject or Snooze. `revert <id>` and `redraft <id>` act on merged fixes |
+| `/autoheal-digest [date]` | Render today's (or a date's) digest (an archive) |
 | `/autoheal-toggle [pause\|resume\|status\|realtime\|autoapply\|webhook]` | Flip config flags |
-| `/autoheal-snooze <id> [days]` | Snooze a proposal for N days (default 7) |
-| `/autoheal-apply [id\|list]` | Formal apply path; feature branch + validation tests + audit |
+| `/autoheal-snooze <id> [days]` | Alias for the Snooze answer: snooze a ledger row for N days (default 14) |
+| `/autoheal-apply [id\|list]` | Alias for `/autoheal-review` |
 | `/permission-fix [event-id\|latest]` | In-session root-cause sub-agent for a permission failure |
 | `/permission-audit` | Static audit of installed hooks + settings against the classification table |
 
 ### Autoheal posture
 
-Autoheal is opt-in by design. The default install only captures events and surfaces a local digest. Nothing alerts mid-session, nothing auto-applies, no network calls leave the machine. Each opt-in is a deliberate `/autoheal-toggle` away.
+Autoheal captures, counts and drafts by default: the model is called only for a signature that qualifies, and nothing lands without your answer in `/autoheal-review`. Nothing alerts mid-session, nothing auto-applies, and nothing goes to email or a webhook until you opt in. Each opt-in is a deliberate `/autoheal-toggle` or config edit away, and auto-apply has to earn `active` from your own review decisions.
 
 ## Dreaming Module
 

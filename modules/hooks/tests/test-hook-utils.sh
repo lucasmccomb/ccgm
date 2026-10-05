@@ -233,16 +233,16 @@ assert_eq "${out}" "{}" "load_repo_config absent returns empty dict"
 # 10. load_repo_config walks UP from a nested cwd to find the config.
 mkdir -p "${REPO_TMP}/.autoheal"
 cat > "${REPO_TMP}/.autoheal/config.json" <<'EOF'
-{"additional_allow_patterns": ["Bash(test-tool:*)"], "calibration_days": 14}
+{"additional_allow_patterns": ["Bash(test-tool:*)"], "paused": true}
 EOF
 mkdir -p "${REPO_TMP}/nested/deeper"
 out=$(py "
 import hook_utils
 cfg = hook_utils.load_repo_config('${REPO_TMP}/nested/deeper')
-print(cfg.get('calibration_days'))
+print(cfg.get('paused'))
 print(cfg.get('additional_allow_patterns', ['MISS'])[0])
 ")
-assert_eq "$(echo "${out}" | sed -n 1p)" "14" "load_repo_config walks up to ancestor"
+assert_eq "$(echo "${out}" | sed -n 1p)" "True" "load_repo_config walks up to ancestor"
 assert_eq "$(echo "${out}" | sed -n 2p)" "Bash(test-tool:*)" "load_repo_config preserves allow pattern"
 
 # 11. load_repo_config tolerates malformed JSON.

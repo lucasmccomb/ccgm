@@ -61,6 +61,20 @@ exit 113
 STUB
 chmod +x "${FAKEBIN}/launchctl"
 
+# Manifest the install check reads: two plain targets under REAL_HOME/.claude, and a
+# merge entry (settings.json) that is never a file of its own.
+MANIFEST="${TMP}/module.json"
+mkdir -p "${REAL_HOME}/.claude/bin" "${REAL_HOME}/.claude/lib"
+: > "${REAL_HOME}/.claude/bin/one.sh"
+: > "${REAL_HOME}/.claude/lib/two.json"
+cat > "${MANIFEST}" <<'JSON'
+{"name": "autoheal", "files": {
+  "bin/one.sh": {"target": "bin/one.sh", "type": "script", "template": false},
+  "lib/two.json": {"target": "lib/two.json", "type": "lib", "template": false},
+  "settings.partial.json": {"target": "settings.json", "type": "config", "merge": true, "template": false}
+}}
+JSON
+
 # fixture <plist-path> <script-path> <last-exit> [stderr-path]
 fixture() {
     local errline=""
@@ -103,6 +117,7 @@ run_doctor() {
         CCGM_DOCTOR_REAL_HOME="${REAL_HOME}" \
         CCGM_AUTOHEAL_USERNAME="tester" \
         CCGM_AUTOHEAL_DIR="${AH}" \
+        CCGM_DOCTOR_MANIFEST="${MANIFEST}" \
         python3 "${DOCTOR}" "$@" 2>&1)"
     RC=$?
 }
@@ -195,6 +210,70 @@ write_health ok 2
 run_doctor
 assert_eq "${RC}" "1" "no stderr evidence: exit 1"
 assert_lacks "${OUT}" "predates the last good run" "no stderr evidence: not stale"
+
+# 10. Install check. Healthy launchd job and heartbeat, so the only problem is a module
+#     file the installer never linked. The merge entry (settings.json) is not required.
+fixture "${REAL_HOME}/Library/LaunchAgents/${LABEL}.plist" "${GOOD}" 0
+write_health ok 2
+printf 'ANTHROPIC_API_KEY=sk-ant-x\n' > "${AH}/.env"
+run_doctor
+assert_eq "${RC}" "0" "install complete: exit 0"
+assert_has "${OUT}" "install: all 2 module files present" "install complete: counts the plain targets only"
+rm "${REAL_HOME}/.claude/lib/two.json"
+run_doctor
+assert_eq "${RC}" "1" "missing module file: exit 1"
+assert_has "${OUT}" "install: 1 of 2 module files missing" "missing module file: summary"
+assert_has "${OUT}" "missing: lib/two.json" "missing module file: names the target"
+assert_has "${OUT}" "./start.sh --add autoheal" "missing module file, no link-mode manifest: start.sh repair"
+assert_lacks "${OUT}" "ln -s" "missing module file, copy mode: no ln -s"
+printf '{"linkMode": true}\n' > "${REAL_HOME}/.claude/.ccgm-manifest.json"
+run_doctor
+RTMP="$(cd "${TMP}" && pwd -P)"
+assert_has "${OUT}" "install repair (link mode" "link mode: per-target repair"
+assert_has "${OUT}" "ln -s ${RTMP}/lib/two.json ${REAL_HOME}/.claude/lib/two.json" "link mode: ln -s canonical source to target"
+assert_lacks "${OUT}" "start.sh" "link mode: no start.sh line"
+assert_lacks "${OUT}" "launchctl bootstrap" "missing module file only: no launchd repair"
+assert_lacks "${OUT}" "install_new_files" "no install_new_files mention"
+assert_lacks "${OUT}" "ccgm_sync_install" "no ccgm_sync_install mention"
+# A dangling symlink is missing too.
+ln -s "${TMP}/nowhere" "${REAL_HOME}/.claude/lib/two.json"
+run_doctor
+assert_has "${OUT}" "missing: lib/two.json" "dangling symlink: counts as missing"
+rm "${REAL_HOME}/.claude/lib/two.json"
+: > "${REAL_HOME}/.claude/lib/two.json"
+
+# A target or source that escapes is refused and flagged, never linked.
+MANIFEST="${TMP}/escape-module.json"
+cat > "${MANIFEST}" <<'JSON'
+{"files": {
+  "lib/two.json": {"target": "lib/two.json", "type": "lib", "template": false},
+  "lib/ok.json": {"target": "../evil.json", "type": "lib", "template": false},
+  "../outside.json": {"target": "lib/outside.json", "type": "lib", "template": false}
+}}
+JSON
+rm -f "${REAL_HOME}/.claude/lib/two.json"
+run_doctor
+assert_eq "$(printf '%s\n' "${OUT}" | grep -c 'REFUSED')" "2" "escape: both escaping entries refused"
+assert_eq "$(printf '%s\n' "${OUT}" | grep -c 'ln -s')" "1" "escape: only the contained entry is linked"
+assert_lacks "${OUT}" "outside.json ${REAL_HOME}" "escape: escaping source never linked"
+assert_eq "$(printf '%s\n' "${OUT}" | grep -c 'ln -s.*evil')" "0" "escape: escaping target never linked"
+: > "${REAL_HOME}/.claude/lib/two.json"
+rm -f "${REAL_HOME}/.claude/.ccgm-manifest.json"
+MANIFEST="${TMP}/module.json"
+
+# 11. No readable manifest: the check is skipped and does not fail the run.
+MANIFEST="${TMP}/absent-module.json"
+run_doctor
+assert_eq "${RC}" "0" "no manifest: exit 0"
+assert_has "${OUT}" "install: skipped" "no manifest: says skipped"
+
+# 12. Default manifest (the module's own module.json) against an empty home: every real
+#     plain target is reported missing, so the default path resolves and parses.
+OUT="$(PATH="${FAKEBIN}:${PATH}" CCGM_DOCTOR_REAL_HOME="${TMP}/emptyhome" CCGM_AUTOHEAL_USERNAME=tester \
+    CCGM_AUTOHEAL_DIR="${TMP}/emptyhome/.claude/autoheal" python3 "${DOCTOR}" 2>&1)"
+assert_has "${OUT}" "module files missing under ${TMP}/emptyhome/.claude" "default manifest: read from the module"
+assert_has "${OUT}" "missing: bin/autoheal-doctor.py" "default manifest: lists the doctor itself"
+assert_lacks "${OUT}" "missing: settings.json" "default manifest: merge entry skipped"
 
 echo ""
 echo "test-doctor.sh: ${PASS} passed, ${FAIL} failed"

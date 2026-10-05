@@ -15,9 +15,10 @@ repair after you approve it.
 ## What it shows
 
 1. The set of autoheal slash commands and a one-line description of each.
-2. The current config flags (`realtime_alerts_enabled`, `auto_apply_mode`,
-   `email_enabled`, `digest_enabled`, `webhook_url`) read from
-   `~/.claude/autoheal/config.json`.
+2. The current config flags (`paused`, `realtime_alerts_enabled`,
+   `auto_apply_mode`, `email_enabled`, `digest_enabled`, `webhook_url`) read
+   from `~/.claude/autoheal/config.json`. A `paused: true` install is called
+   out first: the daily job runs no step.
 3. Today's local digest path (whether it exists yet) and the last analyzer
    run timestamp from `~/.claude/autoheal/last-analyzed` if present.
 4. The count of fixes waiting for a decision (`python3 ~/.claude/lib/ledger.py
@@ -37,6 +38,14 @@ repair after you approve it.
      active to shadow) and `auto_applied`;
    - the `targets` allowlist (default `modules/*/rules/*.md`), or "empty:
      nothing can qualify" when config sets an explicit `[]`.
+6. Success metrics, from `python3 ~/.claude/lib/autoheal_metrics.py` (JSON).
+   Print one line per entry of `metrics`: `name`, `value` as a percent or
+   dollars with `detail`, the `target`, and `status` (`met`, `missed`).
+   Entries with status `not_computable` print `not computable yet` and their
+   `detail`; never fill in a number for them. The computed ones are run
+   health over 30 days, acceptance rate, applied-effective rate and 30-day
+   spend; time to detect, friction rate and cost per accepted fix are not
+   computable yet.
 
 ## How it works
 
@@ -64,35 +73,41 @@ and do this:
    It prints the loaded launchd plist path, whether the job's script exists
    under the real `$HOME`, the last exit code, heartbeat status and age, whether
    `ANTHROPIC_API_KEY` is set in `~/.claude/autoheal/.env` (never the value),
-   and the last `cost.log` row. Exit 0 means healthy.
+   the last `cost.log` row, and whether every `module.json` file target of
+   the autoheal module exists under `~/.claude`. Exit 0 means healthy.
 2. Exit 0: report the output and stop.
 3. Exit 1: the output ends with `problems:` and a `repair (run in order):`
-   block (`launchctl bootout` then `launchctl bootstrap` of the real plist).
+   block (`launchctl bootout` then `launchctl bootstrap` of the real plist),
+   an `install repair` block (one `ln -s` line per missing target in link
+   mode, or `./start.sh --add autoheal` in copy mode), or both. `install: N of
+   M module files missing` means a file the installer never linked.
    Ask with AskUserQuestion before running it. The question payload must
    stand alone (ask-context rules): put the evidence from the doctor output in
    the question text (the loaded path or "not loaded", the missing file, the
    last exit code, the heartbeat status and age) and the exact commands in
    each option's description. Options:
-   - Run the repair: runs the printed bootout and bootstrap commands, then
-     re-runs the doctor and reports its output.
+   - Run the repair: runs the printed commands, then re-runs the doctor and
+     reports its output.
    - Show only: print the commands and change nothing.
 4. If the doctor says the real plist does not exist, there is no bootstrap
    to offer; the repair is `bash modules/autoheal/bin/autoheal-install.sh`.
 
 Never run `launchctl bootout`, `bootstrap` or `kickstart` without the user
 picking the repair option. The `problems:` line may also name a missing API
-key or a stale heartbeat; those have no launchctl fix, so report them.
+key or a stale heartbeat; those have no launchctl fix, so report them. The
+install repair is not a launchctl command; it only links or copies missing
+files and changes nothing else.
 
 ## Command surface
 
 | Command | Purpose |
 |---|---|
-| `/autoheal` | This overview. |
-| `/autoheal doctor` | Diagnose the launchd job, heartbeat and API key; offer the repair. |
+| `/autoheal` | This overview, auto-apply state and success metrics. |
+| `/autoheal doctor` | Diagnose the launchd job, heartbeat, API key and module install; offer the repair. |
 | `/autoheal-review [id]` | Accept, edit, reject or snooze each ready fix. Apply opens and merges a PR. `revert <id>` undoes a merged fix; `redraft <id>` asks for a new draft of a measured one. |
 | `/autoheal-digest [date]` | Render today's or a specific date's digest (an archive). |
 | `/autoheal-toggle [pause\|resume\|status\|realtime\|autoapply\|webhook] [on\|off\|shadow\|active\|status\|url <URL>]` | Flip config flags. `autoapply active` is refused below the promotion bar. |
-| `/autoheal-snooze <id> [days]` | Snooze a proposal for N days (default 30). |
+| `/autoheal-snooze <id> [days]` | Alias for the Snooze answer: snooze a ledger row for N days (default 14). |
 | `/autoheal-apply [id\|list]` | Alias for `/autoheal-review`. |
 | `/permission-fix [event-id\|latest]` | In-session root-cause sub-agent (Epic 4). |
 | `/permission-audit` | Static audit of installed hooks + settings (Epic 5). |
@@ -100,7 +115,7 @@ key or a stale heartbeat; those have no launchctl fix, so report them.
 ## Config flags
 
 See the autoheal rule (`~/.claude/skills/autoheal-reference/SKILL.md`) for the full config
-schema. Defaults: `realtime_alerts_enabled: "off"`, `auto_apply_mode:
+schema. Defaults: `paused: false`, `realtime_alerts_enabled: "off"`, `auto_apply_mode:
 "off"` (each takes `off|shadow|active`), `auto_apply_targets: ["modules/*/rules/*.md"]`,
 `email_enabled: false`, `digest_enabled: true`, `webhook_url: null`.
 

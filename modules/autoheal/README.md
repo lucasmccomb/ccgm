@@ -9,9 +9,9 @@ Self-healing observability loop for Claude Code. Captures permission events, too
   - **2 response hooks**: `permission-request-suppress.py` (PermissionRequest contextual auto-allow) and `realtime-security-scanner.py` (PostToolUse opt-in mid-session alerts).
   - **1 notice hook**: `autoheal-session-notice.py` (SessionStart). See "Session notice" below.
 - **Signature aggregator**: `bin/autoheal-aggregate.py [--date D]` counts recurring failures over a 14-day window with no model call and writes `signatures/{date}.json`, ranked by count x sessions. A signature qualifies at 5 or more occurrences across 2 or more sessions and 2 or more days (override under `aggregation` in `config.json`). `bin/autoheal-analyze.sh` runs it first.
-- **8 slash commands**: `/permission-fix`, `/permission-audit`, `/autoheal`, `/autoheal-review`, `/autoheal-digest`, `/autoheal-toggle`, `/autoheal-snooze`, `/autoheal-apply`. `/autoheal-review` is where a fix is accepted; `/autoheal-apply` is an alias for it and `/autoheal-digest` is an archive.
+- **8 slash commands**: `/permission-fix`, `/permission-audit`, `/autoheal`, `/autoheal-review`, `/autoheal-digest`, `/autoheal-toggle`, `/autoheal-snooze`, `/autoheal-apply`. `/autoheal-review` is where a fix is accepted; `/autoheal-apply` and `/autoheal-snooze` are aliases into it (apply forwards; snooze sets a ledger row to `snoozed`) and `/autoheal-digest` is an archive. `/autoheal` shows status and the success metrics.
 - **Heartbeat**: every run of `bin/autoheal-daily.sh` writes `~/.claude/autoheal/health.json` from an EXIT trap (`status` ok/partial/failed/paused, per-step exit codes, calls, cost, `reasons[{code,message,fix}]`; same top level as dreaming's health file). The wrapper exits 1 when the analyze step fails. A paused run writes `paused` and counts as a success. The analyzer records how each run ended in `last-run.json` (`outcome` ok, `daily_cap_refused` or `failed`); a daily-cap stop is a non-failure only through that record, and exit code 2 alone is a failure.
-- **`/autoheal doctor`**: `bin/autoheal-doctor.py` reports the loaded launchd path, whether the job's script exists under the real home, last exit code, heartbeat age, whether the `.env` API key is set, and the last cost row, then prints the bootout and bootstrap repair. It never runs the repair itself. A non-zero launchd exit code counts as stale, not a problem, when a good heartbeat is newer than the job's stderr file (launchd keeps the code until the next fire).
+- **`/autoheal doctor`**: `bin/autoheal-doctor.py` reports the loaded launchd path, whether the job's script exists under the real home, last exit code, heartbeat age, whether the `.env` API key is set, the last cost row, and whether every `module.json` file target of this module exists under the real home's `.claude`, then prints the repair: bootout and bootstrap for the job, or, for missing module files, one `ln -s` line per target in link mode (a target or source that escapes the install or module directory is refused and flagged) and `./start.sh --add autoheal` in copy mode or when the manifest cannot be read. It never runs a repair itself, and it skips the install check when it cannot find `module.json`. A non-zero launchd exit code counts as stale, not a problem, when a good heartbeat is newer than the job's stderr file (launchd keeps the code until the next fire).
 - **Daily LaunchAgent** (macOS) calling `bin/autoheal-daily.sh` at 08:00 local. Linux scheduling is an architectural seam, not built in v1.
 
 ## How the analyzer drafts a fix
@@ -48,7 +48,7 @@ Self-healing observability loop for Claude Code. Captures permission events, too
    | Model `skip` (state `skipped`) | No expiry |
 
    Rows dropped as `validation_unavailable` carry `consecutive_unavailable`; at three, the row also carries `health_reason`, for the health writer to surface.
-7. **Write.** Rows go to `proposals/{today}.jsonl` with `signature_id`, `kind`, `target`, `anchor`, `insert_markdown`, `diff` and `evidence` (count, sessions, sample errors). `state` is `ready`, or `skipped` when the model declined; a skipped signature counts as covered, so it is not sent again. The digest, the session notice and `/autoheal-review` read these rows.
+7. **Write.** Rows go to the ledger (`proposals.jsonl`, see below) with `signature_id`, `kind`, `target`, `anchor`, `insert_markdown`, `diff` and `evidence` (count, sessions, sample errors). `state` is `ready`, or `skipped` when the model declined; a skipped signature counts as covered, so it is not sent again. The digest, the session notice and `/autoheal-review` read these rows.
 
 ## The proposal ledger
 
@@ -94,7 +94,7 @@ If checks fail or the merge is refused, the PR stays open, the row goes back to 
 
 The hook reads files only, never calls the network, never asks a question, and always exits 0.
 
-A failed call is logged and counted, never retried in the run and never held for a later one. There is no day watermark, no give-up counter and no calibration mode; `last-analyzed` only records the date of the last finished run.
+A failed call is logged and counted, never retried in the run and never held for a later one. There is no day watermark and no give-up counter; `last-analyzed` only records the date of the last finished run.
 
 ### Finding the CCGM source repo
 
@@ -111,7 +111,9 @@ Run `python3 lib/module-index.py` to see what resolves and the index text.
 - **Real-time security alerts: OFF.** Enable with `/autoheal-toggle realtime on` (or `realtime_alerts_enabled: "active"` in config). Try `/autoheal-toggle realtime shadow` first.
 - **Auto-apply: OFF.** Try `/autoheal-toggle autoapply shadow` first. `active` has to be earned; see "Earned auto-apply".
 - **Email digest: OFF.** Local digest is always-on; opt into Resend with `digest_email` and `email_enabled: true` + `RESEND_API_KEY` in `~/.claude/autoheal/.env` (NOT shell rc — see "API keys" below).
-- **Webhook publisher: OFF.** Set `webhook_url` in config to enable.
+- **Webhook publisher: OFF.** Set `webhook_url` in config to enable; unset it to stop.
+
+Email and the webhook are kept, opt-in features. Both read the ledger: the digest and email render today's `ready` rows (`lib/ledger.py day`), and the publisher posts today's ledger rows as `proposal` records, plus the day's events and digest. Neither runs in the nightly chain unless its key is set.
 
 ## Rollout: off, shadow, active
 
@@ -150,11 +152,54 @@ Every night the aggregator (`bin/autoheal-aggregate.py`, no API call) measures e
 
 When a window has no counted tool calls, failure counts over the two equal windows are compared instead of rates. A failed automatic revert records `revert_error` and is not retried every night; `/autoheal-review revert <id>` retries it. `redraft` keeps the merged rule and lets the next run draft the signature again from newer samples.
 
+## Success metrics
+
+`/autoheal` prints the metrics of the redesign (`lib/autoheal_metrics.py`, JSON). Four are computed from files the module already keeps; three are marked not computable yet.
+
+| Metric | Target | Source |
+|---|---|---|
+| Run health, last 30 days | at least 95% of days `ok` | `health-history.jsonl`, one row per daily run (paused days and days before the first run are left out) |
+| Acceptance rate | at least 40% | ledger: accepted (applied, measured, reverted, not `applied_by: auto`) over accepted plus rejected |
+| Applied fixes effective at +14 days | at least 60% | ledger `outcome`: effective over effective, ineffective and harmful |
+| API spend, last 30 days | under $3 | `cost.log` |
+| Time to detect a dead job | one SessionStart | not computable yet: the notice keeps no log |
+| Friction rate | down 20% in 60 days | not computable yet: needs 60 days of counts after the first applied fix |
+| Cost per accepted fix | under $1 | not computable yet: `cost.log` records no per-fix cost |
+
 ## Config
 
-User-global config lives at `~/.claude/autoheal/config.json`. Per-repo overrides live in `.autoheal/config.json` at the repo root.
+User-global config lives at `~/.claude/autoheal/config.json`. Per-repo overrides live in `.autoheal/config.json` at the repo root; the merge rule is "missing keys fall through to global" (`hook_utils.load_repo_config()`; the daily wrapper reads `paused` from it). The installer writes the defaults below on first run and never overwrites an existing file.
 
-See `skills/autoheal-reference/SKILL.md` for the full config-key table and merge rules.
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `paused` | bool | `false` | Off switch. Only `true` pauses: the daily wrapper logs "paused", runs no step, makes no API call and writes `health.json` with status `paused`. A per-repo `.autoheal/config.json` that sets it wins. `/autoheal-toggle pause` and `resume` flip it |
+| `realtime_alerts_enabled` | `off\|shadow\|active` | `off` | Mid-session `<autoheal-security-alert>` blocks; shadow logs would-alert only (a persisted boolean reads as active/off) |
+| `auto_apply_mode` | `off\|shadow\|active` | `off` | Earned auto-apply of `rule_insert` fixes; shadow logs would-apply only; `active` only through `/autoheal-toggle` past the promotion bar. Replaces `auto_apply_enabled`, which is migrated on read (off stays off; any other value reads as shadow) and deleted on the next toggle |
+| `auto_apply_targets` | glob list | `["modules/*/rules/*.md"]` | Rule files auto-apply may change. Key absent: every `modules/*/rules/*.md`, the set `validate()` accepts. Narrow it with globs such as `modules/git-workflow/rules/*.md`; an explicit `[]` lets nothing qualify |
+| `auto_apply_promoted_at`, `auto_apply_demoted_at`, `auto_apply_demoted_reason` | written by autoheal | absent | Promotion and demotion record; do not hand-edit |
+| `aggregation.window_days` | int | `14` | Days of events the aggregator counts |
+| `aggregation.min_occurrences` | int | `5` | Failures a signature needs to qualify |
+| `aggregation.min_sessions` | int | `2` | Distinct sessions it must span |
+| `aggregation.min_days` | int | `2` | Distinct days it must span |
+| `aggregation.redraft_cooldown_days` | int | `14` | Days a signature stays covered after a draft is dropped for a content reason; each further drop doubles it, capped at 90. Infrastructure drops (`validation_unavailable`) wait 1 day |
+| `rule_budget_lines_per_week` | int | `20` | Most lines `validate()` lets fixes add to always-loaded rules (no `paths:` frontmatter) in 7 days, counting every ready or applied fix |
+| `validation_timeout_seconds` | int | `120` | Cap for each `validate()` check |
+| `apply_checks_timeout_seconds` | int | `1800` | How long `/autoheal-review` waits for PR checks before leaving the PR open |
+| `ccgm_repo_path` | string | unset | CCGM source repo the drafter reads rule files from and `/autoheal-review` opens PRs against. Overrides the `~/.claude/rules/*.md` symlink lookup; must hold `start.sh` and `modules/` |
+| `default_model` | string | `claude-sonnet-5` | Model for the drafting call; it must support structured outputs and have a `cost_pricing` entry. `model` is read when `default_model` is absent |
+| `cost_pricing` | object | seeded by the installer | Per-model `input_per_million` and `output_per_million` dollar rates used for `cost.log` |
+| `daily_cost_cap_usd` | number | `10.00` | The analyzer refuses to start a call once today's spend reaches it |
+| `digest_enabled` | bool | `true` | Set `false` to skip rendering the local digest |
+| `email_enabled` | bool | `false` | Opt-in to Resend digest delivery (needs `digest_email` and `RESEND_API_KEY`) |
+| `digest_email` | string or string list | `null` | Recipient(s) for the email digest |
+| `webhook_url` | string | `null` | When set, the daily run POSTs to `${webhook_url}/v1/ingest`. This one key is the on/off switch |
+| `webhook_token` | string | generated at install | 32-character Bearer token sent with each webhook POST |
+| `webhook_kinds` | string list | `["proposal", "event", "digest"]` | Streams the publisher sends |
+| `webhook_max_per_run` | int | `100` | Most records one run sends |
+| `retention_gzip_days` | int | `30` | Gzip events and digests older than N days. The ledger is never gzipped, and retention never deletes a `ready` row |
+| `retention_delete_days` | int | `60` | Delete gzipped artifacts older than N days |
+
+Cost stays low because the model is called only for a qualifying signature, with an input under 15,000 tokens (measured, not estimated) and thinking off. The 15,000-token limit is fixed.
 
 ## API keys
 
@@ -182,10 +227,8 @@ This installs the hooks, commands, rules, and shell scripts. Run `autoheal-insta
 ## Tests
 
 ```bash
-bash modules/autoheal/tests/test-event-logging.sh
-bash modules/autoheal/tests/test-permission-suppress.sh
-bash modules/autoheal/tests/test-correction-detection.sh
-bash modules/autoheal/tests/test-redaction-coverage.sh
+bash modules/autoheal/tests/run-all.sh                 # every autoheal suite
+bash modules/autoheal/tests/test-doctor.sh             # one suite
 ```
 
 Each test sets `CCGM_AUTOHEAL_DIR` to a temp directory; nothing pollutes the real `~/.claude/autoheal/`.

@@ -11,8 +11,6 @@ deliberately conservative: ALL of the following must hold for auto-allow:
   2. The (tool_name, command-or-path-signature) has been approved >= 3
      times across >= 2 distinct session_ids in the events log. This
      prevents one rogue session from establishing a precedent.
-  3. The signature is NOT currently snoozed (no entry in snoozed.json
-     with snoozed_until > now).
 
 If all conditions hold we emit a PermissionRequest 'allow' decision via
 hook_utils.emit_decision('allow', ...). Otherwise we exit 0 and let the
@@ -23,7 +21,6 @@ prompt they could have skipped.
 """
 from __future__ import annotations
 
-import datetime as _dt
 import json
 import os
 import sys
@@ -45,10 +42,6 @@ def _autoheal_dir() -> str:
 
 def _events_dir() -> str:
     return os.path.join(_autoheal_dir(), "events")
-
-
-def _snoozed_path() -> str:
-    return os.path.join(_autoheal_dir(), "snoozed.json")
 
 
 def _signature(tool_name: str, tool_input: dict) -> str:
@@ -130,42 +123,6 @@ def _scan_history(signature: str) -> tuple[int, set[str]]:
     return (approvals, sessions)
 
 
-def _is_snoozed(signature: str) -> bool:
-    """Read snoozed.json; return True iff `signature` is snoozed and the
-    snooze hasn't expired.
-
-    Schema:
-        {
-          "<signature>": {"snoozed_until": "<ISO 8601>"},
-          ...
-        }
-    """
-    path = _snoozed_path()
-    if not os.path.isfile(path):
-        return False
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return False
-    if not isinstance(data, dict):
-        return False
-    entry = data.get(signature)
-    if not isinstance(entry, dict):
-        return False
-    until_str = entry.get("snoozed_until")
-    if not isinstance(until_str, str):
-        return False
-    try:
-        until = _dt.datetime.fromisoformat(until_str.replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    now = _dt.datetime.now(_dt.timezone.utc)
-    if until.tzinfo is None:
-        until = until.replace(tzinfo=_dt.timezone.utc)
-    return until > now
-
-
 def main() -> None:
     try:
         data = hook_utils.read_hook_input()
@@ -177,9 +134,6 @@ def main() -> None:
         if not tool_name:
             sys.exit(0)
         signature = _signature(tool_name, tool_input if isinstance(tool_input, dict) else {})
-
-        if _is_snoozed(signature):
-            sys.exit(0)
 
         approvals, sessions = _scan_history(signature)
         if approvals < _MIN_APPROVALS:

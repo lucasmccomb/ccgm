@@ -12,7 +12,7 @@ reasons[{code, message, fix}].
     steps            {step: exit code} for each step that ran
     calls, cost_usd  today's rows in cost.log
     signatures       signature count from runs/{today}.json, or null
-    proposals        lines in proposals/{today}.jsonl
+    proposals        ledger rows drafted for today (proposals.jsonl)
     analyzer_sha     short git SHA of the module checkout, or null
 
 Rules:
@@ -22,6 +22,9 @@ Rules:
              non-zero with no recorded refusal.
   partial    analyze succeeded (or stopped on purpose) and a later step failed.
   ok         everything exited 0, or the analyzer stopped on the daily cost cap.
+
+Each run also appends {date, status, generated_at} to health-history.jsonl, the
+source of the 30-day run-health metric (lib/autoheal_metrics.py).
 
 A daily-cap stop is deliberate, never inferred from exit code 2 alone (the
 analyzer also exits 2 for an unsupported model). It counts only when the
@@ -33,6 +36,7 @@ failure.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import subprocess
@@ -43,6 +47,15 @@ from typing import Any
 
 CAP_OUTCOME = "daily_cap_refused"
 ANALYZE_FIX = "tail -n 40 ~/.claude/logs/autoheal-daily-$(date -u +%F).log"
+
+
+def _ledger():
+    """lib/ledger.py beside this script's module (through the install symlink)."""
+    path = Path(__file__).resolve().parent.parent / "lib" / "ledger.py"
+    spec = importlib.util.spec_from_file_location("autoheal_ledger", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _read_json(path: Path) -> Any:
@@ -148,10 +161,7 @@ def build(args: argparse.Namespace, now: datetime) -> "dict[str, Any]":
     calls, cost = today_cost(adir / "cost.log", args.today)
     run = _read_json(adir / "runs" / f"{args.today}.json")
     signatures = run.get("signatures") if isinstance(run, dict) and isinstance(run.get("signatures"), int) else None
-    try:
-        proposals = sum(1 for ln in (adir / "proposals" / f"{args.today}.jsonl").read_text(encoding="utf-8").splitlines() if ln.strip())
-    except OSError:
-        proposals = 0
+    proposals = len(_ledger().rows_for_day(args.today, str(adir / "proposals.jsonl")))
 
     return {
         "status": status,
@@ -190,6 +200,9 @@ def main(argv: "list[str] | None" = None) -> int:
         tmp = adir / f"health.json.tmp{os.getpid()}"
         tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         tmp.replace(adir / "health.json")
+        with open(adir / "health-history.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"date": args.today, "status": data["status"],
+                                 "generated_at": data["generated_at"]}) + "\n")
     except OSError as exc:
         print(f"autoheal-health: could not write health.json: {exc}", file=sys.stderr)
     print(data["status"])

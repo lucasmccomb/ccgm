@@ -8,8 +8,6 @@
 #     auto-allow (emits an 'allow' decision and exits 0).
 #   - Bypass mode with only 2 prior approvals (below the threshold)
 #     does NOT auto-allow.
-#   - Bypass mode where the (tool, command) signature is snoozed does
-#     NOT auto-allow.
 #
 # All event history is written into a fresh CCGM_AUTOHEAL_DIR temp dir
 # so the user's real ~/.claude/autoheal is never touched.
@@ -135,37 +133,7 @@ rc=$?
 assert_eq "${rc}" "0" "bypass with single-session history exits 0"
 assert_eq "${out}" "" "bypass with single-session history emits no decision"
 
-# 5. Bypass + history + signature snoozed: no auto-allow.
-rm -f "$(events_file)"
-seed_history "git diff" 3 2
-# Snoozed until +1 hour from now.
-python3 <<'PY'
-import json, datetime, os
-sig = 'Bash::git diff'
-data = {sig: {'snoozed_until': (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()}}
-os.makedirs(os.environ['CCGM_AUTOHEAL_DIR'], exist_ok=True)
-with open(os.path.join(os.environ['CCGM_AUTOHEAL_DIR'], 'snoozed.json'), 'w') as fh:
-    json.dump(data, fh)
-PY
-out=$(echo '{"hook_event_name":"PermissionRequest","session_id":"s-bypass","tool_name":"Bash","tool_input":{"command":"git diff thing"},"permission_mode":"bypassPermissions","cwd":"/tmp/repo"}' | python3 "${HOOK}")
-rc=$?
-assert_eq "${rc}" "0" "snoozed bypass exits 0"
-assert_eq "${out}" "" "snoozed bypass emits no decision"
-
-# 6. Bypass + history + signature with EXPIRED snooze: auto-allow.
-rm -f "${CCGM_AUTOHEAL_DIR}/snoozed.json"
-python3 <<'PY'
-import json, datetime, os
-sig = 'Bash::git diff'
-data = {sig: {'snoozed_until': (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)).isoformat()}}
-with open(os.path.join(os.environ['CCGM_AUTOHEAL_DIR'], 'snoozed.json'), 'w') as fh:
-    json.dump(data, fh)
-PY
-out=$(echo '{"hook_event_name":"PermissionRequest","session_id":"s-bypass","tool_name":"Bash","tool_input":{"command":"git diff later"},"permission_mode":"bypassPermissions","cwd":"/tmp/repo"}' | python3 "${HOOK}")
-decision=$(echo "${out}" | python3 -c "import json, sys; print(json.load(sys.stdin)['hookSpecificOutput']['permissionDecision'])")
-assert_eq "${decision}" "allow" "expired snooze does not block auto-allow"
-
-# 7. Malformed stdin exits 0 cleanly.
+# 5. Malformed stdin exits 0 cleanly.
 echo 'not json {{{' | python3 "${HOOK}"
 rc=$?
 assert_eq "${rc}" "0" "malformed stdin exits 0"

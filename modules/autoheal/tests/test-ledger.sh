@@ -126,7 +126,7 @@ for day in range(1, 8):
     rows = []
     for k in range(3 if day < 7 else 4):
         n += 1
-        rows.append({"id": f"prop_{n}", "kind": "settings_allow_add", "title": f"t{n}", "fingerprint": f"fp{n}",
+        rows.append({"id": f"prop_{n}", "kind": "rule_insert", "title": f"t{n}", "fingerprint": f"fp{n}",
                      "proposed_diff_target": "modules/settings/x", "proposed_diff": "+x",
                      "generated_at": f"2026-05-{day:02d}T08:00:00Z"})
     data = "".join(json.dumps(r) + "\n" for r in rows)

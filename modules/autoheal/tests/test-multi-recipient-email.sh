@@ -86,7 +86,7 @@ write_proposal() {
         --arg day "${day}" \
         '{
             id: $id,
-            kind: "settings_allow_add",
+            kind: "rule_insert",
             title: "T",
             rationale: "R",
             confidence: 7,

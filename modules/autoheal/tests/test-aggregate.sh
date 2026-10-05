@@ -142,10 +142,6 @@ write(d, day(2), [row(head="curl", cls="other", sess="c3", err="boom 4")])
 for dd in range(0, 14):
     counts(d, day(dd), {"Bash": 1000, "Read": 500})
 for i in range(6):
-    write(d, day(i % 2), [row(head="snz", cls="other", sess="z%d" % i)])
-with open(os.path.join(d, "snoozed.json"), "w") as fh:
-    json.dump({sid("Bash", "snz", "other"): {"snoozed_until": "2027-01-01T00:00:00Z"}}, fh)
-for i in range(6):
     write(d, day(i % 2), [row(head="led", cls="other", sess="l%d" % i)])
 
 p, data = run(d)
@@ -188,9 +184,6 @@ if data:
         check(len(set(s)) == len(s), "samples deduped")
         check(all(len(x) <= 300 for x in s), "samples <= 300 chars")
         check(not any("ghp_" + "a" * 36 in x for x in s), "samples redacted")
-    sn = find(data, "Bash", "snz", "other")
-    check(sn is not None and not sn["qualifies"] and sn.get("excluded") == "snoozed",
-          "snoozed excluded: %s" % sn)
     check(find(data, "Bash", "led", "other")["qualifies"], "ledger absent -> qualifies")
     ranks = [s["count"] * s["sessions"] for s in sigs]
     check(ranks == sorted(ranks, reverse=True), "ranked by count x sessions")

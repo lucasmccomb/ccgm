@@ -8,7 +8,6 @@ Input, under the autoheal data dir ($CCGM_AUTOHEAL_DIR, default
 ~/.claude/autoheal):
   events/{date}.jsonl   tool_failure and user_interrupt rows
   counts/{date}.json    per-tool call counters ({"Bash": 123, ...})
-  snoozed.json          {"<signature_id or tool|head|class>": {"snoozed_until": ISO}}
   proposals.jsonl       the proposal ledger (lib/ledger.py); rows carrying
                         `signature_id` cover that signature unless their state
                         is "dropped"
@@ -290,28 +289,6 @@ def cooldown_until(history: list, base_days: int):
     return last_day + dt.timedelta(days=days)
 
 
-def _snoozed_keys(data_dir: str, as_of: dt.datetime) -> set:
-    try:
-        with open(os.path.join(data_dir, "snoozed.json"), "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):
-        return set()
-    keys = set()
-    for key, entry in (data.items() if isinstance(data, dict) else []):
-        until = entry.get("snoozed_until") if isinstance(entry, dict) else None
-        if not isinstance(until, str):
-            continue
-        try:
-            when = dt.datetime.fromisoformat(until.replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if when.tzinfo is None:
-            when = when.replace(tzinfo=dt.timezone.utc)
-        if when > as_of:
-            keys.add(key)
-    return keys
-
-
 def aggregate(data_dir: str, end: dt.date, cfg: dict) -> dict:
     redact = _redactor()
     start = end - dt.timedelta(days=cfg["window_days"] - 1)
@@ -351,8 +328,6 @@ def aggregate(data_dir: str, end: dt.date, cfg: dict) -> dict:
 
     covered = _covered_ids(data_dir, end)
     drops = drop_history(data_dir)
-    as_of = dt.datetime.combine(end, dt.time(23, 59, 59), tzinfo=dt.timezone.utc)
-    snoozed = _snoozed_keys(data_dir, as_of)
     call_totals: dict = {}
 
     out = []
@@ -367,8 +342,6 @@ def aggregate(data_dir: str, end: dt.date, cfg: dict) -> dict:
             excluded = "unknown"
         elif sid in covered:
             excluded = "covered"
-        elif sid in snoozed or "|".join(sig) in snoozed:
-            excluded = "snoozed"
         until = cooldown_until(drops.get(sid, []), cfg["redraft_cooldown_days"])
         if excluded is None and until is not None and end < until:
             excluded = "cooldown"

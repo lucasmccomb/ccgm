@@ -225,8 +225,8 @@
       "type": "lib",
       "template": false
     },
-    "lib/proposal-eval.py": {
-      "target": "lib/proposal-eval.py",
+    "lib/autoheal_metrics.py": {
+      "target": "lib/autoheal_metrics.py",
       "type": "lib",
       "template": false
     },

@@ -98,7 +98,7 @@ seed_proposals() {
     local day_iso="$2"
     mkdir -p "${autoheal_dir}"
     cat > "${autoheal_dir}/proposals.jsonl" <<EOF
-{"id":"prop-utc-test-01","title":"UTC alignment regression seed","kind":"settings_allow_add","confidence":9,"breadth_score":1,"occurrence_count":3,"session_ids":["sess-utc-1"],"rationale":"Synthetic proposal for issue #520 regression test.","generated_at":"${day_iso}T08:00:00Z"}
+{"id":"prop-utc-test-01","title":"UTC alignment regression seed","kind":"rule_insert","confidence":9,"breadth_score":1,"occurrence_count":3,"session_ids":["sess-utc-1"],"rationale":"Synthetic proposal for issue #520 regression test.","generated_at":"${day_iso}T08:00:00Z"}
 EOF
 }
 
