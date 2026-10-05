@@ -12,7 +12,7 @@ Read-only. Prints:
   - whether every module.json file target of the autoheal module exists under
     the real home's .claude (merge entries such as settings.json are skipped)
   - when something is wrong, the exact repair: bootout plus bootstrap of the
-    real plist, or the command that links missing module files. The doctor never
+    real plist, or per-target `ln -s` lines (link mode) or `./start.sh --add autoheal` for missing module files. The doctor never
     runs a repair; /autoheal asks first.
 
 Exit 0 when every check passes, 1 otherwise.
@@ -54,27 +54,56 @@ def manifest_path() -> Path:
     return Path(os.path.realpath(__file__)).parent.parent / "module.json"
 
 
-def missing_files(manifest: Path, claude_dir: Path) -> "tuple[int, list[str]] | None":
-    """Return (files checked, targets missing under claude_dir), or None when
-    the manifest cannot be read. Entries with `merge` (settings.json) are not
-    files of their own and are skipped. A dangling symlink counts as missing."""
+def missing_files(manifest: Path, claude_dir: Path) -> "tuple[int, list[tuple[str, dict]]] | None":
+    """Return (files checked, [(source key, entry)] missing under claude_dir), or
+    None when the manifest cannot be read. Entries with `merge` (settings.json)
+    are not files of their own and are skipped. A dangling symlink counts as
+    missing."""
     try:
         files = json.loads(manifest.read_text(encoding="utf-8"))["files"]
     except (OSError, ValueError, KeyError, TypeError):
         return None
-    targets = [e["target"] for e in files.values()
-               if isinstance(e, dict) and isinstance(e.get("target"), str) and not e.get("merge")]
-    return len(targets), [t for t in targets if not (claude_dir / t).exists()]
+    plain = [(k, e) for k, e in files.items()
+             if isinstance(e, dict) and isinstance(e.get("target"), str) and not e.get("merge")]
+    return len(plain), [(k, e) for k, e in plain if not (claude_dir / e["target"]).exists()]
 
 
-def install_repair(manifest: Path, claude_dir: Path) -> "list[str]":
-    """The command that links the missing files. install_new_files only links;
-    it does nothing for a copy-mode install, which needs ./start.sh again."""
-    repo = manifest.resolve().parent.parent.parent
-    code = (f"import os,sys; sys.path.insert(0,{str(repo / 'modules' / 'hooks' / 'lib')!r}); "
-            f"import ccgm_sync_install as i; print(i.install_new_files({str(claude_dir)!r}, {str(repo)!r}))")
-    return ["install repair (links the missing files; a copy-mode install needs ./start.sh instead):",
-            f"  python3 -c {shlex.quote(code)}"]
+def link_mode(claude_dir: Path) -> bool:
+    try:
+        return json.loads((claude_dir / ".ccgm-manifest.json").read_text(encoding="utf-8")).get("linkMode") is True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def _contained(path: Path, base: Path) -> bool:
+    real, real_base = os.path.realpath(path), os.path.realpath(base)
+    return real == real_base or real.startswith(real_base + os.sep)
+
+
+def install_repair(manifest: Path, claude_dir: Path, gaps: "list[tuple[str, dict]] | None") -> "list[str]":
+    """Deterministic repair for missing targets. Link mode: one `ln -s` per
+    target, refusing (and flagging) any target outside claude_dir or source
+    outside the module. A template entry is copy-expanded by the installer, never
+    linked. Copy mode or an unreadable manifest: ./start.sh --add autoheal."""
+    start = ["  ./start.sh --add autoheal"]
+    if gaps is None or not link_mode(claude_dir):
+        return ["install repair (copy-mode install or unreadable manifest; run from the CCGM checkout):"] + start
+    module_dir = manifest.resolve().parent
+    lines: list[str] = []
+    needs_start = False
+    for key, entry in gaps:
+        target, source = claude_dir / entry["target"], module_dir / key
+        if entry.get("template"):
+            needs_start = True
+        elif not (Path(entry["target"]).parts and not Path(entry["target"]).is_absolute()
+                  and ".." not in Path(entry["target"]).parts and _contained(target.parent, claude_dir)
+                  and ".." not in Path(key).parts and not Path(key).is_absolute() and _contained(source, module_dir)):
+            lines.append(f"  REFUSED (escapes the install or module dir): {key} -> {entry['target']}")
+        else:
+            lines.append(f"  mkdir -p {shlex.quote(str(target.parent))} && ln -s {shlex.quote(str(source))} {shlex.quote(str(target))}")
+    if needs_start:
+        lines += ["  # template files are copied and expanded, not linked:"] + start
+    return ["install repair (link mode; run each line):"] + lines
 
 
 def label() -> str:
@@ -275,14 +304,14 @@ def main() -> int:
     claude_dir = home / ".claude"
     manifest = manifest_path()
     checked = missing_files(manifest, claude_dir)
-    gaps: list[str] = []
+    gaps: "list[tuple[str, dict]]" = []
     if checked is None:
         out.append(f"install: skipped, cannot read {manifest}")
     else:
         total, gaps = checked
         if gaps:
             out.append(f"install: {len(gaps)} of {total} module files missing under {claude_dir}")
-            out.extend(f"  missing: {t}" for t in gaps)
+            out.extend(f"  missing: {e['target']}" for _, e in gaps)
             problems.append(INSTALL_PROBLEM)
         else:
             out.append(f"install: all {total} module files present under {claude_dir}")
@@ -300,7 +329,7 @@ def main() -> int:
                 out.append(f"repair: the real plist {real_plist} does not exist; reinstall with")
                 out.append("  bash modules/autoheal/bin/autoheal-install.sh")
         if gaps:
-            out.extend(install_repair(manifest, claude_dir))
+            out.extend(install_repair(manifest, claude_dir, gaps))
     print("\n".join(out))
     return 1 if problems else 0
 

@@ -78,9 +78,9 @@ and do this:
 2. Exit 0: report the output and stop.
 3. Exit 1: the output ends with `problems:` and a `repair (run in order):`
    block (`launchctl bootout` then `launchctl bootstrap` of the real plist),
-   an `install repair` block (a `python3 -c` call that links the missing
-   module files), or both. `install: N of M module files missing` means a
-   file the installer never linked; the `install repair` call fixes it.
+   an `install repair` block (one `ln -s` line per missing target in link
+   mode, or `./start.sh --add autoheal` in copy mode), or both. `install: N of
+   M module files missing` means a file the installer never linked.
    Ask with AskUserQuestion before running it. The question payload must
    stand alone (ask-context rules): put the evidence from the doctor output in
    the question text (the loaded path or "not loaded", the missing file, the
@@ -95,8 +95,8 @@ and do this:
 Never run `launchctl bootout`, `bootstrap` or `kickstart` without the user
 picking the repair option. The `problems:` line may also name a missing API
 key or a stale heartbeat; those have no launchctl fix, so report them. The
-install repair is not a launchctl command; it only links missing files and
-changes nothing else.
+install repair is not a launchctl command; it only links or copies missing
+files and changes nothing else.
 
 ## Command surface
 

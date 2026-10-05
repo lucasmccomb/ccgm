@@ -224,15 +224,42 @@ run_doctor
 assert_eq "${RC}" "1" "missing module file: exit 1"
 assert_has "${OUT}" "install: 1 of 2 module files missing" "missing module file: summary"
 assert_has "${OUT}" "missing: lib/two.json" "missing module file: names the target"
-assert_has "${OUT}" "ccgm_sync_install" "missing module file: repair command"
-assert_has "${OUT}" "install_new_files" "missing module file: repair calls the installer helper"
+assert_has "${OUT}" "./start.sh --add autoheal" "missing module file, no link-mode manifest: start.sh repair"
+assert_lacks "${OUT}" "ln -s" "missing module file, copy mode: no ln -s"
+printf '{"linkMode": true}\n' > "${REAL_HOME}/.claude/.ccgm-manifest.json"
+run_doctor
+RTMP="$(cd "${TMP}" && pwd -P)"
+assert_has "${OUT}" "install repair (link mode" "link mode: per-target repair"
+assert_has "${OUT}" "ln -s ${RTMP}/lib/two.json ${REAL_HOME}/.claude/lib/two.json" "link mode: ln -s canonical source to target"
+assert_lacks "${OUT}" "start.sh" "link mode: no start.sh line"
 assert_lacks "${OUT}" "launchctl bootstrap" "missing module file only: no launchd repair"
+assert_lacks "${OUT}" "install_new_files" "no install_new_files mention"
+assert_lacks "${OUT}" "ccgm_sync_install" "no ccgm_sync_install mention"
 # A dangling symlink is missing too.
 ln -s "${TMP}/nowhere" "${REAL_HOME}/.claude/lib/two.json"
 run_doctor
 assert_has "${OUT}" "missing: lib/two.json" "dangling symlink: counts as missing"
 rm "${REAL_HOME}/.claude/lib/two.json"
 : > "${REAL_HOME}/.claude/lib/two.json"
+
+# A target or source that escapes is refused and flagged, never linked.
+MANIFEST="${TMP}/escape-module.json"
+cat > "${MANIFEST}" <<'JSON'
+{"files": {
+  "lib/two.json": {"target": "lib/two.json", "type": "lib", "template": false},
+  "lib/ok.json": {"target": "../evil.json", "type": "lib", "template": false},
+  "../outside.json": {"target": "lib/outside.json", "type": "lib", "template": false}
+}}
+JSON
+rm -f "${REAL_HOME}/.claude/lib/two.json"
+run_doctor
+assert_eq "$(printf '%s\n' "${OUT}" | grep -c 'REFUSED')" "2" "escape: both escaping entries refused"
+assert_eq "$(printf '%s\n' "${OUT}" | grep -c 'ln -s')" "1" "escape: only the contained entry is linked"
+assert_lacks "${OUT}" "outside.json ${REAL_HOME}" "escape: escaping source never linked"
+assert_eq "$(printf '%s\n' "${OUT}" | grep -c 'ln -s.*evil')" "0" "escape: escaping target never linked"
+: > "${REAL_HOME}/.claude/lib/two.json"
+rm -f "${REAL_HOME}/.claude/.ccgm-manifest.json"
+MANIFEST="${TMP}/module.json"
 
 # 11. No readable manifest: the check is skipped and does not fail the run.
 MANIFEST="${TMP}/absent-module.json"
