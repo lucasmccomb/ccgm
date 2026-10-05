@@ -76,8 +76,8 @@ print(hashlib.sha256('\x1f'.join(('Bash','echo','zsh_not_found')).encode()).hexd
 SNOOZED_ID="$(python3 -c "
 import hashlib
 print(hashlib.sha256('\x1f'.join(('Bash','grep','zsh_no_matches')).encode()).hexdigest()[:12])")"
-mkdir -p "${S_AH}/proposals"
-printf '{"id":"%s","signature_id":"%s","state":"ready"}\n' "${COVERED_ID}" "${COVERED_ID}" > "${S_AH}/proposals/2026-10-01.jsonl"
+mkdir -p "${S_AH}"
+printf '{"id":"%s","signature_id":"%s","state":"ready"}\n' "${COVERED_ID}" "${COVERED_ID}" > "${S_AH}/proposals.jsonl"
 printf '{"%s":{"snoozed_until":"2026-12-01T00:00:00Z"}}\n' "${SNOOZED_ID}" > "${S_AH}/snoozed.json"
 plan
 assert_eq "$(grep -c '^item' "${S_OUT}/plan.tsv")" "1" "covered: a covered and a snoozed signature are not chosen"
@@ -133,7 +133,7 @@ fx_events "${S_AH}" "${TODAY}" Bash "git push" hook_denial_git_workflow "Blocked
 plan
 assert_eq "$(grep -c '^item' "${S_OUT}/plan.tsv")" "0" "hooks: no model request for a hook denial"
 assert_eq "$(ls "${S_OUT}"/item-* 2>/dev/null | wc -l | tr -d ' ')" "0" "hooks: no request files at all"
-PROP="${S_AH}/proposals/${TODAY}.jsonl"
+PROP="${S_AH}/proposals.jsonl"
 assert_eq "$(python3 -c "
 import json
 print(sorted((r['kind'], r['module']) for r in map(json.loads, open('${PROP}'))))")" \

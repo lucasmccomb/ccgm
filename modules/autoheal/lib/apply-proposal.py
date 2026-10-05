@@ -9,17 +9,18 @@ which defeats the audit trail.
 
 Locked behavior (Section 3.9 of plan.md):
 
-  1. Find proposal by id in ~/.claude/autoheal/proposals/{today}.jsonl
+  1. Find proposal by id anywhere in the ledger, ~/.claude/autoheal/proposals.jsonl
   2. Resolve canonical CCGM clone path (walk up looking for start.sh,
      fall back to ~/code/ccgm/)
   3. Verify clean working tree on main; commit any WIP per CCGM
      no-stash rule before continuing.
   4. Create branch autoheal/{id} (source="permission-fix") or
      autoheal/auto/{id} (source="auto-apply").
-  5. Apply diff via `git apply` against `proposed_diff_target`.
+  5. Apply diff via `git apply` against `target`.
   6. Run tests/test-modules.sh + tests/test-no-personal-data.sh.
   7. On pass: commit with message `#auto: apply autoheal proposal {id}`.
-  8. Append a record to ~/.claude/autoheal/applied/{today}.jsonl.
+  8. Append a record to ~/.claude/autoheal/applied/{today}.jsonl and move the
+     ledger row to state `applied`.
   9. Print `git diff HEAD~1` + the literal "To undo: git revert HEAD".
  10. Print a suggested `gh pr create` command. Never auto-merge.
 
@@ -29,7 +30,7 @@ without re-parsing prose. Stdout is reserved for human-facing output
 return value is the machine-readable success/failure summary.
 
 Env overrides (tests):
-  - CCGM_AUTOHEAL_PROPOSALS_DIR — default ~/.claude/autoheal/proposals
+  - CCGM_AUTOHEAL_LEDGER        — default ~/.claude/autoheal/proposals.jsonl
   - CCGM_AUTOHEAL_APPLIED_DIR   — default ~/.claude/autoheal/applied
   - CCGM_AUTOHEAL_TODAY         — YYYY-MM-DD override
   - CCGM_CLONE_ROOT             — explicit clone root (skips resolve)
@@ -61,12 +62,6 @@ def _today_str() -> str:
     if override:
         return override
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
-
-
-def _proposals_dir() -> str:
-    return os.environ.get("CCGM_AUTOHEAL_PROPOSALS_DIR") or os.path.expanduser(
-        "~/.claude/autoheal/proposals"
-    )
 
 
 def _applied_dir() -> str:
@@ -259,10 +254,11 @@ def _jsonl_rows(directory: str):
 def _recent_rule_lines(repo: str, exclude_id: str, now: _dt.datetime, timeout: int) -> int:
     """Always-loaded rule lines added by ready or applied proposals in the last 7 days."""
     cutoff = now - _dt.timedelta(days=BUDGET_WINDOW_DAYS)
+    ledger = _sibling("ledger.py", "autoheal_ledger")
     rows: dict = {}
-    for rec, day in _jsonl_rows(_proposals_dir()):
+    for rec in ledger.read_rows():
         if isinstance(rec.get("id"), str):
-            rows[rec["id"]] = (rec, _parse_ts(rec.get("generated_at"), day))
+            rows[rec["id"]] = (rec, _parse_ts(rec.get("generated_at"), _parse_ts(rec.get("source_day"), None)))
     counted = {pid for pid, (rec, ts) in rows.items()
                if rec.get("state") in ("ready", "applied") and ts is not None and ts >= cutoff}
     for rec, day in _jsonl_rows(_applied_dir()):
@@ -271,8 +267,7 @@ def _recent_rule_lines(repo: str, exclude_id: str, now: _dt.datetime, timeout: i
             counted.add(rec["proposal_id"])
     total = 0
     for pid in counted - {exclude_id}:
-        rec = rows[pid][0]
-        total += _always_loaded_added(repo, rec.get("diff") or rec.get("proposed_diff") or "", timeout)
+        total += _always_loaded_added(repo, rows[pid][0].get("diff") or "", timeout)
     return total
 
 
@@ -307,7 +302,7 @@ def validate(proposal: dict, repo_root: str | None = None, now: _dt.datetime | N
       5. tests/test-modules.sh passes in the copy.
     Each command is capped by `validation_timeout_seconds` (config, default 120).
     """
-    diff = proposal.get("diff") or proposal.get("proposed_diff") or ""
+    diff = proposal.get("diff") or ""
     if not diff.strip():
         return True, ""
     cfg = _gate_config()
@@ -363,29 +358,8 @@ def validate(proposal: dict, repo_root: str | None = None, now: _dt.datetime | N
 
 
 def _find_proposal(proposal_id: str) -> dict | None:
-    """Walk today's proposals JSONL for the requested id; return None if absent.
-
-    JSONL scan is intentionally linear: proposal volume is bounded
-    (tens per day) so an index file is not worth the complexity.
-    """
-    path = os.path.join(_proposals_dir(), _today_str() + ".jsonl")
-    if not os.path.isfile(path):
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except (json.JSONDecodeError, ValueError):
-                    continue
-                if isinstance(rec, dict) and rec.get("id") == proposal_id:
-                    return rec
-    except OSError:
-        return None
-    return None
+    """The ledger row for an id, whatever its age or state; None if absent."""
+    return _sibling("ledger.py", "autoheal_ledger").find(proposal_id)
 
 
 def _resolve_clone_root(start_cwd: str | None = None) -> str | None:
@@ -553,7 +527,7 @@ def _run_tests(cwd: str) -> tuple[bool, str]:
 def _commit(cwd: str, proposal_id: str) -> tuple[bool, str]:
     """
     Commit the staged diff. We stage with `git add -A` because the
-    proposal's `proposed_diff_target` could span multiple files under
+    proposal's `target` could span multiple files under
     `modules/`. ALLOW_MAIN_COMMIT is not needed (we are on the new
     branch, not main).
     """
@@ -624,7 +598,7 @@ def apply_proposal(
     Apply a proposal to the canonical CCGM clone source.
 
     Args:
-        proposal_id: id of the proposal in today's proposals.jsonl.
+        proposal_id: id of the proposal in the ledger (proposals.jsonl).
         source: "permission-fix" or "auto-apply". Determines branch
                 shape and the `method` field in the audit record.
         demonstration: required when the proposal's fix_surface is
@@ -650,7 +624,7 @@ def apply_proposal(
 
     proposal = _find_proposal(proposal_id)
     if proposal is None:
-        result["error"] = f"proposal {proposal_id} not found in today's JSONL"
+        result["error"] = f"proposal {proposal_id} not found in the ledger"
         return result
 
     if proposal.get("state", "ready") != "ready":
@@ -686,8 +660,8 @@ def apply_proposal(
         return result
     result["branch"] = branch
 
-    diff_text = proposal.get("proposed_diff") or ""
-    target = proposal.get("proposed_diff_target") or ""
+    diff_text = proposal.get("diff") or ""
+    target = proposal.get("target") or ""
     ok, msg = _apply_diff(cwd, diff_text, target)
     if not ok:
         # Roll back the empty branch so we leave no garbage behind.
@@ -728,6 +702,11 @@ def apply_proposal(
             "fix_surface": fix_surface(proposal),
             "demonstration": demonstration,
         }
+    )
+    _sibling("ledger.py", "autoheal_ledger").set_state(
+        proposal_id, "applied",
+        applied_at=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+        branch=branch, commit_sha=result["commit_sha"],
     )
 
     _print_diff(cwd)

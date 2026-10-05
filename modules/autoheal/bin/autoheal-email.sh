@@ -14,12 +14,12 @@
 #   - 4xx/5xx → log to ~/.claude/logs/autoheal-email-{today}.err.log; do NOT
 #     fail the rest of the pipeline (Resend's idempotency means a retry on
 #     the next daily run is safe)
-#   - Analyzer crash detection: if today's proposals.jsonl missing AND
+#   - Analyzer crash detection: if the ledger has no rows for today AND
 #     yesterday's was present, send a minimal diagnostic email with the most
 #     recent autoheal.err.log tail (≤2KB, redacted).
 #
 # Env overrides (for tests):
-#   CCGM_AUTOHEAL_PROPOSALS_DIR    default ~/.claude/autoheal/proposals
+#   CCGM_AUTOHEAL_LEDGER           default ~/.claude/autoheal/proposals.jsonl
 #   CCGM_AUTOHEAL_DIGESTS_DIR      default ~/.claude/autoheal/digests
 #   CCGM_AUTOHEAL_SENT_DIR         default ~/.claude/autoheal/sent
 #   CCGM_AUTOHEAL_LOGS_DIR         default ~/.claude/logs
@@ -46,7 +46,6 @@ set -u
 # Paths
 # ---------------------------------------------------------------------------
 
-PROPOSALS_DIR="${CCGM_AUTOHEAL_PROPOSALS_DIR:-${HOME}/.claude/autoheal/proposals}"
 DIGESTS_DIR="${CCGM_AUTOHEAL_DIGESTS_DIR:-${HOME}/.claude/autoheal/digests}"
 SENT_DIR="${CCGM_AUTOHEAL_SENT_DIR:-${HOME}/.claude/autoheal/sent}"
 LOGS_DIR="${CCGM_AUTOHEAL_LOGS_DIR:-${HOME}/.claude/logs}"
@@ -68,7 +67,6 @@ else
 fi
 
 DIGEST_FILE="${DIGESTS_DIR}/${TODAY}.md"
-PROPOSALS_FILE="${PROPOSALS_DIR}/${TODAY}.jsonl"
 EMAIL_ERR_LOG="${LOGS_DIR}/autoheal-email-${TODAY}.err.log"
 
 # ---------------------------------------------------------------------------
@@ -133,7 +131,7 @@ fi
 # Analyzer crash detection
 # ---------------------------------------------------------------------------
 #
-# Today's proposals file missing AND yesterday's present → send a minimal
+# No ledger rows for today AND some for yesterday → send a minimal
 # diagnostic email instead of the regular digest. The diagnostic body is the
 # last ~2KB of the err log, redacted via hook_utils.redact_secrets.
 
@@ -147,9 +145,11 @@ today = datetime.date.fromisoformat(today_str)
 print((today - datetime.timedelta(days=1)).isoformat())
 ")"
 
-yesterday_props="${PROPOSALS_DIR}/${yesterday}.jsonl"
+ledger_day_rows() {
+    python3 "${SCRIPT_DIR}/../lib/ledger.py" day "$1" 2>/dev/null | grep -c .
+}
 
-if [ ! -f "${PROPOSALS_FILE}" ] && [ -f "${yesterday_props}" ]; then
+if [ "$(ledger_day_rows "${TODAY}")" -eq 0 ] && [ "$(ledger_day_rows "${yesterday}")" -gt 0 ]; then
     is_crash_mode=1
     crash_body="$(CCGM_ERR_LOG="${ERR_LOG}" CCGM_LIB_DIR="${LIB_DIR}" python3 - <<'PYEOF'
 import os

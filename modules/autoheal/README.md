@@ -4,9 +4,10 @@ Self-healing observability loop for Claude Code. Captures permission events, too
 
 ## What this module installs
 
-- **5 hooks** across `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, and `UserPromptSubmit`:
+- **6 hooks** across `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `UserPromptSubmit`, and `SessionStart`:
   - **3 event-capture hooks**: `permission-event-logger.py` (PermissionRequest rows; PostToolUse / PostToolUseFailure bump the daily per-tool counter `counts/{date}.json`), `failure-logger.py` (PostToolUseFailure: the only writer of failure rows, with `error`, `error_class`, `cmd_head`), `user-correction-detector.py` (UserPromptSubmit: a short prompt after a failure or interrupt).
   - **2 response hooks**: `permission-request-suppress.py` (PermissionRequest contextual auto-allow) and `realtime-security-scanner.py` (PostToolUse opt-in mid-session alerts).
+  - **1 notice hook**: `autoheal-session-notice.py` (SessionStart). See "Session notice" below.
 - **Signature aggregator**: `bin/autoheal-aggregate.py [--date D]` counts recurring failures over a 14-day window with no model call and writes `signatures/{date}.json`, ranked by count x sessions. A signature qualifies at 5 or more occurrences across 2 or more sessions and 2 or more days (override under `aggregation` in `config.json`). `bin/autoheal-analyze.sh` runs it first.
 - **7 slash commands**: `/permission-fix`, `/permission-audit`, `/autoheal`, `/autoheal-digest`, `/autoheal-toggle`, `/autoheal-snooze`, `/autoheal-apply`.
 - **Daily LaunchAgent** (macOS) calling `bin/autoheal-daily.sh` at 08:00 local. Linux scheduling is an architectural seam, not built in v1.
@@ -45,7 +46,38 @@ Self-healing observability loop for Claude Code. Captures permission events, too
    | Model `skip` (state `skipped`) | No expiry |
 
    Rows dropped as `validation_unavailable` carry `consecutive_unavailable`; at three, the row also carries `health_reason`, for the health writer to surface.
-7. **Write.** Rows go to `proposals/{today}.jsonl` with `signature_id`, `kind`, `target`, `anchor`, `insert_markdown`, `diff` and `evidence` (count, sessions, sample errors). `state` is `ready`, or `skipped` when the model declined; a skipped signature counts as covered, so it is not sent again. The digest and `/autoheal-apply` read these rows (`proposed_diff_target` and `proposed_diff` repeat the target and diff until the single ledger replaces this directory).
+7. **Write.** Rows go to `proposals/{today}.jsonl` with `signature_id`, `kind`, `target`, `anchor`, `insert_markdown`, `diff` and `evidence` (count, sessions, sample errors). `state` is `ready`, or `skipped` when the model declined; a skipped signature counts as covered, so it is not sent again. The digest, the session notice and `/autoheal-apply` read these rows.
+
+## The proposal ledger
+
+Every proposal lives in one file, `~/.claude/autoheal/proposals.jsonl` (`lib/ledger.py`), one row per proposal. Lookup by id (`/autoheal-apply <id>`) searches the whole file, so a proposal stays applicable until someone decides it.
+
+| State | Meaning |
+|---|---|
+| `ready` | Waiting for a decision |
+| `applied` | `/autoheal-apply` landed it |
+| `rejected` | The user said no |
+| `snoozed` | Deferred until `snoozed_until` |
+| `dropped` | Failed the validation gate; feeds the redraft cooldown |
+| `skipped` | The model declined to draft; the signature stays covered |
+| `measured` | Applied, and its +14 day outcome is recorded |
+| `reverted` | Applied, then undone |
+| `legacy` | Written before the redesign; never shown |
+
+Retention (`bin/autoheal-retention.sh`) never deletes a `ready` row. It prunes only `dropped` rows older than 120 days, past the 90-day cooldown cap; applied, rejected and skipped rows keep their signature covered.
+
+**Migration.** Per-day files from before the ledger (`proposals/{date}.jsonl`) move in with `bin/autoheal-ledger-migrate.py`. It plans by default (`--dry-run`) and writes only with `--apply`. Rows without a `signature_id` become `legacy`; the script renames `proposals/` to `proposals.migrated/` afterwards and skips rows already in the ledger, so a second `--apply` adds nothing. Nothing runs it on install.
+
+## Session notice
+
+`hooks/autoheal-session-notice.py` runs at SessionStart and prints one line, at most once per UTC day per machine (sentinel `notice-sentinel`), only in a real session (not a subagent worktree). It stays silent when there is nothing to say.
+
+- Ready fixes: `autoheal: 2 fixes ready (zsh quoting in Bash, cp -i alias) — run /autoheal-review`
+- Stale or failed run, from `health.json`: `autoheal: last good run 3d ago (<reason>) — /autoheal doctor`. A `paused` status says nothing.
+- A launchd job that runs a missing file, from `launchctl print` (once a day, cached in `notice-launchd.json`; skipped when `launchctl` is absent): `autoheal: scheduled job runs <path>, which does not exist — /autoheal doctor`
+  A path that exists but resolves (`realpath`) outside the real home gets its own line: `autoheal: job points outside your home: <path> — /autoheal doctor`. This is the foreign-HOME case, before the temp dir is cleaned up.
+
+The hook reads files only, never calls the network, never asks a question, and always exits 0.
 
 A failed call is logged and counted, never retried in the run and never held for a later one. There is no day watermark, no give-up counter and no calibration mode; `last-analyzed` only records the date of the last finished run.
 

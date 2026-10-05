@@ -145,7 +145,7 @@ assert_contains "${EVAL_OUT}" '"regressions": 0' "A3: 0 regressions (harmless mi
 assert_contains "${EVAL_OUT}" "no improvement" "A3: reason explains zero improvement"
 
 # A4: empty proposal (no extractable rules) -> exit 1.
-empty_rec='{"id":"p","kind":"settings_allow_add","proposed_diff":""}'
+empty_rec='{"id":"p","kind":"settings_allow_add","diff":""}'
 out="$(printf '%s' "${empty_rec}" | python3 "${EVAL_LIB}" - "${SCENARIOS}" 2>&1)"
 assert_eq "$?" "1" "A4: empty proposal fails (exit 1)"
 assert_contains "${out}" "no allow-rules" "A4: reason explains no rules"
@@ -153,7 +153,7 @@ assert_contains "${out}" "no allow-rules" "A4: reason explains no rules"
 # A4b: a rule_insert row as the drafting analyzer writes it carries a diff to a
 # markdown rule file. It has no allow-rules to score, so this eval refuses it
 # rather than passing it by default.
-ri_rec='{"id":"abc123def456","kind":"rule_insert","state":"ready","target":"modules/code-quality/rules/code-quality.md","proposed_diff":"--- a/modules/code-quality/rules/code-quality.md\n+++ b/modules/code-quality/rules/code-quality.md\n@@ -1,3 +1,4 @@\n # Code Quality\n+- Bash runs under zsh.\n \n x\n"}'
+ri_rec='{"id":"abc123def456","kind":"rule_insert","state":"ready","target":"modules/code-quality/rules/code-quality.md","diff":"--- a/modules/code-quality/rules/code-quality.md\n+++ b/modules/code-quality/rules/code-quality.md\n@@ -1,3 +1,4 @@\n # Code Quality\n+- Bash runs under zsh.\n \n x\n"}'
 out="$(printf '%s' "${ri_rec}" | python3 "${EVAL_LIB}" - "${SCENARIOS}" 2>&1)"
 assert_eq "$?" "1" "A4b: analyzer rule_insert row fails the allow-rule eval (exit 1)"
 assert_contains "${out}" "no allow-rules" "A4b: reason explains no rules"
@@ -199,7 +199,7 @@ diff = (
     "   }\n"
     " }\n"
 )
-print(json.dumps({"id": "p", "kind": "settings_allow_add", "proposed_diff": diff}))
+print(json.dumps({"id": "p", "kind": "settings_allow_add", "diff": diff}))
 PY
 )"
 out="$(printf '%s' "${diff_rec}" | python3 "${EVAL_LIB}" - "${SCENARIOS}" 2>&1)"
@@ -224,7 +224,7 @@ trap 'rm -rf "${CLONE_ROOT}" "${PROPOSALS_DIR}" "${APPLIED_DIR}" "${LOGS_DIR}" "
 
 CONFIG_FILE="${CONFIG_DIR}/config.json"
 TODAY="2026-06-14"
-PROPOSALS_FILE="${PROPOSALS_DIR}/${TODAY}.jsonl"
+PROPOSALS_FILE="${PROPOSALS_DIR}/proposals.jsonl"
 APPLIED_FILE="${APPLIED_DIR}/${TODAY}.jsonl"
 LOG_FILE="${LOGS_DIR}/autoheal-auto-apply-${TODAY}.log"
 
@@ -307,14 +307,14 @@ base = {
     "breadth_score": 1,
     "occurrence_count": 3,
     "session_ids": ["s1", "s2"],
-    "proposed_diff_target": "modules/settings/settings.partial.json",
+    "target": "modules/settings/settings.partial.json",
     "fingerprint": "stub",
     "originating_clone": "test-clone",
     "generated_at": "2026-06-14T00:00:00Z",
 }
 recs = [
-    {**base, "id": "prop_improving_01", "proposed_diff": diff_improving},
-    {**base, "id": "prop_regress_02", "proposed_diff": diff_regress},
+    {**base, "id": "prop_improving_01", "diff": diff_improving},
+    {**base, "id": "prop_regress_02", "diff": diff_regress},
 ]
 with open(path, "w", encoding="utf-8") as fh:
     for r in recs:
@@ -328,7 +328,7 @@ rm -f "${APPLIED_FILE}"
 
 out=$(
     CCGM_AUTOHEAL_CONFIG="${CONFIG_FILE}" \
-    CCGM_AUTOHEAL_PROPOSALS_DIR="${PROPOSALS_DIR}" \
+    CCGM_AUTOHEAL_LEDGER="${PROPOSALS_FILE}" \
     CCGM_AUTOHEAL_APPLIED_DIR="${APPLIED_DIR}" \
     CCGM_AUTOHEAL_LOGS_DIR="${LOGS_DIR}" \
     CCGM_AUTOHEAL_TODAY="${TODAY}" \

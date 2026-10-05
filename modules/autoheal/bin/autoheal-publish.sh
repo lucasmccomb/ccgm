@@ -29,14 +29,14 @@
 # Env overrides (for tests):
 #   CCGM_AUTOHEAL_DIR              default ~/.claude/autoheal
 #   CCGM_AUTOHEAL_CONFIG           default $CCGM_AUTOHEAL_DIR/config.json
-#   CCGM_AUTOHEAL_PROPOSALS_DIR    default $CCGM_AUTOHEAL_DIR/proposals
+#   CCGM_AUTOHEAL_LEDGER           default $CCGM_AUTOHEAL_DIR/proposals.jsonl
 #   CCGM_AUTOHEAL_EVENTS_DIR       default $CCGM_AUTOHEAL_DIR/events
 #   CCGM_AUTOHEAL_DIGESTS_DIR      default $CCGM_AUTOHEAL_DIR/digests
 #   CCGM_AUTOHEAL_PUBLISHED_DIR    default $CCGM_AUTOHEAL_DIR/published
 #   CCGM_AUTOHEAL_LOGS_DIR         default ~/.claude/logs
 #   CCGM_AUTOHEAL_TODAY            default $(date -u +%Y-%m-%d). UTC-keyed
-#                                  to match the events/proposals/digests
-#                                  date-named files (issue #520).
+#                                  to match the events/digests date-named
+#                                  files and the ledger's drafted day (#520).
 #   CCGM_AUTOHEAL_MACHINE_ID       default `hostname`
 #
 # Exit codes:
@@ -51,7 +51,6 @@ set -u
 
 AUTOHEAL_DIR="${CCGM_AUTOHEAL_DIR:-${HOME}/.claude/autoheal}"
 CONFIG_FILE="${CCGM_AUTOHEAL_CONFIG:-${AUTOHEAL_DIR}/config.json}"
-PROPOSALS_DIR="${CCGM_AUTOHEAL_PROPOSALS_DIR:-${AUTOHEAL_DIR}/proposals}"
 EVENTS_DIR="${CCGM_AUTOHEAL_EVENTS_DIR:-${AUTOHEAL_DIR}/events}"
 DIGESTS_DIR="${CCGM_AUTOHEAL_DIGESTS_DIR:-${AUTOHEAL_DIR}/digests}"
 PUBLISHED_DIR="${CCGM_AUTOHEAL_PUBLISHED_DIR:-${AUTOHEAL_DIR}/published}"
@@ -349,7 +348,11 @@ publish_digest() {
 # then events, then digest.
 # ---------------------------------------------------------------------------
 
-publish_jsonl_kind "proposal" "${PROPOSALS_DIR}/${TODAY}.jsonl"
+# Today's ledger rows, in a scratch file the cursor logic can index by line.
+PROPOSALS_TODAY="$(mktemp -t autoheal-publish-rows.XXXXXX)"
+trap 'rm -f "${PROPOSALS_TODAY}"' EXIT
+CCGM_AUTOHEAL_DIR="${AUTOHEAL_DIR}" python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/ledger.py" day "${TODAY}" > "${PROPOSALS_TODAY}" 2>/dev/null || true
+publish_jsonl_kind "proposal" "${PROPOSALS_TODAY}"
 publish_jsonl_kind "event"    "${EVENTS_DIR}/${TODAY}.jsonl"
 publish_digest
 

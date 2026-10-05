@@ -28,8 +28,8 @@ file does everything that is plain computation:
           is stored with state "dropped" and a drop_reason, counted with the
           other drops, and never shown.
 
-Rows go to proposals/<today>.jsonl, where the digest and apply commands read
-them until the single ledger of a later unit replaces that directory.
+Rows go to the ledger, proposals.jsonl (lib/ledger.py), where the digest, the
+session notice and the apply commands read them.
 """
 
 from __future__ import annotations
@@ -76,17 +76,17 @@ def _aggregate():
     return _load(os.path.join(_HERE, "..", "bin", "autoheal-aggregate.py"), "autoheal_aggregate")
 
 
+def _ledger():
+    return _load(os.path.join(_HERE, "ledger.py"), "autoheal_ledger")
+
+
 def _module_index():
     return _load(os.path.join(_HERE, "module-index.py"), "autoheal_module_index")
 
 
-def _today() -> str:
-    return os.environ.get("CCGM_AUTOHEAL_TODAY") or dt.datetime.now(dt.timezone.utc).date().isoformat()
-
-
-def _proposals_path(agg) -> str:
-    base = os.environ.get("CCGM_AUTOHEAL_PROPOSALS_DIR") or os.path.join(agg.autoheal_dir(), "proposals")
-    return os.path.join(base, _today() + ".jsonl")
+def _proposals_path() -> str:
+    """The ledger. Every row is appended here, whatever its state."""
+    return _ledger().ledger_path()
 
 
 def append_jsonl(path: str, record: dict) -> None:
@@ -458,10 +458,6 @@ def make_row(sig: dict, answer, candidates: list, repo_root: str, ctx: dict):
         "anchor": anchor_text,
         "insert_markdown": "\n".join(insert_lines),
         "diff": diff,
-        # Read by apply-proposal.py and the digest until the ledger migration
-        # (B7) gives them the new names.
-        "proposed_diff_target": target,
-        "proposed_diff": diff,
         "model": ctx.get("model", ""),
     })
     return row, None
@@ -498,7 +494,7 @@ def cmd_plan(args) -> int:
         sid = sig["signature_id"]
         if is_hook_denial(sig, mp):
             module = hook_module(sig, mp)
-            append_jsonl(_proposals_path(agg), issue_row(sig, module, ctx))
+            append_jsonl(_proposals_path(), issue_row(sig, module, ctx))
             plan_lines.append(f"issue\t{sid}\t{module}")
             continue
         if not resolved:
@@ -579,14 +575,14 @@ def cmd_finish(args) -> int:
             if dropped["consecutive_unavailable"] >= agg.INFRA_STREAK_FOR_COOLDOWN:
                 dropped["health_reason"] = (f"validation_unavailable {dropped['consecutive_unavailable']} "
                                             f"nights running for signature {meta['signature_id']}")
-        append_jsonl(_proposals_path(agg), dropped)
+        append_jsonl(_proposals_path(), dropped)
         if args.rejected_log:
             append_jsonl(args.rejected_log, {
                 "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
                 "reason": why, "signature_id": meta["signature_id"], "answer": text[:2000]})
         print(json.dumps({"outcome": "dropped", "reason": why}))
         return 0
-    append_jsonl(_proposals_path(agg), row)
+    append_jsonl(_proposals_path(), row)
     print(json.dumps({"outcome": row["kind"], "reason": ""}))
     return 0
 

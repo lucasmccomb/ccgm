@@ -18,7 +18,7 @@
 #      stop_reason. The model answers with a rule_insert or a skip.
 #   6. lib/draft_proposals.py finish checks the answer against the real file
 #      (target is a candidate, anchor heading exists), builds the unified diff
-#      and appends the proposal row to proposals/<today>.jsonl. A failed check
+#      and appends the proposal row to the ledger, proposals.jsonl. A failed check
 #      drops the answer with a counted reason (anchor_missing,
 #      path_not_candidate, ...).
 #
@@ -36,7 +36,7 @@
 #                                 never baked into the launchd plist.
 #   CCGM_AUTOHEAL_DIR            Root of autoheal state (default
 #                                 ~/.claude/autoheal). Tests override.
-#   CCGM_AUTOHEAL_PROPOSALS_DIR  Proposals dir (default $CCGM_AUTOHEAL_DIR/proposals).
+#   CCGM_AUTOHEAL_LEDGER         Proposal ledger (default $CCGM_AUTOHEAL_DIR/proposals.jsonl).
 #   CCGM_AUTOHEAL_CONFIG         Config JSON (default $CCGM_AUTOHEAL_DIR/config.json).
 #                                 Keys read here: default_model, model,
 #                                 daily_cost_cap_usd, cost_pricing,
@@ -163,10 +163,6 @@ CURL_MAX_TIME_SECONDS=120
 
 autoheal_dir() {
     printf '%s\n' "${CCGM_AUTOHEAL_DIR:-${HOME}/.claude/autoheal}"
-}
-
-proposals_dir() {
-    printf '%s\n' "${CCGM_AUTOHEAL_PROPOSALS_DIR:-$(autoheal_dir)/proposals}"
 }
 
 config_path() {
@@ -303,7 +299,7 @@ supports_structured_outputs() {
 # Setup.
 # ---------------------------------------------------------------------
 
-mkdir -p "$(autoheal_dir)" "$(proposals_dir)" "$(logs_dir)"
+mkdir -p "$(autoheal_dir)" "$(logs_dir)"
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "autoheal-analyze: python3 not found on PATH" >&2

@@ -163,9 +163,8 @@ EOF
 )
 
 TODAY="2026-06-14"
-PROPS="${TMPROOT}/props"
-mkdir -p "${PROPS}"
-python3 - "${PROPS}/${TODAY}.jsonl" <<'PY'
+PROPS="${TMPROOT}/proposals.jsonl"
+python3 - "${PROPS}" <<'PY'
 import json, sys
 diff = lambda rule: (
     "--- a/modules/settings/settings.partial.json\n+++ b/modules/settings/settings.partial.json\n"
@@ -173,15 +172,15 @@ diff = lambda rule: (
     "-      \"Bash(git status)\"\n+      \"Bash(git status)\",\n+      \"" + rule + "\"\n     ]\n   }\n }\n")
 base = {"kind": "settings_allow_add", "title": "t", "rationale": "r", "confidence": 9, "breadth_score": 1,
         "occurrence_count": 3, "session_ids": ["s1", "s2"],
-        "proposed_diff_target": "modules/settings/settings.partial.json",
+        "target": "modules/settings/settings.partial.json",
         "originating_clone": "c", "generated_at": "2026-06-14T00:00:00Z"}
 recs = [
-    {**base, "id": "prop_good", "fingerprint": "fp-good", "fix_surface": "rule", "proposed_diff": diff("Bash(git diff)")},
-    {**base, "id": "prop_regress", "fingerprint": "fp-regress", "fix_surface": "rule", "proposed_diff": diff("Bash(git:*)")},
-    {**base, "id": "prop_check", "fingerprint": "fp-check", "fix_surface": "check", "proposed_diff": diff("Bash(git diff)")},
+    {**base, "id": "prop_good", "fingerprint": "fp-good", "fix_surface": "rule", "diff": diff("Bash(git diff)")},
+    {**base, "id": "prop_regress", "fingerprint": "fp-regress", "fix_surface": "rule", "diff": diff("Bash(git:*)")},
+    {**base, "id": "prop_check", "fingerprint": "fp-check", "fix_surface": "check", "diff": diff("Bash(git diff)")},
     {**base, "id": "prop_lowconf", "fingerprint": "fp-low", "fix_surface": "rule", "confidence": 5,
-     "proposed_diff": diff("Bash(git diff)")},
-    {**base, "id": "prop_legacy", "fingerprint": "fp-legacy", "proposed_diff": diff("Bash(git diff)")},
+     "diff": diff("Bash(git diff)")},
+    {**base, "id": "prop_legacy", "fingerprint": "fp-legacy", "diff": diff("Bash(git diff)")},
 ]
 with open(sys.argv[1], "w") as fh:
     for r in recs:
@@ -194,7 +193,7 @@ run_auto_apply() {
     printf '%s\n' "$1" > "${cfg}"
     rm -rf "${TMPROOT}/applied" "${TMPROOT}/shadow" "${TMPROOT}/logs"
     CCGM_AUTOHEAL_CONFIG="${cfg}" \
-    CCGM_AUTOHEAL_PROPOSALS_DIR="${PROPS}" \
+    CCGM_AUTOHEAL_LEDGER="${PROPS}" \
     CCGM_AUTOHEAL_APPLIED_DIR="${TMPROOT}/applied" \
     CCGM_AUTOHEAL_SHADOW_DIR="${TMPROOT}/shadow" \
     CCGM_AUTOHEAL_LOGS_DIR="${TMPROOT}/logs" \
@@ -236,7 +235,7 @@ assert_eq "${ts_present}" "True" "shadow auto-apply: every record has a ts"
 
 # A same-day re-run appends again; agreement counts each proposal once.
 run_auto_apply_rerun() {
-    CCGM_AUTOHEAL_CONFIG="${TMPROOT}/auto-config.json" CCGM_AUTOHEAL_PROPOSALS_DIR="${PROPS}" \
+    CCGM_AUTOHEAL_CONFIG="${TMPROOT}/auto-config.json" CCGM_AUTOHEAL_LEDGER="${PROPS}" \
     CCGM_AUTOHEAL_APPLIED_DIR="${TMPROOT}/applied" CCGM_AUTOHEAL_SHADOW_DIR="${TMPROOT}/shadow" \
     CCGM_AUTOHEAL_LOGS_DIR="${TMPROOT}/logs" CCGM_AUTOHEAL_TODAY="${TODAY}" \
     CCGM_AUTOHEAL_CLONE_ROOT="${CLONE}" CCGM_AUTOHEAL_EVAL_SCENARIOS="${SCENARIOS}" \
@@ -311,8 +310,8 @@ assert_eq "$(test -e "${RT_HOME}/autoheal/shadow" && echo yes || echo no)" "no" 
 
 # --- 6. digest ---------------------------------------------------------
 DG="${TMPROOT}/dg"
-mkdir -p "${DG}/proposals" "${DG}/shadow" "${DG}/applied"
-jq -nc '{id:"prop_x",kind:"settings_allow_add",title:"X",rationale:"r",confidence:9,breadth_score:1,occurrence_count:3}' > "${DG}/proposals/2026-06-01.jsonl"
+mkdir -p "${DG}/shadow" "${DG}/applied"
+jq -nc '{id:"prop_x",kind:"settings_allow_add",title:"X",rationale:"r",confidence:9,breadth_score:1,occurrence_count:3,generated_at:"2026-06-01T08:00:00Z"}' > "${DG}/proposals.jsonl"
 python3 - "${DG}" <<'PY'
 import json, sys
 d = sys.argv[1]
@@ -332,7 +331,7 @@ open(d + "/shadow/realtime.jsonl", "w").write(
     json.dumps({"ts": "t", "session_id": "s", "pattern": "p", "would_alert": True}) + "\n")
 PY
 run_digest() {
-    CCGM_AUTOHEAL_PROPOSALS_DIR="${DG}/proposals" CCGM_AUTOHEAL_DIGESTS_DIR="${DG}/digests" \
+    CCGM_AUTOHEAL_LEDGER="${DG}/proposals.jsonl" CCGM_AUTOHEAL_DIGESTS_DIR="${DG}/digests" \
     CCGM_AUTOHEAL_SENT_DIR="${DG}/sent" CCGM_AUTOHEAL_CONFIG="${DG}/none.json" \
     CCGM_AUTOHEAL_SHADOW_DIR="${DG}/shadow" CCGM_AUTOHEAL_APPLIED_DIR="${DG}/applied" \
     CCGM_AUTOHEAL_SNOOZED_FILE="${DG}/snoozed.json" \

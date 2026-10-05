@@ -1,6 +1,6 @@
 # /autoheal-apply - List or Apply Autoheal Proposals
 
-Inspect the queue of pending autoheal proposals from the last 7 days,
+Inspect the queue of pending autoheal proposals in the ledger,
 or apply a single proposal by id through the shared `lib/apply-proposal.py`
 path. Same workflow as `/permission-fix apply`: feature branch + diff +
 test gate + reversible commit. Never auto-pushes or auto-merges.
@@ -38,12 +38,10 @@ test gate + reversible commit. Never auto-pushes or auto-merges.
 Read-only enumeration of pending proposals. List mode does not modify
 any files.
 
-1. Walk back over the last 8 days of
-   `~/.claude/autoheal/proposals/{date}.jsonl` (today + 7 prior).
-2. Read each proposal record. Skip those whose `snoozed_until` is in
-   the future or whose `id` already appears in
-   `~/.claude/autoheal/applied/*.jsonl` (already applied).
-3. Print one table row per remaining proposal:
+1. Run `python3 ~/.claude/lib/ledger.py ready`. It prints the rows of
+   `~/.claude/autoheal/proposals.jsonl` waiting for a decision (state
+   `ready`, plus snoozed rows whose snooze has ended), whatever their age.
+2. Print one table row per remaining proposal:
 
    ```
    ID                  KIND                  SURFACE  CONFIDENCE  BREADTH  TITLE
@@ -52,9 +50,9 @@ any files.
    ...
    ```
 
-4. Sort by `(confidence desc, breadth_score asc, generated_at desc)`
+3. Sort by `(confidence desc, breadth_score asc, generated_at desc)`
    so the proposals most likely to be worth applying surface first.
-5. After the table, print: `Found N pending proposal(s). Run
+4. After the table, print: `Found N pending proposal(s). Run
    /autoheal-apply <id> to apply one.` If `N == 0`, print: `No
    pending proposals.`
 
@@ -65,10 +63,10 @@ branch shape, commit message, test gate, and audit record are
 identical to `/permission-fix apply <id>` and the opt-in
 `autoheal-auto-apply.sh`.
 
-1. Look up the proposal by id in
-   `~/.claude/autoheal/proposals/{today}.jsonl`. The library scans
-   today's file only; to apply an older proposal, copy it into today's
-   file or set `CCGM_AUTOHEAL_TODAY=<date>` for the agent's environment.
+1. Look up the proposal by id in the ledger,
+   `~/.claude/autoheal/proposals.jsonl`. The lookup covers the whole
+   file, so a proposal stays applicable until someone decides it. Only a
+   `ready` row applies; a successful apply moves the row to `applied`.
 2. Resolve the canonical CCGM clone path by walking up from `cwd`
    until `start.sh` is found; fall back to `~/code/ccgm/`.
 3. Verify the working tree is clean on `main`. If dirty, commit any
@@ -93,8 +91,7 @@ identical to `/permission-fix apply <id>` and the opt-in
    `"auto-apply"` which produces `autoheal/auto/{proposal-id}` —
    different prefix on purpose, so the audit log can distinguish
    manual from automatic applies).
-5. Apply the proposal's `proposed_diff` to its `proposed_diff_target`
-   via `git apply`.
+5. Apply the proposal's `diff` to its `target` via `git apply`.
 6. Run `tests/test-modules.sh` and `tests/test-no-personal-data.sh`.
    If either fails: revert the branch (`git checkout main`,
    `ALLOW_BRANCH_FORCE_DELETE=1 git branch -D autoheal/{id}`), surface the

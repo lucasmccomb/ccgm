@@ -16,11 +16,11 @@ Print the markdown digest for today (default) or a specific past date.
 2. Check whether `~/.claude/autoheal/digests/{date}.md` exists.
 3. If it does, print the file body verbatim.
 4. If it does not, fall through to one of the following:
-   - If `~/.claude/autoheal/proposals/{date}.jsonl` exists with at least
+   - If `~/.claude/autoheal/proposals.jsonl` has rows for that date with at least
      one record: run `bash ~/.claude/bin/autoheal-digest.sh` with the
      env override `CCGM_AUTOHEAL_TODAY={date}` to materialize the digest,
      then print it.
-   - If no proposals file exists for that date: print "no digest available
+   - If the ledger has no rows for that date: print "no digest available
      for {date}" plus the path that was checked.
 
 ## Shadow rollout section
@@ -52,9 +52,9 @@ decisions, 90% agreement, zero `check` false positives). See the README's
 ## How it interacts with state
 
 This command is read-mostly. The one write path is re-running
-`autoheal-digest.sh` when a proposals file exists but the digest does not.
+`autoheal-digest.sh` when the ledger has rows for the date but the digest does not.
 That call writes only to `~/.claude/autoheal/digests/{date}.md` and never
-modifies the proposals or events files.
+modifies the ledger or events files.
 
 ## Cross-references
 

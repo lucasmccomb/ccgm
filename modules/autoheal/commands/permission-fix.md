@@ -27,7 +27,8 @@ git-tracked, test-gated workflow is used by `/autoheal-apply`.
 
 - For one-off destructive commands (`rm -rf`, force-push to `main`).
   These are friction by design; permission-fix should not loosen them.
-- When you have not yet read `~/.claude/autoheal/proposals/{today}.jsonl`
+- When you have not yet read the proposal's row in
+  `~/.claude/autoheal/proposals.jsonl`
   for the proposal you intend to apply. Apply is reversible but slow;
   read first.
 - For changes that span multiple proposals or require analysis. Use
@@ -42,8 +43,8 @@ git-tracked, test-gated workflow is used by `/autoheal-apply`.
 2. Filter to events with `kind` in
    `{permission_request, tool_failure}` for the current session.
 3. Pick the most recent matching event.
-4. Read today's proposals file at
-   `~/.claude/autoheal/proposals/{today}.jsonl`.
+4. Read the proposal ledger at
+   `~/.claude/autoheal/proposals.jsonl`.
 5. Find the proposal whose `source_events` list contains the picked
    event's id. If present: print the proposal as JSON.
 6. If no analyzer-generated proposal exists yet, print the picked
@@ -64,9 +65,11 @@ git-tracked, test-gated workflow is used by `/autoheal-apply`.
 
 ### `/permission-fix list`
 
-1. Read today's `~/.claude/autoheal/proposals/{today}.jsonl`.
+1. Run `python3 ~/.claude/lib/ledger.py ready` (the ledger rows waiting for
+   a decision, any age).
 2. Print one line per proposal: `{id}  {confidence}/10  {kind}  {title}`.
-3. Skip proposals where `snoozed_until` is in the future.
+3. Snoozed proposals do not appear until their snooze ends (the `ready`
+   command already leaves them out).
 4. Never modify any files in `list` mode.
 
 ### `/permission-fix apply <proposal-id>`
@@ -74,8 +77,8 @@ git-tracked, test-gated workflow is used by `/autoheal-apply`.
 This is the only write path. Routes through `lib/apply-proposal.py`
 so the workflow is identical to `/autoheal-apply <id>`:
 
-1. Locate the proposal in
-   `~/.claude/autoheal/proposals/{today}.jsonl` by `id`.
+1. Locate the proposal in the ledger
+   `~/.claude/autoheal/proposals.jsonl` by `id` (any age).
 2. Resolve the canonical CCGM clone path by walking up from `cwd`
    until a directory containing `start.sh` is found. Fall back to
    `~/code/ccgm/` if nothing is found.
@@ -84,7 +87,7 @@ so the workflow is identical to `/autoheal-apply <id>`:
 4. Create branch `autoheal/{proposal-id}` (the `source` argument
    to `apply_proposal` is `"permission-fix"`; `auto-apply` uses
    `"auto-apply"` which produces `autoheal/auto/{proposal-id}`).
-5. Apply the proposal's `proposed_diff` to its `proposed_diff_target`.
+5. Apply the proposal's `diff` to its `target`.
 6. Run `tests/test-modules.sh` and `tests/test-no-personal-data.sh`.
    If either fails: revert the branch, write the failure to
    `~/.claude/logs/autoheal-apply.{today}.log`, and exit non-zero.

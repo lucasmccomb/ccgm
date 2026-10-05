@@ -80,9 +80,10 @@ assert_contains() {
 }
 
 write_proposal() {
-    local out_file="$1"; local pid="$2"
+    local out_file="$1"; local pid="$2"; local day="${3:-2026-05-18}"
     jq -nc \
         --arg id "${pid}" \
+        --arg day "${day}" \
         '{
             id: $id,
             kind: "settings_allow_add",
@@ -92,11 +93,11 @@ write_proposal() {
             breadth_score: 2,
             occurrence_count: 3,
             session_ids: ["s1","s2"],
-            proposed_diff_target: "modules/settings/settings.partial.json",
-            proposed_diff: "+ allow",
+            target: "modules/settings/settings.partial.json",
+            diff: "+ allow",
             fingerprint: ("sha256-" + $id),
             originating_clone: "test",
-            generated_at: "2026-05-18T08:00:00Z"
+            generated_at: ($day + "T08:00:00Z")
         }' >> "${out_file}"
 }
 
@@ -148,11 +149,11 @@ RESEND_URL="http://127.0.0.1:${PORT}/emails"
 # ---------------------------------------------------------------------------
 
 CASE_A="${TMPROOT}/caseA"
-mkdir -p "${CASE_A}/proposals" "${CASE_A}/digests" "${CASE_A}/sent" "${CASE_A}/logs"
+mkdir -p "${CASE_A}/digests" "${CASE_A}/sent" "${CASE_A}/logs"
 TODAY_A="2026-05-18"
-write_proposal "${CASE_A}/proposals/${TODAY_A}.jsonl" "prop_a"
+write_proposal "${CASE_A}/proposals.jsonl" "prop_a"
 
-CCGM_AUTOHEAL_PROPOSALS_DIR="${CASE_A}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${CASE_A}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${CASE_A}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${CASE_A}/sent" \
 CCGM_AUTOHEAL_CONFIG="${CASE_A}/missing.json" \
@@ -171,7 +172,7 @@ JSON
 # Reset mock counter.
 curl -sS -X POST "http://127.0.0.1:${PORT}/reset" >/dev/null
 
-CCGM_AUTOHEAL_PROPOSALS_DIR="${CASE_A}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${CASE_A}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${CASE_A}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${CASE_A}/sent" \
 CCGM_AUTOHEAL_LOGS_DIR="${CASE_A}/logs" \
@@ -214,11 +215,11 @@ done
 # ---------------------------------------------------------------------------
 
 CASE_B="${TMPROOT}/caseB"
-mkdir -p "${CASE_B}/proposals" "${CASE_B}/digests" "${CASE_B}/sent" "${CASE_B}/logs"
+mkdir -p "${CASE_B}/digests" "${CASE_B}/sent" "${CASE_B}/logs"
 TODAY_B="2026-05-20"
-write_proposal "${CASE_B}/proposals/${TODAY_B}.jsonl" "prop_b"
+write_proposal "${CASE_B}/proposals.jsonl" "prop_b" "${TODAY_B}"
 
-CCGM_AUTOHEAL_PROPOSALS_DIR="${CASE_B}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${CASE_B}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${CASE_B}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${CASE_B}/sent" \
 CCGM_AUTOHEAL_CONFIG="${CASE_B}/missing.json" \
@@ -236,7 +237,7 @@ JSON
 
 curl -sS -X POST "http://127.0.0.1:${PORT}/reset" >/dev/null
 
-CCGM_AUTOHEAL_PROPOSALS_DIR="${CASE_B}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${CASE_B}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${CASE_B}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${CASE_B}/sent" \
 CCGM_AUTOHEAL_LOGS_DIR="${CASE_B}/logs" \
@@ -262,11 +263,11 @@ FAIL_PORT="$(cat "${FAIL_PORTFILE}")"
 FAIL_RESEND_URL="http://127.0.0.1:${FAIL_PORT}/emails"
 
 CASE_C="${TMPROOT}/caseC"
-mkdir -p "${CASE_C}/proposals" "${CASE_C}/digests" "${CASE_C}/sent" "${CASE_C}/logs"
+mkdir -p "${CASE_C}/digests" "${CASE_C}/sent" "${CASE_C}/logs"
 TODAY_C="2026-05-21"
-write_proposal "${CASE_C}/proposals/${TODAY_C}.jsonl" "prop_c"
+write_proposal "${CASE_C}/proposals.jsonl" "prop_c" "${TODAY_C}"
 
-CCGM_AUTOHEAL_PROPOSALS_DIR="${CASE_C}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${CASE_C}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${CASE_C}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${CASE_C}/sent" \
 CCGM_AUTOHEAL_CONFIG="${CASE_C}/missing.json" \
@@ -283,7 +284,7 @@ cat > "${CONFIG_C}" <<JSON
 JSON
 
 EMAIL_EXIT=0
-CCGM_AUTOHEAL_PROPOSALS_DIR="${CASE_C}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${CASE_C}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${CASE_C}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${CASE_C}/sent" \
 CCGM_AUTOHEAL_LOGS_DIR="${CASE_C}/logs" \

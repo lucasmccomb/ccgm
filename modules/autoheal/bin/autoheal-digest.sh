@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # autoheal-digest.sh
 #
-# Render today's autoheal proposals into a markdown digest at
+# Render today's rows of the autoheal proposal ledger into a markdown digest at
 # ~/.claude/autoheal/digests/{today}.md.
 #
 # Behavior (plan.md §5 Epic 7):
@@ -15,13 +15,13 @@
 #   - Footer links to /autoheal-toggle, /autoheal-snooze, /autoheal-apply list.
 #
 # Env overrides (for tests):
-#   CCGM_AUTOHEAL_PROPOSALS_DIR    default ~/.claude/autoheal/proposals
+#   CCGM_AUTOHEAL_LEDGER           default ~/.claude/autoheal/proposals.jsonl
 #   CCGM_AUTOHEAL_DIGESTS_DIR      default ~/.claude/autoheal/digests
 #   CCGM_AUTOHEAL_SENT_DIR         default ~/.claude/autoheal/sent
 #   CCGM_AUTOHEAL_CONFIG           default ~/.claude/autoheal/config.json
 #   CCGM_AUTOHEAL_TODAY            default $(date -u +%Y-%m-%d). UTC-keyed
-#                                  to match proposals/{date}.jsonl written
-#                                  by the analyzer (issue #520).
+#                                  to match the day the analyzer drafted a
+#                                  row for (issue #520).
 #   CCGM_AUTOHEAL_LIB_DIR          default to in-tree modules/hooks/lib (when
 #                                  running from the CCGM checkout), else
 #                                  ~/.claude/lib (the installed copy).
@@ -62,7 +62,6 @@ done
 # Paths
 # ---------------------------------------------------------------------------
 
-PROPOSALS_DIR="${CCGM_AUTOHEAL_PROPOSALS_DIR:-${HOME}/.claude/autoheal/proposals}"
 DIGESTS_DIR="${CCGM_AUTOHEAL_DIGESTS_DIR:-${HOME}/.claude/autoheal/digests}"
 SENT_DIR="${CCGM_AUTOHEAL_SENT_DIR:-${HOME}/.claude/autoheal/sent}"
 CONFIG_FILE="${CCGM_AUTOHEAL_CONFIG:-${HOME}/.claude/autoheal/config.json}"
@@ -79,7 +78,11 @@ else
     LIB_DIR="${HOME}/.claude/lib"
 fi
 
-PROPOSALS_FILE="${PROPOSALS_DIR}/${TODAY}.jsonl"
+# The ledger holds every day's rows; the digest renders one day of them.
+LEDGER_LIB="${SCRIPT_DIR}/../lib/ledger.py"
+PROPOSALS_FILE="$(mktemp -t autoheal-digest-rows.XXXXXX)"
+trap 'rm -f "${PROPOSALS_FILE}"' EXIT
+python3 "${LEDGER_LIB}" day "${TODAY}" > "${PROPOSALS_FILE}" 2>/dev/null || true
 DIGEST_FILE="${DIGESTS_DIR}/${TODAY}.md"
 # Per-run call health written by autoheal-analyze.sh (#1026, #1028): how
 # many calls stopped at the output cap or failed outright. A day whose
@@ -124,11 +127,8 @@ fi
 # Proposal count
 # ---------------------------------------------------------------------------
 
-proposal_count=0
-if [ -f "${PROPOSALS_FILE}" ]; then
-    # Count non-blank lines.
-    proposal_count="$(grep -c . "${PROPOSALS_FILE}" 2>/dev/null || echo 0)"
-fi
+# Count non-blank lines.
+proposal_count="$(grep -c . "${PROPOSALS_FILE}" 2>/dev/null || echo 0)"
 
 # Did any call fail today? A zero-proposal day caused by failed calls is
 # not a quiet day, and skipping the digest would hide it.
@@ -150,7 +150,7 @@ fi
 # ---------------------------------------------------------------------------
 #
 # A day is considered "unemailed" if BOTH:
-#   (a) a proposals file exists for that day (we have something to email)
+#   (a) the ledger has rows for that day (we have something to email)
 #   (b) no sent flag matching ${SENT_DIR}/${date}*.flag exists
 #
 # We look back 7 days INCLUDING yesterday (not today; today is the active
@@ -169,8 +169,7 @@ today = datetime.date.fromisoformat(today_str)
 print((today - datetime.timedelta(days=offset)).isoformat())
 " CCGM_AUTOHEAL_TODAY="${TODAY}")"
 
-    past_proposals="${PROPOSALS_DIR}/${past_date}.jsonl"
-    if [ -f "${past_proposals}" ] && [ "$(grep -c . "${past_proposals}" 2>/dev/null || echo 0)" -gt 0 ]; then
+    if [ "$(python3 "${LEDGER_LIB}" day "${past_date}" 2>/dev/null | grep -c .)" -gt 0 ]; then
         sent_glob="${SENT_DIR}/${past_date}"
         if ! ls "${sent_glob}"*.flag >/dev/null 2>&1; then
             if [ -z "${backfill_days}" ]; then

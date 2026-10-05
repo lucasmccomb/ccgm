@@ -76,10 +76,11 @@ assert_contains() {
 }
 
 write_proposal() {
-    local out_file="$1"; local pid="$2"; local title="$3"
+    local out_file="$1"; local pid="$2"; local title="$3"; local day="${4:-2026-05-18}"
     jq -nc \
         --arg id "${pid}" \
         --arg title "${title}" \
+        --arg day "${day}" \
         '{
             id: $id,
             kind: "settings_allow_add",
@@ -89,11 +90,11 @@ write_proposal() {
             breadth_score: 2,
             occurrence_count: 3,
             session_ids: ["s1","s2"],
-            proposed_diff_target: "modules/settings/settings.partial.json",
-            proposed_diff: "+ allow Foo",
+            target: "modules/settings/settings.partial.json",
+            diff: "+ allow Foo",
             fingerprint: ("sha256-" + $id),
             originating_clone: "test",
-            generated_at: "2026-05-18T08:00:00Z"
+            generated_at: ($day + "T08:00:00Z")
         }' >> "${out_file}"
 }
 
@@ -156,13 +157,13 @@ RESEND_URL="http://127.0.0.1:${PORT}/emails"
 # ---------------------------------------------------------------------------
 
 CASE1="${TMPROOT}/case1"
-mkdir -p "${CASE1}/proposals" "${CASE1}/digests" "${CASE1}/sent" "${CASE1}/logs"
+mkdir -p "${CASE1}/digests" "${CASE1}/sent" "${CASE1}/logs"
 TODAY1="2026-05-18"
 
-write_proposal "${CASE1}/proposals/${TODAY1}.jsonl" "prop_a" "Title 1"
+write_proposal "${CASE1}/proposals.jsonl" "prop_a" "Title 1"
 
 # Pre-render digest (the email script does not generate the digest itself).
-CCGM_AUTOHEAL_PROPOSALS_DIR="${CASE1}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${CASE1}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${CASE1}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${CASE1}/sent" \
 CCGM_AUTOHEAL_CONFIG="${CASE1}/missing.json" \
@@ -181,7 +182,7 @@ JSON
 reset_mock "${PORT}"
 
 # Run #1.
-CCGM_AUTOHEAL_PROPOSALS_DIR="${CASE1}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${CASE1}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${CASE1}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${CASE1}/sent" \
 CCGM_AUTOHEAL_LOGS_DIR="${CASE1}/logs" \
@@ -219,7 +220,7 @@ fi
 # the sent flag is for the digest backfill, not a send-skip gate. So a second
 # run DOES POST again. The receiver (real or mock) is the authoritative
 # deduper via Idempotency-Key.)
-CCGM_AUTOHEAL_PROPOSALS_DIR="${CASE1}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${CASE1}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${CASE1}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${CASE1}/sent" \
 CCGM_AUTOHEAL_LOGS_DIR="${CASE1}/logs" \
@@ -253,12 +254,12 @@ assert_eq "${TO_ADDR}" "alice@example.com" "case1: To field set"
 # ---------------------------------------------------------------------------
 
 CASE2="${TMPROOT}/case2"
-mkdir -p "${CASE2}/proposals" "${CASE2}/digests" "${CASE2}/sent" "${CASE2}/logs"
+mkdir -p "${CASE2}/digests" "${CASE2}/sent" "${CASE2}/logs"
 TODAY2="2026-05-19"
 
-write_proposal "${CASE2}/proposals/${TODAY2}.jsonl" "prop_z" "Title 2"
+write_proposal "${CASE2}/proposals.jsonl" "prop_z" "Title 2" "${TODAY2}"
 
-CCGM_AUTOHEAL_PROPOSALS_DIR="${CASE2}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${CASE2}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${CASE2}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${CASE2}/sent" \
 CCGM_AUTOHEAL_CONFIG="${CASE2}/missing.json" \
@@ -276,7 +277,7 @@ JSON
 
 reset_mock "${PORT}"
 
-CCGM_AUTOHEAL_PROPOSALS_DIR="${CASE2}/proposals" \
+CCGM_AUTOHEAL_LEDGER="${CASE2}/proposals.jsonl" \
 CCGM_AUTOHEAL_DIGESTS_DIR="${CASE2}/digests" \
 CCGM_AUTOHEAL_SENT_DIR="${CASE2}/sent" \
 CCGM_AUTOHEAL_LOGS_DIR="${CASE2}/logs" \

@@ -76,7 +76,7 @@ assert_eq "${RC}" "0" "t1: analyzer exits 0"
 assert_eq "$(fx_calls "${S_FAKE}" count_tokens)" "1" "t1: one count_tokens call"
 assert_eq "$(fx_calls "${S_FAKE}" messages)" "1" "t1: one messages call"
 
-P1="${S_AH}/proposals/${TODAY}.jsonl"
+P1="${S_AH}/proposals.jsonl"
 assert_file_exists "${P1}" "t1: proposals file written"
 assert_eq "$(wc -l < "${P1}" | tr -d ' ')" "1" "t1: exactly one row"
 SIG_ID="$(python3 -c "
@@ -94,7 +94,7 @@ assert_eq "$(jsonl_get "${P1}" 1 "d['evidence']['count']")" "12" "t1: evidence c
 assert_eq "$(jsonl_get "${P1}" 1 "d['evidence']['sessions']")" "3" "t1: evidence sessions"
 assert_contains "$(jsonl_get "${P1}" 1 "d['evidence']['samples']")" "not found" "t1: evidence sample errors"
 assert_eq "$(jsonl_get "${P1}" 1 "d['originating_clone']")" "ccgm-w1-c0" "t1: originating_clone"
-assert_eq "$(jsonl_get "${P1}" 1 "d['proposed_diff_target']")" "modules/code-quality/rules/code-quality.md" "t1: apply-path target alias"
+assert_eq "$(jsonl_get "${P1}" 1 "'proposed_diff' in d or 'proposed_diff_target' in d")" "False" "t1: no duplicate proposed_diff fields"
 
 # The diff is built by code and applies to the real file.
 jsonl_get "${P1}" 1 "d['diff']" > "${S_ROOT}/t1.diff"
@@ -135,7 +135,7 @@ assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['failed_calls']")" "0" "t1
 
 # The existing digest renders the row; the apply command reads the same id.
 digest_for() {
-    CCGM_AUTOHEAL_PROPOSALS_DIR="${S_AH}/proposals" CCGM_AUTOHEAL_DIGESTS_DIR="${S_AH}/digests" \
+    CCGM_AUTOHEAL_DIGESTS_DIR="${S_AH}/digests" \
         CCGM_AUTOHEAL_SENT_DIR="${S_AH}/sent" CCGM_AUTOHEAL_CONFIG="${S_AH}/none.json" \
         CCGM_AUTOHEAL_TODAY="${TODAY}" CCGM_AUTOHEAL_LIB_DIR="${MODULE_ROOT}/../hooks/lib" \
         HOME="${S_HOME}" bash "${MODULE_ROOT}/bin/autoheal-digest.sh" >/dev/null 2>&1
@@ -191,7 +191,7 @@ BAD_ANCHOR='{"proposal":{"kind":"rule_insert","target_path":"modules/code-qualit
 fx_answer "${S_FAKE}/messages.response.json" "${BAD_ANCHOR}"
 run_analyzer
 assert_eq "${RC}" "0" "t3: a dropped proposal is not a failed run"
-assert_eq "$(jsonl_get "${S_AH}/proposals/${TODAY}.jsonl" 1 "d['state'] + ' ' + d['drop_reason']")" "dropped anchor_missing" "t3: anchor_missing is stored as dropped, never ready"
+assert_eq "$(jsonl_get "${S_AH}/proposals.jsonl" 1 "d['state'] + ' ' + d['drop_reason']")" "dropped anchor_missing" "t3: anchor_missing is stored as dropped, never ready"
 assert_contains "$(cat "${S_HOME}/.claude/logs/autoheal-rejected-${TODAY}.log")" "anchor_missing" "t3: rejection log names anchor_missing"
 assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['dropped']['anchor_missing']")" "1" "t3: runs summary counts anchor_missing"
 assert_contains "${ERR}" "anchor_missing" "t3: stderr names anchor_missing"
@@ -201,7 +201,7 @@ zsh_events
 BAD_PATH='{"proposal":{"kind":"rule_insert","target_path":"modules/invented/rules/made-up.md","anchor_heading":"Code Standards","insert_markdown":"- x"}}'
 fx_answer "${S_FAKE}/messages.response.json" "${BAD_PATH}"
 run_analyzer
-assert_eq "$(jsonl_get "${S_AH}/proposals/${TODAY}.jsonl" 1 "d['state'] + ' ' + d['drop_reason']")" "dropped path_not_candidate" "t3b: invented path is stored as dropped, never ready"
+assert_eq "$(jsonl_get "${S_AH}/proposals.jsonl" 1 "d['state'] + ' ' + d['drop_reason']")" "dropped path_not_candidate" "t3b: invented path is stored as dropped, never ready"
 assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['dropped']['path_not_candidate']")" "1" "t3b: runs summary counts path_not_candidate"
 
 scenario t3c
@@ -210,7 +210,7 @@ SKIP='{"proposal":{"kind":"skip","reason":"the failure is environmental"}}'
 fx_answer "${S_FAKE}/messages.response.json" "${SKIP}"
 run_analyzer
 assert_eq "${RC}" "0" "t3c: skip exits 0"
-P3C="${S_AH}/proposals/${TODAY}.jsonl"
+P3C="${S_AH}/proposals.jsonl"
 assert_eq "$(jsonl_get "${P3C}" 1 "d['state']")" "skipped" "t3c: skip is recorded with state skipped"
 assert_eq "$(jsonl_get "${P3C}" 1 "d['reason']")" "the failure is environmental" "t3c: skip reason kept"
 assert_not_contains "$(digest_for)" "skipped:" "t3c: the digest does not list a skipped row as a proposal"
@@ -227,7 +227,7 @@ run_analyzer
 assert_eq "${RC}" "0" "t4: exits 0"
 assert_eq "$(fx_calls "${S_FAKE}" count_tokens)" "0" "t4: no count_tokens call"
 assert_eq "$(fx_calls "${S_FAKE}" messages)" "0" "t4: no model call for a hook denial"
-P4="${S_AH}/proposals/${TODAY}.jsonl"
+P4="${S_AH}/proposals.jsonl"
 assert_eq "$(jsonl_get "${P4}" 1 "d['kind']")" "issue" "t4: proposal kind is issue"
 assert_eq "$(jsonl_get "${P4}" 1 "d['state']")" "ready" "t4: issue is ready"
 assert_eq "$(jsonl_get "${P4}" 1 "d['module']")" "branch-guard" "t4: names the denying hook's module"
@@ -242,7 +242,7 @@ fx_events "${S_AH}" "${TODAY}" Edit "" hook_denial_advisor_guard "advisor mode: 
 rm -rf "${S_HOME}/.claude/rules"
 run_analyzer ANTHROPIC_API_KEY=
 assert_eq "${RC}" "0" "t4b: exits 0 with no key and no repo"
-assert_eq "$(jsonl_get "${S_AH}/proposals/${TODAY}.jsonl" 1 "d['kind']")" "issue" "t4b: issue still drafted locally"
+assert_eq "$(jsonl_get "${S_AH}/proposals.jsonl" 1 "d['kind']")" "issue" "t4b: issue still drafted locally"
 
 # ---------------------------------------------------------------------
 # Test 5 - nothing qualifies: zero API calls.
@@ -253,7 +253,7 @@ run_analyzer
 assert_eq "${RC}" "0" "t5: exits 0"
 assert_no_file "${S_FAKE}/calls.log" "t5: zero API calls"
 assert_contains "${ERR}" "no qualifying" "t5: logs that no signature qualified"
-assert_no_file "${S_AH}/proposals/${TODAY}.jsonl" "t5: no proposals"
+assert_no_file "${S_AH}/proposals.jsonl" "t5: no proposals"
 
 scenario t5b
 run_analyzer
@@ -292,7 +292,7 @@ run_analyzer
 assert_eq "${RC}" "0" "t6d: copy install (no source repo) exits 0"
 assert_no_file "${S_FAKE}/calls.log" "t6d: no calls without a source repo"
 assert_contains "${ERR}" "no_source_repo" "t6d: logged reason"
-assert_no_file "${S_AH}/proposals/${TODAY}.jsonl" "t6d: no invented proposal"
+assert_no_file "${S_AH}/proposals.jsonl" "t6d: no invented proposal"
 
 scenario t6e
 zsh_events
@@ -314,7 +314,7 @@ assert_eq "${RC}" "1" "t7a: HTTP failure exits 1"
 assert_eq "$(fx_calls "${S_FAKE}" messages)" "1" "t7a: a failed call is not retried in-run"
 assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['failed_calls']")" "1" "t7a: failure counted"
 assert_no_file "${S_AH}/rejected-days.jsonl" "t7a: no rejected-days ledger"
-assert_no_file "${S_AH}/proposals/${TODAY}.jsonl" "t7a: no proposal"
+assert_no_file "${S_AH}/proposals.jsonl" "t7a: no proposal"
 
 scenario t7b
 zsh_events
@@ -322,7 +322,7 @@ fx_answer "${S_FAKE}/messages.response.json" '{"proposal":{"kind":"skip","reason
 run_analyzer
 assert_eq "${RC}" "1" "t7b: stop_reason max_tokens is a failed call"
 assert_eq "$(json_get "${S_AH}/runs/${TODAY}.json" "d['truncated_calls']")" "1" "t7b: truncation counted"
-assert_no_file "${S_AH}/proposals/${TODAY}.jsonl" "t7b: truncated answer is not used"
+assert_no_file "${S_AH}/proposals.jsonl" "t7b: truncated answer is not used"
 assert_eq "$(awk -F'\t' '{print $2}' "${S_AH}/cost.log")" "1200" "t7b: a billed call is still in cost.log"
 
 scenario t7c
@@ -351,10 +351,10 @@ fx_answer "${S_FAKE}/messages.response.json" '{"proposal":{"kind":"skip","reason
 run_analyzer
 assert_eq "$(fx_calls "${S_FAKE}" messages)" "3" "t8: five qualify, three are drafted"
 assert_eq "$(fx_calls "${S_FAKE}" count_tokens)" "3" "t8: three measurements"
-assert_eq "$(wc -l < "${S_AH}/proposals/${TODAY}.jsonl" | tr -d ' ')" "3" "t8: three rows"
+assert_eq "$(wc -l < "${S_AH}/proposals.jsonl" | tr -d ' ')" "3" "t8: three rows"
 TOP="$(python3 -c "
 import json
-rows=[json.loads(l) for l in open('${S_AH}/proposals/${TODAY}.jsonl')]
+rows=[json.loads(l) for l in open('${S_AH}/proposals.jsonl')]
 print(sorted(r['evidence']['count'] for r in rows))")"
 assert_eq "${TOP}" "[7, 8, 9]" "t8: the three highest count x sessions go first"
 
