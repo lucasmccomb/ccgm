@@ -54,6 +54,10 @@
       "uniqueItems": true,
       "description": "Whitelist of proposal kinds to retain for this repo. Empty array means 'no proposals from this repo'. Missing field means 'all kinds permitted'. Enum mirrors proposal-schema.json `kind`."
     },
+    "paused": {
+      "type": "boolean",
+      "description": "Per-repo override of the global paused flag. true makes autoheal-daily.sh log 'paused', run no step, make no API call, and write health.json with status 'paused'. Only the boolean true pauses."
+    },
     "realtime_alerts_enabled": {
       "enum": ["off", "shadow", "active", true, false],
       "description": "Per-repo override of the global realtime_alerts_enabled flag. A boolean reads as active (true) or off (false)."

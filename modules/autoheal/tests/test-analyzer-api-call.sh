@@ -48,6 +48,17 @@ scenario() {
     fx_curl "${S_BIN}" "${S_FAKE}"
 }
 
+# last_run <field>: a field of the scenario's last-run.json, or MISSING.
+last_run() {
+    python3 -c "
+import json,sys
+try:
+    d=json.load(open(sys.argv[1]))
+    print(d[sys.argv[2]])
+except (OSError, ValueError, KeyError):
+    print('MISSING')" "${S_AH}/last-run.json" "$1"
+}
+
 # zsh_events: 12 zsh "== not found" failures over 3 sessions and 2 days.
 zsh_events() {
     fx_events "${S_AH}" "${TODAY}" Bash echo zsh_not_found "(eval):1: ==== not found" 12 3
@@ -73,6 +84,9 @@ echo '{"input_tokens": 9000}' > "${S_FAKE}/count_tokens.response.json"
 PROMPT_LOG="${S_ROOT}/prompt.log"
 run_analyzer CCGM_AUTOHEAL_PROMPT_LOG="${PROMPT_LOG}"
 assert_eq "${RC}" "0" "t1: analyzer exits 0"
+assert_eq "$(last_run outcome)" "ok" "t1: last-run.json outcome ok"
+assert_eq "$(last_run date)" "${TODAY}" "t1: last-run.json date is the UTC day"
+assert_eq "$(last_run rc)" "0" "t1: last-run.json rc 0"
 assert_eq "$(fx_calls "${S_FAKE}" count_tokens)" "1" "t1: one count_tokens call"
 assert_eq "$(fx_calls "${S_FAKE}" messages)" "1" "t1: one messages call"
 
@@ -251,6 +265,7 @@ scenario t5
 fx_events "${S_AH}" "${TODAY}" Bash echo zsh_not_found "(eval):1: ==== not found" 4 3
 run_analyzer
 assert_eq "${RC}" "0" "t5: exits 0"
+assert_eq "$(last_run outcome)" "ok" "t5: nothing qualified is outcome ok"
 assert_no_file "${S_FAKE}/calls.log" "t5: zero API calls"
 assert_contains "${ERR}" "no qualifying" "t5: logs that no signature qualified"
 assert_no_file "${S_AH}/proposals.jsonl" "t5: no proposals"
@@ -275,13 +290,35 @@ zsh_events
 printf '%s\t1\t1\t10.500000\tclaude-sonnet-5\n' "${TODAY}" > "${S_AH}/cost.log"
 run_analyzer
 assert_eq "${RC}" "2" "t6b: daily cost cap exits 2"
+assert_eq "$(last_run outcome)" "daily_cap_refused" "t6b: refusal recorded in last-run.json"
+assert_eq "$(last_run rc)" "2" "t6b: last-run.json rc 2"
+assert_eq "$(last_run date)" "${TODAY}" "t6b: last-run.json date"
 assert_eq "$(fx_calls "${S_FAKE}" messages)" "0" "t6b: cap reached, no call"
+
+# End to end through the wrapper: a cap stop is a recorded, non-failure outcome.
+W_BIN="${S_ROOT}/wrapper-bin"
+mkdir -p "${W_BIN}" "${S_ROOT}/logs"
+printf '#!/usr/bin/env bash\nexec bash "%s"\n' "${ANALYZER}" > "${W_BIN}/autoheal-analyze.sh"
+rm -f "${S_AH}/last-run.json"
+env HOME="${S_HOME}" PATH="${S_BIN}:${PATH}" FAKE_CURL_DIR="${S_FAKE}" \
+    CCGM_AUTOHEAL_DIR="${S_AH}" CCGM_AUTOHEAL_TODAY="${TODAY}" \
+    CCGM_AUTOHEAL_CLONE_ID="ccgm-w1-c0" ANTHROPIC_API_KEY="sk-test-not-real" \
+    CCGM_AUTOHEAL_BIN_DIR="${W_BIN}" CCGM_AUTOHEAL_LOGS_DIR="${S_ROOT}/logs" \
+    bash "${MODULE_ROOT}/bin/autoheal-daily.sh" >/dev/null 2>&1
+WRC=$?
+HB() { python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])" "${S_AH}/health.json" "$1"; }
+assert_eq "${WRC}" "0" "t6b: wrapper exits 0 on a cap stop"
+assert_eq "$(HB status)" "ok" "t6b: heartbeat status ok on a cap stop"
+assert_eq "$(HB outcome)" "daily_cap_refused" "t6b: heartbeat outcome daily_cap_refused end to end"
 
 scenario t6c
 zsh_events
 echo '{"default_model": "claude-sonnet-4-6"}' > "${S_AH}/config.json"
 run_analyzer
 assert_eq "${RC}" "2" "t6c: a model without structured outputs exits 2"
+assert_eq "$(last_run outcome)" "failed" "t6c: unsupported model recorded as failed"
+assert_eq "$(last_run reason)" "unsupported_model" "t6c: reason recorded"
+assert_eq "$(last_run rc)" "2" "t6c: last-run.json rc 2"
 assert_eq "$(fx_calls "${S_FAKE}" messages)" "0" "t6c: nothing sent"
 assert_contains "${ERR}" "does not support structured outputs" "t6c: names the problem"
 
