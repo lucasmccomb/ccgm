@@ -91,6 +91,18 @@ jobs:
             bash "$t"
           done
 
+      - name: Autoheal module tests (GNU userland)
+        # The macOS job runs the same suite. Running it here too catches
+        # GNU-vs-BSD tool drift such as the `\t` in a grep pattern that GNU
+        # grep read as a literal t (#1099). The tests stub launchctl, gh and
+        # the API; none touches a real scheduler or GitHub.
+        env:
+          GIT_AUTHOR_NAME: CCGM CI
+          GIT_AUTHOR_EMAIL: ci@ccgm.invalid
+          GIT_COMMITTER_NAME: CCGM CI
+          GIT_COMMITTER_EMAIL: ci@ccgm.invalid
+        run: bash modules/autoheal/tests/run-all.sh
+
       - name: relevance-injection - pytest suites (issue #985)
         # The whole tests/ directory, not one file: test_loaded_log.py,
         # test_relevance_select.py and both test_version_floor*.py were
@@ -277,11 +289,9 @@ jobs:
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
 
       - name: Autoheal module tests
-        # Autoheal is macOS-only (launchd), so it runs here and not on the
-        # Linux job: autoheal-auto-apply.sh greps for a tab with `\t` in ERE,
-        # which GNU grep reads as a literal t, so three auto-apply suites
-        # fail on Linux. The tests stub launchctl and the API; none touches
-        # the real scheduler.
+        # Also runs on the Linux job, which catches GNU-vs-BSD tool drift
+        # (the old `\t` grep in autoheal-auto-apply.sh). The tests stub
+        # launchctl, gh and the API; none touches the real scheduler.
         run: bash modules/autoheal/tests/run-all.sh
 
       - name: relevance-injection - pytest suites (issue #985)

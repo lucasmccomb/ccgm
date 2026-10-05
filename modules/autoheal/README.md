@@ -1,6 +1,6 @@
 # autoheal
 
-Self-healing observability loop for Claude Code. Captures permission events, tool failures, and user-correction signals; counts recurring failures with plain code; drafts a small rule for each recurring failure through a direct Anthropic API call; surfaces a digest with the proposals. Optional real-time security alerts and confidence-gated auto-apply, both default off.
+Self-healing observability loop for Claude Code. Captures permission events, tool failures, and user-correction signals; counts recurring failures with plain code; drafts a small rule for each recurring failure through a direct Anthropic API call; surfaces a digest with the proposals. Optional real-time security alerts and earned auto-apply, both default off. Applied fixes are measured 14 days after merge.
 
 ## What this module installs
 
@@ -109,19 +109,46 @@ Run `python3 lib/module-index.py` to see what resolves and the index text.
 ## Default posture
 
 - **Real-time security alerts: OFF.** Enable with `/autoheal-toggle realtime on` (or `realtime_alerts_enabled: "active"` in config). Try `/autoheal-toggle realtime shadow` first.
-- **Auto-apply: OFF.** Enable with `/autoheal-toggle autoapply on` (or `auto_apply_enabled: "active"` in config). Try `/autoheal-toggle autoapply shadow` first.
+- **Auto-apply: OFF.** Set `auto_apply_targets`, then `/autoheal-toggle autoapply shadow`. `active` has to be earned; see "Earned auto-apply".
 - **Email digest: OFF.** Local digest is always-on; opt into Resend with `digest_email` and `email_enabled: true` + `RESEND_API_KEY` in `~/.claude/autoheal/.env` (NOT shell rc — see "API keys" below).
 - **Webhook publisher: OFF.** Set `webhook_url` in config to enable.
 
 ## Rollout: off, shadow, active
 
-`realtime_alerts_enabled` and `auto_apply_enabled` each take `"off"`, `"shadow"` or `"active"`. Configs written before shadow mode hold a boolean; `lib/autoheal_mode.py` reads `true` as `active` and `false` as `off` and never rewrites the file. Every reader goes through its `resolve_mode`.
+`realtime_alerts_enabled` and `auto_apply_mode` each take `"off"`, `"shadow"` or `"active"`. A persisted realtime boolean reads as `active` (`true`) or `off` (`false`). Every reader goes through `lib/autoheal_mode.py`.
 
 - **shadow** computes the decision and logs it. Nothing else happens.
-  - Auto-apply runs the same eligibility logic as active (confidence, breadth, kind, target, snooze, block, the `check`-surface rule, the eval gate) and appends `{ts, proposal_id, would_apply, reason, fingerprint, fix_surface}` to `~/.claude/autoheal/shadow/auto-apply.jsonl`. It creates no branch and no applied record.
-  - Realtime alerts evaluate the patterns and append `{ts, session_id, pattern, severity, would_alert}` to `~/.claude/autoheal/shadow/realtime.jsonl` (never the command). No `<autoheal-security-alert>` block, no event, exit 0.
-- **Agreement.** The digest's "Shadow rollout" section compares each auto-apply decision with what you did next: an applied record (`/autoheal-apply`, `/permission-fix`) means accepted, a snoozed fingerprint means rejected. Would-apply and accepted, or would-skip and rejected, is agreed; would-apply and rejected is a false positive; would-skip and accepted is a false negative; neither yet is pending. Alerts have no recorded human outcome, so they are counted but stay pending.
-- **Promotion bar.** Move a flag to `active` only when the digest shows at least 20 decided (non-pending) decisions, at 90% agreement or better, with zero false positives on `check`-surface proposals. The numbers are `PROMOTION_MIN_DECIDED`, `PROMOTION_MIN_AGREEMENT` and `PROMOTION_MAX_GUARDED_FALSE_POSITIVES` in `lib/autoheal_mode.py`; the digest computes the verdict from them.
+- Realtime alerts in shadow evaluate the patterns and append `{ts, session_id, pattern, severity, would_alert}` to `~/.claude/autoheal/shadow/realtime.jsonl` (never the command). No `<autoheal-security-alert>` block, no event, exit 0. Alerts have no recorded human outcome, so the digest counts them but they stay pending.
+
+## Earned auto-apply
+
+The nightly `bin/autoheal-auto-apply.sh` (logic in `lib/auto_apply.py`) can apply a fix without asking, but only after shadow mode shows it agrees with your own `/autoheal-review` decisions.
+
+| Mode | What runs | How you get there |
+|---|---|---|
+| `off` (default) | Nothing. Fixes wait for `/autoheal-review`. | Default, or `/autoheal-toggle autoapply off` |
+| `shadow` | Each ready `rule_insert` row gets a decision `{ts, proposal_id, generated_at, signature_id, would_apply, reason, mode}` in `~/.claude/autoheal/shadow/auto-apply.jsonl`. No git, gh or ledger change. | `/autoheal-toggle autoapply shadow`, or automatic demotion |
+| `active` | Fixes measured harmful are reverted, then rows that pass the gate are applied through `/autoheal-review`'s path (PR, checks, squash-merge, `Autoheal-Id` and `Autoheal-Signature` trailers) and marked `applied_by: auto`. The next session's notice names each one with its undo command. | `/autoheal-toggle autoapply active`, refused below the promotion bar |
+
+- **Gate.** All of: kind `rule_insert`; `validate()` passes against `origin/main`; at least 10 occurrences across at least 3 sessions; target matches a glob in `auto_apply_targets` (default empty, so nothing qualifies until you list rule files).
+- **Agreement.** Each decision is matched to its ledger row by id and `generated_at`. Applied by you (applied, measured or reverted, not `applied_by: auto`) is accepted; rejected is rejected. Would-apply and accepted, or would-skip and rejected, agree; the rest disagree; rows still ready are pending. A proposal decided on several nights counts once, by its latest decision.
+- **Promotion bar.** `active` is refused, with exit 3 and the reasons, until there are at least 10 decided decisions at 90% agreement or better and no would-apply decision whose fix was later measured harmful or reverted. A successful switch records `auto_apply_promoted_at`; an `active` value without it (a hand edit) runs as shadow.
+- **Demotion.** 3 reverts within 30 days set the mode back to `shadow` and record `auto_apply_demoted_at` and `auto_apply_demoted_reason`. Only decisions logged after the demotion count toward the next promotion.
+- **Legacy flag.** `auto_apply_enabled` is retired. When `auto_apply_mode` is absent it is migrated on read: off/false stays off, and any other value (true, `"shadow"`, `"active"`) reads as `shadow`, never active, because active must be earned. The toggle writes `auto_apply_mode` and deletes the old key.
+- The constants are in `lib/autoheal_mode.py` (`PROMOTION_MIN_DECIDED`, `PROMOTION_MIN_AGREEMENT`, `PROMOTION_MAX_HARMFUL`, `DEMOTION_REVERTS`, `DEMOTION_WINDOW_DAYS`) and `lib/auto_apply.py` (`MIN_OCCURRENCES`, `MIN_SESSIONS`). `/autoheal` and the digest show the mode, the agreement and the verdict.
+
+## Outcome measurement
+
+Every night the aggregator (`bin/autoheal-aggregate.py`, no API call) measures each `applied` rule fix once its 14-day post-merge window has ended (merge day + 15). It compares the failure rate of the fix's signature over the 14 days after the merge with the `baseline_rate` recorded at merge (the 14 days before), and moves the row to `measured`:
+
+| Outcome | Rule | What happens |
+|---|---|---|
+| effective | post rate at most 50% of baseline | Counted in `/autoheal` |
+| ineffective | above 50%, at most 100% | The notice offers `/autoheal-review revert <id>` or `/autoheal-review redraft <id>` |
+| harmful | above baseline, or a new signature (same tool and command head, another error class, 2+ failures after and none before) appeared | `active`: a revert PR is opened and merged automatically and the row becomes `reverted`. `off`/`shadow`: flagged in the notice only |
+| unmeasurable | no baseline to compare against | Counted in `/autoheal` |
+
+When a window has no counted tool calls, failure counts over the two equal windows are compared instead of rates. A failed automatic revert records `revert_error` and is not retried every night; `/autoheal-review revert <id>` retries it. `redraft` keeps the merged rule and lets the next run draft the signature again from newer samples.
 
 ## Config
 

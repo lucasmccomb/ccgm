@@ -12,7 +12,7 @@ autoheal feature flags.
 /autoheal-toggle resume                             # paused: false
 
 /autoheal-toggle realtime on|off|shadow|status      # realtime_alerts_enabled
-/autoheal-toggle autoapply on|off|shadow|status     # auto_apply_enabled
+/autoheal-toggle autoapply off|shadow|active|status # auto_apply_mode (active must be earned)
 /autoheal-toggle email on|off|status                # email_enabled
 /autoheal-toggle digest on|off|status               # digest_enabled
 
@@ -32,15 +32,22 @@ For every subcommand:
      respects this flag in its preflight).
    - `realtime on|off|shadow` sets `realtime_alerts_enabled` (Epic 10) to
      `active`, `off` or `shadow`. `active` is also accepted.
-   - `autoapply on|off|shadow` sets `auto_apply_enabled` (Epic 11) the same
-     way. Shadow computes and logs the decision and takes no action; see the
-     README's "Rollout: off, shadow, active" for the promotion bar.
+   - `autoapply off|shadow|active` sets `auto_apply_mode` (#1099 Phase 4.2).
+     Shadow logs what auto-apply would do and changes nothing. `active` (or
+     `on`) is refused, with exit 3 and the reasons, until the shadow record
+     shows at least 10 decided decisions at 90% agreement or better with no
+     would-apply fix later measured harmful or reverted; a successful switch
+     records `auto_apply_promoted_at`. Report a refusal to the user verbatim.
+     Writing this key also deletes the retired `auto_apply_enabled` flag.
+     Set the rule-file allowlist `auto_apply_targets` (globs such as
+     `modules/git-workflow/rules/*.md`) before shadow, or nothing qualifies.
+     See the README's "Earned auto-apply".
 
    These two run through `lib/autoheal_mode.py`, which validates the value,
    keeps every other key, writes atomically, and prints the confirmation:
    `python3 ~/.claude/lib/autoheal_mode.py set ~/.claude/autoheal/config.json autoapply shadow`
-   (`status` prints `{key} = {mode}`; a persisted boolean reads as active/off).
-   Do not hand-edit these two keys with `jq`.
+   (`status` prints `{key} = {mode}`; a persisted realtime boolean reads as
+   active/off). Do not hand-edit these two keys with `jq`.
    - `email on|off` flips `email_enabled` (Epic 7 sender gate).
    - `digest on|off` flips `digest_enabled` (Epic 7 renderer gate).
    - `webhook on|off` flips `webhook_enabled` (Epic 12 publisher gate).
@@ -58,7 +65,7 @@ For every subcommand:
 | `pause` | `paused` | `false` |
 | `resume` | `paused` | (sets to `false`) |
 | `realtime` | `realtime_alerts_enabled` | `off` |
-| `autoapply` | `auto_apply_enabled` | `off` |
+| `autoapply` | `auto_apply_mode` | `off` |
 | `email` | `email_enabled` | `false` |
 | `digest` | `digest_enabled` | `true` |
 | `webhook` (`on`/`off`) | `webhook_enabled` | `false` |
@@ -115,4 +122,5 @@ agent. The agent:
 
 - Rule: `~/.claude/skills/autoheal-reference/SKILL.md` (config keys table)
 - Plan: `~/code/plans/ccgm-autoheal/plan.md` §5 Epic 7, §5 Epic 10
-  (realtime), §5 Epic 11 (autoapply), §5 Epic 12 (webhook).
+  (realtime), §5 Epic 12 (webhook); `ccgm-learning-loops/autoheal-rca.md`
+  §3.5 (earned auto-apply).

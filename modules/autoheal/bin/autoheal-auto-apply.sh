@@ -1,451 +1,52 @@
 #!/usr/bin/env bash
 # autoheal-auto-apply.sh
 #
-# Epic 11: opt-in confidence-gated auto-apply.
+# Nightly auto-apply step (#1099 Phase 4.2), chained after the analyzer in
+# autoheal-daily.sh. The logic lives in lib/auto_apply.py; this wrapper resolves
+# paths, keeps a per-day log, and always exits 0 so one bad night never fails
+# the daily wrapper.
 #
-# Reads today's rows of the proposal ledger (~/.claude/autoheal/proposals.jsonl),
-# evaluates each against the strict auto-apply gate (plan.md §3.7), and
-# routes qualifying proposals through lib/apply-proposal.py. The apply
-# logic is shared with /permission-fix apply and /autoheal-apply <id>
-# so the branch shape, commit format, and audit record stay identical
-# across the three invocation paths.
+# Mode: `auto_apply_mode` in config.json, off (default) | shadow | active.
+#   off     nothing runs.
+#   shadow  logs a would-apply decision for every ready rule_insert row to
+#           shadow/auto-apply.jsonl; changes nothing.
+#   active  reverts fixes measured harmful, then applies rows that pass the gate
+#           through /autoheal-review's PR path (Autoheal-Id and
+#           Autoheal-Signature trailers). Allowed only after promotion
+#           (/autoheal-toggle autoapply active); 3 reverts in 30 days demote it
+#           back to shadow.
 #
-# This script is chained at the end of autoheal-daily.sh (after the
-# analyzer has written today's proposals, before the digest). It NEVER
-# pushes to remote: it only commits to a feature branch named
-# `autoheal/auto/{proposal-id}`. The user reviews the resulting diff and
-# opens the PR by hand.
-#
-# Gate predicate (plan.md §3.7):
-#   confidence            >= 9
-#   breadth_score         <= 1
-#   kind                  == "settings_allow_add"
-#   target                startswith("modules/settings/")
-#   snoozed_until         is null
-#   auto_apply_blocked    is false
-#   fix_surface           is not "check" (needs a demonstration; #1077)
-#
-# Every apply attempt — success OR failure — appends a record to
-# ~/.claude/autoheal/applied/{today}.jsonl. Failures additionally write
-# a stderr-tagged line to ~/.claude/logs/autoheal-auto-apply-{today}.log
-# so the daily-wrapper log captures the reason without polluting the
-# audit trail.
+# Gate: kind rule_insert, validate() passes, >= 10 occurrences across >= 3
+# sessions, target in the `auto_apply_targets` allowlist.
 #
 # Env overrides (tests):
-#   CCGM_AUTOHEAL_CONFIG         default ~/.claude/autoheal/config.json
-#   CCGM_AUTOHEAL_LEDGER         default ~/.claude/autoheal/proposals.jsonl
-#   CCGM_AUTOHEAL_APPLIED_DIR    default ~/.claude/autoheal/applied
-#   CCGM_AUTOHEAL_LOGS_DIR       default ~/.claude/logs
-#   CCGM_AUTOHEAL_TODAY          default $(date -u +%Y-%m-%d)
-#   CCGM_AUTOHEAL_CLONE_ROOT     forwarded as CCGM_CLONE_ROOT to
-#                                apply-proposal.py
-#
-# Exit codes:
-#   0  always (per autoheal-daily.sh contract: a single failed proposal
-#      should not crash the daily wrapper). Per-proposal failures are
-#      logged but do not propagate.
+#   CCGM_AUTOHEAL_CONFIG     default ~/.claude/autoheal/config.json
+#   CCGM_AUTOHEAL_DIR        default ~/.claude/autoheal (ledger, shadow log)
+#   CCGM_AUTOHEAL_LOGS_DIR   default ~/.claude/logs
+#   CCGM_AUTOHEAL_TODAY      default today (UTC)
 
 set -u
 
-# ---------------------------------------------------------------------
-# Resolve module + path defaults.
-# ---------------------------------------------------------------------
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-APPLY_LIB="${MODULE_ROOT}/lib/apply-proposal.py"
-EVAL_LIB="${MODULE_ROOT}/lib/proposal-eval.py"
-MODE_LIB="${MODULE_ROOT}/lib/autoheal_mode.py"
-
-CONFIG_FILE="${CCGM_AUTOHEAL_CONFIG:-${HOME}/.claude/autoheal/config.json}"
-APPLIED_DIR="${CCGM_AUTOHEAL_APPLIED_DIR:-${HOME}/.claude/autoheal/applied}"
+AUTO_LIB="${MODULE_ROOT}/lib/auto_apply.py"
 LOGS_DIR="${CCGM_AUTOHEAL_LOGS_DIR:-${HOME}/.claude/logs}"
-
-if [ -n "${CCGM_AUTOHEAL_TODAY:-}" ]; then
-    TODAY="${CCGM_AUTOHEAL_TODAY}"
-else
-    TODAY="$(python3 -c "import datetime; print(datetime.datetime.now(datetime.timezone.utc).date().isoformat())")"
-fi
-
-# Today's ledger rows in a scratch file; apply-proposal.py looks each id up in the
-# ledger itself.
-PROPOSALS_FILE="$(mktemp -t autoheal-auto-apply-rows.XXXXXX)"
-trap 'rm -f "${PROPOSALS_FILE}"' EXIT
-python3 "${MODULE_ROOT}/lib/ledger.py" day "${TODAY}" > "${PROPOSALS_FILE}" 2>/dev/null || true
-APPLIED_FILE="${APPLIED_DIR}/${TODAY}.jsonl"
+TODAY="${CCGM_AUTOHEAL_TODAY:-$(date -u +%Y-%m-%d)}"
 LOG_FILE="${LOGS_DIR}/autoheal-auto-apply-${TODAY}.log"
 
-mkdir -p "${APPLIED_DIR}" "${LOGS_DIR}"
-
-# Forward the autoheal-flavored clone-root override to apply-proposal.py,
-# which reads CCGM_CLONE_ROOT. We never overwrite an explicit caller-set
-# CCGM_CLONE_ROOT so manual invocations still work.
-if [ -n "${CCGM_AUTOHEAL_CLONE_ROOT:-}" ] && [ -z "${CCGM_CLONE_ROOT:-}" ]; then
-    export CCGM_CLONE_ROOT="${CCGM_AUTOHEAL_CLONE_ROOT}"
-fi
-
-# Pass through the env knobs apply-proposal.py honors. These are already
-# exported in the daily-wrapper case, but re-exporting in tests keeps the
-# script self-contained.
-export CCGM_AUTOHEAL_APPLIED_DIR="${APPLIED_DIR}"
+export CCGM_AUTOHEAL_CONFIG="${CCGM_AUTOHEAL_CONFIG:-${HOME}/.claude/autoheal/config.json}"
 export CCGM_AUTOHEAL_TODAY="${TODAY}"
 
-log() {
-    # Append a tagged line to the per-day log AND echo to stderr so the
-    # daily wrapper's aggregated log captures it too.
-    local msg="$1"
-    local ts
-    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf '[%s] %s\n' "${ts}" "${msg}" >>"${LOG_FILE}"
-    printf '[%s] %s\n' "${ts}" "${msg}" >&2
-}
-
-# ---------------------------------------------------------------------
-# Preflight
-# ---------------------------------------------------------------------
+mkdir -p "${LOGS_DIR}"
 
 if ! command -v python3 >/dev/null 2>&1; then
-    log "python3 not on PATH; auto-apply disabled this run"
+    printf '[%s] python3 not on PATH; auto-apply skipped\n' "${TODAY}" | tee -a "${LOG_FILE}" >&2
+    exit 0
+fi
+if [ ! -f "${AUTO_LIB}" ]; then
+    printf '[%s] %s missing; auto-apply skipped\n' "${TODAY}" "${AUTO_LIB}" | tee -a "${LOG_FILE}" >&2
     exit 0
 fi
 
-if [ ! -f "${APPLY_LIB}" ]; then
-    log "apply-proposal.py missing at ${APPLY_LIB}; auto-apply disabled this run"
-    exit 0
-fi
-
-# ---------------------------------------------------------------------
-# Config gate: auto_apply_enabled is off | shadow | active.
-#
-# lib/autoheal_mode.py is the one resolver (a persisted `true` reads as
-# active, `false` as off). Unreadable config, or a missing resolver, is off.
-#   off     skip the run.
-#   shadow  run the same eligibility logic, log would_apply to
-#           shadow/auto-apply.jsonl, apply nothing (no branch, no audit record).
-#   active  apply qualifying proposals.
-# ---------------------------------------------------------------------
-
-if [ -f "${MODE_LIB}" ]; then
-    MODE="$(python3 "${MODE_LIB}" mode "${CONFIG_FILE}" auto_apply_enabled 2>/dev/null || echo off)"
-else
-    MODE="off"
-fi
-if [ "${MODE}" != "active" ] && [ "${MODE}" != "shadow" ]; then
-    log "auto_apply_enabled=false (default off); skipping ${TODAY}"
-    exit 0
-fi
-
-if [ ! -s "${PROPOSALS_FILE}" ]; then
-    log "no ledger rows for ${TODAY}; nothing to apply"
-    exit 0
-fi
-
-# ---------------------------------------------------------------------
-# Build the list of proposal ids that pass the gate.
-#
-# We do the gate evaluation in a single python pass so the predicate
-# matches plan.md §3.7 exactly, with no shell-quoting ambiguity. The
-# python prints one line per proposal: `<status>\t<id>\t<reason>`, where
-# status is one of:
-#   QUALIFY   passed the gate; auto-apply will run
-#   SKIP      failed the gate; reason names the rejected field
-#   BAD_ROW   malformed JSON or missing required field; skipped
-# ---------------------------------------------------------------------
-
-evaluate_gate() {
-    python3 - "${PROPOSALS_FILE}" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-
-
-def gate(p):
-    # Predicate from plan.md §3.7. Return (ok, reason).
-    if not isinstance(p, dict):
-        return False, "not-a-dict"
-    pid = p.get("id")
-    if not isinstance(pid, str) or not pid:
-        return False, "missing-id"
-    try:
-        c = int(p.get("confidence"))
-    except (TypeError, ValueError):
-        return False, "confidence-not-int"
-    if c < 9:
-        return False, f"confidence<{9} (got {c})"
-    try:
-        b = int(p.get("breadth_score"))
-    except (TypeError, ValueError):
-        return False, "breadth_score-not-int"
-    if b > 1:
-        return False, f"breadth_score>{1} (got {b})"
-    kind = p.get("kind")
-    if kind != "settings_allow_add":
-        return False, f"kind!=settings_allow_add (got {kind!r})"
-    target = p.get("target") or ""
-    if not isinstance(target, str) or not target.startswith("modules/settings/"):
-        return False, f"target not under modules/settings/ (got {target!r})"
-    if p.get("snoozed_until"):
-        return False, "snoozed"
-    if p.get("auto_apply_blocked"):
-        return False, "auto_apply_blocked"
-    # #1077: a `check` proposal needs a failing demonstration, and auto-apply
-    # supplies none. A missing fix_surface (proposal written before the field
-    # existed) reads as `rule`.
-    if p.get("fix_surface") == "check":
-        return False, "check-surface proposal needs a demonstration; auto-apply supplies none"
-    return True, ""
-
-
-total = 0
-qualified = 0
-with open(path, "r", encoding="utf-8") as fh:
-    for line in fh:
-        line = line.strip()
-        if not line:
-            continue
-        total += 1
-        try:
-            rec = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            sys.stdout.write("BAD_ROW\t-\tinvalid-json\n")
-            continue
-        ok, reason = gate(rec)
-        if ok:
-            qualified += 1
-            sys.stdout.write(f"QUALIFY\t{rec['id']}\t-\n")
-        else:
-            pid = rec.get("id") if isinstance(rec, dict) else "-"
-            sys.stdout.write(f"SKIP\t{pid or '-'}\t{reason}\n")
-
-sys.stderr.write(f"evaluated={total} qualified={qualified}\n")
-PY
-}
-
-# ---------------------------------------------------------------------
-# Eval/regression gate (issue #705, epic #659).
-#
-# The structural gate above proves a proposal is the RIGHT SHAPE to
-# auto-apply (high confidence, narrow, settings_allow_add). It does NOT
-# prove the proposal IMPROVES anything. eval_proposal() replays the
-# proposal against a fixed fixture set (tests/fixtures/eval-scenarios.json
-# via lib/proposal-eval.py) and returns 0 only if the proposal resolves
-# >= 1 friction scenario with 0 regressions (no dangerous/guard scenario
-# silently auto-allowed).
-#
-# This is a PRECONDITION layered on top of the structural gate: a proposal
-# must pass BOTH to reach apply-proposal.py. Auto-apply stays off by
-# default (auto_apply_enabled gate, above) — this only narrows what can be
-# promoted once the user has opted in.
-#
-# Deterministic by design (latent-vs-deterministic): the verdict is a
-# pure function of (proposal, fixtures). Same inputs, same answer, every
-# run. If proposal-eval.py is missing we FAIL CLOSED (skip the proposal)
-# rather than promoting un-evaluated changes.
-#
-# Args: $1 = proposal id. Reads the full record from PROPOSALS_FILE.
-# Prints the eval reason on stderr-via-log. Returns:
-#   0  eval passed   -> proposal may proceed to apply
-#   1  eval failed    -> proposal blocked (reason logged)
-#   2  eval error     -> fail closed; proposal blocked (reason logged)
-# ---------------------------------------------------------------------
-
-eval_proposal() {
-    local pid="$1"
-
-    if [ ! -f "${EVAL_LIB}" ]; then
-        log "eval ${pid}: proposal-eval.py missing at ${EVAL_LIB}; failing closed"
-        return 2
-    fi
-
-    # Extract the single proposal record by id, then pipe it to the eval
-    # CLI over stdin. Two python invocations keep the contract clean: the
-    # extractor only knows JSONL, the evaluator only knows one record.
-    local record
-    record="$(python3 - "${PROPOSALS_FILE}" "${pid}" <<'PY'
-import json
-import sys
-
-path, pid = sys.argv[1], sys.argv[2]
-try:
-    with open(path, "r", encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except (json.JSONDecodeError, ValueError):
-                continue
-            if isinstance(rec, dict) and rec.get("id") == pid:
-                sys.stdout.write(json.dumps(rec))
-                sys.exit(0)
-except OSError:
-    pass
-sys.exit(3)  # not found
-PY
-)"
-    if [ $? -ne 0 ] || [ -z "${record}" ]; then
-        log "eval ${pid}: could not extract proposal record; failing closed"
-        return 2
-    fi
-
-    local eval_out eval_rc reason
-    EVAL_REASON=""
-    eval_out="$(printf '%s' "${record}" | python3 "${EVAL_LIB}" - 2>&1)"
-    eval_rc=$?
-
-    # Pull the human-readable reason from the JSON result (best effort).
-    reason="$(printf '%s' "${eval_out}" | python3 -c "
-import json, sys
-try:
-    print(json.loads(sys.stdin.read()).get('reason', ''))
-except Exception:
-    pass
-" 2>/dev/null)"
-
-    EVAL_REASON="${reason}"
-    if [ "${eval_rc}" -eq 0 ]; then
-        log "eval ${pid}: PASS (${reason:-passed})"
-        return 0
-    elif [ "${eval_rc}" -eq 1 ]; then
-        log "eval ${pid}: BLOCK (${reason:-failed eval})"
-        return 1
-    else
-        log "eval ${pid}: ERROR rc=${eval_rc} (${eval_out}); failing closed"
-        return 2
-    fi
-}
-
-GATE_OUTPUT="$(evaluate_gate 2>&1)"
-# Separate the per-row tab-delimited rows from the trailing stderr counter.
-ROWS="$(printf '%s\n' "${GATE_OUTPUT}" | grep -E '^(QUALIFY|SKIP|BAD_ROW)\t' || true)"
-
-shadow_decision() {
-    # Args: proposal id, true|false (would apply), reason. Never fails the run.
-    python3 "${MODE_LIB}" shadow-log auto-apply "${PROPOSALS_FILE}" "$1" "$2" "$3" 2>>"${LOG_FILE}" || true
-}
-
-EVALUATED=0
-SHADOW_WOULD_APPLY=0
-QUALIFIED=0
-APPLIED=0
-FAILED=0
-EVAL_BLOCKED=0
-
-while IFS= read -r row; do
-    [ -z "${row}" ] && continue
-    EVALUATED=$((EVALUATED + 1))
-    status="${row%%	*}"
-    rest="${row#*	}"
-    pid="${rest%%	*}"
-    reason="${rest#*	}"
-    case "${status}" in
-        SKIP|BAD_ROW)
-            log "skip ${pid}: ${reason}"
-            if [ "${MODE}" = "shadow" ] && [ "${pid}" != "-" ]; then
-                shadow_decision "${pid}" false "${reason}"
-            fi
-            ;;
-        QUALIFY)
-            QUALIFIED=$((QUALIFIED + 1))
-
-            # Eval/regression precondition (#705): the structural gate
-            # said the proposal is the right shape; the eval proves it
-            # actually improves the fixture set without regressions.
-            # A proposal must clear BOTH before it reaches apply.
-            eval_proposal "${pid}"
-            eval_rc=$?
-            if [ "${eval_rc}" -ne 0 ]; then
-                EVAL_BLOCKED=$((EVAL_BLOCKED + 1))
-                log "block ${pid}: eval gate rejected (rc=${eval_rc}); not applying"
-                if [ "${MODE}" = "shadow" ]; then
-                    shadow_decision "${pid}" false "eval gate rejected (rc=${eval_rc}): ${EVAL_REASON:-no reason}"
-                fi
-                continue
-            fi
-
-            # Shadow stops here: the proposal cleared every gate, so active
-            # mode would apply it. Log that and touch nothing.
-            if [ "${MODE}" = "shadow" ]; then
-                SHADOW_WOULD_APPLY=$((SHADOW_WOULD_APPLY + 1))
-                log "shadow ${pid}: would apply (eval passed); nothing applied"
-                shadow_decision "${pid}" true "passed every gate; eval: ${EVAL_REASON:-passed}"
-                continue
-            fi
-
-            log "qualify ${pid}: eval passed; routing to apply-proposal.py"
-
-            # Run apply-proposal.py with source=auto-apply. The library
-            # creates branch autoheal/auto/{pid}, applies the diff, runs
-            # tests/test-modules.sh + tests/test-no-personal-data.sh, and
-            # — on pass — commits with `#auto: apply autoheal proposal {pid}`
-            # and appends to applied/{today}.jsonl. We capture stdout +
-            # stderr into the per-day log so a tester sees both the diff
-            # and the failure reason in one place.
-            apply_out="$(python3 "${APPLY_LIB}" "${pid}" auto-apply 2>&1)"
-            apply_rc=$?
-            printf '%s\n' "${apply_out}" >>"${LOG_FILE}"
-
-            if [ "${apply_rc}" -eq 0 ]; then
-                APPLIED=$((APPLIED + 1))
-                log "applied ${pid}: branch + commit created (review the PR)"
-            else
-                FAILED=$((FAILED + 1))
-                # The library wrote NO applied record on failure (its
-                # contract is "audit on success"). We add a failure-tagged
-                # record so the audit log captures the attempt either way.
-                python3 - "${APPLIED_FILE}" "${pid}" "${apply_out}" <<'PY'
-import datetime
-import json
-import os
-import sys
-
-path = sys.argv[1]
-pid = sys.argv[2]
-err = sys.argv[3]
-
-# Truncate the err blob so a 4MB test-output dump doesn't bloat the audit.
-err_short = err[-2000:] if len(err) > 2000 else err
-
-rec = {
-    "id": f"app_{pid}_failed_{int(datetime.datetime.now(datetime.timezone.utc).timestamp())}",
-    "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    "proposal_id": pid,
-    "method": "auto_apply",
-    "branch": None,
-    "commit_sha": None,
-    "tests_passed": False,
-    "rolled_back": True,
-    "error": err_short,
-}
-
-parent = os.path.dirname(path)
-if parent:
-    os.makedirs(parent, exist_ok=True)
-with open(path, "a", encoding="utf-8") as fh:
-    fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
-PY
-                log "failed ${pid}: apply-proposal.py exit=${apply_rc} (see log for details)"
-            fi
-            ;;
-        *)
-            log "unknown gate row: ${row}"
-            ;;
-    esac
-done <<< "${ROWS}"
-
-# ---------------------------------------------------------------------
-# Summary line. The daily wrapper aggregates stderr into its log so this
-# is visible without parsing the per-day file.
-# ---------------------------------------------------------------------
-
-if [ "${MODE}" = "shadow" ]; then
-    printf 'autoheal-auto-apply: shadow evaluated=%d qualified=%d eval_blocked=%d would_apply=%d applied=0 (today=%s)\n' \
-        "${EVALUATED}" "${QUALIFIED}" "${EVAL_BLOCKED}" "${SHADOW_WOULD_APPLY}" "${TODAY}" >&2
-else
-    printf 'autoheal-auto-apply: evaluated=%d qualified=%d eval_blocked=%d applied=%d failed=%d (today=%s)\n' \
-        "${EVALUATED}" "${QUALIFIED}" "${EVAL_BLOCKED}" "${APPLIED}" "${FAILED}" "${TODAY}" >&2
-fi
-
+python3 "${AUTO_LIB}" --log "${LOG_FILE}" >/dev/null
 exit 0

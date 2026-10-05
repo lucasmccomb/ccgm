@@ -12,6 +12,8 @@
 #   launchctl program present  nothing
 #   cwd under /.claude/worktrees/   nothing, and the day's notice is not used up
 #   launchctl absent           the job check is skipped
+#   auto-applied fix, harmful / ineffective outcome, automatic revert
+#                              one line each, announced once (#1099 Phase 4.1, 4.2)
 #
 # Every run uses a temp autoheal dir, a temp HOME, and a fake launchctl.
 #
@@ -35,6 +37,8 @@ assert_eq() {
         echo "  actual:   $1"
     fi
 }
+
+contains() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 
 TMP="$(mktemp -d -t autoheal-notice.XXXXXX)"
 trap 'rm -rf "${TMP}"' EXIT
@@ -220,6 +224,29 @@ scenario t6
 ready_row sigA "echo zsh_not_found: add a rule to code-quality.md"
 assert_eq "$(run_hook "/Users/x/code/repo/.claude/worktrees/agent-x")" "" "t6: a worktree cwd is silent"
 assert_eq "$(field "$(run_hook)" msg)" "autoheal: 1 fix ready (echo zsh_not_found) — run /autoheal-review" "t6b: the next normal session still gets the notice"
+
+# --- outcomes and auto-applied fixes (#1099 Phase 4.1, 4.2) ---------------------
+scenario t9
+cat >> "${AH}/proposals.jsonl" <<'ROWS'
+{"id":"auto1","state":"applied","applied_by":"auto","kind":"rule_insert","title":"echo zsh_no_match: add a rule to git-workflow.md","merged_at":"2026-10-03T00:00:00+00:00"}
+{"id":"human1","state":"applied","applied_by":"review","kind":"rule_insert","title":"cp prompt: add a rule","merged_at":"2026-10-03T00:00:00+00:00"}
+{"id":"harm1","state":"measured","outcome":"harmful","outcome_basis":"rate","baseline_rate":2.0,"post_rate":3.0,"title":"rm denied: add a rule","measured_at":"2026-10-04"}
+{"id":"new1","state":"measured","outcome":"harmful","outcome_basis":"rate","baseline_rate":4.0,"post_rate":0.5,"new_signatures":["Bash|git|network_error"],"title":"git conflict: add a rule","measured_at":"2026-10-04"}
+{"id":"ineff1","state":"measured","outcome":"ineffective","outcome_basis":"occurrences","baseline_occurrences":8,"post_occurrences":6,"title":"Edit miss: add a rule","measured_at":"2026-10-04"}
+{"id":"eff1","state":"measured","outcome":"effective","baseline_rate":5.0,"post_rate":1.0,"title":"ok: add a rule","measured_at":"2026-10-04"}
+{"id":"rev1","state":"reverted","reverted_by":"auto","baseline_rate":1.0,"post_rate":2.5,"title":"ls miss: add a rule","reverted_at":"2026-10-04T01:00:00+00:00"}
+ROWS
+msg="$(field "$(run_hook)" msg)"
+assert_eq "$(contains "${msg}" "applied 1 fix: echo zsh_no_match: add a rule to git-workflow.md (undo: /autoheal-review revert auto1)")" "yes" "t9: auto-applied fix announced with its undo command"
+assert_eq "$(contains "${msg}" "human1")" "no" "t9: a fix the user applied is not announced"
+assert_eq "$(contains "${msg}" "rm denied: add a rule looks harmful (2.0 → 3.0 per 100 calls) — /autoheal-review revert harm1")" "yes" "t9: harmful outcome with rates and the revert command"
+assert_eq "$(contains "${msg}" "git conflict: add a rule looks harmful (new failures: Bash|git|network_error)")" "yes" "t9: harmful by new signature names it"
+assert_eq "$(contains "${msg}" "Edit miss: add a rule is ineffective (8 → 6 failures in 14 days) — /autoheal-review revert ineff1 or /autoheal-review redraft ineff1")" "yes" "t9: ineffective outcome offers revert or redraft"
+assert_eq "$(contains "${msg}" "ok: add a rule")" "no" "t9: an effective outcome is not announced"
+assert_eq "$(contains "${msg}" "reverted ls miss: add a rule (failures rose 1.0 → 2.5 per 100 calls)")" "yes" "t9: automatic revert announced"
+assert_eq "$(printf '%s' "${msg}" | wc -l | tr -d ' ')" "0" "t9: still one line"
+rm -f "${AH}/notice-sentinel"
+assert_eq "$(run_hook)" "" "t9: the next day nothing is repeated"
 
 # --- autoheal not installed: no output and no files -----------------------------
 scenario t7

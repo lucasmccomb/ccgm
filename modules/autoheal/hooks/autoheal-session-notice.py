@@ -11,6 +11,13 @@ Says something when:
         autoheal: 2 fixes ready (zsh quoting in Bash, cp -i alias) — run /autoheal-review
   - health.json is older than 26h, or its status is failed
         autoheal: last good run 3d ago (<reason>) — /autoheal doctor
+  - auto-apply applied a fix (#1099 Phase 4.2), announced once
+        autoheal: applied 1 fix: <title> (undo: /autoheal-review revert <id>)
+  - a fix measured at +14 days was harmful or ineffective, or auto-apply
+    reverted a harmful one (#1099 Phase 4.1), each announced once
+        autoheal: <title> looks harmful (2.0 → 3.0 per 100 calls) — /autoheal-review revert <id>
+        autoheal: <title> is ineffective (2.0 → 1.5 per 100 calls) — /autoheal-review revert <id> or /autoheal-review redraft <id>
+        autoheal: reverted <title> (failures rose 2.0 → 3.0 per 100 calls)
   - the launchd job runs a file that does not exist (checked once a day, cached)
         autoheal: scheduled job runs <path>, which does not exist — /autoheal doctor
         autoheal: job points outside your home: <path> — /autoheal doctor
@@ -20,7 +27,8 @@ a subagent worktree (the day's notice is kept for a real session), or when
 ~/.claude/autoheal does not exist.
 
 State files, in the autoheal dir: notice-sentinel (the date of the last notice),
-notice-launchd.json (the day's launchctl result).
+notice-launchd.json (the day's launchctl result), notice-announced.json (keys of
+the applied fixes and outcomes already announced).
 
 Env: CCGM_AUTOHEAL_DIR (default ~/.claude/autoheal). Tests only:
 CCGM_AUTOHEAL_NOW (ISO time), CCGM_AUTOHEAL_REAL_HOME,
@@ -40,6 +48,7 @@ from datetime import datetime, timedelta, timezone
 
 STALE_HOURS = 26
 MAX_NAMES = 3
+MAX_ANNOUNCED = 500
 SYSTEM_PREFIXES = ("/bin/", "/sbin/", "/usr/", "/opt/homebrew/", "/System/", "/Library/", "/Applications/")
 
 
@@ -91,6 +100,73 @@ def _ready_names(root: str, now: datetime) -> list:
                 title = row.get("title") if isinstance(row.get("title"), str) else ""
                 names.append(title.split(": ")[0].strip() or str(row.get("id", "fix")))
     return list(dict.fromkeys(names))
+
+
+def _rows(root: str) -> list:
+    rows = []
+    try:
+        fh = open(os.path.join(root, "proposals.jsonl"), encoding="utf-8")
+    except OSError:
+        return rows
+    with fh:
+        for line in fh:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+    return rows
+
+
+def _num(value):
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _change(row: dict) -> str:
+    """'2.0 → 3.0 per 100 calls', or the occurrence counts when no rate exists."""
+    base, post = _num(row.get("baseline_rate")), _num(row.get("post_rate"))
+    if row.get("outcome_basis", "rate") == "rate" and base is not None and post is not None:
+        return f"{base:.1f} → {post:.1f} per 100 calls"
+    return f"{row.get('baseline_occurrences')} → {row.get('post_occurrences')} failures in 14 days"
+
+
+def _harm_detail(row: dict) -> str:
+    base, post = _num(row.get("baseline_rate")), _num(row.get("post_rate"))
+    new = [s for s in (row.get("new_signatures") or []) if isinstance(s, str)]
+    rose = base is not None and post is not None and post > base
+    if new and not rose:
+        return "new failures: " + ", ".join(new[:2])
+    return _change(row)
+
+
+def _outcome_items(rows: list) -> tuple:
+    """(auto-applied items, outcome items), each a list of (announce key, text)."""
+    applied, outcomes = [], []
+    for row in rows:
+        pid = str(row.get("id") or "")
+        title = row.get("title") if isinstance(row.get("title"), str) and row.get("title") else pid
+        state = row.get("state")
+        if state == "applied" and row.get("applied_by") == "auto":
+            applied.append((f"applied:{pid}:{row.get('merged_at')}",
+                            f"{title} (undo: /autoheal-review revert {pid})"))
+        elif state == "reverted" and row.get("reverted_by") == "auto":
+            detail = _harm_detail(row)
+            detail = f"failures rose {detail}" if not detail.startswith("new failures") else detail
+            outcomes.append((f"reverted:{pid}:{row.get('reverted_at')}", f"reverted {title} ({detail})"))
+        elif state == "measured" and row.get("outcome") == "harmful":
+            outcomes.append((f"measured:{pid}:{row.get('measured_at')}",
+                             f"{title} looks harmful ({_harm_detail(row)}) — /autoheal-review revert {pid}"))
+        elif state == "measured" and row.get("outcome") == "ineffective":
+            outcomes.append((f"measured:{pid}:{row.get('measured_at')}",
+                             f"{title} is ineffective ({_change(row)}) — /autoheal-review revert {pid} "
+                             f"or /autoheal-review redraft {pid}"))
+    return applied, outcomes
+
+
+def _applied_part(items: list) -> str:
+    noun = "fix" if len(items) == 1 else "fixes"
+    return f"applied {len(items)} {noun}: " + ", ".join(text for _, text in items)
 
 
 def _fixes_part(names: list) -> str:
@@ -211,6 +287,15 @@ def build_notice(root: str, now: datetime):
     parts = []
     if names:
         parts.append(_fixes_part(names))
+    announced_path = os.path.join(root, "notice-announced.json")
+    announced = _load_json(announced_path)
+    announced = [k for k in announced if isinstance(k, str)] if isinstance(announced, list) else []
+    applied, outcomes = _outcome_items(_rows(root))
+    applied = [item for item in applied if item[0] not in announced]
+    outcomes = [item for item in outcomes if item[0] not in announced]
+    if applied:
+        parts.append(_applied_part(applied))
+    parts += [text for _, text in outcomes]
     for part in (_health_part(root, now), _launchd_part(root, today)):
         if part:
             parts.append(part)
@@ -218,6 +303,10 @@ def build_notice(root: str, now: datetime):
         return None
     with open(os.path.join(root, "notice-sentinel"), "w", encoding="utf-8") as fh:
         fh.write(today + "\n")
+    new_keys = [key for key, _ in applied + outcomes]
+    if new_keys:
+        with open(announced_path, "w", encoding="utf-8") as fh:
+            json.dump((announced + new_keys)[-MAX_ANNOUNCED:], fh)
     line = "autoheal: " + " | ".join(parts)
     context = (line + ". The user has seen this one line. If they ask about autoheal, point them to the "
                "command it names. Do not apply fixes or raise this unprompted.")

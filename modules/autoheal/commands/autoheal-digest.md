@@ -28,12 +28,12 @@ shows each fix with its evidence and diff and merges the one you accept.
 
 ## Shadow rollout section
 
-When `auto_apply_enabled` or `realtime_alerts_enabled` has run in `shadow`,
-the digest ends with a "Shadow rollout" section: decisions logged, agreed,
-disagreed (false positives and false negatives), pending, false positives on
-`check`-surface proposals, and whether the promotion bar is met (20 decided
-decisions, 90% agreement, zero `check` false positives). See the README's
-"Rollout: off, shadow, active".
+When `auto_apply_mode` or `realtime_alerts_enabled` has run in `shadow`,
+the digest ends with a "Shadow rollout" section: the auto-apply mode,
+decisions logged, agreed of decided, disagreed (false positives and false
+negatives), pending, would-apply fixes later measured harmful or reverted, and
+whether the promotion bar is met (10 decided decisions, 90% agreement, none
+harmful). See the README's "Earned auto-apply".
 
 ## When to invoke
 

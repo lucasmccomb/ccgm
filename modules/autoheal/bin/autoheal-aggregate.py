@@ -38,9 +38,24 @@ Bar and window come from config.json (CCGM_AUTOHEAL_CONFIG or
   {"window_days": 14, "min_occurrences": 5, "min_sessions": 2, "min_days": 2,
    "redraft_cooldown_days": 14}
 
-Usage: autoheal-aggregate.py [--date YYYY-MM-DD]   (default: today, UTC)
+Outcome measurement (#1099 Phase 4.1). Each run also measures every `applied`
+rule_insert row whose 14-day post-merge window has ended (the window is the 14
+days after the merge day, so a row is due on merge day + 15). post_rate is
+signature_rate() over that window; it is compared with the row's baseline_rate
+(the 14 days before the merge, written by /autoheal-review):
+  effective     post_rate <= 50% of baseline_rate
+  ineffective   above 50% and at most 100%
+  harmful       above baseline_rate, or a new signature (same tool and
+                non-empty cmd_head, another error_class, at least
+                NEW_SIGNATURE_MIN_OCCURRENCES failures in the post window and
+                none in the baseline window) appeared
+  unmeasurable  no baseline to compare against
+When either window has no counted calls, failure counts over the two equal
+windows are compared instead of rates. The row becomes `measured` with the
+outcome. Reverting a harmful fix is the auto-apply step's job, not this one's:
+the aggregator makes no git, gh or network call.
 
-Phase 4.1 imports signature_rate() to compare baseline and post-merge rates.
+Usage: autoheal-aggregate.py [--date YYYY-MM-DD]   (default: today, UTC)
 """
 
 from __future__ import annotations
@@ -54,6 +69,9 @@ import sys
 
 DEFAULTS = {"window_days": 14, "min_occurrences": 5, "min_sessions": 2, "min_days": 2,
             "redraft_cooldown_days": 14}
+OUTCOME_WINDOW_DAYS = 14
+EFFECTIVE_MAX_RATIO = 0.5
+NEW_SIGNATURE_MIN_OCCURRENCES = 2
 MAX_COOLDOWN_DAYS = 90
 INFRA_DROP_REASONS = ("validation_unavailable",)
 INFRA_STREAK_FOR_COOLDOWN = 3
@@ -220,8 +238,12 @@ def _suppression_over(row: dict, as_of: dt.date) -> bool:
 
 
 def _covered_ids(data_dir: str, as_of: dt.date) -> set:
+    """Signatures a ledger row still covers. A measured row the user asked to
+    redraft (`/autoheal-review redraft`) stops covering its signature, so the
+    next run drafts it again from the newer samples."""
     return {row["signature_id"] for row in _ledger_rows(data_dir)
-            if row.get("state") != "dropped" and not _suppression_over(row, as_of)}
+            if row.get("state") != "dropped" and not _suppression_over(row, as_of)
+            and not (row.get("state") == "measured" and row.get("redraft_requested_at"))}
 
 
 def drop_history(data_dir: str) -> dict:
@@ -388,6 +410,89 @@ def aggregate(data_dir: str, end: dt.date, cfg: dict) -> dict:
     }
 
 
+def _ledger_lib():
+    import importlib.util
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location("autoheal_ledger", os.path.join(here, "..", "lib", "ledger.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _signatures_in(data_dir: str, tool: str, head: str, start: dt.date, end: dt.date) -> dict:
+    """{signature: count} of tool_failure rows with this tool and cmd_head."""
+    counts: dict = {}
+    for d in _dates(start, end):
+        for row in _read_rows(data_dir, d):
+            if row.get("kind") != "tool_failure":
+                continue
+            sig = row_signature(row)
+            if sig[0] == tool and sig[1] == head and sig[2] != UNKNOWN:
+                counts[sig] = counts.get(sig, 0) + 1
+    return counts
+
+
+def classify(baseline, post) -> str:
+    """effective | ineffective | harmful | unmeasurable, from two comparable numbers."""
+    if isinstance(baseline, bool) or not isinstance(baseline, (int, float)) or baseline <= 0 or post is None:
+        return "unmeasurable"
+    if post <= baseline * EFFECTIVE_MAX_RATIO:
+        return "effective"
+    if post <= baseline:
+        return "ineffective"
+    return "harmful"
+
+
+def _merge_day(row: dict):
+    try:
+        return dt.datetime.fromisoformat(str(row.get("merged_at")).replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def measure_row(data_dir: str, row: dict, merged: dt.date) -> dict:
+    """The outcome fields for one due applied row. Reads events and counts only."""
+    start, end = merged + dt.timedelta(days=1), merged + dt.timedelta(days=OUTCOME_WINDOW_DAYS)
+    sig = (str(row.get("tool_name") or ""), str(row.get("cmd_head") or ""), str(row.get("error_class") or ""))
+    post = signature_rate(data_dir, sig, start, end)
+    baseline_rate = row.get("baseline_rate")
+    if isinstance(baseline_rate, (int, float)) and post["rate_per_100_calls"] is not None:
+        outcome, basis = classify(baseline_rate, post["rate_per_100_calls"]), "rate"
+    else:
+        outcome, basis = classify(row.get("baseline_occurrences"), post["occurrences"]), "occurrences"
+    new_sigs = []
+    if sig[1]:
+        before = _signatures_in(data_dir, sig[0], sig[1], merged - dt.timedelta(days=OUTCOME_WINDOW_DAYS), merged)
+        after = _signatures_in(data_dir, sig[0], sig[1], start, end)
+        new_sigs = sorted("|".join(s) for s, n in after.items()
+                          if s != sig and s not in before and n >= NEW_SIGNATURE_MIN_OCCURRENCES)
+    if new_sigs and outcome != "unmeasurable":
+        outcome = "harmful"
+    return {"outcome": outcome, "outcome_basis": basis,
+            "post_rate": post["rate_per_100_calls"], "post_occurrences": post["occurrences"],
+            "post_calls": post["calls"], "post_window": [start.isoformat(), end.isoformat()],
+            "new_signatures": new_sigs}
+
+
+def measure_outcomes(data_dir: str, today: dt.date) -> list:
+    """Move every due applied rule_insert row to `measured`; returns [(id, outcome)]."""
+    ledger = _ledger_lib()
+    path = os.path.join(data_dir, "proposals.jsonl")
+    done = []
+    for row in ledger.read_rows(path):
+        if row.get("state") != "applied" or row.get("kind") != "rule_insert":
+            continue
+        merged = _merge_day(row)
+        if merged is None or today < merged + dt.timedelta(days=OUTCOME_WINDOW_DAYS + 1):
+            continue
+        fields = measure_row(data_dir, row, merged)
+        if ledger.set_state(row["id"], "measured", path=path, from_states=("applied",),
+                            measured_at=today.isoformat(), **fields):
+            done.append((row["id"], fields["outcome"]))
+    return done
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--date", help="window end, YYYY-MM-DD (default: today UTC)")
@@ -411,6 +516,10 @@ def main(argv=None) -> int:
     qualifying = sum(1 for s in result["signatures"] if s["qualifies"])
     print(f"autoheal-aggregate: {len(result['signatures'])} signatures, "
           f"{qualifying} qualify -> {out_path}")
+    measured = measure_outcomes(data_dir, end)
+    if measured:
+        detail = ", ".join(f"{pid} {outcome}" for pid, outcome in measured)
+        print(f"autoheal-aggregate: measured {len(measured)} applied fix(es): {detail}")
     return 0
 
 

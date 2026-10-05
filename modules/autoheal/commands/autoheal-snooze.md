@@ -53,8 +53,8 @@ entries (those whose timestamp is in the future) in human-readable form.
 
 ## When NOT to invoke
 
-- To reject a proposal permanently — set `auto_apply_blocked: true` in
-  the proposal record instead (a future epic exposes this via a flag).
+- To reject a proposal — use Reject in `/autoheal-review`, which records
+  the reason and suppresses the signature for 90 days.
 - To delete the underlying event log — the events drive proposal
   generation, not the snoozed set. Editing events directly is forbidden
   (see the autoheal rule).

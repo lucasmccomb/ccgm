@@ -21,8 +21,18 @@ the questions; this script does every step that is plain computation:
         A failure after the PR exists leaves the PR open and the row `ready`
         with an `apply_error`; a retry merges the same PR.
         The source repo's own working tree is never touched.
+        --auto marks the row applied_by auto (the nightly auto-apply step).
   reject ID --reason TEXT    state rejected, signature suppressed for 90 days
   snooze ID [--days 14]      state snoozed until now + days
+  revert ID [--reason T] [--auto]
+        Undo an applied or measured rule_insert: a temporary worktree on
+        autoheal/revert-<id> from origin/main, `git revert` of the commit carrying
+        `Autoheal-Id: <id>` (the row's merge_sha when it is on origin/main),
+        commit with an Autoheal-Revert trailer, push, PR, checks, squash-merge,
+        delete the remote branch. The row becomes `reverted`. A failure keeps the
+        row's state and records revert_error.
+  redraft ID                 a measured row stops covering its signature, so the
+                             next nightly run drafts it again; the merged rule stays
 
 Prints one JSON object per call; exit 0 when "ok" is true, 1 otherwise.
 Tests put a fake `gh` first on PATH and point the source repo at a fixture.
@@ -381,9 +391,9 @@ def _baseline(row: dict, merged: dt.datetime) -> dict:
             "baseline_window": [start.isoformat(), end.isoformat()]}
 
 
-def _open_pr(root: str, row: dict, diff: str) -> tuple:
-    """Worktree -> branch -> commit -> push -> PR. Returns (pr_url, commit_sha, branch)."""
-    pid, branch = row["id"], f"autoheal/{row['id']}"
+def _open_pr(root: str, branch: str, prepare, subject: str, body: str) -> tuple:
+    """Worktree on `branch` from origin/main -> prepare(worktree) stages the change ->
+    commit -> push -> PR. Returns (pr_url, commit_sha). Apply and revert share it."""
     tmp = tempfile.mkdtemp(prefix="autoheal-apply-")
     wt = os.path.join(tmp, "wt")
     added = False
@@ -392,13 +402,8 @@ def _open_pr(root: str, row: dict, diff: str) -> tuple:
         if rc != 0:
             raise Failure(f"worktree add failed: {_tail(out)}")
         added = True
-        rc, out = run(["git", "apply", "-"], wt, stdin=diff)
-        if rc != 0:
-            raise Failure(f"apply_conflict: {_tail(out)}")
-        rc, out = run(["git", "add", "--", row["target"]], wt)
-        if rc != 0:
-            raise Failure(f"git add failed: {_tail(out)}")
-        message = _commit_subject(row) + "\n\n" + _body(row) + "\n"
+        prepare(wt)
+        message = subject + "\n\n" + body + "\n"
         rc, out = run(["git", "commit", "-q", "-F", "-"], wt, stdin=message)
         if rc != 0:
             raise Failure(f"commit failed: {_tail(out)}")
@@ -414,11 +419,11 @@ def _open_pr(root: str, row: dict, diff: str) -> tuple:
         if rc != 0:
             raise Failure(f"push failed: {_tail(out)}")
         rc, out = run(["gh", "pr", "create", "--base", "main", "--head", branch,
-                       "--title", _commit_subject(row), "--body", _body(row)], wt)
+                       "--title", subject, "--body", body], wt)
         url = out.strip().splitlines()[-1].strip() if rc == 0 and out.strip() else ""
         if not url.startswith("http"):
             raise Failure(f"gh pr create failed: {_tail(out)}")
-        return url, sha.strip(), branch
+        return url, sha.strip()
     finally:
         if added:
             run(["git", "-C", root, "worktree", "remove", "--force", wt], root, 60)
@@ -434,7 +439,7 @@ def _fail(led, row: dict, message: str, **fields) -> dict:
     return out
 
 
-def _apply_rule(led, row: dict, insert_text: str | None) -> dict:
+def _apply_rule(led, row: dict, insert_text: str | None, applied_by: str = "review") -> dict:
     root = source_repo()
     rc, out = run(["git", "-C", root, "fetch", "origin", "main"], root)
     if rc != 0:
@@ -459,8 +464,18 @@ def _apply_rule(led, row: dict, insert_text: str | None) -> dict:
                 led.set_state(row["id"], "dropped", drop_reason=reason, apply_error=message)
                 return {"ok": False, "id": row["id"], "state": "dropped", "error": message}
             return _fail(led, row, message)
+        branch = f"autoheal/{row['id']}"
+
+        def prepare(wt: str) -> None:
+            rc, out = run(["git", "apply", "-"], wt, stdin=row["diff"])
+            if rc != 0:
+                raise Failure(f"apply_conflict: {_tail(out)}")
+            rc, out = run(["git", "add", "--", row["target"]], wt)
+            if rc != 0:
+                raise Failure(f"git add failed: {_tail(out)}")
+
         try:
-            pr_url, commit_sha, branch = _open_pr(root, row, row["diff"])
+            pr_url, commit_sha = _open_pr(root, branch, prepare, _commit_subject(row), _body(row))
         except Failure as exc:
             return _fail(led, row, str(exc))
         extra.update({"branch": branch, "commit_sha": commit_sha})
@@ -474,7 +489,7 @@ def _apply_rule(led, row: dict, insert_text: str | None) -> dict:
     merged = _now()
     fields = {"applied_at": merged.isoformat(), "merged_at": merged.isoformat(), "pr_url": pr_url,
               "merge_sha": sha.strip().splitlines()[-1].strip() if sha.strip() else "",
-              "apply_error": None, **extra, **_baseline(row, merged)}
+              "apply_error": None, "applied_by": applied_by, **extra, **_baseline(row, merged)}
     led.set_state(row["id"], "applied", **fields)
     return {"ok": True, "id": row["id"], "state": "applied", "pr_url": pr_url,
             "merge_sha": fields["merge_sha"], "baseline_rate": fields["baseline_rate"]}
@@ -514,8 +529,113 @@ def cmd_apply(args) -> dict:
             raise Failure("an issue proposal has no text to edit")
         return _apply_issue(led, row)
     if kind == "rule_insert":
-        return _apply_rule(led, row, insert_text)
+        return _apply_rule(led, row, insert_text, "auto" if args.auto else "review")
     raise Failure(f"a {kind} proposal applies through lib/apply-proposal.py, not /autoheal-review")
+
+
+# ---------------------------------------------------------------------
+# revert and redraft (#1099 Phase 4.1, 4.2).
+# ---------------------------------------------------------------------
+
+REVERTIBLE_STATES = ("applied", "measured")
+
+
+def _merged_row(led, pid: str) -> dict:
+    """The newest applied or measured row for an id."""
+    rows = [r for r in led.read_rows() if r.get("id") == pid and r.get("state") in REVERTIBLE_STATES]
+    if not rows:
+        raise Failure(f"proposal {pid} has no applied or measured row to act on")
+    row = rows[-1]
+    if row.get("kind") != "rule_insert":
+        raise Failure(f"proposal {pid} is a {row.get('kind')} fix with no commit to revert")
+    return row
+
+
+def _trailer_commit(root: str, row: dict) -> str:
+    """The commit on origin/main that applied the row: its merge_sha when that is on
+    origin/main, else the newest commit carrying `Autoheal-Id: <id>`."""
+    sha = str(row.get("merge_sha") or "")
+    if re.fullmatch(r"[0-9a-f]{7,40}", sha):
+        rc, _ = run(["git", "-C", root, "merge-base", "--is-ancestor", sha, "origin/main"], root, 60)
+        if rc == 0:
+            return sha
+    pid = re.escape(str(row["id"]))
+    rc, out = run(["git", "-C", root, "log", "origin/main", "-1", "--format=%H",
+                   f"--grep=^Autoheal-Id: {pid}$"], root, 60)
+    found = out.strip()
+    if rc != 0 or not re.fullmatch(r"[0-9a-f]{40}", found):
+        raise Failure(f"no commit with Autoheal-Id: {row['id']} on origin/main")
+    return found
+
+
+def revert_row(led, row: dict, reason: str, by: str) -> dict:
+    """Open, check, squash-merge and clean up a `git revert` PR for an applied fix,
+    then mark the row reverted. On failure the row keeps its state and gets a
+    revert_error (plus revert_pr_url once a PR exists, so a retry merges it)."""
+    pid, state = row["id"], row.get("state")
+
+    def failed(message: str, **fields) -> dict:
+        led.set_state(pid, state, from_states=(state,), revert_error=message, **fields)
+        out = {"ok": False, "id": pid, "state": state, "error": message}
+        out.update(fields)
+        return out
+
+    try:
+        root = source_repo()
+    except Failure as exc:
+        return failed(str(exc))
+    rc, out = run(["git", "-C", root, "fetch", "origin", "main"], root)
+    if rc != 0:
+        return failed(f"fetch failed: {_tail(out)}")
+    try:
+        sha = _trailer_commit(root, row)
+    except Failure as exc:
+        return failed(str(exc))
+    branch = f"autoheal/revert-{pid}"
+    subject = f"#auto: revert autoheal proposal {pid}"
+    body = f"This reverts commit {sha}.\n\n{reason}\n\nAutoheal-Revert: {pid}"
+    pr_url = row.get("revert_pr_url")
+    if not pr_url:
+        def prepare(wt: str) -> None:
+            rc, out = run(["git", "revert", "--no-commit", sha], wt)
+            if rc != 0:
+                raise Failure(f"revert_conflict: {_tail(out)}")
+
+        try:
+            pr_url, _ = _open_pr(root, branch, prepare, subject, body)
+        except Failure as exc:
+            return failed(str(exc))
+    try:
+        _wait_for_checks(pr_url, root)
+        _merge(pr_url, root, subject, body)
+    except Failure as exc:
+        return failed(str(exc), revert_pr_url=pr_url)
+    _delete_remote_branch(root, branch)
+    _, merged = run(["gh", "pr", "view", pr_url, "--json", "mergeCommit", "--jq", ".mergeCommit.oid"], root, 60)
+    fields = {"reverted_at": _now().isoformat(), "reverted_by": by, "revert_reason": reason,
+              "revert_pr_url": pr_url, "reverted_commit": sha, "revert_error": None,
+              "revert_merge_sha": merged.strip().splitlines()[-1].strip() if merged.strip() else ""}
+    led.set_state(pid, "reverted", from_states=(state,), **fields)
+    return {"ok": True, "id": pid, "state": "reverted", "revert_pr_url": pr_url, "reverted_commit": sha}
+
+
+def cmd_revert(args) -> dict:
+    led = _ledger()
+    row = _merged_row(led, args.id)
+    reason = args.reason or "Reverted by the user through /autoheal-review."
+    return revert_row(led, row, reason, "auto" if args.auto else "review")
+
+
+def cmd_redraft(args) -> dict:
+    """Stop a measured fix covering its signature, so the next nightly run drafts the
+    signature again from the newer samples. The merged rule stays in place."""
+    led = _ledger()
+    row = _merged_row(led, args.id)
+    if row.get("state") != "measured":
+        raise Failure(f"proposal {args.id} has not been measured yet; redraft is offered after the 14-day check")
+    now = _now().isoformat()
+    led.set_state(args.id, "measured", from_states=("measured",), redraft_requested_at=now)
+    return {"ok": True, "id": args.id, "state": "measured", "redraft_requested_at": now}
 
 
 def cmd_reject(args) -> dict:
@@ -548,7 +668,16 @@ def main(argv=None) -> int:
     p.add_argument("id")
     p.add_argument("--insert-file", default="")
     p.add_argument("--insert-text", default=None)
+    p.add_argument("--auto", action="store_true", help="record applied_by auto (the auto-apply step)")
     p.set_defaults(fn=cmd_apply)
+    p = sub.add_parser("revert")
+    p.add_argument("id")
+    p.add_argument("--reason", default="")
+    p.add_argument("--auto", action="store_true", help="record reverted_by auto (the auto-apply step)")
+    p.set_defaults(fn=cmd_revert)
+    p = sub.add_parser("redraft")
+    p.add_argument("id")
+    p.set_defaults(fn=cmd_redraft)
     p = sub.add_parser("reject")
     p.add_argument("id")
     p.add_argument("--reason", required=True)
