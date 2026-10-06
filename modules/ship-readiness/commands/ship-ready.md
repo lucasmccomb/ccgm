@@ -28,7 +28,7 @@ reports the last known result and a note on how to refresh it, not a live run.
 
 ## What the Dashboard Shows
 
-The dashboard has seven sections, always in this order. Skip a section if the
+The dashboard has these sections, always in this order. Skip a section if the
 underlying data is unavailable - note the reason inline rather than printing an
 empty block.
 
