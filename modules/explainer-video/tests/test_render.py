@@ -161,6 +161,10 @@ def probe(path, *args):
     return json.loads(out)
 
 
+def duration(path):
+    return float(probe(path, "-show_entries", "format=duration")["format"]["duration"])
+
+
 def test_two_scene_render_with_say(tmp_path):
     missing = render_prereqs_missing()
     if missing:
@@ -180,11 +184,8 @@ def test_two_scene_render_with_say(tmp_path):
     streams = probe(video, "-show_entries", "stream=codec_type")["streams"]
     assert sorted(s["codec_type"] for s in streams) == ["audio", "video"]
 
-    narration = sum(
-        float(probe(w, "-show_entries", "format=duration")["format"]["duration"])
-        for w in sorted((proj / "build").glob("*.wav"))
-    )
-    total = float(probe(video, "-show_entries", "format=duration")["format"]["duration"])
+    narration = sum(duration(w) for w in (proj / "build").glob("*.wav"))
+    total = duration(video)
     assert abs(total - narration) <= 0.10 * narration
 
     assert sorted(p.name for p in (proj / "frames").glob("*.png")) == ["flow.png", "intro.png"]
