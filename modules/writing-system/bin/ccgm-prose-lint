@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""ccgm-prose-lint: check prose against the STE-lite limits in writing-system.
+
+  ccgm-prose-lint [FILE|-] [--json] [--strict]
+
+Reads FILE, or stdin when FILE is "-" or absent. Prints one finding per line:
+  FILE:LINE: level: rule: message
+--json prints {"findings": [...], "stats": {...}} instead.
+--strict exits 1 when any error-level finding exists. Warnings never fail.
+Exit codes: 0 ok, 1 strict failure, 2 unreadable input.
+"""
+import argparse
+import json
+import sys
+from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent / "lib"))
+
+import prose_lint  # noqa: E402
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="STE-lite prose linter")
+    ap.add_argument("file", nargs="?", default="-")
+    ap.add_argument("--json", action="store_true", help="emit findings and stats as JSON")
+    ap.add_argument("--strict", action="store_true", help="exit 1 on any error-level finding")
+    args = ap.parse_args(argv)
+
+    try:
+        text = sys.stdin.read() if args.file == "-" else Path(args.file).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"ccgm-prose-lint: cannot read {args.file}: {e}", file=sys.stderr)
+        return 2
+
+    findings = prose_lint.lint(text)
+    if args.json:
+        print(json.dumps({
+            "findings": [f.as_dict() for f in findings],
+            "stats": prose_lint.stats(text),
+        }, indent=2))
+    else:
+        name = "<stdin>" if args.file == "-" else args.file
+        for f in findings:
+            print(f"{name}:{f.line}: {f.level}: {f.rule}: {f.message}")
+    if args.strict and any(f.level == "error" for f in findings):
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

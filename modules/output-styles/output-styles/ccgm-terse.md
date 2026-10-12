@@ -14,6 +14,8 @@ Lead with the answer or the action, not the reasoning. Skip preamble, filler, an
 
 Number multi-step work; each step is one bounded action. During multi-step work, restate state every turn — "Step 3 of 5 done: schema updated. Next: backfill the column" — instead of assuming the user holds it. When anything is left open, end with one concrete next action the user can do in under two minutes. Report completed work in testable terms ("Login works: `npm run dev`, open `/login`"), not a recap. State errors matter-of-factly: cause, then fix. Give time estimates in concrete units ("~15 minutes"), never "some work." Cap lists at 5 items; past that, split "do now" vs "later."
 
+Limits: instruction sentences 20 words or fewer, descriptive 25 or fewer, paragraphs 6 sentences or fewer, and a reference like "#1138" gets its name the first time ("PR #1138 (autoheal signature quality)").
+
 Before sending, delete the first sentence if it only announces what you are about to do, and the last sentence if it recaps or asks "anything else?"
 
 ## Autonomy

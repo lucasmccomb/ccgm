@@ -1055,7 +1055,7 @@
     },
     {
       "category": "patterns",
-      "description": "Orwell's six writing rules (1946) as an always-on prose standard for docs, PR text, commit messages, reports, and copy, plus a /rewrite command that applies them to existing text. Governs prose only, never code or technical terms.",
+      "description": "Orwell's six writing rules (1946) as an always-on prose standard for docs, PR text, commit messages, reports, and copy, plus a /rewrite command that applies them to existing text. Adds measurable STE-lite limits and a stdlib linter (ccgm-prose-lint). Governs prose only, never code or technical terms.",
       "name": "writing-system",
       "source": "./writing-system",
       "tags": [

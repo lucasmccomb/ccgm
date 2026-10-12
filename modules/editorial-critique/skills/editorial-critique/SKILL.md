@@ -25,6 +25,10 @@ If `$ARGUMENTS` contains a file path, use it. Otherwise find the most recently m
 
 Read the full file content. Strip frontmatter (everything between the opening and closing `---`) before sending to agents - they should critique the prose, not the metadata.
 
+### Step 1b: Deterministic Pass
+
+If `"${CCGM_BIN:-$HOME/.claude/bin}/ccgm-prose-lint"` exists, run it on the file (`--json`) before the lenses and keep its findings (sentence and paragraph limits, noun clusters, two-action steps, bare references) for the report. If the file does not exist, print "ccgm-prose-lint not installed; skipping the deterministic pass" and go on.
+
 ### Step 2: Run Parallel Editorial Passes
 
 Launch **8 agents in parallel** (single message, all `subagent_type: "Explore"`). Do **NOT** use `run_in_background: true` - the agents must run in the foreground so the system waits for all 8 to complete before returning results. Launching all 8 in a single message ensures they execute concurrently while still blocking until all finish.
