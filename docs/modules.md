@@ -218,6 +218,8 @@ Essential slash commands for daily development workflow.
 
 **Installs**: 5 command files
 
+**Prose gates**: `/ghi` and the `pr-description` skill run `ccgm-prose-lint --strict` on the prose before it goes out and report `Prose check: exit <code>, <N> errors`. `pr-description` also adds a Mermaid `### How it fits` diagram when the diff changes control or data flow across 3 or more files, and records the decision on a `Diagram:` line.
+
 | Command | Description |
 |---------|-------------|
 | `/commit` | Stage all changes and commit with conventional format |
@@ -237,6 +239,8 @@ See [Commands Reference](commands.md) for detailed usage of each command.
 Additional slash commands for codebase audits, visual verification, guided walkthroughs, rule promotion, safety-hook state management, and session-state checkpoints.
 
 **Installs**: 8 command files + audit skill (21 packs, deterministic tool spine, schemas, reference docs)
+
+**Report page**: `/audit` ends each mode by rendering the report with `ccgm-md-page` (or the Artifact tool) and printing `Page: <path>`.
 
 | Command | Description |
 |---------|-------------|
@@ -260,6 +264,8 @@ See [Commands Reference](commands.md) for detailed usage of each command.
 Research tools for naming products, companies, or projects.
 
 **Installs**: 2 command files
+
+**Report page**: `/brand` ends with a rendered page of the naming report and a `Page: <path>` line.
 
 | Command | Description |
 |---------|-------------|
@@ -311,6 +317,8 @@ Comprehensive documentation audit and update command.
 Deep editorial review of long-form writing.
 
 **Installs**: 1 skill file
+
+**Linter first**: the skill runs `ccgm-prose-lint` when installed and prints a note and continues when it is not.
 
 | Command | Description |
 |---------|-------------|
@@ -392,6 +400,8 @@ Multi-channel research using parallel agents.
 
 **Installs**: 1 command file
 
+**Report page**: `/research` ends with a rendered page of the report and a `Page: <path>` line.
+
 | Command | Description |
 |---------|-------------|
 | `/research` | Parallel multi-channel research with WebSearch, WebFetch, GitHub, and Reddit |
@@ -453,6 +463,8 @@ Unified code-review orchestrator that composes scope-drift, learnings, and tiere
 Multi-query semantic research using the Exa MCP server.
 
 **Installs**: `commands/deepresearch.md`
+
+**Report page**: `/deepresearch` ends with a rendered page of `research.md` and a `Page: <path>` line.
 
 **What it does**: `/deepresearch` generates diverse queries from your topic, fans them out via parallel Exa MCP tool calls, and synthesizes a structured `research.md` from full page contents. Requires the Exa MCP server registered via `claude mcp add` and an Exa API key.
 
@@ -605,6 +617,8 @@ Multi-clone architecture for running multiple Claude agents in parallel on the s
 
 **Installs**: `rules/multi-agent.md`, `multi-agent-system.md` (reference doc), `commands/mawf.md`, `commands/workspace-setup.md`, `commands/handoff.md`, `lib/handoff.py`, `port-registry.json`
 
+**Prose gate**: `/handoff` lints the document (never the verbatim kickoff prompt) with `ccgm-prose-lint --strict` and ends with a `Prose check:` line.
+
 **What it does**: Enables parallel development with multiple Claude Code instances:
 
 - **Clone organization**: Two models supported - workspace model (`{repo}-workspaces/{repo}-wX/{repo}-wX-cY/`) and flat model (`{repo}-repos/{repo}-N/`)
@@ -627,7 +641,9 @@ Commands installed:
 
 Deep research, planning, and execution framework for complex projects.
 
-**Installs**: 5 command files + 2 lib files + `bin/ccgm-etp-receipts`
+**Installs**: 5 command files + 2 lib files + `bin/ccgm-etp-receipts`, `bin/xplan-depgraph`
+
+**Epic graph**: `xplan-depgraph PLAN.md [--check] [--status E1=done,...]` generates the wave graph from each epic's Wave and Dependencies fields. `--check` exits 1 on an unknown ref, duplicate epic number, cycle, or a dependency on the same or a later wave. `/xplan` runs it before presenting, `/etp` runs it in pre-flight and in the final report, and `/xplan-status` prints its output. Call it as `test -x "$HOME/.claude/bin/xplan-depgraph"`, then `"$HOME/.claude/bin/xplan-depgraph" /abs/plan.md --check`, as two separate commands (the form advisor mode allows). The web review page renders markdown through pinned `marked` and `DOMPurify`.
 
 **What it does**: An interactive, human-in-the-loop planning framework:
 
@@ -868,6 +884,8 @@ Nightly, cost-capped service that mines session transcripts for cross-session fa
 
 **Installs**: `skills/dreaming/SKILL.md`; 7 bin scripts (`dream-analyze.sh`, `dream-digest.sh`, `dream-daily.sh`, `dream-reconcile.sh`, `dream-eval.sh`, `dream-install.sh`, `dream-scorecard.sh`); 5 commands (`/dream`, `/dream-digest`, `/dream-review`, `/dream-apply`, `/dream-scorecard`); lib files for the transcript miner, map/reduce analyzer, optimistic integration engine, apply path, auto-memory reconciliation, weekly observability scorecard, evidence-bundle and proposal JSON schemas, prompt templates, and LaunchAgent/cron templates; 9 eval seed tasks plus fixtures under `eval/tasks/`.
 
+**Report page**: `/dream-scorecard` ends with a chart (Artifact tool) or a `ccgm-md-page` page of the weekly scorecard.
+
 **What it does**: The deterministic transcript miner (`discover()`/`mine()`/`cluster()`/`budget()` plus a schema-drift canary) turns session transcripts into a bounded, redacted (secrets + PII) evidence bundle, re-deriving each transcript's owning learnings-store slug from its own `cwd` field rather than a directory-name heuristic. The map-reduce analyzer (`dream_analyze.py`, direct Anthropic API over `curl` -- no nested agent runtime) turns that evidence into per-change proposals against the `self-improving` learnings store, written to `~/.claude/dreaming/proposals/{date}.jsonl` and rendered as a digest (`/dream-digest`). The optimistic integration engine (`run_optimistic_integrate`) is the primary write path: it auto-integrates eligible proposals with per-op-kind postures (verify integrates immediately; add/supersede land under a 24h dwell window before injection; evictions quarantine), bounded by per-run blast caps, batch-anomaly detection, and a windowed self-healing circuit breaker. An opt-in composite eligibility gate (`lib/eligibility.py`, default off, `add`/`supersede` only) can decide those two op-kinds' admission by a deterministic no-LLM waterfall -- static floor, non-compensatory origin gate, then a four-signal composite score (`confidence`/`prevalence`/`recency`/`novelty`) re-derived from the transcripts and live store at apply time -- with a read-only `eligibility-dry-run` CLI to preview a day before opting in; evictions and `verify` are untouched. `/dream-review` inspects auto-integrated + dwelling rows and vetoes/reverts them post-hoc; `/dream-apply` is the manual override (and the only path while integration is off). A nightly `launchd` LaunchAgent (`dream-install.sh`) chains breaker-check -> analyze -> eval-refresh -> optimistic-integrate -> expire-pending -> recurrence -> digest -> reconcile -> scorecard -> retention, then writes `state/health.json`; optimistic integration is default OFF (`optimistic_integration.enabled` takes `off`, `shadow` or `active`; shadow logs each would-integrate decision without writing) and eval-gated. A read-only reconciliation report (`reconcile_automemory.py`) compares Claude Code's own harness auto-memory (`~/.claude/projects/*/memory/`) against the learnings store and writes import-candidate/contradiction findings to `digests/{date}.reconcile.md`, never writing to auto-memory itself. The memory eval harness (`eval/`) runs a weekly regression smoke by default (4 tasks x baseline/treatment x 3 runs, deterministic graders, about $1.50; `--full` keeps the 9-task, three-arm, judged suite) including one end-to-end task exercising the analyzer's own mined output; `dream-eval.sh --gate` is open unless the smoke shows a supported regression, and the optimistic engine must find it open. A read-only weekly observability scorecard (`/dream-scorecard`, `lib/scorecard.py`) aggregates captured / injected / reused / applied counts plus store health from the on-disk signals (learnings store, injection telemetry, proposals), so the read path's value is reviewable at a glance without touching the store.
 
 **Dependencies**: hooks, self-improving, session-history
@@ -915,6 +933,8 @@ One hostile lens against a plan or any entity, with automatic plan incorporation
 Delegation-only session posture for expensive orchestrator models (Fable/Opus), mechanically enforced.
 
 **Installs**: `commands/advisor.md`, `rules/advisor-mode.md`, `hooks/advisor-guard.py`, `hooks/advisor-posture.py`, `hooks/advisor-session-start.py`, `hooks/advisor-session-end.py`, hook registrations
+
+**Output-ladder CLIs**: the guard allows `ccgm-prose-lint`, `xplan-depgraph`, `ccgm-output-metrics`, and `ccgm-md-page` by exact installed path, and only as the whole command (no chaining, pipes, or substitution). `ccgm-md-page` also needs absolute literal paths and an `.html` output inside an allowed write root. Once the mode is on, any unexpected error in the guard denies the call (exit 2) instead of exiting 1, which Claude Code treats as non-blocking.
 
 **What it does**: State is one flag file per session, `~/.claude/advisor-mode/<session_id>`, keyed by the `session_id` every hook input carries — one session's mode never binds another's. `advisor-session-start.py` creates the flag at startup, resume, and clear, so every session begins in the mode (opt out with `CCGM_ADVISOR_AUTO=false` in the environment or `~/.claude/.ccgm.env`; compaction never re-enables a mode the session turned off), and sweeps flags whose session is gone; `advisor-session-end.py` removes the flag when the session ends. `/advisor` (bare = toggle; explicit `on|off|status` accepted) acts on the current session only, and `status` lists every session currently in the mode. The posture itself: the main agent writes four-field specs, dispatches cheaper implementer agents (worktree isolation), personally reviews spec compliance then code quality, triages findings, delegates fixes (three-round lead checkpoint; optional native runs have their own tighter bounds and no automatic extensions), and merges — it never implements. While this session's flag exists, `advisor-guard.py` hard-blocks (exit 2, survives bypass mode) the main agent's file edits outside its work-product paths (`~/.claude/`, scratchpads, `~/code/plans/`, `~/code/docs/`, worktrees, plan-mode files) and any Bash beyond read-only inspection plus orchestration verbs (read-only git, branch/worktree/pull lifecycle, `gh` PR/issue/run/label management including merge). Subagent tool calls pass untouched (their hook input carries `agent_id`), so delegated workers are unaffected, and `advisor-posture.py` re-injects the posture each turn so the model delegates instead of fighting denials. Plan- or issue-shaped work is routed to `/etp`, which already runs this loop at full ceremony. Escape hatches: `/advisor off` and a one-off `ADVISOR_DIRECT=1`.
 
@@ -987,6 +1007,8 @@ Cross-platform session historian agent for surfacing institutional knowledge fro
 Structured session shutdown via `/sds`.
 
 **Installs**: `commands/sds.md`, `lib/sds-broadcast.sh`
+
+**Prose gate**: `/sds` lints the handoff it writes (never the kickoff prompt) with `ccgm-prose-lint --strict` and ends with a `Prose check:` line.
 
 **What it does**: `/sds` runs an autonomous end-of-session wrap-up sweep — commits dirty work, updates referenced issues, runs `/reflect`, writes a handoff via `handoff.py`, broadcasts a session-ended event to sibling clones, then terminates the Claude Code session (`kill -TERM $PPID`). Bookend to `/startup`. Composes existing primitives rather than duplicating them.
 
@@ -1141,7 +1163,9 @@ Seven documented anti-patterns extracted from real mistakes.
 
 Formatting rules for user-facing output, starting with copy-pasteable content.
 
-**Installs**: `rules/copy-paste-output.md`
+**Installs**: `rules/copy-paste-output.md`, `rules/output-medium.md`, `skills/output-medium/`, `commands/explain.md`, `bin/ccgm-md-page`, `bin/ccgm-output-metrics`, `lib/comprehension-patterns.json`
+
+**Output ladder**: `rules/output-medium.md` and `skills/output-medium/` tell agents to pick the lowest medium that carries the content: prose, then a diagram (ASCII or Mermaid), then a page, then video. `/explain <topic> [as prose|diagram|page|video]` applies it on request and ends with a `Check:` line. `ccgm-md-page IN.md [-o OUT.html]` renders markdown to one HTML page (pinned `marked`, `DOMPurify`, and `mermaid` with SRI; source shown offline; never opens the page). Call it as `test -x "$HOME/.claude/bin/ccgm-md-page"`, then `"$HOME/.claude/bin/ccgm-md-page" /abs/in.md -o /abs/out.html`, as two separate commands (the form advisor mode allows). `ccgm-output-metrics [--since ISO] [--until ISO] [--project=SLUG] [--json]` is read-only and measures operator-facing output from session transcripts: sentences over limit, final-message length, medium use, and how often the operator asked what the agent meant. It prints to stdout and writes nothing.
 
 **What it does**: When output is meant to be copy-pasted somewhere else (emails, texts, social posts, bios, form answers, prompts for other tools, config snippets), Claude delivers it in a fenced code block containing exactly the text that should land at the destination - never a blockquote, which renders as a vertical line in the terminal and copies dirty. Commentary stays outside the block; plain text by default, markdown source only when the destination renders markdown.
 
@@ -1153,7 +1177,9 @@ Formatting rules for user-facing output, starting with copy-pasteable content.
 
 Orwell's six writing rules (1946) as the always-on prose standard, plus `/rewrite` to apply them to existing text.
 
-**Installs**: `rules/writing-system.md`, `commands/rewrite.md`
+**Installs**: `rules/writing-system.md`, `commands/rewrite.md`, `bin/ccgm-prose-lint`, `lib/prose_lint.py`
+
+**STE-lite limits**: the rule adds measurable limits (instruction sentence 20 words, description sentence 25, paragraph 6 sentences, one action per step), so readability is a pass/fail check instead of a word list. `ccgm-prose-lint [FILE|-] [--json] [--strict]` checks sentence length, paragraph length, and `diagram-width` (a line over 100 characters in a fenced block of box-drawing characters), and warns on two-action steps; `--strict` exits 1 on any error. Call it as `test -x "$HOME/.claude/bin/ccgm-prose-lint"`, then `"$HOME/.claude/bin/ccgm-prose-lint" --strict /abs/file.md`, as two separate commands (the form advisor mode allows). `/rewrite --ste` rewrites to full Simplified Technical English. CI runs the module tests in the output-ladder step of `.github/workflows/test.yml`. The noun-cluster and bare-reference checks were removed after a precision audit; their rule lines remain as guidance.
 
 **What it does**: Replaces one-word bans ("no delve", "no em dashes") with a writing system. The rule loads in every session and governs prose - docs, READMEs, PR descriptions, commit messages, issue comments, session reports, chat responses, marketing copy - never code, identifiers, or technical terms whose plain-word swap would change the meaning. It adds two workflow subsections: commit/PR prose (plain words, no achievement language, one-read test) and session reports (plain sentences, what changed / what failed / what comes next; no emoji checkmarks, no "Successfully"). `/rewrite [file] [mode:landing] [--apply]` lists every violation (stale phrase, long word with its short replacement, cuttable word, passive construction, jargon), then rewrites, keeping every fact, number, and name unchanged; `mode:landing` adds the swap test for marketing copy. `/editorial-critique` remains the deep multi-lens review; both judge against the same six rules.
 
