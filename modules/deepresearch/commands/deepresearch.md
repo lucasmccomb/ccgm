@@ -180,7 +180,13 @@ Official/Academic first, then Industry/News, then Blogs/Community.}
 
 ## Phase 5: Report
 
-After writing `research.md`, report to the user:
+After writing `research.md`:
+
+<!-- ccgm:section report-page-step -->
+**Report page step.** After the report markdown file is written, render it as a page. If the harness Artifact tool is available, load the `artifact-design` skill, follow its publish guidance, and print the link. Otherwise run `"${CCGM_BIN:-$HOME/.claude/bin}/ccgm-md-page" <report.md>` and print the path it returns. If that file does not exist, print `ccgm-md-page not installed; the report is at <path>` and continue. Never open the page. The terminal summary stays.
+<!-- /ccgm:section report-page-step -->
+
+Then report to the user:
 - Output path
 - Executive Summary (2-3 sentences)
 - Key Insights list (numbered)

@@ -424,6 +424,12 @@ If NOT called from xplan (no `--plan-dir`), append after Sources:
 
 After writing research.md:
 
+<!-- ccgm:section report-page-step -->
+**Report page step.** After the report markdown file is written, render it as a page. If the harness Artifact tool is available, load the `artifact-design` skill, follow its publish guidance, and print the link. Otherwise run `"${CCGM_BIN:-$HOME/.claude/bin}/ccgm-md-page" <report.md>` and print the path it returns. If that file does not exist, print `ccgm-md-page not installed; the report is at <path>` and continue. Never open the page. The terminal summary stays.
+<!-- /ccgm:section report-page-step -->
+
+Then:
+
 1. Print the output path
 2. Summarize key insights (top 3-5) with their confidence levels
 3. Note any channels that failed or returned no data

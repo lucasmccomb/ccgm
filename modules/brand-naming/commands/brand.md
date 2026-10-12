@@ -439,7 +439,13 @@ Write the report to the output path. Structure:
 - All checks performed {date}. Domain availability is ephemeral - verify before purchasing.
 ```
 
-### 6.3 Present Results
+### 6.3 Render the Report Page
+
+<!-- ccgm:section report-page-step -->
+**Report page step.** After the report markdown file is written, render it as a page. If the harness Artifact tool is available, load the `artifact-design` skill, follow its publish guidance, and print the link. Otherwise run `"${CCGM_BIN:-$HOME/.claude/bin}/ccgm-md-page" <report.md>` and print the path it returns. If that file does not exist, print `ccgm-md-page not installed; the report is at <path>` and continue. Never open the page. The terminal summary stays.
+<!-- /ccgm:section report-page-step -->
+
+### 6.4 Present Results
 
 Display the Top 10 to the user with a brief explanation of each name's strengths.
 
