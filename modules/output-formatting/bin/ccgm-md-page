@@ -173,7 +173,7 @@ def json_for_script(text):
     """JSON safe inside <script type=application/json>: no raw '<', '>', '&'."""
     out = json.dumps(text, ensure_ascii=False)
     for ch, esc in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"),
-                    (" ", "\\u2028"), (" ", "\\u2029")):
+                    ("\u2028", "\\u2028"), ("\u2029", "\\u2029")):
         out = out.replace(ch, esc)
     return out
 
@@ -182,15 +182,14 @@ def build_page(markdown, title):
     scripts = [script_tag(MARKED), script_tag(DOMPURIFY)]
     if MERMAID_BLOCK.search(markdown):
         scripts.append(script_tag(MERMAID))
-    page = PAGE
-    # Substitute __JSON__ and __NOSCRIPT__ last-but-safe: use single pass via lambdas.
+    # One regex pass, so a placeholder inside the markdown is never re-expanded.
     values = {
         "__TITLE__": html.escape(title, quote=True),
         "__NOSCRIPT__": html.escape(markdown, quote=True),
         "__JSON__": json_for_script(markdown),
         "__SCRIPTS__": "\n".join(scripts),
     }
-    return re.sub("|".join(values), lambda m: values[m.group(0)], page)
+    return re.sub("|".join(values), lambda m: values[m.group(0)], PAGE)
 
 
 def main(argv=None):
