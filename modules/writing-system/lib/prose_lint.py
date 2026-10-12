@@ -54,9 +54,9 @@ review merge push pull apply revert wait ask tell follow define declare import e
 launch kill skip save load begin finish split join pick treat try change increase decrease
 restrict explain describe include exclude prefer compare inspect resolve retry convert
 extract parse validate provide supply assign configure enable disable grant revoke approve
-reject accept handle extend reduce compute measure calculate generate render ignore use
-make put get turn bring write cite quote paste upload download sign pin unpin cancel clear
-confirm dispatch delegate delete append prepend insert trigger fetch track wrap
+reject accept handle extend reduce compute measure calculate generate render ignore
+make put get turn bring cite quote paste upload download sign pin unpin cancel clear
+dispatch delegate append prepend insert trigger fetch track wrap
 """.split())
 
 # Words that are also common nouns: an instruction only when a determiner,
@@ -74,13 +74,13 @@ to with on in into from up out off at by for of as over under back if when
 
 _FUNCTION_WORDS = set("""
 a an the this that these those some any each every all both no not nor and or but so yet
-if then else when while where which who whom whose what why how than as of in on at by for
+if else when while where which who whom whose what why how than as of in on at by for
 with without from to into onto over under about after before between through during
 against among within across per via is are was were be been being am do does did done
 have has had having will would shall should can could may might must it its they them
 their we us our you your he she his her him i me my there here also only just even still
 very more most less least much many few such own same other another too then now once
-again already never always often sometimes usually instead rather not
+again already never always often sometimes usually instead rather
 """.split())
 
 _COMMON_ACRONYMS = set("""
@@ -218,7 +218,7 @@ def _is_instruction(sentence):
 # --- analysis ----------------------------------------------------------------
 
 def _analyze(text):
-    """Return (paragraphs, findings, counters). Paragraph = (line, [sentences])."""
+    """Return (paragraphs, findings). Paragraph = (line, [sentences])."""
     findings = []
     paragraphs = []
     seen_refs = set()
@@ -251,9 +251,14 @@ def _analyze(text):
     return paragraphs, findings
 
 
+_VERB_ALTERNATION = "|".join(sorted(re.escape(v) for v in _VERBS if "'" not in v))
+_TWO_ACTIONS = re.compile(
+    rf"\b(?:and|then)\s+(?:then\s+)?(?:{_VERB_ALTERNATION})\b|,\s*then\b|;", re.I
+)
+
+
 def _two_actions(line, sentence):
-    verbs = "|".join(sorted(re.escape(v) for v in _VERBS if "'" not in v))
-    if re.search(rf"\b(?:and|then)\s+(?:then\s+)?(?:{verbs})\b|,\s*then\b|;", sentence, re.I):
+    if _TWO_ACTIONS.search(sentence):
         return [Finding(line, "warning", "two-actions",
                         "step holds more than one action; split it", sentence)]
     return []
@@ -269,9 +274,7 @@ def _bare_references(line, sentence, seen):
     found = []
     for m in _REF.finditer(sentence):
         ref = m.group(0)
-        if re.fullmatch(r"[A-Z0-9]+", ref) and not re.search(r"\d", ref) and ref in _COMMON_ACRONYMS:
-            continue
-        if re.fullmatch(r"[A-Z]+S?", ref) and ref in _COMMON_ACRONYMS:
+        if ref.isalpha() and ref in _COMMON_ACRONYMS:
             continue
         key = re.sub(r"\s+", " ", ref).lower()
         first = key not in seen
