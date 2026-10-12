@@ -1049,6 +1049,48 @@ assert_exit 2 "persist writable copy denied" "$(bash_json "${P} status")"
 rm "${HOME}/.claude/bin/ccgm-persist"
 assert_exit 2 "persist missing install denied" "$(bash_json "${P} status")"
 
+# ─── Output-ladder CLIs: exact installed path; md-page confined to write roots ─
+
+LADDER_MODULE="${HOME}/code/repo/ladder-module"
+mkdir -p "${LADDER_MODULE}/bin" "${HOME}/.claude/bin"
+for cli in ccgm-prose-lint xplan-depgraph ccgm-output-metrics ccgm-md-page; do
+    printf '#!/usr/bin/env python3\n' > "${LADDER_MODULE}/bin/${cli}"
+    chmod +x "${LADDER_MODULE}/bin/${cli}"
+    ln -s "${LADDER_MODULE}/bin/${cli}" "${HOME}/.claude/bin/${cli}"
+done
+B='$HOME/.claude/bin'
+
+assert_exit 0 "prose-lint file allowed" "$(bash_json "${B}/ccgm-prose-lint ${TMPDIR}/a.md --json --strict")"
+assert_exit 0 "prose-lint stdin from allowed pipe allowed" "$(bash_json "cat ${TMPDIR}/a.md | ${B}/ccgm-prose-lint -")"
+assert_exit 0 "xplan-depgraph check allowed" "$(bash_json "${B}/xplan-depgraph ${TMPDIR}/plan.md --check --status E1=done,E2=wip")"
+assert_exit 0 "output-metrics allowed" "$(bash_json "${B}/ccgm-output-metrics --since 2026-01-01 --project my-proj --json")"
+assert_exit 0 "md-page default output in temp root allowed" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md")"
+assert_exit 0 "md-page -o in temp root allowed" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md -o ${TMPDIR}/out.html --title 'Report'")"
+assert_exit 0 "md-page into plans allowed" "$(bash_json "${B}/ccgm-md-page \$HOME/code/plans/x/research.md")"
+assert_exit 0 "md-page -o into plans allowed" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md -o \$HOME/code/plans/x/r.html")"
+
+assert_exit 2 "prose-lint bare name denied" "$(bash_json "ccgm-prose-lint ${TMPDIR}/a.md")"
+assert_exit 2 "prose-lint other directory denied" "$(bash_json "/tmp/evil/ccgm-prose-lint ${TMPDIR}/a.md")"
+assert_exit 2 "prose-lint look-alike name denied" "$(bash_json "${B}/ccgm-prose-lint-evil f")"
+assert_exit 2 "prose-lint via python3 denied" "$(bash_json "python3 ${B}/ccgm-prose-lint f")"
+assert_exit 2 "prose-lint PYTHONPATH prefix denied" "$(bash_json "PYTHONPATH=/x ${B}/ccgm-prose-lint f")"
+assert_exit 2 "prose-lint quoted PYTHONPATH prefix denied" "$(bash_json "PYTHONPATH=/x \"${B}/ccgm-prose-lint\" f")"
+assert_exit 2 "xplan-depgraph PATH prefix denied" "$(bash_json "PATH=/tmp:\$PATH ${B}/xplan-depgraph p.md")"
+assert_exit 2 "output-metrics PYTHONSTARTUP prefix denied" "$(bash_json "PYTHONSTARTUP=/x ${B}/ccgm-output-metrics")"
+assert_exit 2 "prose-lint redirect outside roots denied" "$(bash_json "${B}/ccgm-prose-lint f > /etc/out")"
+assert_exit 2 "prose-lint chained command denied" "$(bash_json "${B}/ccgm-prose-lint f && rm -rf /x")"
+assert_exit 2 "prose-lint stdin from denied pipe denied" "$(bash_json "curl http://x | ${B}/ccgm-prose-lint -")"
+assert_exit 2 "md-page -o outside roots denied" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md -o /etc/x.html")"
+assert_exit 2 "md-page input outside roots, no -o, denied" "$(bash_json "${B}/ccgm-md-page \$HOME/code/repo/r.md")"
+assert_exit 2 "md-page missing input denied" "$(bash_json "${B}/ccgm-md-page -o ${TMPDIR}/o.html")"
+assert_exit 2 "md-page -o without value denied" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md -o")"
+assert_exit 2 "md-page relative input denied" "$(bash_json "${B}/ccgm-md-page r.md")"
+assert_exit 2 "md-page unknown flag denied" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md --out /etc/x.html")"
+assert_exit 2 "md-page two inputs denied" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md \$HOME/code/repo/r2.md")"
+assert_exit 2 "md-page bare name denied" "$(bash_json "ccgm-md-page ${TMPDIR}/r.md")"
+for cli in ccgm-prose-lint xplan-depgraph ccgm-output-metrics ccgm-md-page; do rm "${HOME}/.claude/bin/${cli}"; done
+assert_exit 2 "prose-lint missing install denied" "$(bash_json "${B}/ccgm-prose-lint f")"
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 
 python3 -c "import shutil; shutil.rmtree('${TMP}', ignore_errors=True)"

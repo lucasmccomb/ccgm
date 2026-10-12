@@ -122,6 +122,7 @@ import re
 import shutil
 import sys
 import tempfile
+from pathlib import PurePosixPath
 
 SESSION_ID_ENV = "CLAUDE_CODE_SESSION_ID"
 
@@ -1314,6 +1315,27 @@ PERSIST_OPTIONS = {"start": {"--task", "--criteria", "--max"}, "status": set(), 
 PERSIST_SESSION_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 
+def installed_cli_trusted(words, name):
+    """True when words[0] is exactly the installed ~/.claude/bin/<name>.
+
+    Trusted by full path only, and only while the script and the interpreter
+    its shebang resolves are not main-agent-writable and no Python-steering
+    variable is set. `words` are raw (a command-local assignment is then the
+    first word and fails the path match).
+    """
+    if any(w.unresolved for w in words):
+        return False
+    script = os.path.expanduser(os.path.expandvars(words[0].text))
+    expected = os.path.join(os.path.expanduser("~"), ".claude", "bin", name)
+    if script != expected or not os.path.isfile(script) or not os.access(script, os.X_OK):
+        return False
+    python = shutil.which("python3")
+    if not python or path_allowed(os.path.realpath(python)) or path_allowed(os.path.realpath(script)):
+        return False
+    return not any(os.environ.get(v) for v in
+                   ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE", "PYTHONINSPECT", "PYTHONSTARTUP"))
+
+
 def persist_segment_allowed(words):
     """Permit only the installed `ccgm-persist` CLI, in its exact grammar.
 
@@ -1324,17 +1346,7 @@ def persist_segment_allowed(words):
     same trust check the review policy gets. Grammar:
     ccgm-persist [--session ID] start|status|done|cancel [that verb's flags].
     """
-    if any(w.unresolved for w in words):
-        return False
-    script = os.path.expanduser(os.path.expandvars(words[0].text))
-    expected = os.path.join(os.path.expanduser("~"), ".claude", "bin", "ccgm-persist")
-    if script != expected or not os.path.isfile(script) or not os.access(script, os.X_OK):
-        return False
-    python = shutil.which("python3")
-    if not python or path_allowed(os.path.realpath(python)) or path_allowed(os.path.realpath(script)):
-        return False
-    if any(os.environ.get(name) for name in
-           ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE", "PYTHONINSPECT", "PYTHONSTARTUP")):
+    if not installed_cli_trusted(words, "ccgm-persist"):
         return False
     args = [w.text for w in words[1:]]
     if args[:1] == ["--session"]:
@@ -1365,6 +1377,51 @@ def persist_segment_allowed(words):
     return args[0] != "start" or "--task" in seen
 
 
+LADDER_READ_ONLY_CLIS = ("ccgm-prose-lint", "xplan-depgraph", "ccgm-output-metrics")
+
+
+def ladder_segment_allowed(words, name):
+    """Permit the installed output-ladder CLIs by exact path.
+
+    ccgm-prose-lint, xplan-depgraph and ccgm-output-metrics only read and
+    print, so any arguments pass (argument_blocker already ran on the
+    segment; a redirect is checked by the redirect scan). ccgm-md-page
+    writes one file: OUT from `-o OUT`, else IN with its suffix replaced by
+    `.html`. That path must pass path_allowed, the same write-root check
+    redirects use. Relative paths are denied (the cwd is unknowable here).
+    ccgm-md-page IN [-o OUT] [--title T].
+    """
+    if not installed_cli_trusted(words, name):
+        return False
+    if name != "ccgm-md-page":
+        return True
+    args = [w.text for w in words[1:]]
+    source = out = None
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in ("-o", "--title"):
+            index += 1
+            if index >= len(args) or not args[index]:
+                return False
+            if arg == "-o":
+                if out is not None:
+                    return False
+                out = args[index]
+        elif arg.startswith("--title="):
+            pass
+        elif arg.startswith("-") or source is not None:
+            return False
+        else:
+            source = arg
+        index += 1
+    if not source:
+        return False
+    if out is None:
+        out = str(PurePosixPath(source).with_suffix(".html"))
+    return os.path.isabs(os.path.expanduser(source)) and os.path.isabs(os.path.expanduser(out)) and path_allowed(out)
+
+
 def bash_segment_allowed(segment, after_cd=False):
     words = segment_words(segment)
     if not words:
@@ -1377,6 +1434,9 @@ def bash_segment_allowed(segment, after_cd=False):
         # Raw words: a command-local PATH or PYTHON* assignment must not be
         # erased before the script's interpreter is trusted.
         return persist_segment_allowed([normalize_word(w) for w in split_words(strip_grouping(segment))])
+    if first in LADDER_READ_ONLY_CLIS or first == "ccgm-md-page":
+        return ladder_segment_allowed(
+            [normalize_word(w) for w in split_words(strip_grouping(segment))], first)
     if first == "python3":
         # Do not erase command-local PATH/HOME/PYTHONPATH assignments before
         # trusting the interpreter and imports. Other command grammars retain
