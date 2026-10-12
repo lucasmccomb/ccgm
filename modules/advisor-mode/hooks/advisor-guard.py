@@ -1314,7 +1314,42 @@ PERSIST_OPTIONS = {"start": {"--task", "--criteria", "--max"}, "status": set(), 
 PERSIST_SESSION_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 
-def persist_segment_allowed(words):
+def literal_path(raw, word):
+    """The absolute path `word` names, or None when it is not provably one.
+
+    `word` is quote-removed and has had `$HOME` resolved where bash would
+    resolve it (unquoted or double-quoted), so a `$HOME` still in its text was
+    single-quoted: literal, hence relative. A `~` expands only when it is the
+    first, unquoted character of the raw word; `'~'/x` is a relative path.
+    """
+    text = word.text
+    if raw.startswith("~/") and text.startswith("~/"):
+        return os.path.expanduser("~") + text[1:]
+    return text if text.startswith("/") else None
+
+
+def installed_cli_trusted(raw_words, words, name):
+    """True when words[0] is exactly the installed ~/.claude/bin/<name>.
+
+    Trusted by full path only, and only while the script and the interpreter
+    its shebang resolves are not main-agent-writable and no Python-steering
+    variable is set. The words are raw (a command-local assignment is then the
+    first word and fails the path match).
+    """
+    if any(w.unresolved for w in words):
+        return False
+    script = literal_path(raw_words[0], words[0])
+    expected = os.path.join(os.path.expanduser("~"), ".claude", "bin", name)
+    if script != expected or not os.path.isfile(script) or not os.access(script, os.X_OK):
+        return False
+    python = shutil.which("python3")
+    if not python or path_allowed(os.path.realpath(python)) or path_allowed(os.path.realpath(script)):
+        return False
+    return not any(os.environ.get(v) for v in
+                   ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE", "PYTHONINSPECT", "PYTHONSTARTUP"))
+
+
+def persist_segment_allowed(raw_words, words):
     """Permit only the installed `ccgm-persist` CLI, in its exact grammar.
 
     The persist module's CLI writes only ~/.claude/persist/<session_id>.json
@@ -1324,17 +1359,7 @@ def persist_segment_allowed(words):
     same trust check the review policy gets. Grammar:
     ccgm-persist [--session ID] start|status|done|cancel [that verb's flags].
     """
-    if any(w.unresolved for w in words):
-        return False
-    script = os.path.expanduser(os.path.expandvars(words[0].text))
-    expected = os.path.join(os.path.expanduser("~"), ".claude", "bin", "ccgm-persist")
-    if script != expected or not os.path.isfile(script) or not os.access(script, os.X_OK):
-        return False
-    python = shutil.which("python3")
-    if not python or path_allowed(os.path.realpath(python)) or path_allowed(os.path.realpath(script)):
-        return False
-    if any(os.environ.get(name) for name in
-           ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE", "PYTHONINSPECT", "PYTHONSTARTUP")):
+    if not installed_cli_trusted(raw_words, words, "ccgm-persist"):
         return False
     args = [w.text for w in words[1:]]
     if args[:1] == ["--session"]:
@@ -1365,7 +1390,57 @@ def persist_segment_allowed(words):
     return args[0] != "start" or "--task" in seen
 
 
-def bash_segment_allowed(segment, after_cd=False):
+LADDER_READ_ONLY_CLIS = ("ccgm-prose-lint", "xplan-depgraph", "ccgm-output-metrics")
+
+
+def ladder_segment_allowed(raw_words, words, name):
+    """Permit the installed output-ladder CLIs by exact path.
+
+    ccgm-prose-lint, xplan-depgraph and ccgm-output-metrics only read and
+    print, so any arguments pass (argument_blocker already ran on the
+    segment; a redirect is checked by the redirect scan). ccgm-md-page
+    writes one file: OUT from `-o OUT`, else IN with its suffix replaced by
+    `.html`. That path must end in .html and pass path_allowed, the same write-root check
+    redirects use. Relative paths are denied (the cwd is unknowable here).
+    ccgm-md-page IN [-o OUT] [--title T].
+    """
+    if not installed_cli_trusted(raw_words, words, name):
+        return False
+    if name != "ccgm-md-page":
+        return True
+    pairs = list(zip(raw_words[1:], words[1:]))
+    source = out = None
+    index = 0
+    while index < len(pairs):
+        arg = pairs[index][1].text
+        if arg in ("-o", "--title"):
+            index += 1
+            if index >= len(pairs) or not pairs[index][1].text:
+                return False
+            if arg == "-o":
+                if out is not None:
+                    return False
+                out = literal_path(*pairs[index])
+                if out is None:
+                    return False
+        elif arg.startswith("--title="):
+            pass
+        elif arg.startswith("-") or source is not None:
+            return False
+        else:
+            source = literal_path(*pairs[index])
+            if source is None:
+                return False
+        index += 1
+    if not source:
+        return False
+    if out is None:
+        out = os.path.splitext(source)[0] + ".html"
+    # md-page writes an HTML document; any other suffix is a clobber, not a page.
+    return out.lower().endswith(".html") and path_allowed(out)
+
+
+def bash_segment_allowed(segment, after_cd=False, alone=False):
     words = segment_words(segment)
     if not words:
         return True
@@ -1373,16 +1448,24 @@ def bash_segment_allowed(segment, after_cd=False):
     args = [w.text for w in words[1:]]
     if argument_blocker(segment) is not None:
         return False
-    if first == "ccgm-persist":
+    if first == "ccgm-persist" or first in LADDER_READ_ONLY_CLIS or first == "ccgm-md-page":
         # Raw words: a command-local PATH or PYTHON* assignment must not be
-        # erased before the script's interpreter is trusted.
-        return persist_segment_allowed([normalize_word(w) for w in split_words(strip_grouping(segment))])
+        # erased before the script's interpreter is trusted. A trusted CLI is
+        # allowed only as the whole command: an earlier segment could have
+        # changed PATH or HOME, which the trust check just read.
+        raw_words = split_words(strip_grouping(segment))
+        words_raw = [normalize_word(w) for w in raw_words]
+        if not alone or not raw_words:
+            return False
+        if first == "ccgm-persist":
+            return persist_segment_allowed(raw_words, words_raw)
+        return ladder_segment_allowed(raw_words, words_raw, first)
     if first == "python3":
         # Do not erase command-local PATH/HOME/PYTHONPATH assignments before
         # trusting the interpreter and imports. Other command grammars retain
         # their existing prefix handling.
         policy_words = [normalize_word(w) for w in split_words(strip_grouping(segment))]
-        if review_policy_segment_allowed(policy_words, after_cd):
+        if alone and review_policy_segment_allowed(policy_words, after_cd):
             return True
     if first == "sed":
         # -i in any form: bare, with attached suffix (-i.bak), inside a
@@ -1552,7 +1635,8 @@ def check_command(command, depth=0):
                 "orchestrator's work-product paths." % target.text)
     after_cd = False
     for segment in segments:
-        if not bash_segment_allowed(segment, after_cd):
+        if not bash_segment_allowed(
+                segment, after_cd, alone=depth == 0 and len(segments) == 1 and not spans):
             reason = argument_blocker(segment)
             if reason is not None:
                 return reason
@@ -1628,13 +1712,19 @@ def main():
     tool_input = data.get("tool_input") or {}
     if not isinstance(tool_input, dict):
         sys.exit(0)
-    if tool in FILE_TOOLS:
-        check_file_tool(tool, tool_input)
-    elif tool == "Bash":
-        command = tool_input.get("command")
-        if command and isinstance(command, str):
-            check_bash(command)  # non-string command: fail open like any
-            # other malformed shape — never an uncaught traceback
+    # Advisor mode is on for this session. A hook that crashes exits 1, which
+    # Claude Code treats as non-blocking, so any unexpected error here denies.
+    try:
+        if tool in FILE_TOOLS:
+            check_file_tool(tool, tool_input)
+        elif tool == "Bash":
+            command = tool_input.get("command")
+            if command and isinstance(command, str):
+                check_bash(command)  # non-string command: fail open like any
+                # other malformed shape — never an uncaught traceback
+    except Exception as error:
+        hard_block("advisor mode: guard error (%s); the call is denied. %s"
+                   % (type(error).__name__, RECIPE))
     sys.exit(0)
 
 
