@@ -31,9 +31,23 @@ A good handoff is one a fresh agent can read in under 2 minutes and act on withi
 5. **Gotchas** — Anti-patterns you discovered, surprises, things that look right but aren't. The "if I forgot to tell you this, you'd waste an hour" section.
 6. **Blockers** — What's stopping forward progress and what would unblock it. `(none)` if nothing.
 
+## Prose check
+
+Check the handoff document before writing it.
+
+<!-- ccgm:section prose-lint-gate -->
+**Prose check.** Before publishing, run these steps as separate commands:
+
+1. Write the document's prose (no code blocks, no Mermaid block) to a temp file in the session scratchpad or temp directory.
+2. Run `test -x "$HOME/.claude/bin/ccgm-prose-lint"` as its own command. If it exits non-zero, print `ccgm-prose-lint not installed; skipping the prose check` and continue.
+3. Otherwise run `"$HOME/.claude/bin/ccgm-prose-lint" --strict <temp file>` as its own command. Exit 1 means a sentence or paragraph is over the limit: fix it and run again until it exits 0. Warnings do not fail the run; fix the ones that are cheap to fix.
+<!-- /ccgm:section prose-lint-gate -->
+
+The check covers the handoff document only, never the kickoff prompt: the helper prints the kickoff prompt verbatim and it stays unedited.
+
 ## Implementation
 
-Gather the six sections, then invoke the helper. Prefer the `--body` heredoc form for multi-line content (file lists, numbered next steps with sub-bullets):
+Gather the six sections, run the prose check, then invoke the helper. Prefer the `--body` heredoc form for multi-line content (file lists, numbered next steps with sub-bullets):
 
 ```bash
 python3 ~/.claude/lib/handoff.py write --body "$(cat <<'EOF'

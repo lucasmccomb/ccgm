@@ -113,6 +113,26 @@ If a section in the template does not apply to this PR (e.g., "Screenshots" for 
 | "Various improvements." | If you cannot name them, do not mention them. Delete the bullet. |
 | "Comprehensive error handling has been implemented..." | "Adds error handling to every API endpoint." State the change; drop the adjectives and the passive. |
 
+## Diagram: `### How it fits`
+
+Add a `### How it fits` section to the body when the diff changes how control or data moves across 3 or more files, or adds a hook, pipeline stage, or component. Otherwise add no diagram. Apply the trigger as written; do not decide first and justify later.
+
+The section holds one Mermaid `flowchart` with at most 12 nodes. GitHub renders it in the PR body. If `npx` exists, check the diagram before returning:
+
+```bash
+npx -y @mermaid-js/mermaid-cli -i x.mmd -o x.svg
+```
+
+Fix the diagram until the command exits 0. If `npx` does not exist, leave the diagram out. When a PR template exists, put the section under the template's closest "what changed" heading rather than adding a heading the template lacks.
+
+## Prose Check
+
+Before returning, run these steps as separate commands:
+
+1. Write the body's prose (no code blocks, no Mermaid block) to a temp file in the session scratchpad or temp directory.
+2. Run `test -x "$HOME/.claude/bin/ccgm-prose-lint"` as its own command. If it exits non-zero, print `ccgm-prose-lint not installed; skipping the prose check` and continue.
+3. Otherwise run `"$HOME/.claude/bin/ccgm-prose-lint" --strict <temp file>` as its own command. Exit 1 means a sentence or paragraph is over the limit: fix it and run again until it exits 0. Warnings do not fail the run; fix the ones that are cheap to fix.
+
 ## Output Format
 
 Return exactly this structure as the skill's output. The caller parses it.
@@ -131,6 +151,7 @@ Return exactly this structure as the skill's output. The caller parses it.
 - Files changed: {count}
 - Template used: {path} or "default"
 - Steering applied: {yes/no}; {one-line summary if yes}
+- Diagram: {fired/not fired}; {one line: which part of the trigger applied or why none did}
 ```
 
 Do NOT wrap in additional prose. Do NOT invoke `gh` commands with the result. Do NOT emit a "here's your PR body" preamble.
@@ -141,7 +162,7 @@ Do NOT wrap in additional prose. Do NOT invoke `gh` commands with the result. Do
 - Editing an existing PR (`gh pr edit`)
 - Commenting on the PR
 - Pushing the branch
-- Running verification (tests, lint, build)
+- Running verification (tests, lint, build). The one exception is the prose lint on the body and the diagram check, both above
 - Deciding whether the PR is mergeable
 
 The caller handles all of the above.
