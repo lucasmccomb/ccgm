@@ -19,8 +19,6 @@ MODULES = Path(__file__).resolve().parents[2]
 SCRIPT = MODULES / "output-formatting" / "bin" / "ccgm-output-metrics"
 PATTERNS = MODULES / "output-formatting" / "lib" / "comprehension-patterns.json"
 
-BASE_MINUTE = [0]
-
 
 def _ts(minute):
     return f"2026-10-01T{minute // 60:02d}:{minute % 60:02d}:00.000Z"
@@ -42,8 +40,8 @@ class Session:
         rec.setdefault("timestamp", _ts(self.minute))
         self.lines.append(rec)
 
-    def human(self, text, source="typed"):
-        self._add({"type": "user", "origin": {"kind": "human"}, "promptSource": source,
+    def human(self, text):
+        self._add({"type": "user", "origin": {"kind": "human"}, "promptSource": "typed",
                    "message": {"role": "user", "content": text}})
 
     def command(self, name):
@@ -65,9 +63,9 @@ class Session:
             rec["toolUseResult"] = {"questions": [], "answers": answers}
         self._add(rec)
 
-    def tool_use(self, name, tool_input=None, tool_id=None):
+    def tool_use(self, name, tool_input=None):
         self.n += 1
-        tool_id = tool_id or f"toolu_{self.n}"
+        tool_id = f"toolu_{self.n}"
         self._add({"type": "assistant", "message": {"model": self.model, "role": "assistant", "content": [
             {"type": "tool_use", "id": tool_id, "name": name, "input": tool_input or {}}]}})
         return tool_id
@@ -369,9 +367,7 @@ def test_subagent_transcripts_are_ignored(env):
 
 def test_missing_library_exits_2_and_names_it(env):
     (env["lib"] / "prose_lint.py").unlink()
-    r = subprocess.run([sys.executable, str(SCRIPT), "--json"], env=env["env"],
-                       capture_output=True, text=True)
-    assert r.returncode == 2
+    r = run(env, "--json", expect=2)
     assert "prose_lint" in r.stderr
     assert "writing-system" in r.stderr
 

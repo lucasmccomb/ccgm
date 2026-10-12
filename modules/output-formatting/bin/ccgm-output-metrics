@@ -406,9 +406,9 @@ def build_report(turns, pl, since, until, project, files):
 
 # --- output ------------------------------------------------------------------
 
-def _fmt_rate(label, r, unit="per 100 turns"):
+def _fmt_rate(label, r):
     flag = "  (insufficient data)" if r["insufficient_data"] else ""
-    return f"  {label}: {r['events']} events, {r['per_100_turns']} {unit}{flag}"
+    return f"  {label}: {r['events']} events, {r['per_100_turns']} per 100 turns{flag}"
 
 
 def render_group(name, g):
