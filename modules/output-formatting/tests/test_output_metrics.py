@@ -448,3 +448,46 @@ def test_ordinary_followups_do_not_match(env):
         s.text("More.")
     s.write()
     assert metrics(env)["overall"]["comprehension"]["events"] == 0
+
+
+def test_records_after_until_are_ignored(env):
+    d = project(env, "-proj-a")
+    s = Session(d)
+    s.human("first")                       # 00:01
+    s.text("Early.")                       # 00:02
+    s.minute = 3
+    s.text("Later text here now.")         # 00:04, after --until
+    s.human("what do you mean?")           # 00:05, after --until
+    s.text("Meaning.")
+    s.write()
+    m = metrics(env, "--until", "2026-10-01T00:03:30Z")
+    assert m["overall"]["turns"] == 1
+    assert m["overall"]["length"]["words_median"] == 1
+    assert m["overall"]["comprehension"]["events"] == 0
+
+
+def test_turn_with_only_post_until_text_has_no_final_message(env):
+    d = project(env, "-proj-a")
+    s = Session(d)
+    s.human("first")                       # 00:01
+    s.minute = 4
+    s.text("Too late.")                    # 00:05
+    s.write()
+    m = metrics(env, "--until", "2026-10-01T00:03:30Z")
+    assert m["overall"]["turns"] == 1
+    assert m["overall"]["final_messages"] == 0
+
+
+def test_files_scanned_counts_only_files_with_turns_in_window(env):
+    d = project(env, "-proj-a")
+    old = Session(d, name="old")
+    old.human("early")
+    old.text("One.")
+    old.write()
+    late = Session(d, name="late")
+    late.minute = 10
+    late.human("after the cutoff")
+    late.text("Two.")
+    late.write()
+    m = metrics(env, "--until", "2026-10-01T00:05:00Z")
+    assert m["files_scanned"] == 1

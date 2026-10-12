@@ -27,7 +27,9 @@ definitions:
                   A turn whose prompt is a slash command (<command-name> wrapper
                   or text starting with "/") is tagged slash: its output is
                   measured, but it never counts toward comprehension.
-  final message   The turn's last assistant text block.
+  final message   The turn's last assistant text block. Records stamped at or
+                  after --until are ignored, so a window stays fixed while
+                  sessions that began before the cutoff keep running.
   prose           prose_lint stats over final messages: sentences over limit,
                   p90 sentence length over all sentences, rule finding counts.
   length          Lines and words per final message (median, p90).
@@ -240,6 +242,8 @@ def scan_file(path, project, tm, patterns, since, until):
                 continue
             if not isinstance(obj, dict) or obj.get("isSidechain"):
                 continue
+            if until is not None and _at_or_after(obj.get("timestamp"), until):
+                continue  # written after the cutoff: not part of the measured window
             msg = obj.get("message") or {}
             content = msg.get("content")
             if obj.get("type") == "user":
@@ -282,6 +286,13 @@ def scan_file(path, project, tm, patterns, since, until):
                                     if isinstance(opt, dict) and opt.get("label"):
                                         labels.add(opt["label"])
     return [t for t in turns if _in_window(t["ts"], since, until)]
+
+
+def _at_or_after(ts, limit):
+    try:
+        return _parse_iso(ts) >= limit
+    except (ValueError, AttributeError):
+        return False
 
 
 def _in_window(ts, since, until):
@@ -465,8 +476,9 @@ def main(argv=None):
                 continue
             if since and os.path.getmtime(path) < since.timestamp():
                 continue
-            files += 1
-            turns.extend(scan_file(path, proj, tm, patterns, since, until))
+            found = scan_file(path, proj, tm, patterns, since, until)
+            files += 1 if found else 0  # only files with in-window turns, so the count is fixed
+            turns.extend(found)
 
     report = build_report(turns, pl, since, until, args.project, files)
     sys.stdout.write(json.dumps(report, indent=2) + "\n" if args.json else render_text(report))
