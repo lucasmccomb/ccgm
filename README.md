@@ -23,7 +23,7 @@ Modular configuration system for [Claude Code](https://docs.anthropic.com/en/doc
 
 ## What is CCGM?
 
-CCGM is a curated collection of 81 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
+CCGM is a curated collection of 82 configuration modules for Claude Code. Instead of hand-crafting rules, hooks, commands, and permissions from scratch, you pick modules and install them with a single command.
 
 Each module is self-contained with its own README, so you can also [copy individual files manually](#manual-installation) without the installer.
 
@@ -138,7 +138,7 @@ For a quick install with a preset:
 | **standard** | global-claude-md, autonomy, identity, git-workflow, hooks, branch-guard, ask-context, model-vetting, live-testing-guard, settings, commands-core, commands-utility, self-improving, output-formatting, writing-system, statusline | Most users |
 | **team** | global-claude-md, autonomy, git-workflow, hooks, branch-guard, ask-context, settings, commands-core, github-protocols, code-quality, systematic-debugging, verification, autoheal, output-formatting, writing-system, ce-review, pr-feedback, pr-review-toolkit, document-review, compound-knowledge, skill-authoring, subagent-patterns (+ deps) | Teams |
 | **cloud-agent** | 55 modules | Autonomous/headless agents |
-| **full** | 77 modules | Power users |
+| **full** | 78 modules | Power users |
 
 ### Other install options
 
@@ -213,6 +213,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **documentation** | commands | `/docupdate` | Comprehensive documentation audit: README accuracy, table of contents, onboarding flow, package lists, and module coverage against actual codebase state | - |
 | **dreaming** [BETA] | workflow |  `/dream`, `/dream-apply`, `/dream-digest`, `/dream-review`, `/dream-scorecard`, `/dreaming`  | Nightly, cost-capped transcript-mining pipeline: deterministic miner extracts redirections, resolved struggles, conclusions, rediscovered facts and abandoned work from session transcripts (hook friction is left to autoheal, and what the session already loads is prefiltered out), map-reduce analyzer (direct Anthropic API) proposes evidence-tagged `self-improving` learnings-store changes, digest via `/dream-digest`, read-only reconciliation report against Claude Code's own auto-memory, a memory eval harness (with/without-memory A/B, four-bucket outcome classification), and a weekly observability scorecard (`/dream-scorecard`). No human queue: opt-in `optimistic_integration` (default off, activated via `memory-setup.sh`, never a hand JSON edit) integrates or discards every proposal per-op-kind (`/dream-apply` is the manual override and the only path while it is off) — immediate for `verify`, a 24h dwell window for `add`/`supersede`/`contradict`/`deprecate` — bounded by per-slug blast caps, a batch-anomaly check, a windowed circuit breaker, and an opt-in composite eligibility gate (add/supersede only, default off) that scores admission on four transcript-verified signals, with post-hoc review + rollback via `/dream-review` and `ccgm-learnings-sync revert`. Bring-up: `bash start.sh --add dreaming` then `bash modules/dreaming/bin/dream-install.sh` | hooks, self-improving, session-history |
 | **editorial-critique** | commands | `/editorial-critique` | 8-pass editorial review of long-form writing: prose craft, AI-tell detection, argument, conciseness, accuracy, structure, impact, grammar. Scored report with auto-fix | - |
+| **explainer-video** [BETA] | commands | `/explainer-video` | Turns a topic into a narrated, Manim-rendered .mp4, rendered headless: voice from ElevenLabs (when a key is set) or macOS say, one frame extracted per scene, and ffprobe checks for one video and one audio stream with duration within 10 percent of the narration. Opt-in rung 4 of the output ladder; full preset only | - |
 | **git-workflow** | core | - | Git rules: sync before history changes, rebase by default, post-merge cleanup, no AI attribution | - |
 | **git-worktrees** | workflow |  `/git-worktrees`, `/worktree-finish`, `/worktree-start`, `/worktree-sweep`  | Git worktrees as the default isolation for parallel sub-agent delegation on one machine, with a safe janitor (/worktree-sweep) that enforces teardown so worktrees never silently fill the disk | - |
 | **github-protocols** | workflow | - | Issue-first workflow, PR conventions, label taxonomy, code review standards | - |
@@ -367,7 +368,7 @@ The `docs/` directory contains comprehensive documentation:
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation walkthrough, first session, prerequisites |
 | [Install via Agent](docs/install-via-agent.md) | Per-preset paste-blocks and how to dry-run them safely |
-| [Module Catalog](docs/modules.md) | Detailed reference for all 81 modules |
+| [Module Catalog](docs/modules.md) | Detailed reference for all 82 modules |
 | [Commands Reference](docs/commands.md) | All 94 slash commands with usage examples |
 | [Hooks Reference](docs/hooks.md) | All 38 hooks explained - what they do and when they fire |
 | [Presets](docs/presets.md) | Preset breakdowns and recommendations |

@@ -1,0 +1,17 @@
+{
+  "title": "Two scene fixture",
+  "scenes": [
+    {
+      "id": "intro",
+      "scene": "Intro",
+      "narration": "A queue holds work until a worker is free.",
+      "description": "Title text, then a box labeled queue."
+    },
+    {
+      "id": "flow",
+      "scene": "Flow",
+      "narration": "The worker takes the oldest item and runs it.",
+      "description": "An arrow from the queue box to a worker box."
+    }
+  ]
+}
