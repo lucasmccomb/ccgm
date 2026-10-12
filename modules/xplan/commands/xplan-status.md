@@ -63,15 +63,15 @@ This outputs structured `=== SECTION ===` blocks: ISSUES, PRS, CLONES, TRACKING.
 
 ### Step 4: Present Dashboard
 
+Build the Wave Status block with `xplan-depgraph`, not by hand. First run `test -x "$HOME/.claude/bin/xplan-depgraph"` as its own command; non-zero: print "xplan-depgraph not installed; wave status skipped" and omit the block. From `progress.md` (and the gathered PRS and CLONES sections), list each epic's state as `E<N>=done` (merged), `E<N>=run` (agent active or PR open), or `E<N>=blocked`; leave pending epics out (they print as `todo`). Pass the pairs as `--status`. The tool prints one line per wave, each epic tagged `[state]` with its `←` dependencies. If it prints `no epics; skipped`, write "Wave Status: n/a (no epics)".
+
 ```
 Plan: {plan-name}
 Status: {IN PROGRESS / COMPLETE / INTERRUPTED}
 Progress: {N}/{total} epics complete
 
 Wave Status:
-  Wave 1: COMPLETE (3/3 epics merged)
-  Wave 2: IN PROGRESS (1/4 epics complete, 2 active, 1 pending)
-  Wave 3: PENDING
+  {output of: "$HOME/.claude/bin/xplan-depgraph" ~/code/plans/{plan-name}/plan.md --status E1=done,E2=run,...}
 
 Active Agents:
   {clone}: {branch} [status from CLONES section]

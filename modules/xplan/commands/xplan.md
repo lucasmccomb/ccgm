@@ -1260,7 +1260,8 @@ This section is what makes the Section 9.5 follow-up contract executable autonom
 ## 7. Execution Strategy
 ### 7.1 Wave Breakdown
 ### 7.2 Parallel Agent Allocation
-### 7.3 Dependency Graph (ASCII)
+### 7.3 Dependency Graph
+[Paste the output of `"$HOME/.claude/bin/xplan-depgraph" plan.md`. Do not draw it by hand.]
 ### 7.4 Integration Points
 ### 7.5 Verification Gates
 
@@ -1388,6 +1389,20 @@ The agent decides the triage itself using §1.4 — it does not stop to ask the 
 - [ ] All review findings addressed
 - [ ] README.md generated and merged
 ```
+
+**Dependency graph (generated, checked)**: after the Agent-Epics are written and before presenting the plan, run the checker on the draft `plan.md`:
+
+```bash
+test -x "$HOME/.claude/bin/xplan-depgraph"
+```
+
+Non-zero: print "xplan-depgraph not installed; graph check skipped" and skip the rest of this step. Otherwise run, as its own command:
+
+```bash
+"$HOME/.claude/bin/xplan-depgraph" ~/code/plans/{concept-name}/plan.md --check
+```
+
+It reads each epic's `**Wave**` and `**Dependencies**` bullets and exits 1 on an unknown epic reference, a cycle, or a dependency on the same or a later wave. Fix the epics (not the tool output) until it exits 0, then paste its stdout, one line per wave, into §7.3. A plan with no `### Epic` blocks prints `no epics; skipped`; leave §7.3 as that line.
 
 ### Phase 5.5: Scope Estimate
 
@@ -1697,7 +1712,7 @@ Structure the output in this exact order, as a single message (or a small number
 - Any scope decisions driven by research findings
 
 **5. Epic breakdown**
-- Wave structure (names only - full epic specs live in plan.md)
+- Wave structure: the output of `"$HOME/.claude/bin/xplan-depgraph" ~/code/plans/{concept-name}/plan.md` (the same text as plan §7.3; full epic specs live in plan.md)
 - Parallel allocation per wave
 - Total agent-epic count, total human-epic count
 - Inferred multi-agent setup (workspace / flat / single) and why

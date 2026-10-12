@@ -94,6 +94,7 @@ Both execute work, but they are not interchangeable. `/xplan-resume` resumes an 
 | `commands/etp.md` | command | Execute a plan or GitHub issue(s) end-to-end with adversarial PR review and follow-up completion (/etp) |
 | `lib/xplan-status-gather.sh` | lib | Helper script that gathers plan progress data for /xplan-status |
 | `lib/xplan-web-review.py` | lib | Local web server that renders plan.md in browser with section-level comment support for Phase 6 review |
+| `bin/xplan-depgraph` | script | Prints and checks the plan's epic graph from each epic's Wave and Dependencies bullets (`--check`, `--status`) |
 
 ## Dependencies
 
@@ -139,6 +140,8 @@ chmod +x ~/.claude/lib/xplan-web-review.py
 mkdir -p ~/.claude/bin
 cp bin/ccgm-etp-receipts ~/.claude/bin/ccgm-etp-receipts
 chmod +x ~/.claude/bin/ccgm-etp-receipts
+cp bin/xplan-depgraph ~/.claude/bin/xplan-depgraph
+chmod +x ~/.claude/bin/xplan-depgraph
 ```
 
 ### Plans Directory

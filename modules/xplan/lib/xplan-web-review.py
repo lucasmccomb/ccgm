@@ -21,15 +21,16 @@ Fallback signals (caller should use text walkthrough):
 
 Trust model:
   Server binds to 127.0.0.1 only. The rendered markdown (plan.md and siblings)
-  is content this same user wrote or that xplan wrote into their own plan dir.
-  It is NOT user-submitted content from an untrusted third party. The review
-  UI uses marked.parse on this trusted content; inline HTML in markdown will
-  render as HTML, same as any local markdown viewer. If a plan contains raw
-  HTML, that is by the plan author's intent (diagrams, tables, etc.). We do
-  escape text-derived values (section titles, toast messages) into DOM text
-  nodes / attributes rather than interpolating them into innerHTML templates.
+  is content this same user wrote or that xplan wrote into their own plan dir,
+  not content from an untrusted third party. The page still sanitizes it:
+  marked.parse output goes through DOMPurify.sanitize before it reaches the
+  DOM. Inline HTML in the markdown is kept (diagrams, tables, etc.); scripts
+  and event-handler attributes are stripped. We also escape text-derived
+  values (section titles, toast messages) into DOM text nodes / attributes
+  rather than interpolating them into innerHTML templates.
 
-No runtime dependencies beyond stdlib. HTML uses marked.js via CDN.
+No runtime dependencies beyond stdlib. The page loads marked and DOMPurify
+from cdnjs, pinned by version and Subresource Integrity hash.
 """
 
 from __future__ import annotations
@@ -90,7 +91,8 @@ INDEX_HTML = r"""<!doctype html>
 <meta charset="utf-8">
 <title>xplan review</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/18.0.13/lib/marked.umd.min.js" integrity="sha384-EDNybkEeN9yYwIqheQpxHmn7Xdh180RKiMROtjDRy+SVH8Sl0EqpmIPOolCUbdyE" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.15/purify.min.js" integrity="sha384-uUMu9JDY09vBzRf9SPcK2VgUj+W/70J6Soc+Dded5P474ElQ63iv9j5N3DE7Kp3N" crossorigin="anonymous"></script>
 <style>
   :root {
     --bg: #0e1116;
@@ -472,10 +474,9 @@ INDEX_HTML = r"""<!doctype html>
       const resp = await fetch(`/raw/${path}`);
       if (!resp.ok) throw new Error(`${resp.status}`);
       const md = await resp.text();
-      // Trust model note: plan.md and siblings are local trusted content this user
-      // (or xplan running as this user) wrote into ~/code/plans/{concept}/. Rendering
-      // inline HTML in markdown is expected behavior for a local markdown viewer.
-      contentEl.innerHTML = marked.parse(md);
+      // plan.md and siblings are local content, but sanitize anyway: inline HTML
+      // stays, scripts and event handlers are stripped.
+      contentEl.innerHTML = DOMPurify.sanitize(marked.parse(md));
       attachCommentButtons(path);
       statusEl.textContent = `Viewing ${path}`;
     } catch (e) {

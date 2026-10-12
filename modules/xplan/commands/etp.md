@@ -155,6 +155,7 @@ Group independent units into **waves** (parallel within a wave, sequential acros
 - **Single issue** → one wave of one. No wave machinery.
 - **Issue batch** → group issues that touch different files/areas into a parallel wave; serialize any that depend on each other (an issue that says "depends on #A", or two issues editing the same files). When independence is unclear, **serialize** - parallelism is an optimization, correctness is not.
 - **Plan** → use the plan's own waves/dependency graph; infer it from file overlap if the plan is a flat list.
+  - For an xplan-style plan, run `test -x "$HOME/.claude/bin/xplan-depgraph"` as its own command (non-zero: note "xplan-depgraph not installed; graph check skipped" and go on), then `"$HOME/.claude/bin/xplan-depgraph" <plan.md> --check` as its own command, in pre-flight (Phase 3). Print each error it reports as a warning and continue: the directive is notify-and-continue, so a graph error never stops the run. Where the plan's Wave and Dependencies bullets disagree, serialize the affected units. "no epics; skipped" means the plan is not epic-shaped; ignore it.
 
 ### 1.3 Identify the target repo, isolation, and ceremony level
 
@@ -427,6 +428,7 @@ Report what it reclaimed and anything it preserved (a preserved worktree means u
 - **Blocked**: each blocker, why, and the exact human action that unblocks it.
 - **Deferred**: out-of-scope follow-ups logged but intentionally not done.
 - **Live state**: the verification that the system actually runs end-to-end (where applicable).
+- **Graph** (plan runs with epics): the epic graph with each epic's end state, from `"$HOME/.claude/bin/xplan-depgraph" <plan.md> --status E1=done,E2=blocked,...` (same `test -x` guard first; skip the graph if not installed). Build the pairs from the progress file and receipts: `done` for a unit with a verified merge receipt, `blocked` for a blocker, `run` for a unit still open, and leave the rest out (they print as `todo`). Plan epics carry no issue numbers, so map each receipt to its epic through the progress file.
 
 ### 8.3 Finalize the run record
 
