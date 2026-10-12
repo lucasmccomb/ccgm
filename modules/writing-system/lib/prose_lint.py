@@ -268,10 +268,19 @@ def lint(text):
     return _analyze(text)[1]
 
 
+def _counts(paragraphs):
+    return [len(_words(s)) for _, group in paragraphs for s in group]
+
+
+def sentence_word_counts(text):
+    """Word count of each counted sentence, in document order (same set as stats())."""
+    return _counts(_analyze(text)[0])
+
+
 def stats(text):
     paragraphs, findings = _analyze(text)
     sentences = [s for _, group in paragraphs for s in group]
-    counts = [len(_words(s)) for s in sentences]
+    counts = _counts(paragraphs)
     instr = sum(1 for s in sentences if _is_instruction(s))
     by_rule = dict.fromkeys(RULES, 0)
     for f in findings:

@@ -314,10 +314,9 @@ def analyze_final(turn, pl):
     if page and len(prose_lines) < THIN_PAGE_PROSE_LINES:
         src = _source_lines(html, md)
         thin_page = src is None or src < THIN_SOURCE_LINES
-    sentences = [len(pl._words(s)) for _, group in pl._analyze(text)[0] for s in group]
     return {
         "stats": pl.stats(text),
-        "sentence_words": sentences,
+        "sentence_words": pl.sentence_word_counts(text),
         "lines": len(text.splitlines()),
         "words": len(text.split()),
         "ascii": len(ascii_boxes), "mermaid": len(mermaid),
