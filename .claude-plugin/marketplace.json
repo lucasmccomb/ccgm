@@ -486,6 +486,22 @@
       ]
     },
     {
+      "category": "commands",
+      "description": "Turns a topic into a narrated, Manim-rendered .mp4, rendered headless with deterministic checks (one video and one audio stream, duration within 10 percent of the narration, one frame per scene). Voice: ElevenLabs when a key is set, else macOS say. Opt-in rung 4 of the output ladder.",
+      "keywords": [
+        "status:beta"
+      ],
+      "name": "explainer-video",
+      "source": "./explainer-video",
+      "tags": [
+        "explainer",
+        "manim",
+        "narration",
+        "output",
+        "video"
+      ]
+    },
+    {
       "category": "core",
       "description": "Git workflow rules: sync before history changes, rebase by default, post-merge cleanup, PR template detection, no AI attribution in commits.",
       "name": "git-workflow",

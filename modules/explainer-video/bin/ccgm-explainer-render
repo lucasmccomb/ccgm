@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+"""ccgm-explainer-render: turn script.json + scenes.py into a narrated .mp4.
+
+Usage: ccgm-explainer-render DIR [--scenes ID[,ID...]]
+
+DIR holds:
+  script.json  {"title": str, "scenes": [{"id", "scene", "narration", "description"}]}
+               "id" names the build files and frame; "scene" is the Manim class.
+  scenes.py    Manim CE scenes. Each reads its length in seconds from the
+               SCENE_DURATION environment variable and holds until then.
+
+For each scene the tool synthesizes narration, measures it with ffprobe,
+renders the Manim class with that duration, muxes, and extracts one frame to
+DIR/frames/<id>.png. It then joins the scenes into DIR/explainer.mp4 and checks
+the result. With --scenes, only those scenes are rebuilt; the rest reuse the
+files in DIR/build/.
+
+Narration voice, first available: ElevenLabs (ELEVENLABS_API_KEY set and the
+text within ELEVENLABS_MAX_CHARS, default 5000), Kokoro (CCGM_KOKORO_VETTED=1,
+espeak-ng and uv installed), macOS `say -o FILE`. The tool prints which one.
+
+Headless: never previews a render, never plays audio, never opens a window.
+
+Exit codes: 0 done, 1 a stage or check failed (named on stderr), 2 bad input
+or a missing tool.
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+
+DEFAULT_MAX_CHARS = 5000
+TARGET_SECONDS = (60, 180)
+DURATION_TOLERANCE = 0.10
+ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+KOKORO_CODE = (
+    "import sys, numpy, soundfile\n"
+    "from kokoro import KPipeline\n"
+    "text, out = open(sys.argv[1]).read(), sys.argv[2]\n"
+    "chunks = [a for _, _, a in KPipeline(lang_code='a')(text, voice='af_heart')]\n"
+    "soundfile.write(out, numpy.concatenate(chunks), 24000)\n"
+)
+
+
+class RenderError(Exception):
+    def __init__(self, message, code=1):
+        super().__init__(message)
+        self.code = code
+
+
+# --- backend chain -----------------------------------------------------------
+
+
+def choose_backend(env, which, chars):
+    """Return (backend, note). `which` maps a tool name to a path or None."""
+    note = None
+    if env.get("ELEVENLABS_API_KEY"):
+        cap = int(env.get("ELEVENLABS_MAX_CHARS") or DEFAULT_MAX_CHARS)
+        if chars <= cap:
+            return "elevenlabs", None
+        note = (
+            f"narration is {chars} characters, above ELEVENLABS_MAX_CHARS={cap}; "
+            "using the local voice"
+        )
+    if env.get("CCGM_KOKORO_VETTED") == "1" and which("espeak-ng") and which("uv"):
+        return "kokoro", note
+    if which("say"):
+        return "say", note
+    raise RenderError(
+        "no narration backend: set ELEVENLABS_API_KEY, vet Kokoro "
+        "(CCGM_KOKORO_VETTED=1, needs espeak-ng), or run on macOS for `say`",
+        code=2,
+    )
+
+
+def synth_say(text, raw):
+    raw = raw.with_suffix(".aiff")
+    run(["say", "-o", str(raw), "-f", "-"], "narration (say)", input=text)
+    return raw
+
+
+def synth_elevenlabs(text, raw):
+    raw = raw.with_suffix(".mp3")
+    voice = os.environ.get("ELEVENLABS_VOICE_ID") or "21m00Tcm4TlvDq8ikWAM"
+    req = urllib.request.Request(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice}?output_format=mp3_44100_128",
+        data=json.dumps({"text": text, "model_id": "eleven_multilingual_v2"}).encode(),
+        headers={
+            "xi-api-key": os.environ["ELEVENLABS_API_KEY"],
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw.write_bytes(resp.read())
+    except OSError as e:
+        raise RenderError(f"narration (elevenlabs): {e}")
+    return raw
+
+
+def synth_kokoro(text, raw):
+    txt = raw.with_suffix(".txt")
+    txt.write_text(text)
+    raw = raw.with_suffix(".kokoro.wav")
+    run(
+        ["uv", "run", "--with", "kokoro", "--with", "soundfile", "python", "-I",
+         "-c", KOKORO_CODE, str(txt), str(raw)],
+        "narration (kokoro)",
+    )
+    return raw
+
+
+SYNTH = {"say": synth_say, "elevenlabs": synth_elevenlabs, "kokoro": synth_kokoro}
+
+
+# --- helpers -----------------------------------------------------------------
+
+
+def run(cmd, stage, **kw):
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    except OSError as e:
+        raise RenderError(f"{stage}: {e}")
+    if proc.returncode != 0:
+        tail = "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-15:])
+        raise RenderError(f"{stage} failed (exit {proc.returncode}):\n{tail}")
+    return proc
+
+
+def require_tools(which):
+    for tool in ("uv", "ffmpeg", "ffprobe"):
+        if not which(tool):
+            raise RenderError(f"missing required tool: {tool}", code=2)
+
+
+def probe(path, *args):
+    out = run(
+        ["ffprobe", "-v", "error", *args, "-of", "json", str(path)], f"ffprobe {path.name}"
+    ).stdout
+    return json.loads(out)
+
+
+def duration(path):
+    return float(probe(path, "-show_entries", "format=duration")["format"]["duration"])
+
+
+def load_script(proj):
+    path = proj / "script.json"
+    if not path.is_file() or not (proj / "scenes.py").is_file():
+        raise RenderError(f"{proj} needs script.json and scenes.py", code=2)
+    try:
+        scenes = json.loads(path.read_text())["scenes"]
+    except (ValueError, KeyError) as e:
+        raise RenderError(f"script.json unreadable: {e!r}", code=2)
+    if not scenes:
+        raise RenderError("script.json has no scenes", code=2)
+    seen = set()
+    for s in scenes:
+        for key in ("id", "scene", "narration"):
+            if not isinstance(s.get(key), str) or not s[key].strip():
+                raise RenderError(f"scene {s.get('id', '?')}: missing {key}", code=2)
+        if not ID_RE.match(s["id"]) or not ID_RE.match(s["scene"]) or s["id"] in seen:
+            raise RenderError(f"scene id/class invalid or repeated: {s['id']}", code=2)
+        seen.add(s["id"])
+    return scenes
+
+
+def lint_narration(texts, home=None):
+    """Run ccgm-prose-lint on the narration when installed; None when absent."""
+    linter = Path(home or Path.home()) / ".claude" / "bin" / "ccgm-prose-lint"
+    if not os.access(linter, os.X_OK):
+        return None
+    proc = subprocess.run(
+        [str(linter), "-"], input="\n\n".join(texts), capture_output=True, text=True, timeout=30
+    )
+    return (proc.stdout + proc.stderr).strip()
+
+
+# --- per-scene pipeline --------------------------------------------------------
+
+
+def synthesize(scene, backend, build):
+    raw = SYNTH[backend](scene["narration"], build / scene["id"])
+    wav = build / f"{scene['id']}.wav"
+    run(["ffmpeg", "-y", "-v", "error", "-i", str(raw), "-ar", "44100", "-ac", "1", str(wav)],
+        f"convert narration {scene['id']}")
+    return wav
+
+
+def render_scene(proj, scene, seconds, build):
+    media = build / "media" / scene["id"]
+    shutil.rmtree(media, ignore_errors=True)
+    env = {**os.environ, "SCENE_DURATION": f"{seconds:.3f}"}
+    run(
+        ["uv", "run", "--with", "manim", "manim", "-qm", "--disable_caching",
+         "--progress_bar", "none", "-v", "WARNING", "--media_dir", str(media),
+         "-o", scene["id"], "scenes.py", scene["scene"]],
+        f"manim render {scene['id']} (needs `brew install cairo pango` on macOS)",
+        cwd=proj, env=env,
+    )
+    found = sorted(media.rglob(f"{scene['id']}.mp4"))
+    if not found:
+        raise RenderError(f"manim render {scene['id']}: no output video under {media}")
+    return found[0]
+
+
+def mux_scene(video, wav, seconds, out):
+    run(
+        ["ffmpeg", "-y", "-v", "error", "-i", str(video), "-i", str(wav),
+         "-filter_complex", f"[0:v]tpad=stop_mode=clone:stop_duration={seconds:.3f}[v]",
+         "-map", "[v]", "-map", "1:a", "-t", f"{seconds:.3f}",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", "30",
+         "-c:a", "aac", "-ar", "44100", "-ac", "1", str(out)],
+        f"mux {out.stem}",
+    )
+
+
+def extract_frame(segment, seconds, out):
+    out.parent.mkdir(exist_ok=True)
+    run(["ffmpeg", "-y", "-v", "error", "-ss", f"{seconds * 0.8:.3f}", "-i", str(segment),
+         "-frames:v", "1", str(out)], f"frame {out.stem}")
+
+
+def concat(segments, build, out):
+    lst = build / "concat.txt"
+    lst.write_text("".join(f"file '{s.name}'\n" for s in segments))
+    run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", lst.name,
+         "-c", "copy", str(out.resolve())], "concat", cwd=build)
+
+
+def verify(video, narration_total):
+    streams = probe(video, "-show_entries", "stream=codec_type")["streams"]
+    counts = {k: sum(s["codec_type"] == k for s in streams) for k in ("video", "audio")}
+    if counts != {"video": 1, "audio": 1} or len(streams) != 2:
+        raise RenderError(f"check streams: want 1 video + 1 audio, got {counts}")
+    total = duration(video)
+    if abs(total - narration_total) > DURATION_TOLERANCE * narration_total:
+        raise RenderError(
+            f"check duration: video {total:.1f}s vs narration {narration_total:.1f}s "
+            f"(allowed +/-{DURATION_TOLERANCE:.0%})"
+        )
+    return total
+
+
+# --- main --------------------------------------------------------------------
+
+
+def render(proj, only):
+    require_tools(shutil.which)
+    scenes = load_script(proj)
+    ids = [s["id"] for s in scenes]
+    todo = [s for s in scenes if only is None or s["id"] in only]
+    unknown = set(only or ()) - set(ids)
+    if unknown or not todo:
+        raise RenderError(f"--scenes names no known scene: {sorted(unknown)}", code=2)
+
+    build = proj / "build"
+    build.mkdir(exist_ok=True)
+    for s in scenes:
+        if s not in todo and not (build / f"{s['id']}.mp4").is_file():
+            raise RenderError(f"--scenes needs a prior full render; {s['id']} has no build", code=2)
+
+    chars = sum(len(s["narration"]) for s in todo)
+    backend, note = choose_backend(os.environ, shutil.which, chars)
+    print(f"voice: {backend}")
+    if note:
+        print(f"note: {note}")
+    lint = lint_narration([s["narration"] for s in scenes])
+    if lint:
+        print(f"lint:\n{lint}")
+
+    for s in todo:
+        wav = synthesize(s, backend, build)
+        seconds = duration(wav)
+        print(f"scene {s['id']}: narration {seconds:.1f}s")
+        video = render_scene(proj, s, seconds, build)
+        seg = build / f"{s['id']}.mp4"
+        mux_scene(video, wav, seconds, seg)
+        extract_frame(seg, seconds, proj / "frames" / f"{s['id']}.png")
+
+    narration_total = sum(duration(build / f"{i}.wav") for i in ids)
+    if not TARGET_SECONDS[0] <= narration_total <= TARGET_SECONDS[1]:
+        print(f"note: narration is {narration_total:.0f}s; the target is "
+              f"{TARGET_SECONDS[0]}-{TARGET_SECONDS[1]}s")
+    out = proj / "explainer.mp4"
+    concat([build / f"{i}.mp4" for i in ids], build, out)
+    total = verify(out, narration_total)
+    print(f"checks: 1 video + 1 audio stream; {total:.1f}s vs {narration_total:.1f}s narration")
+    print(f"frames: {proj / 'frames'}")
+    print(f"video: {out}")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Render a narrated Manim explainer video.")
+    ap.add_argument("dir", type=Path)
+    ap.add_argument("--scenes", help="comma-separated scene ids to rebuild")
+    args = ap.parse_args(argv)
+    only = set(args.scenes.split(",")) if args.scenes else None
+    try:
+        render(args.dir.resolve(), only)
+    except RenderError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return e.code
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,15 @@
+{
+  "name": "explainer-video",
+  "displayName": "Explainer Video",
+  "description": "Turns a topic into a narrated, Manim-rendered .mp4, rendered headless with deterministic checks (one video and one audio stream, duration within 10 percent of the narration, one frame per scene). Voice: ElevenLabs when a key is set, else macOS say. Opt-in rung 4 of the output ladder.",
+  "category": "commands",
+  "status": "beta",
+  "scope": ["global"],
+  "dependencies": [],
+  "files": {
+    "skills/explainer-video/SKILL.md": { "target": "skills/explainer-video/SKILL.md", "type": "skill", "template": false },
+    "bin/ccgm-explainer-render": { "target": "bin/ccgm-explainer-render", "type": "script", "template": false }
+  },
+  "tags": ["video", "manim", "explainer", "narration", "output"],
+  "configPrompts": []
+}

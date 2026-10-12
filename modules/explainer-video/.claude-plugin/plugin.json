@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "author": {
+    "name": "CCGM"
+  },
+  "description": "Turns a topic into a narrated, Manim-rendered .mp4, rendered headless with deterministic checks (one video and one audio stream, duration within 10 percent of the narration, one frame per scene). Voice: ElevenLabs when a key is set, else macOS say. Opt-in rung 4 of the output ladder.",
+  "displayName": "Explainer Video",
+  "keywords": [
+    "explainer",
+    "manim",
+    "narration",
+    "output",
+    "video"
+  ],
+  "license": "MIT",
+  "name": "explainer-video"
+}

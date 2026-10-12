@@ -8,7 +8,7 @@ For user-facing documentation, see the [README](../README.md) and the rest of [`
 
 ## What CCGM Is
 
-CCGM is a modular configuration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Instead of hand-crafting rules, hooks, slash commands, and permissions from scratch, users pick from a catalog of 81 self-contained modules and install them with a single command. Each module packages one coherent capability — a behavioral discipline, a workflow command, an enforcement hook, an entire subsystem — with its own manifest, README, tests, and manual-install path.
+CCGM is a modular configuration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Instead of hand-crafting rules, hooks, slash commands, and permissions from scratch, users pick from a catalog of 82 self-contained modules and install them with a single command. Each module packages one coherent capability — a behavioral discipline, a workflow command, an enforcement hook, an entire subsystem — with its own manifest, README, tests, and manual-install path.
 
 At a higher level, CCGM is an answer to a question: **what does a fully-configured, safety-railed, self-improving AI coding environment look like when you treat the configuration itself as a serious software project?** It applies production engineering practice — issue-first workflow, CI, adversarial review, append-only data models, deterministic gates, incident postmortems — to the layer most people treat as dotfiles.
 
@@ -17,10 +17,10 @@ At a higher level, CCGM is an answer to a question: **what does a fully-configur
 | Fact | Value |
 |------|-------|
 | First commit | 2026-03-19 |
-| Modules | 81 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
+| Modules | 82 installable (5 categories: core, commands, workflow, patterns, tech-specific) |
 | Slash commands | 94 |
 | Hooks | 38 Python hooks across 11 Claude Code events |
-| Presets | 5 (minimal, standard 16 modules, team, cloud-agent 55, full 77) |
+| Presets | 5 (minimal, standard 16 modules, team, cloud-agent 55, full 78) |
 | Commits / issues | 430+ commits, 870+ issues and PRs in the first 4 months |
 | Base permission policy | 800+ allow entries, curated deny list, bypass-proof destructive-command blocks |
 | Audit engine | 21 audit packs over a deterministic tool spine + LLM triage |
@@ -379,7 +379,7 @@ CCGM's most distinctive property is that it is built *by* the environment it con
 
 ## Notable Engineering Highlights
 
-- Designed and shipped an 81-module configuration platform with dependency resolution, deep JSON settings merging, template expansion, manifest-tracked install/update/uninstall, and four distribution surfaces — in pure bash + jq with no runtime dependencies.
+- Designed and shipped an 82-module configuration platform with dependency resolution, deep JSON settings merging, template expansion, manifest-tracked install/update/uninstall, and four distribution surfaces — in pure bash + jq with no runtime dependencies.
 - Built a durable cross-session memory system on an append-only op-event log with read-time projection, confidence decay, conflict-free multi-writer git sync, computed rollback, three independent anti-poisoning layers, and a published adversarial security analysis — then held its automation behind an eval gate its own results hadn't yet passed.
 - Built two autonomous observe-analyze-propose loops (permission friction; session transcripts) that run nightly under cost caps with direct API calls, layered defenses (dwell windows, blast-radius caps, anomaly checks, self-healing circuit breakers), and human-gated apply paths.
 - Rebuilt a codebase auditor as a 21-pack engine over a deterministic multi-tool spine with schema-validated, fingerprinted findings, baseline/delta classification, and suppression/provenance workflows.
