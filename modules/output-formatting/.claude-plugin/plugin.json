@@ -3,7 +3,7 @@
   "author": {
     "name": "CCGM"
   },
-  "description": "Formatting rules for user-facing output: copy-pasteable content (drafts, messages, prompts, config snippets) is delivered in fenced code blocks, never blockquotes, so it pastes clean anywhere.",
+  "description": "Output formatting for text addressed to the operator: copy-pasteable content goes in fenced code blocks, and a medium ladder (prose, diagram, page, video) picks the lowest medium that carries the content. Ships /explain and ccgm-md-page, a markdown-to-HTML page renderer for installs without the Artifact tool.",
   "displayName": "Output Formatting",
   "hooks": {
     "SessionStart": [
@@ -20,8 +20,10 @@
   "keywords": [
     "communication",
     "copy-paste",
+    "diagrams",
     "formatting",
-    "output"
+    "output",
+    "pages"
   ],
   "license": "MIT",
   "name": "output-formatting"

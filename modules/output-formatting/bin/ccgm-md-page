@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+"""ccgm-md-page: turn a markdown file into one self-contained HTML page.
+
+Usage: ccgm-md-page IN.md [-o OUT.html] [--title T]
+
+The page holds the markdown as JSON and renders it in the browser with pinned
+marked, then DOMPurify, then innerHTML. Mermaid loads only when the markdown
+has a mermaid block. Every remote script has an exact version, an SRI hash,
+and crossorigin="anonymous". The tool writes the file and prints its path.
+It never opens the page; the operator does.
+
+Offline or with JavaScript off, the page still shows the markdown source: a
+<noscript> copy for JavaScript-off browsers, and a script fallback when a CDN
+file fails to load.
+
+Exit codes: 0 written, 2 bad input.
+"""
+
+import argparse
+import html
+import json
+import re
+import sys
+from pathlib import Path
+
+# Pinned third-party scripts. To bump one: download the file, compute
+#   openssl dgst -sha384 -binary FILE | openssl base64 -A
+# confirm the CDN answers with Access-Control-Allow-Origin, and update both
+# fields. cdnjs does not carry mermaid 11.17.x, so mermaid comes from jsdelivr.
+MARKED = (
+    "https://cdnjs.cloudflare.com/ajax/libs/marked/18.0.13/lib/marked.umd.min.js",
+    "sha384-EDNybkEeN9yYwIqheQpxHmn7Xdh180RKiMROtjDRy+SVH8Sl0EqpmIPOolCUbdyE",
+)
+DOMPURIFY = (
+    "https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.15/purify.min.js",
+    "sha384-uUMu9JDY09vBzRf9SPcK2VgUj+W/70J6Soc+Dded5P474ElQ63iv9j5N3DE7Kp3N",
+)
+MERMAID = (
+    "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js",
+    "sha384-EOXBFmc3gx5mb+vn0vPvvGqACToJD24hhacX5Yx+8NUUQrHIle/Qi5Bg9o3zKwW2",
+)
+
+MERMAID_BLOCK = re.compile(r"^[ ]{0,3}(```|~~~)[ \t]*mermaid\b", re.M)
+H1 = re.compile(r"^#[ \t]+(.+?)[ \t#]*$", re.M)
+
+PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  :root {
+    --bg: #ffffff; --panel: #f6f8fa; --border: #d0d7de; --text: #1f2328;
+    --muted: #59636e; --accent: #0969da;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1116; --panel: #151a21; --border: #2a3038; --text: #e6edf3;
+      --muted: #8b949e; --accent: #58a6ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow-wrap: anywhere;
+  }
+  main { max-width: 72ch; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+  h1, h2, h3, h4 { line-height: 1.25; margin: 1.6em 0 0.5em; }
+  h1 { margin-top: 0; font-size: 1.8rem; }
+  h2 { font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25em; }
+  a { color: var(--accent); }
+  nav#toc { background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.75rem 1rem; margin: 1rem 0; }
+  nav#toc ul { margin: 0; padding-left: 1.2rem; }
+  pre, code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.75rem; overflow-x: auto; }
+  :not(pre) > code { background: var(--panel); padding: 0.1em 0.3em; border-radius: 4px; }
+  .table-wrap { overflow-x: auto; margin: 1rem 0; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid var(--border); padding: 0.4rem 0.7rem; text-align: left; }
+  th { background: var(--panel); }
+  blockquote { margin: 1rem 0; padding: 0 1rem; border-left: 4px solid var(--border);
+    color: var(--muted); }
+  img, svg { max-width: 100%; height: auto; }
+  pre.mermaid { background: transparent; border: 0; text-align: center; }
+  #fallback { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+<article id="content"></article>
+</main>
+<noscript><pre style="white-space:pre-wrap;padding:1rem">__NOSCRIPT__</pre></noscript>
+<script id="md-src" type="application/json">__JSON__</script>
+__SCRIPTS__
+<script>
+(function () {
+  var src = JSON.parse(document.getElementById("md-src").textContent);
+  var root = document.getElementById("content");
+  var ready = window.marked && window.DOMPurify;
+  if (!ready) {
+    // A CDN file failed to load (offline, blocked). Show the source as text.
+    var pre = document.createElement("pre");
+    pre.id = "fallback";
+    pre.textContent = src;
+    root.appendChild(pre);
+    return;
+  }
+  root.innerHTML = DOMPurify.sanitize(marked.parse(src));
+
+  Array.prototype.forEach.call(root.querySelectorAll("table"), function (t) {
+    var wrap = document.createElement("div");
+    wrap.className = "table-wrap";
+    t.parentNode.insertBefore(wrap, t);
+    wrap.appendChild(t);
+  });
+  Array.prototype.forEach.call(root.querySelectorAll("a[href]"), function (a) {
+    if (/^https?:/i.test(a.getAttribute("href"))) { a.rel = "noopener noreferrer"; a.target = "_blank"; }
+  });
+
+  var heads = root.querySelectorAll("h2");
+  Array.prototype.forEach.call(root.querySelectorAll("h1,h2,h3,h4"), function (h, i) {
+    h.id = "s" + i + "-" + h.textContent.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  });
+  if (heads.length > 4) {
+    var nav = document.createElement("nav");
+    nav.id = "toc";
+    var ul = document.createElement("ul");
+    Array.prototype.forEach.call(heads, function (h) {
+      var li = document.createElement("li");
+      var a = document.createElement("a");
+      a.href = "#" + h.id;
+      a.textContent = h.textContent;
+      li.appendChild(a);
+      ul.appendChild(li);
+    });
+    nav.appendChild(ul);
+    var first = root.querySelector("h1");
+    if (first && first.nextSibling) { first.parentNode.insertBefore(nav, first.nextSibling); }
+    else { root.insertBefore(nav, root.firstChild); }
+  }
+
+  if (window.mermaid) {
+    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "default" });
+    var blocks = root.querySelectorAll("pre > code.language-mermaid");
+    Array.prototype.forEach.call(blocks, function (code) {
+      var pre = code.parentNode;
+      pre.className = "mermaid";
+      pre.textContent = code.textContent;
+    });
+    mermaid.run({ querySelector: "pre.mermaid" }).catch(function () {});
+  }
+})();
+</script>
+</body>
+</html>
+"""
+
+
+def script_tag(spec):
+    url, integrity = spec
+    return (
+        f'<script src="{url}" integrity="{integrity}" '
+        f'crossorigin="anonymous"></script>'
+    )
+
+
+def json_for_script(text):
+    """JSON safe inside <script type=application/json>: no raw '<', '>', '&'."""
+    out = json.dumps(text, ensure_ascii=False)
+    for ch, esc in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"),
+                    (" ", "\\u2028"), (" ", "\\u2029")):
+        out = out.replace(ch, esc)
+    return out
+
+
+def build_page(markdown, title):
+    scripts = [script_tag(MARKED), script_tag(DOMPURIFY)]
+    if MERMAID_BLOCK.search(markdown):
+        scripts.append(script_tag(MERMAID))
+    page = PAGE
+    # Substitute __JSON__ and __NOSCRIPT__ last-but-safe: use single pass via lambdas.
+    values = {
+        "__TITLE__": html.escape(title, quote=True),
+        "__NOSCRIPT__": html.escape(markdown, quote=True),
+        "__JSON__": json_for_script(markdown),
+        "__SCRIPTS__": "\n".join(scripts),
+    }
+    return re.sub("|".join(values), lambda m: values[m.group(0)], page)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Render a markdown file as one HTML page.")
+    ap.add_argument("input", help="markdown file")
+    ap.add_argument("-o", "--output", help="output HTML path (default: next to the input)")
+    ap.add_argument("--title", help="page title (default: first # heading, else file name)")
+    args = ap.parse_args(argv)
+
+    src = Path(args.input)
+    try:
+        markdown = src.read_text(encoding="utf-8")
+    except OSError as err:
+        print(f"ccgm-md-page: cannot read {src}: {err.strerror}", file=sys.stderr)
+        return 2
+
+    title = args.title
+    if not title:
+        m = H1.search(markdown)
+        title = m.group(1).strip() if m else src.stem
+    out = Path(args.output) if args.output else src.with_suffix(".html")
+    out.write_text(build_page(markdown, title), encoding="utf-8")
+    print(out.resolve())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
