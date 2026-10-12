@@ -19,6 +19,15 @@ signals — the honest answer to "how do I know the memory system is working?"
    the existing on-disk read-path telemetry (read-only) and writes
    `~/.claude/dreaming/scorecards/{week-ending}.md`.
 3. Print the rendered scorecard.
+4. **Report page step.** If the harness Artifact tool is available, load the
+   `artifact-design` and `dataviz` skills, chart the weekly series with
+   `dataviz`, follow the Artifact publish guidance, and print the link.
+   Otherwise run `test -x "$HOME/.claude/bin/ccgm-md-page"` as its own command.
+   If it exits non-zero, print
+   `ccgm-md-page not installed; the report is at <path>` and continue.
+   Otherwise run `"$HOME/.claude/bin/ccgm-md-page" <scorecard.md>` as its own
+   command, giving the absolute path of the scorecard file from step 2, and print the path it returns.
+   Never open the page. The terminal scorecard stays.
 
 ## Sections
 

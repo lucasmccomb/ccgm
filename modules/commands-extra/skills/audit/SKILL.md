@@ -992,7 +992,12 @@ Tools that were absent, wrappers that were skipped, or checks that could not run
 ```
 
 3. **Write** the compiled document to `$AUDIT_DIR/current/audit-report.md`.
-4. **Display** the summary table and critical/high findings to the user.
+4. **Render the page**: run the Report page step (below) on `$AUDIT_DIR/current/audit-report.md`.
+5. **Display** the summary table and critical/high findings to the user.
+
+#### Report page step (shared by M6, C2, and `--single` Phase 6)
+
+After `audit-report.md` is written, render it as a page. If the harness Artifact tool is available, load the `artifact-design` skill, follow its publish guidance, and print the link. Otherwise run `test -x "$HOME/.claude/bin/ccgm-md-page"` as its own command. If it exits non-zero, print `ccgm-md-page not installed; the report is at <path>` and continue. Otherwise run `"$HOME/.claude/bin/ccgm-md-page" <audit-report.md>` as its own command, giving the resolved absolute path of `audit-report.md`, and print the path it returns. Never open the page. The terminal summary stays.
 
 ### Baseline / Delta (optional, after merge step)
 
@@ -1409,7 +1414,7 @@ for wid, packs in sorted(a.items()):
 
 ### Phase C2: Merge + Compile Report
 
-Run the merge pipeline (same as Phase M6 above) and compile the pack-grouped audit report with Coverage Gaps section.
+Run the merge pipeline (same as Phase M6 above) and compile the pack-grouped audit report with Coverage Gaps section, then run the Report page step (see Phase M6) on `$AUDIT_DIR/current/audit-report.md`.
 
 **Merge conflict handling (--fix only):** If a git merge step produces conflicts:
 
@@ -1899,7 +1904,7 @@ python3 "$SKILL_ROOT/scripts/merge-findings.py" \
 ### Phase 6: Compile Report + Display Summary
 
 Compile the pack-grouped audit report from `$AUDIT_DIR/current/findings.jsonl` — same format
-as Phase M6, including the **Coverage Gaps** section. Write to `$AUDIT_DIR/current/audit-report.md`.
+as Phase M6, including the **Coverage Gaps** section. Write to `$AUDIT_DIR/current/audit-report.md`, then run the Report page step (see Phase M6) on it.
 
 Display the summary table and critical/high findings to the user.
 
