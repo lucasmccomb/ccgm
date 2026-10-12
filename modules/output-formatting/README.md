@@ -63,6 +63,10 @@ cp skills/output-medium/SKILL.md ~/.claude/skills/output-medium/SKILL.md
 cp commands/explain.md ~/.claude/commands/explain.md
 cp bin/ccgm-md-page ~/.claude/bin/ccgm-md-page
 chmod +x ~/.claude/bin/ccgm-md-page
+mkdir -p ~/.claude/lib
+cp bin/ccgm-output-metrics ~/.claude/bin/ccgm-output-metrics
+cp lib/comprehension-patterns.json ~/.claude/lib/comprehension-patterns.json
+chmod +x ~/.claude/bin/ccgm-output-metrics
 ```
 
 ## Files
@@ -74,3 +78,18 @@ chmod +x ~/.claude/bin/ccgm-md-page
 | `skills/output-medium/SKILL.md` | Conventions for ASCII and Mermaid diagrams and for pages |
 | `commands/explain.md` | `/explain`: explain a topic in the right medium |
 | `bin/ccgm-md-page` | Markdown to a self-contained HTML page |
+| `bin/ccgm-output-metrics` | Read-only report on operator-facing output from Claude Code transcripts |
+| `lib/comprehension-patterns.json` | Phrases ("what do you mean", "tl;dr") that mark a message the operator did not follow |
+
+## Output Metrics
+
+`ccgm-output-metrics [--since ISO] [--until ISO] [--project=SLUG] [--json]` reads top-level transcripts in `~/.claude/projects/*/*.jsonl` and prints, to stdout, how the agent's final message in each turn reads:
+
+- **Prose**: share of sentences over the `ccgm-prose-lint` limits, p90 sentence length, paragraph-length and two-actions counts.
+- **Length and medium**: lines and words per final message; ASCII diagrams, Mermaid blocks, Artifact uses, printed `.html` and `.mp4` paths.
+- **Over-climbing**: a diagram under 3 boxes or nodes, or a page whose final message is under 8 prose lines and whose source markdown is under 40.
+- **Comprehension (primary outcome)**: events per 100 operator turns where the next short prompt, or a free-text AskUserQuestion answer, matches `lib/comprehension-patterns.json`.
+
+Every figure is split by model and by project. A rate with fewer than 20 events prints "insufficient data". `--help` has the exact definitions.
+
+It imports `prose_lint` (writing-system module) and `transcript_miner` (dreaming module) from `$CCGM_LIB` or `~/.claude/lib`, and exits 2 naming the missing one. `CCGM_PROJECTS` overrides the transcripts root.

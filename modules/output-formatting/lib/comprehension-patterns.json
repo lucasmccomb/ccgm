@@ -1,0 +1,47 @@
+{
+  "_description": "Phrases that signal the operator did not follow the agent's last message. ccgm-output-metrics applies them to a short follow-up prompt (<= 300 chars, not a slash command) and to a free-text AskUserQuestion answer. A text matches when the phrase starts it or makes up at least half of it. Texts are lowercased, curly apostrophes become straight, and surrounding punctuation is trimmed before matching. Every pattern carries examples; the test suite requires each example to match.",
+  "patterns": [
+    {
+      "name": "what_do_you_mean",
+      "regex": "what\\s+do\\s+you\\s+mean",
+      "description": "Operator asks what the agent meant.",
+      "examples": ["what do you mean?", "What do you mean by that"]
+    },
+    {
+      "name": "dont_understand",
+      "regex": "i\\s+(?:really\\s+)?(?:don'?t|do\\s+not)\\s+(?:really\\s+)?(?:understand|get\\s+(?:it|this|that))",
+      "description": "Operator says they do not understand.",
+      "examples": ["I don't understand", "i dont really get it"]
+    },
+    {
+      "name": "what_context",
+      "regex": "what\\s+context",
+      "description": "Operator asks what context a question or message rests on.",
+      "examples": ["what context?", "What context are you talking about"]
+    },
+    {
+      "name": "huh",
+      "regex": "huh\\b",
+      "description": "Operator answers with 'huh'.",
+      "examples": ["huh?", "Huh"]
+    },
+    {
+      "name": "lost_me",
+      "regex": "(?:you\\s+)?lost\\s+me",
+      "description": "Operator says the agent lost them.",
+      "examples": ["you lost me", "lost me there"]
+    },
+    {
+      "name": "too_long",
+      "regex": "too\\s+long",
+      "description": "Operator says the message is too long.",
+      "examples": ["too long", "this is too long"]
+    },
+    {
+      "name": "tldr",
+      "regex": "tl;?\\s?dr",
+      "description": "Operator asks for a summary.",
+      "examples": ["tl;dr", "TLDR please"]
+    }
+  ]
+}

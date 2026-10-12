@@ -163,6 +163,18 @@ def test_stats_over_limit_p90_and_by_rule():
     assert s["by_rule"]["paragraph-length"] == 1
 
 
+def test_sentence_word_counts_match_stats():
+    text = sentence("Run", 25) + " " + " ".join(["The cat sat."] * 9) + " See #1138.\n\n- Fix `a b c` now."
+    counts = prose_lint.sentence_word_counts(text)
+    s = prose_lint.stats(text)
+    assert len(counts) == s["sentences"]
+    assert sum(counts) == s["words"]
+    assert counts[0] == 25
+    ranked = sorted(counts)
+    assert ranked[-(-9 * len(counts) // 10) - 1] == s["p90_sentence_words"]
+    assert prose_lint.sentence_word_counts("") == []
+
+
 # --- CLI ---------------------------------------------------------------------
 
 def test_cli_strict_exits_1_on_error_and_0_on_warning_only():
