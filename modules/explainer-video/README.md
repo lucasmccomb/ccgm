@@ -46,12 +46,11 @@ The tool uses the first available backend and prints `voice: <name>`.
 | Order | Backend | Used when |
 |-------|---------|-----------|
 | 1 | ElevenLabs | `ELEVENLABS_API_KEY` is set and the narration is within `ELEVENLABS_MAX_CHARS` (default 5000 per video). Over the cap, the tool says so and uses a local voice. `ELEVENLABS_VOICE_ID` overrides the voice. |
-| 2 | Kokoro | `CCGM_KOKORO_VETTED=1`, `uv`, and `espeak-ng` are present. Off by default; see below. |
-| 3 | macOS `say` | Always on macOS. Writes to a file with `say -o`, then converts with `ffmpeg`. It never speaks aloud. |
+| 2 | macOS `say` | Always on macOS. Writes to a file with `say -o`, then converts with `ffmpeg`. It never speaks aloud. |
 
-### Kokoro is off by default
+## Voices Considered
 
-The Kokoro-82M weights (`hexgrad/Kokoro-82M`, Apache-2.0) ship as `kokoro-v1_0.pth`, a pickle file, and the voices as `.pt` pickles. The `model-vetting` checklist allows only safetensors or GGUF and refuses pickle formats, so this module downloads nothing and ships Kokoro disabled. Set `CCGM_KOKORO_VETTED=1` only after you have converted or scanned the weights, pinned a revision, and recorded the vetting. The backend path is not exercised by a real run in this module's tests.
+Kokoro-82M (Apache-2.0) was vetted on 2026-10-12 and rejected: its weights ship as pickle (`.pth` and `.pt`), which the `model-vetting` checklist refuses. Revisit if a safetensors or ONNX release appears.
 
 ## Tests
 

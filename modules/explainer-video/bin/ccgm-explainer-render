@@ -16,8 +16,8 @@ the result. With --scenes, only those scenes are rebuilt; the rest reuse the
 files in DIR/build/.
 
 Narration voice, first available: ElevenLabs (ELEVENLABS_API_KEY set and the
-text within ELEVENLABS_MAX_CHARS, default 5000), Kokoro (CCGM_KOKORO_VETTED=1,
-espeak-ng and uv installed), macOS `say -o FILE`. The tool prints which one.
+text within ELEVENLABS_MAX_CHARS, default 5000), then macOS `say -o FILE`. The
+tool prints which one.
 
 Headless: never previews a render, never plays audio, never opens a window.
 
@@ -40,14 +40,6 @@ TARGET_SECONDS = (60, 180)
 DURATION_TOLERANCE = 0.10
 ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
-KOKORO_CODE = (
-    "import sys, numpy, soundfile\n"
-    "from kokoro import KPipeline\n"
-    "text, out = open(sys.argv[1]).read(), sys.argv[2]\n"
-    "chunks = [a for _, _, a in KPipeline(lang_code='a')(text, voice='af_heart')]\n"
-    "soundfile.write(out, numpy.concatenate(chunks), 24000)\n"
-)
-
 
 class RenderError(Exception):
     def __init__(self, message, code=1):
@@ -69,13 +61,10 @@ def choose_backend(env, which, chars):
             f"narration is {chars} characters, above ELEVENLABS_MAX_CHARS={cap}; "
             "using the local voice"
         )
-    if env.get("CCGM_KOKORO_VETTED") == "1" and which("espeak-ng") and which("uv"):
-        return "kokoro", note
     if which("say"):
         return "say", note
     raise RenderError(
-        "no narration backend: set ELEVENLABS_API_KEY, vet Kokoro "
-        "(CCGM_KOKORO_VETTED=1, needs espeak-ng), or run on macOS for `say`",
+        "no narration backend: set ELEVENLABS_API_KEY or run on macOS for `say`",
         code=2,
     )
 
@@ -105,19 +94,7 @@ def synth_elevenlabs(text, raw):
     return raw
 
 
-def synth_kokoro(text, raw):
-    txt = raw.with_suffix(".txt")
-    txt.write_text(text)
-    raw = raw.with_suffix(".kokoro.wav")
-    run(
-        ["uv", "run", "--with", "kokoro", "--with", "soundfile", "python", "-I",
-         "-c", KOKORO_CODE, str(txt), str(raw)],
-        "narration (kokoro)",
-    )
-    return raw
-
-
-SYNTH = {"say": synth_say, "elevenlabs": synth_elevenlabs, "kokoro": synth_kokoro}
+SYNTH = {"say": synth_say, "elevenlabs": synth_elevenlabs}
 
 
 # --- helpers -----------------------------------------------------------------

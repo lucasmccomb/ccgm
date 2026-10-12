@@ -65,18 +65,9 @@ def test_elevenlabs_default_cap_is_5000():
     assert r.choose_backend(env, tools("say", "uv"), chars=5001)[0] == "say"
 
 
-def test_kokoro_needs_vetting_flag_espeak_and_uv():
+def test_chain_is_only_elevenlabs_then_say():
     r = load_module()
-    env = {"CCGM_KOKORO_VETTED": "1"}
-    assert r.choose_backend(env, tools("say", "uv", "espeak-ng"), chars=10)[0] == "kokoro"
     assert r.choose_backend({}, tools("say", "uv", "espeak-ng"), chars=10)[0] == "say"
-    assert r.choose_backend(env, tools("say", "uv"), chars=10)[0] == "say"
-
-
-def test_elevenlabs_beats_kokoro():
-    r = load_module()
-    env = {"ELEVENLABS_API_KEY": "k", "CCGM_KOKORO_VETTED": "1"}
-    assert r.choose_backend(env, tools("say", "uv", "espeak-ng"), chars=10)[0] == "elevenlabs"
 
 
 def test_no_backend_is_an_error():
@@ -172,7 +163,7 @@ def test_two_scene_render_with_say(tmp_path):
         pytest.skip(f"missing: {', '.join(missing)}")
     proj = tmp_path / "proj"
     shutil.copytree(FIXTURE, proj)
-    env = {k: v for k, v in os.environ.items() if k not in ("ELEVENLABS_API_KEY", "CCGM_KOKORO_VETTED")}
+    env = {k: v for k, v in os.environ.items() if k != "ELEVENLABS_API_KEY"}
     res = subprocess.run(
         [sys.executable, str(SCRIPT), str(proj)],
         env=env, capture_output=True, text=True, timeout=900,

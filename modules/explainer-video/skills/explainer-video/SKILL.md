@@ -82,7 +82,7 @@ Keep the animations in a scene shorter than its duration. Keep every object insi
 "$HOME/.claude/bin/ccgm-explainer-render" explainer-<topic>
 ```
 
-The script picks a voice (ElevenLabs when `ELEVENLABS_API_KEY` is set and the text is within `ELEVENLABS_MAX_CHARS`, Kokoro when vetted, else macOS `say -o`) and prints which. It measures each narration, renders each scene to that length, joins them, and checks the result: one video stream, one audio stream, total length within 10 percent of the narration. It exits non-zero and names the failed check. It writes `explainer.mp4` and one frame per scene to `frames/`.
+The script picks a voice (ElevenLabs when `ELEVENLABS_API_KEY` is set and the text is within `ELEVENLABS_MAX_CHARS`, else macOS `say -o`) and prints which. It measures each narration, renders each scene to that length, joins them, and checks the result: one video stream, one audio stream, total length within 10 percent of the narration. It exits non-zero and names the failed check. It writes `explainer.mp4` and one frame per scene to `frames/`.
 
 ### 6. Inspect the frames
 

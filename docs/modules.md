@@ -332,7 +332,7 @@ Turns a topic into a narrated, Manim-rendered video.
 |---------|-------------|
 | `/explainer-video` | Research a topic, write a scene script and Manim scenes, render, inspect the frames, and print the `.mp4` path |
 
-**What it does**: Rung 4 of the output ladder (`/explain <topic> as video` hands off here). `ccgm-explainer-render` narrates each scene (ElevenLabs when `ELEVENLABS_API_KEY` is set and the text is within `ELEVENLABS_MAX_CHARS`, else macOS `say -o`; Kokoro stays off until its weights pass `model-vetting`), measures the narration with `ffprobe`, renders each scene to that length with `uv run --with manim`, joins them, and checks the file: one video stream, one audio stream, duration within 10 percent of the narration. It extracts one frame per scene for the agent to inspect. Headless: no preview, no playback, no focus change. Needs `brew install cairo pango pkg-config`, `uv`, and `ffmpeg`. In the `full` preset only.
+**What it does**: Rung 4 of the output ladder (`/explain <topic> as video` hands off here). `ccgm-explainer-render` narrates each scene (ElevenLabs when `ELEVENLABS_API_KEY` is set and the text is within `ELEVENLABS_MAX_CHARS`, else macOS `say -o`), measures the narration with `ffprobe`, renders each scene to that length with `uv run --with manim`, joins them, and checks the file: one video stream, one audio stream, duration within 10 percent of the narration. It extracts one frame per scene for the agent to inspect. Headless: no preview, no playback, no focus change. Needs `brew install cairo pango pkg-config`, `uv`, and `ffmpeg`. In the `full` preset only.
 
 **Dependencies**: None
 
