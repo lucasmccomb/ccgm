@@ -10,6 +10,7 @@ Warnings: noun clusters, two-action steps, bare references.
 Before counting, the text loses frontmatter, fenced code, inline code, tables,
 headings, URLs, and file:line refs. Each list item is its own paragraph.
 """
+import math
 import re
 from dataclasses import dataclass
 
@@ -20,6 +21,8 @@ LIMITS = {
     "paragraph_sentences": 6,
     "noun_cluster": 4,  # warn at this many consecutive noun-like tokens
 }
+
+RULES = ("sentence-length", "paragraph-length", "noun-cluster", "two-actions", "bare-reference")
 
 
 @dataclass
@@ -331,6 +334,11 @@ def stats(text):
     sentences = [s for _, group in paragraphs for s in group]
     counts = [len(_words(s)) for s in sentences]
     instr = sum(1 for s in sentences if _is_instruction(s))
+    by_rule = dict.fromkeys(RULES, 0)
+    for f in findings:
+        by_rule[f.rule] += 1
+    over = by_rule["sentence-length"]
+    ranked = sorted(counts)
     return {
         "words": sum(counts),
         "sentences": len(sentences),
@@ -342,4 +350,8 @@ def stats(text):
         "max_paragraph_sentences": max((len(g) for _, g in paragraphs), default=0),
         "errors": sum(1 for f in findings if f.level == "error"),
         "warnings": sum(1 for f in findings if f.level == "warning"),
+        "p90_sentence_words": ranked[math.ceil(0.9 * len(ranked)) - 1] if ranked else 0,
+        "sentences_over_limit": over,
+        "pct_over_limit": round(over / len(counts) * 100, 1) if counts else 0,
+        "by_rule": by_rule,
     }

@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 
 import prose_lint  # noqa: E402
 
+RULE_NAMES = ("sentence-length", "paragraph-length", "noun-cluster", "two-actions", "bare-reference")
 CLI = ROOT / "bin" / "ccgm-prose-lint"
 
 
@@ -162,15 +163,34 @@ def test_stats_keys_and_values():
         "words", "sentences", "paragraphs", "instruction_sentences",
         "descriptive_sentences", "max_sentence_words", "mean_sentence_words",
         "max_paragraph_sentences", "errors", "warnings",
+        "p90_sentence_words", "sentences_over_limit", "pct_over_limit", "by_rule",
     }
+    assert s["p90_sentence_words"] == 4
+    assert s["sentences_over_limit"] == 0 and s["pct_over_limit"] == 0
+    assert s["by_rule"] == dict.fromkeys(RULE_NAMES, 0)
     assert s["sentences"] == 2 and s["paragraphs"] == 2
     assert s["instruction_sentences"] == 1 and s["descriptive_sentences"] == 1
     assert s["words"] == 7 and s["max_sentence_words"] == 4
 
 
 def test_stats_of_empty_text():
-    assert prose_lint.stats("")["sentences"] == 0
-    assert prose_lint.stats("")["mean_sentence_words"] == 0
+    s = prose_lint.stats("")
+    assert s["sentences"] == 0 and s["mean_sentence_words"] == 0
+    assert s["p90_sentence_words"] == 0 and s["pct_over_limit"] == 0
+    assert s["sentences_over_limit"] == 0
+    assert s["by_rule"] == dict.fromkeys(RULE_NAMES, 0)
+
+
+def test_stats_over_limit_p90_and_by_rule():
+    text = sentence("Run", 25) + " " + " ".join(["The cat sat."] * 9) + " See #1138."
+    s = prose_lint.stats(text)
+    assert s["sentences"] == 11
+    assert s["sentences_over_limit"] == 1
+    assert s["pct_over_limit"] == 9.1
+    assert s["p90_sentence_words"] == 3  # nearest rank: ceil(0.9 * 11) = 10th of 11 sorted: 2, 3 x9, 25
+    assert s["by_rule"]["sentence-length"] == 1
+    assert s["by_rule"]["paragraph-length"] == 1
+    assert s["by_rule"]["bare-reference"] == 1
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -195,6 +215,11 @@ def test_cli_json_schema():
         assert set(f) == {"line", "level", "rule", "message", "text"}
         assert isinstance(f["line"], int) and f["level"] in ("error", "warning")
     assert data["stats"] == prose_lint.stats(text)
+    assert data["stats"]["by_rule"] == {"sentence-length": 1, "paragraph-length": 0,
+                                        "noun-cluster": 1, "two-actions": 0, "bare-reference": 1}
+    assert data["stats"]["sentences_over_limit"] == 1
+    assert data["stats"]["pct_over_limit"] == 50.0
+    assert data["stats"]["p90_sentence_words"] == 25
 
 
 def test_cli_reads_a_file_and_dash(tmp_path):
