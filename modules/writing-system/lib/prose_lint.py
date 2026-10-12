@@ -5,7 +5,9 @@ Public API:
     stats(text) -> dict            counts the metrics tools read
 
 Errors: sentence length (by kind) and paragraph length.
-Warnings: noun clusters, two-action steps, bare references.
+Warnings: two-action steps.
+Noun clusters and unnamed references are guidance in the rule, not checked here:
+an audit of real messages put their precision at 16% and 35%.
 
 Before counting, the text loses frontmatter, fenced code, inline code, tables,
 headings, URLs, and file:line refs. Each list item is its own paragraph.
@@ -14,15 +16,14 @@ import math
 import re
 from dataclasses import dataclass
 
-# Every threshold lives here. Delete "noun_cluster" to turn that check off.
+# Every threshold lives here.
 LIMITS = {
     "instruction_words": 20,
     "description_words": 25,
     "paragraph_sentences": 6,
-    "noun_cluster": 4,  # warn at this many consecutive noun-like tokens
 }
 
-RULES = ("sentence-length", "paragraph-length", "noun-cluster", "two-actions", "bare-reference")
+RULES = ("sentence-length", "paragraph-length", "two-actions")
 
 
 @dataclass
@@ -72,25 +73,9 @@ the a an this that these those it them each every all any your my our its their 
 to with on in into from up out off at by for of as over under back if when
 """.split())
 
-_FUNCTION_WORDS = set("""
-a an the this that these those some any each every all both no not nor and or but so yet
-if else when while where which who whom whose what why how than as of in on at by for
-with without from to into onto over under about after before between through during
-against among within across per via is are was were be been being am do does did done
-have has had having will would shall should can could may might must it its they them
-their we us our you your he she his her him i me my there here also only just even still
-very more most less least much many few such own same other another too then now once
-again already never always often sometimes usually instead rather
-""".split())
-
-# Digit-bearing terms that are not references (matched case-insensitively).
-_COMMON_CODES = set("""
-E2E MP3 MP4 UTF8 UTF16 SHA1 SHA256 SHA384 SHA512 MD5 IPV4 IPV6 HTTP2 HTTP3 OAUTH2 S3 EC2 K8S
-I18N L10N A11Y B2B B2C ES6
-""".split())
-
 _ABBREVIATIONS = {
     "e.g", "i.e", "vs", "cf", "approx", "mr", "mrs", "ms", "dr", "st", "no", "fig", "ca", "al",
+    "etc", "inc", "ltd", "jr", "sr",
 }
 
 # --- cleaning ----------------------------------------------------------------
@@ -103,7 +88,7 @@ _URL = re.compile(r"(?:https?://|www\.)\S+")
 _FILE_REF = re.compile(r"[\w./~-]*\w\.\w+:\d+(?::\d+)?")
 _INLINE_CODE = re.compile(r"`[^`]*`")
 # Inline code becomes this marker: it keeps a sentence boundary visible to the
-# splitter but is not a word, a noun, or a reference.
+# splitter but is not a word.
 _CODE = "\ue000"
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
@@ -176,7 +161,7 @@ def _blocks(text):
 
 # --- sentences ---------------------------------------------------------------
 
-_SPLIT = re.compile(r"""([.!?]+["')\]]*)\s+(?=["'(\[]?[A-Z0-9\ue000])""")
+_SPLIT = re.compile(r"""([.!?]+["')\]]*)\s+(?=["'(\[]?[A-Za-z0-9\ue000])""")
 
 
 def _split_sentences(block):
@@ -186,12 +171,28 @@ def _split_sentences(block):
         last = before[-1].lower().strip("\"'([") if before else ""
         if m.group(1) == "." and (last in _ABBREVIATIONS or re.fullmatch(r"[a-z]", last)):
             continue
+        if block[m.end():].lstrip("\"'([")[:1].islower():
+            # A lowercase start splits only after a plain full stop, "!" or "?"
+            # that follows a word of 3+ letters that is not an abbreviation.
+            ends_word = re.search(r"[A-Za-z]{3,}$", before[-1].strip("\"'([")) if before else None
+            if m.group(1).rstrip("\"')]") not in (".", "!", "?") or not ends_word or last in _ABBREVIATIONS:
+                continue
         sentences.append(block[start:m.end()].strip())
         start = m.end()
     tail = block[start:].strip()
     if tail:
         sentences.append(tail)
     return [s for s in sentences if re.search(r"\w", s)]
+
+
+_ID = re.compile(r"#\d+|[A-Z]{1,3}-?\d+")
+
+
+def _is_id_list(sentence):
+    """True when more than half the words are IDs (E3, XP-3, #12): not prose."""
+    words = _words(sentence)
+    ids = sum(1 for w in words if _ID.fullmatch(_strip_punct(w)))
+    return ids * 2 > len(words)
 
 
 def _words(sentence):
@@ -222,9 +223,8 @@ def _analyze(text):
     """Return (paragraphs, findings). Paragraph = (line, [sentences])."""
     findings = []
     paragraphs = []
-    seen_refs = set()
     for line, block in _blocks(text):
-        sentences = _split_sentences(block)
+        sentences = [s for s in _split_sentences(block) if not _is_id_list(s)]
         if not sentences:
             continue
         paragraphs.append((line, sentences))
@@ -246,9 +246,6 @@ def _analyze(text):
                 ))
             if instr:
                 findings.extend(_two_actions(line, s))
-            findings.extend(_bare_references(line, s, seen_refs))
-            if LIMITS.get("noun_cluster"):
-                findings.extend(_noun_clusters(line, s))
     return paragraphs, findings
 
 
@@ -263,71 +260,6 @@ def _two_actions(line, sentence):
         return [Finding(line, "warning", "two-actions",
                         "step holds more than one action; split it", sentence)]
     return []
-
-
-_REF = re.compile(
-    r"(?:\bPR\s*)?#\d+|\bPR\s+\d+|\badrev-\d+|\bE\d+\b|\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*\b"
-)
-_GLOSS_AFTER = re.compile(r"\s*(?:\(|,\s+(?:a|an|the)\s|\s[—–-]\s)")
-
-
-def _bare_references(line, sentence, seen):
-    found = []
-    for m in _REF.finditer(sentence):
-        ref = m.group(0)
-        if ref.upper() in _COMMON_CODES or not re.search(r"\d", ref):
-            continue  # all-caps words without a digit are emphasis or acronyms
-        key = re.sub(r"\s+", " ", ref).lower()
-        first = key not in seen
-        seen.add(key)
-        if first and not _GLOSS_AFTER.match(sentence, m.end()):
-            found.append(Finding(
-                line, "warning", "bare-reference",
-                f"'{ref}' appears without a name or gloss", sentence,
-            ))
-    return found
-
-
-def _noun_clusters(line, sentence):
-    """Warn on runs of LIMITS['noun_cluster'] or more noun-like tokens."""
-    need = LIMITS["noun_cluster"]
-    found, run = [], []
-
-    def end_run():
-        if len(run) >= need:
-            found.append(Finding(
-                line, "warning", "noun-cluster",
-                f"{len(run)}-word noun cluster; break it with a preposition", " ".join(run),
-            ))
-        run.clear()
-
-    for idx, tok in enumerate(sentence.split()):
-        word = _strip_punct(tok)
-        if _is_noun_like(word, idx == 0):
-            run.append(word)
-            if tok[-1] in ".,;:!?)\"'":
-                end_run()  # punctuation ends the phrase
-        else:
-            end_run()
-    end_run()
-    return found
-
-
-def _is_noun_like(word, sentence_start):
-    if not re.fullmatch(r"[A-Za-z]+(?:-[A-Za-z]+)*", word):
-        return False
-    low = word.lower()
-    if low in _FUNCTION_WORDS or low in _VERBS or (sentence_start and low in _AMBIGUOUS_VERBS):
-        return False
-    if low.endswith("ly") or low.endswith("ed"):
-        return False
-    for stem in (low[:-1], low[:-2]):  # runs -> run, matches -> match
-        if low.endswith("s") and (stem in _VERBS or stem in _AMBIGUOUS_VERBS):
-            return False
-    if word.isupper() and len(word) > 1:
-        return False  # acronym or code, handled by the reference check
-    return True
-
 
 # --- public API --------------------------------------------------------------
 

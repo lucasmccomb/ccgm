@@ -27,7 +27,7 @@ Read the full file content. Strip frontmatter (everything between the opening an
 
 ### Step 1b: Deterministic Pass
 
-If `"${CCGM_BIN:-$HOME/.claude/bin}/ccgm-prose-lint"` exists, run it on the file (`--json`) before the lenses and keep its findings (sentence and paragraph limits, noun clusters, two-action steps, bare references) for the report. If the file does not exist, print "ccgm-prose-lint not installed; skipping the deterministic pass" and go on.
+Run `test -x "$HOME/.claude/bin/ccgm-prose-lint"` as its own command. If it exits non-zero, print "ccgm-prose-lint not installed; skipping the deterministic pass" and go on. Otherwise run `"$HOME/.claude/bin/ccgm-prose-lint" --json FILE` as its own command before the lenses and keep its findings (sentence length, paragraph length, and two-action steps; it does not check noun clusters or references) for the report.
 
 ### Step 2: Run Parallel Editorial Passes
 

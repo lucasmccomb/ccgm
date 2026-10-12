@@ -28,7 +28,7 @@ Go through the text and list each violation, grouped by rule, quoting the exact 
 4. **Passive constructions** (rule 4): each passive with its active rewrite, where the actor is known.
 5. **Jargon** (rule 5): each jargon or foreign phrase with an everyday equivalent, only where precision survives the swap. A technical term with no accurate plain substitute stays.
 
-6. **STE-lite limits** (always on): each sentence over 20 words (instruction) or 25 words (description), each paragraph over 6 sentences, each noun cluster over 3 words, each step that holds two actions, each reference ("#1138") with no name beside it. For a file, run `"${CCGM_BIN:-$HOME/.claude/bin}/ccgm-prose-lint"` on it to get the exact list; skip with a one-line note if that file does not exist.
+6. **STE-lite limits** (always on): each sentence over 20 words (instruction) or 25 words (description), each paragraph over 6 sentences, each noun cluster over 3 words, each step that holds two actions, each reference ("#1138") with no name beside it. For a file, run `test -x "$HOME/.claude/bin/ccgm-prose-lint"` as its own command; if it exits non-zero, print a one-line "not installed" note and skip. Otherwise run `"$HOME/.claude/bin/ccgm-prose-lint" --json FILE` as its own command for the sentence, paragraph, and two-action findings. It does not check noun clusters or unnamed references; judge those by reading.
 
 If a category has no violations, skip it. Do not pad the list.
 

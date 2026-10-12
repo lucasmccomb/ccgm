@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 
 import prose_lint  # noqa: E402
 
-RULE_NAMES = ("sentence-length", "paragraph-length", "noun-cluster", "two-actions", "bare-reference")
+RULE_NAMES = ("sentence-length", "paragraph-length", "two-actions")
 CLI = ROOT / "bin" / "ccgm-prose-lint"
 
 
@@ -121,35 +121,6 @@ def test_hard_wrapped_lines_join_into_one_sentence():
 
 # --- warnings ----------------------------------------------------------------
 
-def test_bare_reference_warns():
-    assert "bare-reference" in rules("See #1138 for details.", "warning")
-
-
-def test_glossed_reference_does_not_warn():
-    assert "bare-reference" not in rules("See PR #1138 (autoheal signature quality) for details.")
-
-
-def test_reference_warns_once_per_document():
-    text = "See #1138 now. Then see #1138 again."
-    assert rules(text).count("bare-reference") == 1
-
-
-def test_other_reference_shapes_warn_and_common_acronyms_do_not():
-    for ref in ("adrev-12", "E4", "PR 77", "ZQX9"):
-        assert "bare-reference" in rules(f"Check {ref} first."), ref
-    assert "bare-reference" not in rules("The API returns JSON over HTTP.")
-
-
-def test_noun_cluster_of_four_warns_and_three_does_not():
-    assert "noun-cluster" in rules("The config file schema validator fails.", "warning")
-    assert "noun-cluster" not in rules("The config file validator is slow.")
-
-
-def test_noun_cluster_check_is_removable_through_limits(monkeypatch):
-    monkeypatch.delitem(prose_lint.LIMITS, "noun_cluster")
-    assert "noun-cluster" not in rules("The config file schema validator fails.")
-
-
 def test_two_action_step_warns():
     assert "two-actions" in rules("Open the file and edit the header.", "warning")
     assert "two-actions" not in rules("Open the file.")
@@ -190,7 +161,6 @@ def test_stats_over_limit_p90_and_by_rule():
     assert s["p90_sentence_words"] == 3  # nearest rank: ceil(0.9 * 11) = 10th of 11 sorted: 2, 3 x9, 25
     assert s["by_rule"]["sentence-length"] == 1
     assert s["by_rule"]["paragraph-length"] == 1
-    assert s["by_rule"]["bare-reference"] == 1
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -198,8 +168,8 @@ def test_stats_over_limit_p90_and_by_rule():
 def test_cli_strict_exits_1_on_error_and_0_on_warning_only():
     bad = run_cli(["--strict"], sentence("Run", 25) + "\n")
     assert bad.returncode == 1 and "sentence-length" in bad.stdout
-    warn = run_cli(["--strict"], "See #1138 now.\n")
-    assert warn.returncode == 0 and "bare-reference" in warn.stdout
+    warn = run_cli(["--strict"], "Open the file and edit the header.\n")
+    assert warn.returncode == 0 and "two-actions" in warn.stdout
 
 
 def test_cli_without_strict_exits_0_on_error():
@@ -215,8 +185,7 @@ def test_cli_json_schema():
         assert set(f) == {"line", "level", "rule", "message", "text"}
         assert isinstance(f["line"], int) and f["level"] in ("error", "warning")
     assert data["stats"] == prose_lint.stats(text)
-    assert data["stats"]["by_rule"] == {"sentence-length": 1, "paragraph-length": 0,
-                                        "noun-cluster": 1, "two-actions": 0, "bare-reference": 1}
+    assert data["stats"]["by_rule"] == {"sentence-length": 1, "paragraph-length": 0, "two-actions": 0}
     assert data["stats"]["sentences_over_limit"] == 1
     assert data["stats"]["pct_over_limit"] == 50.0
     assert data["stats"]["p90_sentence_words"] == 25
@@ -247,34 +216,35 @@ def test_inline_code_still_adds_no_words():
     assert prose_lint.stats("Run `foo` now.")["words"] == 2
 
 
-def test_all_caps_emphasis_is_not_a_reference():
-    text = "Do NOT run this step twice. NEVER skip the baseline. It is DONE and MUST pass. OK so BLOCKED."
-    assert "bare-reference" not in rules(text)
 
 
-def test_all_caps_code_with_a_digit_is_a_reference():
-    assert "bare-reference" in rules("The spec is ASD-STE100 for now.")
-    assert "bare-reference" in rules("The codec is H264 for now.")
+# --- splitter: lowercase starts, ID lists ------------------------------------
+
+def test_lowercase_word_after_a_full_stop_starts_a_new_sentence():
+    assert prose_lint.stats("That is the default. iOS plays that at alarm volume.")["sentences"] == 2
+    assert prose_lint.stats("It comes from lem-work. devtrainer stays the drills product.")["sentences"] == 2
+    assert prose_lint.stats("Is it done? yes it is.")["sentences"] == 2
 
 
-def test_third_person_verb_is_not_part_of_a_noun_cluster():
-    for text in ("The hook logs tool failures to a file.",
-                 "The script runs hook tool checks.",
-                 "The linter writes tool report files.",
-                 "The matcher matches tool hook rules."):
-        assert "noun-cluster" not in rules(text), text
+def test_abbreviations_and_versions_do_not_split_before_lowercase():
+    assert prose_lint.stats("Use tools, e.g. foo bar today.")["sentences"] == 1
+    assert prose_lint.stats("Use grep, sed, etc. and more today.")["sentences"] == 1
+    assert prose_lint.stats("Version v1.2 is out today.")["sentences"] == 1
+    assert prose_lint.stats("Wait... then go on.")["sentences"] == 1
 
 
-def test_plain_noun_cluster_still_warns():
-    assert "noun-cluster" in rules("The session transcript miner output is large.")
+def test_lowercase_start_is_not_classed_as_the_previous_instruction():
+    text = "Skip for this purpose. evoglyph has paying users " + " ".join(["alpha"] * 10) + "."
+    assert prose_lint.stats(text)["instruction_sentences"] == 1
+    assert not errors(text)
 
 
-def test_common_digit_bearing_terms_are_not_references():
-    for text in ("Run the E2E suite before merge.", "Compute the SHA256 of the file.",
-                 "Save it as MP4 or utf8 text.", "Store it in S3 over IPv6."):
-        assert "bare-reference" not in rules(text), text
+def test_id_list_sentence_is_skipped():
+    line = ("(XP-3): E0, E1, E2, E4 in parallel; E3 after E0; E5 after E3; E6 after E4; "
+            "E7 after E5; E8 after E6; E9 after E7 and E8 then E10 after E9.")
+    assert prose_lint.lint(line) == []
+    assert prose_lint.stats(line)["sentences"] == 0
 
 
-def test_epic_and_spec_codes_still_warn():
-    for text in ("Check E3 first.", "The spec is ASD-STE100 for now.", "Check ZQX9 first."):
-        assert "bare-reference" in rules(text), text
+def test_removed_checks_produce_no_findings():
+    assert prose_lint.lint("See #1138 for details. The config file schema validator fails.") == []

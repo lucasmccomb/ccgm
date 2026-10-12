@@ -35,7 +35,7 @@ This governs free-form summaries. When a command or skill mandates an exact outp
 
 ## STE-lite Limits
 
-The measurable half of ASD-STE100. `ccgm-prose-lint` checks it: run `"${CCGM_BIN:-$HOME/.claude/bin}/ccgm-prose-lint" --strict FILE` before delivering a document.
+The measurable half of ASD-STE100. `ccgm-prose-lint` checks the sentence and paragraph limits (noun clusters and unnamed references are judged by reading): before delivering a document, run `test -x "$HOME/.claude/bin/ccgm-prose-lint"` as its own command; if it exits non-zero, note that the linter is not installed and go on; otherwise run `"$HOME/.claude/bin/ccgm-prose-lint" --strict FILE` as its own command.
 
 - Instruction sentences: 20 words or fewer. Descriptive sentences: 25 or fewer.
 - Paragraphs: 6 sentences or fewer, one topic, topic sentence first. Each list item counts as its own paragraph.
