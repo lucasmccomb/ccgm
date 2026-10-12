@@ -228,7 +228,7 @@ The marketplace catalog (`.claude-plugin/marketplace.json`) and per-module `plug
 | **multi-agent** | workflow | `/handoff`, `/mawf`, `/workspace-setup` | Multi-clone parallel agent work with issue claiming, port allocation, /mawf workflow | startup-dashboard, hooks |
 | **onboarding** | commands | `/onboarding` | Analyzes a repository and generates a structured ONBOARDING.md for new contributors | - |
 | **orrery** | commands | `/orrery` | Deep-dives a codebase with parallel read-only scouts and renders an interactive, zoomable, embeddable system-design map as one self-contained HTML file: 4 zoom tiers, GitHub links pinned to an anchor SHA, per-node product prose; `/orrery update` refreshes it | - |
-| **output-formatting** | patterns | - | Copy-pasteable content goes in fenced code blocks, never blockquotes, so it pastes clean anywhere | - |
+| **output-formatting** | patterns | `/explain`, `/output-medium` | Copy-pasteable content goes in fenced code blocks, never blockquotes; a medium ladder (prose, diagram, page, video) picks the lowest medium that carries the content, with /explain and ccgm-md-page for pages | - |
 | **output-styles** | patterns | - | Packages the always-on tone rules as Claude Code output styles - a prompt-cached system-prompt layer instead of per-turn rule files | - |
 | **persist** | workflow | `/persist` | Opt-in Stop hook that keeps the agent working on a declared task until it is marked done, with fail-open guards (context limit, abort, auth error, stale state, iteration cap, cancel) | settings |
 | **plugin-marketplace** [BETA] | core | - | Maintainer tooling that projects CCGM modules into a native Claude Code plugin marketplace. The bash installer stays canonical | - |

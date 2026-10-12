@@ -1,13 +1,17 @@
 {
   "name": "output-formatting",
   "displayName": "Output Formatting",
-  "description": "Formatting rules for user-facing output: copy-pasteable content (drafts, messages, prompts, config snippets) is delivered in fenced code blocks, never blockquotes, so it pastes clean anywhere.",
+  "description": "Output formatting for text addressed to the operator: copy-pasteable content goes in fenced code blocks, and a medium ladder (prose, diagram, page, video) picks the lowest medium that carries the content. Ships /explain and ccgm-md-page, a markdown-to-HTML page renderer for installs without the Artifact tool.",
   "category": "patterns",
   "scope": ["global"],
   "dependencies": [],
   "files": {
-    "rules/copy-paste-output.md": { "target": "rules/copy-paste-output.md", "type": "rule", "template": false }
+    "rules/copy-paste-output.md": { "target": "rules/copy-paste-output.md", "type": "rule", "template": false },
+    "rules/output-medium.md": { "target": "rules/output-medium.md", "type": "rule", "template": false },
+    "skills/output-medium/SKILL.md": { "target": "skills/output-medium/SKILL.md", "type": "skill", "template": false },
+    "commands/explain.md": { "target": "commands/explain.md", "type": "command", "template": false },
+    "bin/ccgm-md-page": { "target": "bin/ccgm-md-page", "type": "script", "template": false }
   },
-  "tags": ["formatting", "output", "copy-paste", "communication"],
+  "tags": ["formatting", "output", "copy-paste", "communication", "diagrams", "pages"],
   "configPrompts": []
 }
