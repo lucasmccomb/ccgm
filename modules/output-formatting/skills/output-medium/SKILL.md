@@ -62,8 +62,10 @@ test -x "$HOME/.claude/bin/ccgm-md-page"
 If that exits non-zero, `ccgm-md-page` is missing: print a one-line "not installed" note, give the markdown file path, and continue. Otherwise run it as its own command:
 
 ```bash
-"$HOME/.claude/bin/ccgm-md-page" report.md -o report.html --title "Report title"
+"$HOME/.claude/bin/ccgm-md-page" /abs/path/report.md -o /abs/path/report.html --title "Report title"
 ```
+
+Use absolute paths; in advisor mode relative paths are denied. The output path must end in `.html`.
 
 The command prints the page path. Print that path to the operator. Keep each step a separate command; do not join them with `if` or `&&`, and do not assign variables.
 

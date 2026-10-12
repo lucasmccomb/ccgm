@@ -41,7 +41,7 @@ Turns markdown into one self-contained HTML page for installs without the harnes
 - Light and dark themes, a readable column, a table of contents above 4 `##` headings, no horizontal scroll at 390 px.
 - The pinned versions and hashes are constants at the top of the script.
 
-Callers run `test -x "$HOME/.claude/bin/ccgm-md-page"` first, then `"$HOME/.claude/bin/ccgm-md-page"`, each as its own command, because `~/.claude/bin` is not on `PATH`.
+Callers run `test -x "$HOME/.claude/bin/ccgm-md-page"` first, then `"$HOME/.claude/bin/ccgm-md-page"`, each as its own command, because `~/.claude/bin` is not on `PATH`. Pass absolute paths: `"$HOME/.claude/bin/ccgm-md-page" /abs/path/report.md -o /abs/path/report.html`.
 
 ## Tests
 
