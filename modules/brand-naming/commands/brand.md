@@ -442,7 +442,7 @@ Write the report to the output path. Structure:
 ### 6.3 Render the Report Page
 
 <!-- ccgm:section report-page-step -->
-**Report page step.** After the report markdown file is written, render it as a page. (1) If the harness Artifact tool is available, load the `artifact-design` skill, follow its publish guidance, and print the link. (2) Otherwise run `test -x "$HOME/.claude/bin/ccgm-md-page"` as its own command. If it exits non-zero, print `ccgm-md-page not installed; the report is at <path>` and continue. (3) Otherwise run `"$HOME/.claude/bin/ccgm-md-page" <report.md>` as its own command and print the path it returns. Never open the page. The terminal summary stays.
+**Report page step.** After the report markdown file is written, render it as a page. (1) If the harness Artifact tool is available, load the `artifact-design` skill, follow its publish guidance, and print the link. (2) Otherwise run `test -x "$HOME/.claude/bin/ccgm-md-page"` as its own command. If it exits non-zero, print `ccgm-md-page not installed; the report is at <path>` and continue. (3) Otherwise run `"$HOME/.claude/bin/ccgm-md-page" <report.md>` as its own command, giving the absolute path of the report file, and print the path it returns. Never open the page. The terminal summary stays.
 <!-- /ccgm:section report-page-step -->
 
 ### 6.4 Present Results

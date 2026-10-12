@@ -26,7 +26,7 @@ signals — the honest answer to "how do I know the memory system is working?"
    If it exits non-zero, print
    `ccgm-md-page not installed; the report is at <path>` and continue.
    Otherwise run `"$HOME/.claude/bin/ccgm-md-page" <scorecard.md>` as its own
-   command, on the scorecard file from step 2, and print the path it returns.
+   command, giving the absolute path of the scorecard file from step 2, and print the path it returns.
    Never open the page. The terminal scorecard stays.
 
 ## Sections
