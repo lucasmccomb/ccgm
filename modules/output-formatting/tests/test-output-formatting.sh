@@ -52,11 +52,13 @@ fi
 # --- callers use the absolute path and survive a missing tool ---------------
 for f in "$SKILL" "$EXPLAIN"; do
   [ -f "$f" ] || { fail "$f is missing"; continue; }
-  if grep -q '\${CCGM_BIN:-\$HOME/.claude/bin}/ccgm-md-page' "$f"; then
-    ok "$(basename "$(dirname "$f")")/$(basename "$f") calls ccgm-md-page by absolute path"
+  # Guard-safe form: a separate test -x, then the plain absolute call. No ${VAR:-default}.
+  if grep -q 'test -x "\$HOME/.claude/bin/ccgm-md-page"' "$f" && grep -q '"\$HOME/.claude/bin/ccgm-md-page" ' "$f"; then
+    ok "$(basename "$f") checks with test -x, then calls ccgm-md-page by absolute path"
   else
-    fail "$f must call \"\${CCGM_BIN:-\$HOME/.claude/bin}/ccgm-md-page\""
+    fail "$f must use 'test -x \"\$HOME/.claude/bin/ccgm-md-page\"' then '\"\$HOME/.claude/bin/ccgm-md-page\" ...'"
   fi
+  if grep -q 'CCGM_BIN' "$f"; then fail "$f still references CCGM_BIN"; else ok "$(basename "$f") has no CCGM_BIN default"; fi
   if grep -qi "missing" "$f"; then ok "$(basename "$f") handles a missing ccgm-md-page"; else fail "$f must say what to do when ccgm-md-page is missing"; fi
 done
 

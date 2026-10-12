@@ -32,7 +32,7 @@ Load the `output-medium` skill before you draw a diagram or write a page. It hol
 
 - **prose**: write plain sentences. No file.
 - **diagram**: ASCII in a fenced block for the terminal, 100 columns or fewer, with a one-line caption. Check the width. Use Mermaid only when the destination is GitHub, and check it with `npx -y @mermaid-js/mermaid-cli` when `npx` exists.
-- **page**: with the Artifact tool, follow its publish guidance. Without it, write the content as markdown and run `"${CCGM_BIN:-$HOME/.claude/bin}/ccgm-md-page" FILE.md`. If that file is missing, print a one-line note and give the markdown path. Never open the page.
+- **page**: with the Artifact tool, follow its publish guidance. Without it, write the content as markdown and run `test -x "$HOME/.claude/bin/ccgm-md-page"` as its own command. If that exits non-zero, the tool is missing: print a one-line not-installed note and give the markdown path. Otherwise run `"$HOME/.claude/bin/ccgm-md-page" FILE.md` as its own command. Never open the page.
 - **video**: use the `explainer-video` module when it is installed. When it is missing, say so in one line and offer a page instead. Do not build a page unasked.
 
 ## Step 5: Finish

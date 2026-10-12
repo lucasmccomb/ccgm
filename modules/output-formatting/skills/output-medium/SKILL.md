@@ -28,7 +28,7 @@ Check the width before you send it. Save the diagram to a file, then run:
 python3 -c 'import sys; [print(f"line {n} is {len(l.rstrip(chr(10)))} columns") for n, l in enumerate(open(sys.argv[1], encoding="utf-8"), 1) if len(l.rstrip(chr(10))) > 100]' diagram.txt
 ```
 
-No output means every line fits.
+No output means every line fits. Do not use `awk 'length($0) > 100'` here: macOS `awk` counts bytes, so a box-drawing character counts as 3. In advisor mode the guard denies `python3 -c`; skip the width check there and keep each line short by hand.
 
 ### Mermaid (GitHub destinations: PR bodies, issues, READMEs)
 
@@ -56,10 +56,16 @@ Load `artifact-design`, plus `artifact-diagramming` or `dataviz` when the page h
 Write the content as markdown, then render it:
 
 ```bash
-"${CCGM_BIN:-$HOME/.claude/bin}/ccgm-md-page" report.md -o report.html --title "Report title"
+test -x "$HOME/.claude/bin/ccgm-md-page"
 ```
 
-The command prints the page path. Print that path to the operator. If `ccgm-md-page` is missing, print a one-line note, give the markdown file path, and continue.
+If that exits non-zero, `ccgm-md-page` is missing: print a one-line "not installed" note, give the markdown file path, and continue. Otherwise run it as its own command:
+
+```bash
+"$HOME/.claude/bin/ccgm-md-page" report.md -o report.html --title "Report title"
+```
+
+The command prints the page path. Print that path to the operator. Keep each step a separate command; do not join them with `if` or `&&`, and do not assign variables.
 
 What the page tool does:
 
