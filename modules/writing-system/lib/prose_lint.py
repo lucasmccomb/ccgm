@@ -4,7 +4,7 @@ Public API:
     lint(text)  -> list[Finding]   errors and warnings
     stats(text) -> dict            counts the metrics tools read
 
-Errors: sentence length (by kind) and paragraph length.
+Errors: sentence length (by kind), paragraph length, and diagram width.
 Warnings: two-action steps.
 Noun clusters and unnamed references are guidance in the rule, not checked here:
 an audit of real messages put their precision at 16% and 35%.
@@ -21,9 +21,10 @@ LIMITS = {
     "instruction_words": 20,
     "description_words": 25,
     "paragraph_sentences": 6,
+    "diagram_columns": 100,
 }
 
-RULES = ("sentence-length", "paragraph-length", "two-actions")
+RULES = ("sentence-length", "paragraph-length", "two-actions", "diagram-width")
 
 
 @dataclass
@@ -107,15 +108,19 @@ def _clean_inline(s):
     return re.sub(r"\s+", " ", s).strip()
 
 
-def _blocks(text):
-    """Yield (first_line_number, cleaned_text) for each paragraph or list item."""
-    lines = text.splitlines()
-    i = 0
+def _body_start(lines):
+    """Index of the first line after frontmatter, or 0 when there is none."""
     if lines and lines[0].strip() == "---":
         for j in range(1, len(lines)):
             if lines[j].strip() == "---":
-                i = j + 1
-                break
+                return j + 1
+    return 0
+
+
+def _blocks(text):
+    """Yield (first_line_number, cleaned_text) for each paragraph or list item."""
+    lines = text.splitlines()
+    i = _body_start(lines)
     fence = None
     cur = None  # [start_line, [parts]]
     out = []
@@ -157,6 +162,45 @@ def _blocks(text):
             cur = [n + 1, [stripped]]
     flush()
     return out
+
+
+# --- diagrams ----------------------------------------------------------------
+
+# A fenced block holding any of these is a diagram; other fenced code is exempt.
+_BOX_CHARS = frozenset("┌┐└┘─│├┤┬┴┼═║╔╗╚╝╠╣╦╩╬▶▼◀▲►◄▾▴▸◂")
+
+
+def _diagram_findings(text):
+    """Error for each line over the column limit in a fenced block with box-drawing characters."""
+    lines = text.splitlines()
+    start = _body_start(lines)
+    limit = LIMITS["diagram_columns"]
+    findings = []
+    fence, body = None, []
+
+    def close():
+        if any(_BOX_CHARS.intersection(line) for _, line in body):
+            for n, line in body:
+                if len(line) > limit:  # characters, not bytes
+                    findings.append(Finding(
+                        n, "error", "diagram-width",
+                        f"{len(line)} columns in a diagram; limit is {limit}", line[:80],
+                    ))
+
+    for n in range(start, len(lines)):
+        raw = lines[n]
+        m = _FENCE.match(raw)
+        if fence:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                close()
+                fence, body = None, []
+            else:
+                body.append((n + 1, raw.rstrip("\r")))
+        elif m:
+            fence, body = m.group(1), []
+    if fence:  # unterminated fence: the block runs to the end of the file
+        close()
+    return findings
 
 
 # --- sentences ---------------------------------------------------------------
@@ -242,10 +286,12 @@ def _analyze(text):
                 kind = "instruction" if instr else "description"
                 findings.append(Finding(
                     line, "error", "sentence-length",
-                    f"{n} words in a {kind}; limit is {limit}", s,
+                    f"{n} words in {'an' if instr else 'a'} {kind}; limit is {limit}", s,
                 ))
             if instr:
                 findings.extend(_two_actions(line, s))
+    findings.extend(_diagram_findings(text))
+    findings.sort(key=lambda f: f.line)
     return paragraphs, findings
 
 

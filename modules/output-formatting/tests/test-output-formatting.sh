@@ -62,6 +62,17 @@ for f in "$SKILL" "$EXPLAIN"; do
   if grep -qi "missing" "$f"; then ok "$(basename "$f") handles a missing ccgm-md-page"; else fail "$f must say what to do when ccgm-md-page is missing"; fi
 done
 
+# --- diagram width check runs through the linter and is reported -------------
+for f in "$SKILL" "$EXPLAIN"; do
+  if grep -q 'python3 -c' "$f"; then fail "$(basename "$f") still mentions python3 -c"; else ok "$(basename "$f") has no python3 -c"; fi
+  if grep -q 'test -x "\$HOME/.claude/bin/ccgm-prose-lint"' "$f" && grep -q '"\$HOME/.claude/bin/ccgm-prose-lint" --strict' "$f" && grep -q 'diagram-width' "$f"; then
+    ok "$(basename "$f") checks diagram width with ccgm-prose-lint"
+  else
+    fail "$f must check width with test -x, then ccgm-prose-lint --strict, and name diagram-width"
+  fi
+done
+if grep -q 'Check: ' "$EXPLAIN"; then ok "explain.md ends with a Check: line"; else fail "explain.md must end its summary with a 'Check:' line"; fi
+
 if [ "$FAILED" = "0" ]; then
   echo "test-output-formatting.sh: PASS"
 else

@@ -132,6 +132,7 @@ Before returning, run these steps as separate commands:
 1. Write the body's prose (no code blocks, no Mermaid block) to a temp file in the session scratchpad or temp directory.
 2. Run `test -x "$HOME/.claude/bin/ccgm-prose-lint"` as its own command. If it exits non-zero, print `ccgm-prose-lint not installed; skipping the prose check` and continue.
 3. Otherwise run `"$HOME/.claude/bin/ccgm-prose-lint" --strict <temp file>` as its own command. Exit 1 means a sentence or paragraph is over the limit: fix it and run again until it exits 0. Warnings do not fail the run; fix the ones that are cheap to fix.
+4. Return the body only when the final run exits 0. After three fix attempts you may return it with the findings that remain. Either way, record the final run on the `- Prose check:` METADATA line below. That line is required: a check that is not reported has not run.
 
 ## Output Format
 
@@ -152,6 +153,7 @@ Return exactly this structure as the skill's output. The caller parses it.
 - Template used: {path} or "default"
 - Steering applied: {yes/no}; {one-line summary if yes}
 - Diagram: {fired/not fired}; {one line: which part of the trigger applied or why none did}
+- Prose check: exit {code}, {N} errors (from the linter's final run on the body; after three failed fixes, list the remaining findings here), or "skipped (ccgm-prose-lint not installed)"
 ```
 
 Do NOT wrap in additional prose. Do NOT invoke `gh` commands with the result. Do NOT emit a "here's your PR body" preamble.

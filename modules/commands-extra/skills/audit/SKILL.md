@@ -997,7 +997,7 @@ Tools that were absent, wrappers that were skipped, or checks that could not run
 
 #### Report page step (shared by M6, C2, and `--single` Phase 6)
 
-After `audit-report.md` is written, render it as a page. If the harness Artifact tool is available, load the `artifact-design` skill, follow its publish guidance, and print the link. Otherwise run `test -x "$HOME/.claude/bin/ccgm-md-page"` as its own command. If it exits non-zero, print `ccgm-md-page not installed; the report is at <path>` and continue. Otherwise run `"$HOME/.claude/bin/ccgm-md-page" <audit-report.md>` as its own command, giving the resolved absolute path of `audit-report.md`, and print the path it returns. Never open the page. The terminal summary stays.
+After `audit-report.md` is written, render it as a page. If the harness Artifact tool is available, load the `artifact-design` skill, follow its publish guidance, and print the link. Otherwise run `test -x "$HOME/.claude/bin/ccgm-md-page"` as its own command. If it exits non-zero, print `ccgm-md-page not installed; the report is at <path>` and continue. Otherwise run `"$HOME/.claude/bin/ccgm-md-page" <audit-report.md>` as its own command, giving the resolved absolute path of `audit-report.md`, and print the exact absolute path it printed, not a relative description of it. Never open the page. The terminal summary stays. End with one line: `Page: <that path>` (or the not-installed note).
 
 ### Baseline / Delta (optional, after merge step)
 

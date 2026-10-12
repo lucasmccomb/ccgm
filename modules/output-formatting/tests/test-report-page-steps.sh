@@ -20,6 +20,8 @@ for f in modules/research/commands/research.md \
   check "$ROOT/$f" "$PROBE" "$f: test -x probe"
   check "$ROOT/$f" "$NOTE <path>\`" "$f: not-installed note on one line"
   if grep -qF "CCGM_BIN" "$ROOT/$f"; then echo "FAIL $f: still uses CCGM_BIN"; fail=1; fi
+  check "$ROOT/$f" "exact absolute path it printed" "$f: prints the exact path"
+  check "$ROOT/$f" 'Page: <that path>' "$f: ends with a Page: line"
   check "$ROOT/$f" "artifact-design" "$f: Artifact branch"
 done
 check "$ROOT/modules/dreaming/commands/dream-scorecard.md" "dataviz" "dream-scorecard: dataviz chart"
