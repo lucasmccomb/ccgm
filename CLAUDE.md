@@ -227,6 +227,24 @@ The judge is one Messages API call per run: no sampling parameters (current judg
 
 Nothing waits on a person. Optimistic auto-integration is opt-in and off by default; with it off, proposals are held (never discarded) and `/dream-apply` is the manual path. With it on, every gate (eval regression, blast-radius caps, anomaly check, circuit breaker) is designed to hold even if the daily report is never read — only *undoing* an already-integrated row needs a read. The weekly regression smoke is a second opt-in (`eval_refresh_enabled`); until it runs, the gate pauses once results go stale, and a pause of 3 or more nights turns `health.json` red. See `modules/dreaming/skills/dreaming/SKILL.md` and the module README for the full contract.
 
+## Output Ladder
+
+The output ladder makes agent output easy for the operator to read. An agent uses the lowest rung that carries the content: prose, then a diagram, then a page, then video. It lives in `modules/writing-system`, `modules/output-formatting`, and `modules/xplan`.
+
+Each CLI installs to `~/.claude/bin/` and is called as `test -x "$HOME/.claude/bin/<tool>"`, then `"$HOME/.claude/bin/<tool>" ...`, as two plain commands, because advisor mode cannot resolve variables or compounds.
+
+| CLI | What it checks or does |
+|-----|------------------------|
+| `ccgm-prose-lint` | Sentence length, paragraph length, two-action steps, and diagram width |
+| `ccgm-md-page` | Renders markdown to one sanitized HTML page |
+| `ccgm-output-metrics` | Measures operator-facing output from transcripts, read-only |
+| `xplan-depgraph` | Generates the epic graph and fails on cycles and bad dependencies |
+
+- **Dropped checks.** A precision audit on 38 real final messages removed the noun-cluster check (16% precise) and the bare-reference check (35%). Sentence length held at 94%. Their rule lines stay as guidance.
+- **Checks must report.** Dry runs showed that a check whose result the output does not report gets skipped. Each surface now ends with a reported line (`Prose check:`, `Check:`, `Page:`).
+- **Tests in CI.** The output-ladder step in `.github/workflows/test.yml` runs the pytest and shell suites for `writing-system`, `output-formatting`, `commands-core`, `explainer-video`, and `xplan`. The ubuntu job sets `CCGM_E2E_REQUIRED=1`, so the page E2E fails instead of skipping.
+- **Advisor guard.** `advisor-guard.py` allows the four CLIs only as the whole command, and denies on any internal error.
+
 ## Commit Message Format
 
 ```

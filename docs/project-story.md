@@ -158,6 +158,14 @@ The busiest month, in several waves:
 
 - **One analysis, sixteen merges in a day.** `/copycat` on oh-my-claudecode produced a batch of issues (#1073-#1088) that `/etp` executed in parallel. The mechanisms adopted: a `persist` module (opt-in Stop-hook run-to-completion loop, #1094); per-unit merge receipts verified against GitHub (`ccgm-etp-receipts`, #1101) and an optional cleanup stage in `/etp` (#1100); `ccgm-verify-baseline`, which gates on new failures instead of all failures (#1102); a read-budget hook that denies the first unranged Read of a large file (#1095); a destructive-command guard that blocks only when unsaved work would be lost (#1103); a scored ambiguity gate in the `/xplan` interview (#1097); a prompt-section composer with a CI `--check` gate (`prompts/sections`, #1105); off/shadow/active rollout for autoheal and dreaming decisions (#1106) with `fix_surface` routing for autoheal proposals (#1104); and tighter rules for completion claims, debugging, adversarial review, code quality, change boundaries and rule authoring (#1089-#1093, #1096).
 
+### October 2026 (October 12) — The output ladder (#1153-#1158, #1168, #1173, #1175)
+
+- **Measurable limits instead of a word list.** The writing-system rule gained STE-lite limits (instruction sentence 20 words, description 25, paragraph 6 sentences) that `ccgm-prose-lint` checks, so readability became a pass or fail result. A banned-word list had never been testable.
+- **An audit removed the checks that did not hold up.** The plan set an 80% precision bar. An independent labeller ran the linter on 38 real final messages from 19 projects. The noun-cluster check was right 9 of 57 times (16%) and the bare-reference check 63 of 182 (35%). Both were removed. Sentence length was right 74 of 79 times (94%) and stayed; one splitter bug caused three of its five misses and is fixed.
+- **Checks report their result.** Post-merge dry runs showed the model ran the checks whose result the output had to report. It skipped the rest: the diagram trigger ran, but the prose gate and the width check did not. Each surface now ends with a reported line, and the width check moved into the linter.
+- **The advisor guard learned the ladder CLIs, then failed closed.** Advisor mode denied the new CLIs in the sessions that oversee the most work, so the fix allowed four CLIs by exact installed path. A security review found that `ccgm-md-page /` crashed the hook with exit 1. Claude Code treats that as non-blocking, so the whole command ran. The guard now denies on any internal error and allows a trusted CLI only as the whole command.
+- **A baseline that cannot reach significance.** `ccgm-output-metrics` measured 53 operator turns and 1 comprehension event in 21 days, below the 20-event floor, so the primary outcome will likely read "insufficient data". The plan records this as a measurement limit, not a bug.
+
 ---
 
 ## Major Systems

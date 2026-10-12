@@ -1552,6 +1552,30 @@ Single-pass rewrite under the Orwell rules in `rules/writing-system.md`. Lists e
 /rewrite path/to/file.md              # violations list + rewrite, asks before applying
 /rewrite path/to/file.md --apply      # apply the rewrite to the file
 /rewrite mode:landing hero.md         # add the one-claim-per-line and swap tests
+/rewrite path/to/file.md --ste        # rewrite to full Simplified Technical English
+```
+
+The default pass also lists the STE-lite limit violations that `ccgm-prose-lint` reports (sentence length, paragraph length, two-action steps).
+
+---
+
+## Output formatting commands
+
+Installed by the **output-formatting** module.
+
+---
+
+### /explain
+
+**Explain a topic in the lowest medium that carries it.**
+
+Picks prose, a diagram, a page, or video, produces it, checks the artifact, and summarizes in 5 lines or fewer. A diagram is checked with `ccgm-prose-lint --strict` (width over 100 characters is an error); a page is rendered by `ccgm-md-page`. The reply ends with a `Check:` line that reports the result.
+
+**Usage**:
+```
+/explain how the advisor guard decides            # you pick the medium
+/explain the autoheal config keys as page         # force a rung
+/explain the install flow as diagram
 ```
 
 ---
