@@ -135,7 +135,7 @@ def test_reference_warns_once_per_document():
 
 
 def test_other_reference_shapes_warn_and_common_acronyms_do_not():
-    for ref in ("adrev-12", "E4", "PR 77", "ZQX"):
+    for ref in ("adrev-12", "E4", "PR 77", "ZQX9"):
         assert "bare-reference" in rules(f"Check {ref} first."), ref
     assert "bare-reference" not in rules("The API returns JSON over HTTP.")
 
@@ -231,3 +231,39 @@ def test_cli_reads_a_file_and_dash(tmp_path):
 
 def test_cli_missing_file_exits_2(tmp_path):
     assert run_cli([str(tmp_path / "nope.md")]).returncode == 2
+
+
+# --- precision fixes ---------------------------------------------------------
+
+def test_sentence_starting_with_inline_code_stays_a_separate_sentence():
+    text = ("Run the linter on the file. `ccgm-prose-lint` reads stdin when no file is given "
+            "and prints one finding per line for each problem it finds.")
+    s = prose_lint.stats(text)
+    assert s["sentences"] == 2
+    assert not errors(text)
+
+
+def test_inline_code_still_adds_no_words():
+    assert prose_lint.stats("Run `foo` now.")["words"] == 2
+
+
+def test_all_caps_emphasis_is_not_a_reference():
+    text = "Do NOT run this step twice. NEVER skip the baseline. It is DONE and MUST pass. OK so BLOCKED."
+    assert "bare-reference" not in rules(text)
+
+
+def test_all_caps_code_with_a_digit_is_a_reference():
+    assert "bare-reference" in rules("The spec is ASD-STE100 for now.")
+    assert "bare-reference" in rules("The codec is H264 for now.")
+
+
+def test_third_person_verb_is_not_part_of_a_noun_cluster():
+    for text in ("The hook logs tool failures to a file.",
+                 "The script runs hook tool checks.",
+                 "The linter writes tool report files.",
+                 "The matcher matches tool hook rules."):
+        assert "noun-cluster" not in rules(text), text
+
+
+def test_plain_noun_cluster_still_warns():
+    assert "noun-cluster" in rules("The session transcript miner output is large.")

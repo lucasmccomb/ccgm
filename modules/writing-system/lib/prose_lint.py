@@ -104,13 +104,16 @@ _RULE_LINE = re.compile(r"^\s*(?:[-*_=]\s*){3,}$")
 _URL = re.compile(r"(?:https?://|www\.)\S+")
 _FILE_REF = re.compile(r"[\w./~-]*\w\.\w+:\d+(?::\d+)?")
 _INLINE_CODE = re.compile(r"`[^`]*`")
+# Inline code becomes this marker: it keeps a sentence boundary visible to the
+# splitter but is not a word, a noun, or a reference.
+_CODE = "\ue000"
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _HTML_TAG = re.compile(r"</?[A-Za-z][^>]*>|<!--.*?-->")
 
 
 def _clean_inline(s):
-    s = _INLINE_CODE.sub("", s)
+    s = _INLINE_CODE.sub(_CODE, s)
     s = _IMAGE.sub("", s)
     s = _LINK.sub(r"\1", s)
     s = _URL.sub("", s)
@@ -175,7 +178,7 @@ def _blocks(text):
 
 # --- sentences ---------------------------------------------------------------
 
-_SPLIT = re.compile(r"""([.!?]+["')\]]*)\s+(?=["'(\[]?[A-Z0-9])""")
+_SPLIT = re.compile(r"""([.!?]+["')\]]*)\s+(?=["'(\[]?[A-Z0-9\ue000])""")
 
 
 def _split_sentences(block):
@@ -265,7 +268,7 @@ def _two_actions(line, sentence):
 
 
 _REF = re.compile(
-    r"(?:\bPR\s*)?#\d+|\bPR\s+\d+|\badrev-\d+|\bE\d+\b|\b[A-Z][A-Z0-9]{2,}(?:-[A-Z0-9]+)*\b|\b[A-Z]{2}\b"
+    r"(?:\bPR\s*)?#\d+|\bPR\s+\d+|\badrev-\d+|\bE\d+\b|\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*\b"
 )
 _GLOSS_AFTER = re.compile(r"\s*(?:\(|,\s+(?:a|an|the)\s|\s[—–-]\s)")
 
@@ -274,8 +277,8 @@ def _bare_references(line, sentence, seen):
     found = []
     for m in _REF.finditer(sentence):
         ref = m.group(0)
-        if ref.isalpha() and ref in _COMMON_ACRONYMS:
-            continue
+        if ref in _COMMON_ACRONYMS or not re.search(r"\d", ref):
+            continue  # all-caps words without a digit are emphasis or acronyms
         key = re.sub(r"\s+", " ", ref).lower()
         first = key not in seen
         seen.add(key)
@@ -320,6 +323,9 @@ def _is_noun_like(word, sentence_start):
         return False
     if low.endswith("ly") or low.endswith("ed"):
         return False
+    for stem in (low[:-1], low[:-2]):  # runs -> run, matches -> match
+        if low.endswith("s") and (stem in _VERBS or stem in _AMBIGUOUS_VERBS):
+            return False
     if word.isupper() and len(word) > 1:
         return False  # acronym or code, handled by the reference check
     return True
