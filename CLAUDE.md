@@ -243,6 +243,7 @@ Each CLI installs to `~/.claude/bin/` and is called as `test -x "$HOME/.claude/b
 - **Dropped checks.** A precision audit on 38 real final messages removed the noun-cluster check (16% precise) and the bare-reference check (35%). Sentence length held at 94%. Their rule lines stay as guidance.
 - **Checks must report.** Dry runs showed that a check whose result the output does not report gets skipped. Each surface now ends with a reported line (`Prose check:`, `Check:`, `Page:`).
 - **Tests in CI.** The output-ladder step in `.github/workflows/test.yml` runs the pytest and shell suites for `writing-system`, `output-formatting`, `commands-core`, `explainer-video`, and `xplan`. The ubuntu job sets `CCGM_E2E_REQUIRED=1`, so the page E2E fails instead of skipping.
+- **Rung 4.** `explainer-video` (beta, opt-in, `full` preset only) renders a narrated Manim video, voiced by macOS `say` unless an ElevenLabs key is set. Kokoro was rejected at vetting.
 - **Advisor guard.** `advisor-guard.py` allows the four CLIs only as the whole command, and denies on any internal error.
 
 ## Commit Message Format

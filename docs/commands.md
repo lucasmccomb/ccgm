@@ -112,6 +112,8 @@ Interactively creates a GitHub issue with appropriate type labels.
 4. Structures the issue body based on type (features get acceptance criteria, bugs get reproduction steps)
 5. Creates the issue and returns the URL
 
+Before it creates the issue, `/ghi` runs `ccgm-prose-lint --strict` on the body and ends with a `Prose check: exit <code>, <N> errors` line.
+
 **Usage**:
 ```
 /ghi
@@ -1115,6 +1117,8 @@ Writes a structured 6-section markdown handoff under `~/.claude/handoffs/{repo}/
 
 **When to use**: End of a working session you do not want to resume via `claude --continue` (bloated, switching machines, going headless); mid-task checkpoint where `/compact` would lose too much; end-of-day pause.
 
+The handoff prose (never the kickoff prompt) goes through `ccgm-prose-lint --strict`, and the command ends with a `Prose check:` line.
+
 **Usage**:
 ```
 /handoff                           # Build the handoff from current session context
@@ -1165,6 +1169,8 @@ Bookend to `/startup`. Composes existing primitives instead of duplicating them.
 6. Writes a handoff via `handoff.py write` (auto-picked up by the next `/startup` thanks to the HANDOFFS section)
 7. Appends a `session-ended` event to `~/.claude/sessions/{repo}/events.jsonl` and reports sibling state
 8. Prints a one-screen summary, then exits the session with `kill -TERM $PPID`
+
+The handoff it writes (never the kickoff prompt) goes through `ccgm-prose-lint --strict`, and the command ends with a `Prose check:` line.
 
 **Usage**:
 ```
