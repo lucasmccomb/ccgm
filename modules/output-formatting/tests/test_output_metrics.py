@@ -281,7 +281,7 @@ def test_prose_stats(env):
     assert p["sentences_over_limit"] >= 1
     assert p["sentences"] > p["sentences_over_limit"]
     assert p["p90_sentence_words"] >= 1
-    assert set(p["by_rule"]) == {"sentence-length", "paragraph-length", "two-actions"}
+    assert set(p["by_rule"]) == {"sentence-length", "paragraph-length", "two-actions", "diagram-width"}
 
 
 def test_prose_sentence_over_limit_isolated_by_project(env):

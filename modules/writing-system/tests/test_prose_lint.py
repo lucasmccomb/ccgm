@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 
 import prose_lint  # noqa: E402
 
-RULE_NAMES = ("sentence-length", "paragraph-length", "two-actions")
+RULE_NAMES = ("sentence-length", "paragraph-length", "two-actions", "diagram-width")
 CLI = ROOT / "bin" / "ccgm-prose-lint"
 
 
@@ -175,6 +175,61 @@ def test_sentence_word_counts_match_stats():
     assert prose_lint.sentence_word_counts("") == []
 
 
+# --- diagram width -----------------------------------------------------------
+
+def fenced(*lines):
+    return "Intro.\n\n```\n" + "\n".join(lines) + "\n```\n"
+
+
+def test_box_line_of_101_characters_is_error():
+    line = "┌" + "─" * 99 + "┐"
+    assert len(line) == 101
+    found = errors(fenced(line))
+    assert [f.rule for f in found] == ["diagram-width"]
+    assert found[0].line == 4 and "101" in found[0].message
+
+
+def test_box_line_of_100_characters_passes():
+    assert not errors(fenced("┌" + "─" * 98 + "┐"))
+
+
+def test_multibyte_box_characters_count_as_one_column():
+    line = "│" * 100  # 300 bytes, 100 characters
+    assert len(line.encode()) == 300
+    assert not errors(fenced(line))
+
+
+def test_long_line_in_plain_code_block_passes():
+    assert not errors(fenced("x = " + "a" * 136))
+
+
+def test_long_line_outside_fence_is_not_diagram_width():
+    assert "diagram-width" not in rules("│" * 101 + "\n")
+
+
+def test_one_box_character_anywhere_marks_the_block_as_a_diagram():
+    assert rules(fenced("a" * 101, "┌─┐"), "error") == ["diagram-width"]
+
+
+def test_unclosed_fence_at_end_of_file_is_still_checked():
+    text = "Intro.\n\n```\n┌" + "─" * 99 + "┐\n"
+    assert [f.rule for f in errors(text)] == ["diagram-width"]
+
+
+def test_diagram_width_counts_in_stats():
+    s = prose_lint.stats(fenced("┌" + "─" * 99 + "┐"))
+    assert s["by_rule"]["diagram-width"] == 1 and s["errors"] == 1
+
+
+def test_cli_strict_fails_on_wide_diagram():
+    r = run_cli(["--strict"], fenced("┌" + "─" * 99 + "┐"))
+    assert r.returncode == 1 and "diagram-width" in r.stdout
+
+
+def test_instruction_message_uses_an():
+    assert "in an instruction" in errors(sentence("Run", 25))[0].message
+
+
 # --- CLI ---------------------------------------------------------------------
 
 def test_cli_strict_exits_1_on_error_and_0_on_warning_only():
@@ -197,7 +252,7 @@ def test_cli_json_schema():
         assert set(f) == {"line", "level", "rule", "message", "text"}
         assert isinstance(f["line"], int) and f["level"] in ("error", "warning")
     assert data["stats"] == prose_lint.stats(text)
-    assert data["stats"]["by_rule"] == {"sentence-length": 1, "paragraph-length": 0, "two-actions": 0}
+    assert data["stats"]["by_rule"] == {"sentence-length": 1, "paragraph-length": 0, "two-actions": 0, "diagram-width": 0}
     assert data["stats"]["sentences_over_limit"] == 1
     assert data["stats"]["pct_over_limit"] == 50.0
     assert data["stats"]["p90_sentence_words"] == 25

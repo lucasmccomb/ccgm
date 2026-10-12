@@ -22,13 +22,19 @@ Use a diagram for a flow, sequence, dependency, state machine, architecture, or 
 - Put labels inside boxes. Make arrows show direction.
 - In `AskUserQuestion`, put the diagram in the option's `preview` field, which renders monospace beside the options. Never put it in the question text.
 
-Check the width before you send it. Save the diagram to a file, then run:
+Check the width before you send it. Write the diagram, or the whole final message, to a file. Run these as separate commands:
 
 ```bash
-python3 -c 'import sys; [print(f"line {n} is {len(l.rstrip(chr(10)))} columns") for n, l in enumerate(open(sys.argv[1], encoding="utf-8"), 1) if len(l.rstrip(chr(10))) > 100]' diagram.txt
+test -x "$HOME/.claude/bin/ccgm-prose-lint"
 ```
 
-No output means every line fits. Do not use `awk 'length($0) > 100'` here: macOS `awk` counts bytes, so a box-drawing character counts as 3. In advisor mode the guard denies `python3 -c`; skip the width check there and keep each line short by hand.
+If that exits non-zero, skip the check and say so in one line. Otherwise run:
+
+```bash
+"$HOME/.claude/bin/ccgm-prose-lint" --strict /abs/path/diagram.txt
+```
+
+A `diagram-width` error names each line over 100 columns. Shorten those lines and run it again until it exits 0. The linter counts characters, so a box-drawing character counts as one column. Prose errors in the same file also fail the run; fix those too. Report the result in your reply.
 
 ### Mermaid (GitHub destinations: PR bodies, issues, READMEs)
 

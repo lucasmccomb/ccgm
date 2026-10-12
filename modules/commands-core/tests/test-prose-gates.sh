@@ -35,6 +35,11 @@ for f in "${FILES[@]}"; do
   if grep -qF 'CCGM_BIN' "$p"; then
     fail "$f still uses CCGM_BIN (guard cannot resolve it)"
   fi
+  if grep -qF 'Prose check: exit <code>, <N> errors' "$p" || grep -qF -- '- Prose check: exit {code}, {N} errors' "$p"; then
+    pass "$f reports the prose check result"
+  else
+    fail "$f does not report the prose check result"
+  fi
   if grep -qF 'ccgm-prose-lint not installed; skipping the prose check' "$p"; then
     pass "$f has the skip note"
   else
