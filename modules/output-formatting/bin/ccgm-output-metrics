@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+"""ccgm-output-metrics: measure operator-facing agent output from Claude Code transcripts.
+
+Read-only. Reads top-level transcripts (~/.claude/projects/*/*.jsonl, never
+subagent transcripts) and prints a report to stdout. Writes nothing.
+
+Environment:
+  CCGM_LIB       directory holding prose_lint.py and transcript_miner.py
+                 (default ~/.claude/lib)
+  CCGM_PROJECTS  transcripts root (default ~/.claude/projects)
+"""
+
+import argparse
+import json
+import math
+import os
+import re
+import statistics
+import sys
+from datetime import datetime, timezone
+
+EPILOG = """\
+definitions:
+  turn            Starts at a human-origin user record (transcript_miner's gate)
+                  and ends before the next one. Task notifications, isMeta skill
+                  expansions, tool results and harness wrappers start no turn.
+                  A turn whose prompt is a slash command (<command-name> wrapper
+                  or text starting with "/") is tagged slash: its output is
+                  measured, but it never counts toward comprehension.
+  final message   The turn's last assistant text block.
+  prose           prose_lint stats over final messages: sentences over limit,
+                  p90 sentence length over all sentences, rule finding counts.
+  length          Lines and words per final message (median, p90).
+  medium          ASCII diagrams (a fenced block with box-drawing characters),
+                  ```mermaid blocks, Artifact tool uses, printed .html and .mp4
+                  paths, prose lines (non-blank lines outside fenced blocks).
+  over-climbing   A diagram with fewer than 3 boxes (count of corner glyphs) or
+                  Mermaid nodes; or a page (printed .html path or Artifact use)
+                  whose final message has under 8 prose lines AND whose source
+                  markdown, when a .md path is printed (or sits beside the .html)
+                  and is readable, has under 40 lines. One event per diagram or
+                  page.
+  long, no medium A final message with over 40 prose lines and no diagram,
+                  page or .mp4 path.
+  comprehension   Primary outcome. Events per 100 operator turns where (a) the
+                  next human prompt is <= 300 chars, not a slash command, and
+                  starts with (or is at least half) a phrase from
+                  comprehension-patterns.json, or (b) an AskUserQuestion answer
+                  typed as free text ("Other") matches the same patterns. The
+                  event belongs to the turn whose message confused the operator.
+  splits          Every group is also reported per assistant model and per
+                  project directory. A rate backed by fewer than 20 events is
+                  flagged "insufficient data".
+"""
+
+MIN_EVENTS = 20
+SHORT_PROMPT_CHARS = 300
+LONG_PROSE_LINES = 40
+THIN_PAGE_PROSE_LINES = 8
+THIN_SOURCE_LINES = 40
+MIN_BOXES = 3
+
+_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})\s*([\w+-]*)")
+_BOX_CHARS_RE = re.compile("[─-╿]")
+_BOX_CORNERS = "┌╭╔"  # light, rounded, double top-left corners
+_HTML_RE = re.compile(r"[\w./~@+-]+\.html?\b")
+_MP4_RE = re.compile(r"[\w./~@+-]+\.mp4\b")
+_MD_RE = re.compile(r"[\w./~@+-]+\.md\b")
+_MM_SHAPED_RE = re.compile(r"\b([A-Za-z_]\w*)\s*(?:\[\[|\[\(|\[|\(\(|\(|\{\{|\{|>)")
+_MM_EDGE_RE = re.compile(
+    r"(?:^|[\s;])([A-Za-z_]\w*)\s*(?:-->|---|==>|-\.->|--[ox>])", re.M)
+_MM_EDGE_TARGET_RE = re.compile(
+    r"(?:-->|---|==>|-\.->)\s*(?:\|[^|]*\|\s*)?([A-Za-z_]\w*)")
+_MM_PARTICIPANT_RE = re.compile(r"^\s*(?:participant|actor)\s+(\w+)", re.M)
+_MM_KEYWORDS = {"graph", "flowchart", "subgraph", "end", "style", "classDef", "class",
+                "click", "linkStyle", "direction", "TD", "TB", "LR", "RL", "BT"}
+
+
+# --- library loading ---------------------------------------------------------
+
+def _load_libs():
+    lib = os.environ.get("CCGM_LIB") or os.path.expanduser("~/.claude/lib")
+    sys.path.insert(0, lib)
+    mods = {}
+    for name, module in (("prose_lint", "writing-system"), ("transcript_miner", "dreaming")):
+        try:
+            mods[name] = __import__(name)
+        except ImportError as exc:
+            sys.stderr.write(
+                f"ccgm-output-metrics: cannot import {name} from {lib} "
+                f"({module} module not installed?): {exc}\n")
+            sys.exit(2)
+    return mods["prose_lint"], mods["transcript_miner"]
+
+
+def _load_patterns():
+    here = os.path.dirname(os.path.realpath(__file__))
+    lib = os.environ.get("CCGM_LIB") or os.path.expanduser("~/.claude/lib")
+    candidates = [os.environ.get("CCGM_COMPREHENSION_PATTERNS"),
+                  os.path.join(here, "..", "lib", "comprehension-patterns.json"),
+                  os.path.join(lib, "comprehension-patterns.json")]
+    for path in candidates:
+        if path and os.path.isfile(path):
+            with open(path) as fh:
+                data = json.load(fh)
+            return [re.compile(p["regex"]) for p in data["patterns"]]
+    sys.stderr.write("ccgm-output-metrics: comprehension-patterns.json not found\n")
+    sys.exit(2)
+
+
+# --- small helpers -----------------------------------------------------------
+
+def _parse_iso(value):
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _pct90(values):
+    ranked = sorted(values)
+    return ranked[math.ceil(0.9 * len(ranked)) - 1] if ranked else 0
+
+
+def _median(values):
+    return statistics.median(values) if values else 0
+
+
+def _normalize(text):
+    text = text.lower().replace("’", "'").replace("‘", "'")
+    return " ".join(text.split()).strip(" \t\n.,!?:;-\"'()[]")
+
+
+def _matches(patterns, text):
+    """True when a pattern starts the text or covers at least half of it."""
+    norm = _normalize(text)
+    if not norm:
+        return False
+    for rx in patterns:
+        m = rx.search(norm)
+        if m and (m.start() == 0 or len(m.group(0)) * 2 >= len(norm)):
+            return True
+    return False
+
+
+def _split_fences(text):
+    """Return (prose_lines, blocks) where blocks is a list of (lang, body)."""
+    prose, blocks = [], []
+    fence, lang, body = None, "", []
+    for line in text.splitlines():
+        m = _FENCE_RE.match(line)
+        if fence is None:
+            if m:
+                fence, lang, body = m.group(1)[0], m.group(2).lower(), []
+            elif line.strip():
+                prose.append(line)
+        elif m and m.group(1)[0] == fence and not m.group(2):
+            blocks.append((lang, "\n".join(body)))
+            fence = None
+        else:
+            body.append(line)
+    if fence is not None:
+        blocks.append((lang, "\n".join(body)))
+    return prose, blocks
+
+
+def _mermaid_nodes(body):
+    ids = set(_MM_SHAPED_RE.findall(body))
+    ids.update(_MM_EDGE_RE.findall(body))
+    ids.update(_MM_EDGE_TARGET_RE.findall(body))
+    ids.update(_MM_PARTICIPANT_RE.findall(body))
+    return len(ids - _MM_KEYWORDS)
+
+
+def _source_lines(html_paths, md_paths):
+    """Line count of the largest readable source markdown, or None."""
+    candidates = list(md_paths) + [os.path.splitext(p)[0] + ".md" for p in html_paths]
+    counts = []
+    for p in candidates:
+        p = os.path.expanduser(p)
+        if os.path.isfile(p):
+            try:
+                with open(p, errors="replace") as fh:
+                    counts.append(sum(1 for _ in fh))
+            except OSError:
+                continue
+    return max(counts) if counts else None
+
+
+def _human_text(tm, obj):
+    """Typed text of a human-origin user record, or None when it starts no turn."""
+    if not tm._is_human_origin_turn(obj) or obj.get("isMeta"):
+        return None
+    content = (obj.get("message") or {}).get("content")
+    if isinstance(content, list) and any(
+            isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+        return None
+    text = tm._REMINDER_RE.sub("", tm._text_from_content(content)).strip()
+    if not text:
+        return None
+    low = text.lower()
+    if low.startswith(("<command-name>", "<command-message>")):
+        return text
+    if low.startswith(tm._HARNESS_PREFIXES):
+        return None
+    return text
+
+
+def _is_slash(text):
+    low = text.lower()
+    return low.startswith(("/", "<command-name>", "<command-message>"))
+
+
+def _free_text_answers(answers, labels):
+    """Answers that are not made only of offered option labels."""
+    out = []
+    for answer in (answers or {}).values():
+        if not isinstance(answer, str):
+            continue
+        rest = answer
+        for label in sorted(labels, key=len, reverse=True):
+            rest = rest.replace(label, "")
+        if rest.strip(" ,;\n") or not answer.strip():
+            out.append(answer)
+    return out
+
+
+# --- transcript scan ---------------------------------------------------------
+
+def scan_file(path, project, tm, patterns, since, until):
+    """Return the window's turns from one transcript, with confusion flags set."""
+    turns = []
+    cur = None
+    labels = set()
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if '"type":"user"' not in line and '"type":"assistant"' not in line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(obj, dict) or obj.get("isSidechain"):
+                continue
+            msg = obj.get("message") or {}
+            content = msg.get("content")
+            if obj.get("type") == "user":
+                text = _human_text(tm, obj)
+                if text is not None:
+                    cur = {"project": project, "ts": obj.get("timestamp", ""),
+                           "prompt": text, "slash": _is_slash(text), "model": None,
+                           "final": None, "artifacts": 0, "ask_confused": False,
+                           "confused": False}
+                    if turns:
+                        prev = turns[-1]
+                        if (not cur["slash"] and len(text) <= SHORT_PROMPT_CHARS
+                                and _matches(patterns, text)):
+                            prev["confused"] = True
+                    turns.append(cur)
+                elif cur is not None and isinstance(obj.get("toolUseResult"), dict):
+                    answers = obj["toolUseResult"].get("answers")
+                    for ans in _free_text_answers(answers, labels):
+                        if _matches(patterns, ans):
+                            cur["ask_confused"] = True
+            elif cur is not None and isinstance(content, list):
+                model = msg.get("model")
+                if model == "<synthetic>":
+                    continue
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    kind = block.get("type")
+                    if kind == "text" and isinstance(block.get("text"), str) and block["text"].strip():
+                        cur["final"] = block["text"]
+                        cur["model"] = model or cur["model"]
+                    elif kind == "tool_use":
+                        cur["model"] = cur["model"] or model
+                        name = block.get("name")
+                        if name == "Artifact":
+                            cur["artifacts"] += 1
+                        elif name == "AskUserQuestion":
+                            for q in (block.get("input") or {}).get("questions", []):
+                                for opt in q.get("options", []):
+                                    if isinstance(opt, dict) and opt.get("label"):
+                                        labels.add(opt["label"])
+    return [t for t in turns if _in_window(t["ts"], since, until)]
+
+
+def _in_window(ts, since, until):
+    if not (since or until):
+        return True
+    try:
+        dt = _parse_iso(ts)
+    except ValueError:
+        return False
+    return (since is None or dt >= since) and (until is None or dt < until)
+
+
+# --- aggregation -------------------------------------------------------------
+
+def analyze_final(turn, pl):
+    """Per-turn measurements of the final message."""
+    text = turn["final"]
+    prose_lines, blocks = _split_fences(text)
+    ascii_boxes = [sum(body.count(c) for c in _BOX_CORNERS)
+                   for lang, body in blocks
+                   if lang != "mermaid" and _BOX_CHARS_RE.search(body)]
+    mermaid = [_mermaid_nodes(body) for lang, body in blocks if lang == "mermaid"]
+    html = _HTML_RE.findall("\n".join(prose_lines) + "\n" + "\n".join(b for _, b in blocks))
+    html = [h for h in html if h.lower().endswith(".html")]
+    mp4 = _MP4_RE.findall(text)
+    md = _MD_RE.findall(text)
+    page = bool(html) or turn["artifacts"] > 0
+    small = sum(1 for n in ascii_boxes + mermaid if n < MIN_BOXES)
+    thin_page = False
+    if page and len(prose_lines) < THIN_PAGE_PROSE_LINES:
+        src = _source_lines(html, md)
+        thin_page = src is None or src < THIN_SOURCE_LINES
+    sentences = [len(pl._words(s)) for _, group in pl._analyze(text)[0] for s in group]
+    return {
+        "stats": pl.stats(text),
+        "sentence_words": sentences,
+        "lines": len(text.splitlines()),
+        "words": len(text.split()),
+        "ascii": len(ascii_boxes), "mermaid": len(mermaid),
+        "html": len(html), "mp4": len(mp4),
+        "prose_lines": len(prose_lines),
+        "over_climb": small + (1 if thin_page else 0),
+        "long_no_medium": (len(prose_lines) > LONG_PROSE_LINES
+                           and not (ascii_boxes or mermaid or page or mp4)),
+    }
+
+
+def _rate(events, turns):
+    return {"events": events,
+            "per_100_turns": round(events / turns * 100, 1) if turns else 0.0,
+            "insufficient_data": events < MIN_EVENTS}
+
+
+def summarize(turns, pl):
+    operator = [t for t in turns if not t["slash"]]
+    finals = [analyze_final(t, pl) for t in turns if t["final"]]
+    words = [w for f in finals for w in f["sentence_words"]]
+    sentences = sum(f["stats"]["sentences"] for f in finals)
+    over = sum(f["stats"]["sentences_over_limit"] for f in finals)
+    by_rule = {k: sum(f["stats"]["by_rule"][k] for f in finals) for k in pl.RULES}
+    followups = sum(1 for t in operator if t["confused"])
+    asks = sum(1 for t in operator if t["ask_confused"])
+    comp = _rate(followups + asks, len(operator))
+    comp.update(followup_events=followups, ask_events=asks)
+    lines = [f["lines"] for f in finals]
+    word_counts = [f["words"] for f in finals]
+    return {
+        "turns": len(operator),
+        "slash_turns": len(turns) - len(operator),
+        "final_messages": len(finals),
+        "prose": {
+            "sentences": sentences,
+            "sentences_over_limit": over,
+            "pct_over_limit": round(over / sentences * 100, 1) if sentences else 0.0,
+            "p90_sentence_words": _pct90(words),
+            "by_rule": by_rule,
+            "insufficient_data": over < MIN_EVENTS,
+        },
+        "length": {"lines_median": _median(lines), "lines_p90": _pct90(lines),
+                   "words_median": _median(word_counts), "words_p90": _pct90(word_counts)},
+        "medium": {
+            "ascii_diagrams": sum(f["ascii"] for f in finals),
+            "mermaid_blocks": sum(f["mermaid"] for f in finals),
+            "artifact_uses": sum(t["artifacts"] for t in turns),
+            "html_paths": sum(f["html"] for f in finals),
+            "mp4_paths": sum(f["mp4"] for f in finals),
+            "prose_lines_total": sum(f["prose_lines"] for f in finals),
+        },
+        "over_climbing": _rate(sum(f["over_climb"] for f in finals), len(operator)),
+        "comprehension": comp,
+        "long_no_medium": _rate(sum(1 for f in finals if f["long_no_medium"]), len(operator)),
+    }
+
+
+def build_report(turns, pl, since, until, project, files):
+    def group(key):
+        buckets = {}
+        for t in turns:
+            buckets.setdefault(key(t), []).append(t)
+        return {k: summarize(v, pl) for k, v in sorted(buckets.items())}
+    return {
+        "schema_version": 1,
+        "window": {"since": since.isoformat() if since else None,
+                   "until": until.isoformat() if until else None},
+        "project": project,
+        "files_scanned": files,
+        "overall": summarize(turns, pl),
+        "by_model": group(lambda t: t["model"] or "unknown"),
+        "by_project": group(lambda t: t["project"]),
+    }
+
+
+# --- output ------------------------------------------------------------------
+
+def _fmt_rate(label, r, unit="per 100 turns"):
+    flag = "  (insufficient data)" if r["insufficient_data"] else ""
+    return f"  {label}: {r['events']} events, {r['per_100_turns']} {unit}{flag}"
+
+
+def render_group(name, g):
+    p, ln, m, c = g["prose"], g["length"], g["medium"], g["comprehension"]
+    flag = "  (insufficient data)" if p["insufficient_data"] else ""
+    return "\n".join([
+        f"[{name}] {g['turns']} operator turns, {g['slash_turns']} slash, "
+        f"{g['final_messages']} final messages",
+        f"  prose: {p['sentences_over_limit']}/{p['sentences']} sentences over limit "
+        f"({p['pct_over_limit']}%), p90 {p['p90_sentence_words']} words{flag}; "
+        f"paragraph-length {p['by_rule']['paragraph-length']}, "
+        f"two-actions {p['by_rule']['two-actions']}",
+        f"  length: lines median {ln['lines_median']} p90 {ln['lines_p90']}; "
+        f"words median {ln['words_median']} p90 {ln['words_p90']}",
+        f"  medium: ascii {m['ascii_diagrams']}, mermaid {m['mermaid_blocks']}, "
+        f"artifact {m['artifact_uses']}, html {m['html_paths']}, mp4 {m['mp4_paths']}, "
+        f"prose lines {m['prose_lines_total']}",
+        _fmt_rate("over-climbing", g["over_climbing"]),
+        _fmt_rate("long, no medium", g["long_no_medium"]),
+        _fmt_rate("comprehension", c) + f" (followup {c['followup_events']}, ask {c['ask_events']})",
+    ])
+
+
+def render_text(report):
+    w = report["window"]
+    out = [f"window: {w['since'] or 'start'} .. {w['until'] or 'now'}; "
+           f"{report['files_scanned']} transcripts", render_group("overall", report["overall"])]
+    for title, key in (("model", "by_model"), ("project", "by_project")):
+        for name, g in report[key].items():
+            out.append(render_group(f"{title} {name}", g))
+    return "\n".join(out) + "\n"
+
+
+# --- main --------------------------------------------------------------------
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        prog="ccgm-output-metrics",
+        description="Measure operator-facing agent output from Claude Code transcripts (read-only).",
+        epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--since", help="ISO time; keep turns that start at or after it")
+    ap.add_argument("--until", help="ISO time; keep turns that start before it")
+    ap.add_argument("--project", help="keep project directories whose name contains this slug; write --project=SLUG, since slugs start with a dash")
+    ap.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    args = ap.parse_args(argv)
+
+    try:
+        since = _parse_iso(args.since) if args.since else None
+        until = _parse_iso(args.until) if args.until else None
+    except ValueError as exc:
+        ap.error(f"bad ISO time: {exc}")
+
+    pl, tm = _load_libs()
+    patterns = _load_patterns()
+    root = os.environ.get("CCGM_PROJECTS") or os.path.expanduser("~/.claude/projects")
+
+    turns, files = [], 0
+    for proj in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        pdir = os.path.join(root, proj)
+        if not os.path.isdir(pdir) or (args.project and args.project not in proj):
+            continue
+        for name in sorted(os.listdir(pdir)):
+            path = os.path.join(pdir, name)
+            if not name.endswith(".jsonl") or not os.path.isfile(path):
+                continue
+            if since and os.path.getmtime(path) < since.timestamp():
+                continue
+            files += 1
+            turns.extend(scan_file(path, proj, tm, patterns, since, until))
+
+    report = build_report(turns, pl, since, until, args.project, files)
+    sys.stdout.write(json.dumps(report, indent=2) + "\n" if args.json else render_text(report))
+
+
+if __name__ == "__main__":
+    main()

@@ -10,8 +10,10 @@
     "rules/output-medium.md": { "target": "rules/output-medium.md", "type": "rule", "template": false },
     "skills/output-medium/SKILL.md": { "target": "skills/output-medium/SKILL.md", "type": "skill", "template": false },
     "commands/explain.md": { "target": "commands/explain.md", "type": "command", "template": false },
-    "bin/ccgm-md-page": { "target": "bin/ccgm-md-page", "type": "script", "template": false }
+    "bin/ccgm-md-page": { "target": "bin/ccgm-md-page", "type": "script", "template": false },
+    "bin/ccgm-output-metrics": { "target": "bin/ccgm-output-metrics", "type": "script", "template": false },
+    "lib/comprehension-patterns.json": { "target": "lib/comprehension-patterns.json", "type": "lib", "template": false }
   },
-  "tags": ["formatting", "output", "copy-paste", "communication", "diagrams", "pages"],
+  "tags": ["formatting", "output", "copy-paste", "communication", "diagrams", "pages", "metrics"],
   "configPrompts": []
 }
