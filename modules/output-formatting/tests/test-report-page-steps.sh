@@ -7,7 +7,8 @@ fail=0
 check() { # file fixed-string description
   if grep -qF -- "$2" "$1"; then echo "PASS $3"; else echo "FAIL $3 ($1 lacks: $2)"; fail=1; fi
 }
-BIN='${CCGM_BIN:-$HOME/.claude/bin}/ccgm-md-page'
+BIN='"$HOME/.claude/bin/ccgm-md-page"'
+PROBE='test -x "$HOME/.claude/bin/ccgm-md-page"'
 NOTE='ccgm-md-page not installed; the report is at'
 
 for f in modules/research/commands/research.md \
@@ -16,7 +17,9 @@ for f in modules/research/commands/research.md \
          modules/commands-extra/skills/audit/SKILL.md \
          modules/dreaming/commands/dream-scorecard.md; do
   check "$ROOT/$f" "$BIN" "$f: absolute-path form"
-  check "$ROOT/$f" "$NOTE" "$f: not-installed note"
+  check "$ROOT/$f" "$PROBE" "$f: test -x probe"
+  check "$ROOT/$f" "$NOTE <path>\`" "$f: not-installed note on one line"
+  if grep -qF "CCGM_BIN" "$ROOT/$f"; then echo "FAIL $f: still uses CCGM_BIN"; fail=1; fi
   check "$ROOT/$f" "artifact-design" "$f: Artifact branch"
 done
 check "$ROOT/modules/dreaming/commands/dream-scorecard.md" "dataviz" "dream-scorecard: dataviz chart"
