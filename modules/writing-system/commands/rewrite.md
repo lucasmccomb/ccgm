@@ -1,7 +1,7 @@
 ---
 description: Rewrite prose under the six writing rules - list every violation first, then rewrite, keeping every fact, number, and name unchanged
 allowed-tools: Read, Edit, Glob, Grep, AskUserQuestion
-argument-hint: "[file-path or pasted text] [mode:landing] [--apply]"
+argument-hint: "[file-path or pasted text] [mode:landing] [--ste] [--apply]"
 ---
 
 # /rewrite - Apply the Six Writing Rules
@@ -16,7 +16,7 @@ For a deep multi-lens review (argument, structure, data, impact), use `/editoria
 - If `$ARGUMENTS` contains pasted text, use it directly.
 - If neither, ask what to rewrite.
 
-Parse flags from `$ARGUMENTS` before treating the rest as the target: `mode:landing` and `--apply`.
+Parse flags from `$ARGUMENTS` before treating the rest as the target: `mode:landing`, `--ste`, and `--apply`.
 
 ## Step 2: List Every Violation
 
@@ -27,6 +27,8 @@ Go through the text and list each violation, grouped by rule, quoting the exact 
 3. **Cuttable words** (rule 3): each word or phrase that can go without losing meaning ("in order to" -> "to", "it's worth noting that" -> cut).
 4. **Passive constructions** (rule 4): each passive with its active rewrite, where the actor is known.
 5. **Jargon** (rule 5): each jargon or foreign phrase with an everyday equivalent, only where precision survives the swap. A technical term with no accurate plain substitute stays.
+
+6. **STE-lite limits** (always on): each sentence over 20 words (instruction) or 25 words (description), each paragraph over 6 sentences, each noun cluster over 3 words, each step that holds two actions, each reference ("#1138") with no name beside it. For a file, run `test -x "$HOME/.claude/bin/ccgm-prose-lint"` as its own command; if it exits non-zero, print a one-line "not installed" note and skip. Otherwise run `"$HOME/.claude/bin/ccgm-prose-lint" --json FILE` as its own command for the sentence, paragraph, and two-action findings. It does not check noun clusters or unnamed references; judge those by reading.
 
 If a category has no violations, skip it. Do not pad the list.
 
@@ -42,6 +44,19 @@ Hard constraints:
 - Rule 6 wins conflicts: if a fix makes the sentence worse, leave the original and say so.
 
 Output the rewrite in a fenced code block so it pastes clean (see `copy-paste-output.md`).
+
+## Step 3b: --ste
+
+`--ste` rewrites to full Simplified Technical English, not only the STE-lite limits:
+
+- One meaning per word, and one word per meaning, across the whole text.
+- Active voice and simple tenses (past, present, future). No perfect or progressive forms where a simple tense works.
+- Instructions are imperative, one action per sentence, with the condition first.
+- Instruction sentences: 20 words or fewer. Descriptive sentences: 25 or fewer.
+- Use a noun or verb, not a "-ing" form acting as a noun, for the thing being done.
+- Keep technical terms, code, identifiers, and error strings exactly as written.
+
+Rule 6 still wins: if the STE form changes a fact, keep the original and say so.
 
 ## Step 4: mode:landing
 

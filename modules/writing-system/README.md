@@ -16,6 +16,9 @@ Most setups ban AI-sounding words one at a time ("no delve", "no em dashes") and
 - The rule adds two workflow subsections: commit/PR prose (plain words, no achievement language, one-read test) and session reports (plain sentences, no emoji checkmarks, no "Successfully").
 - **`commands/rewrite.md`** adds `/rewrite [file] [mode:landing] [--apply]`: lists every violation (stale phrase, long word with its short replacement, cuttable word, passive construction, jargon), then rewrites, keeping every fact, number, and name unchanged. `mode:landing` adds the swap test for marketing copy: if a competitor could paste the line unchanged onto their page, rewrite or delete it.
 
+- **STE-lite limits** in the rule add the measurable half of ASD-STE100: sentence length by kind (20 words for instructions, 25 for description), paragraphs of 6 sentences or fewer, noun clusters of 3 words or fewer, one action per step, and a name beside each first-time reference. **`bin/ccgm-prose-lint`** (library `lib/prose_lint.py`, Python standard library only) measures them: `ccgm-prose-lint [FILE|-] [--json] [--strict]`. The linter checks sentence length and paragraph length (errors) and two-action steps (warnings). Noun clusters and unnamed references stay in the rule as guidance: an audit of real messages found the checks too noisy (16% and 35% precision), so they were removed. `--strict` exits 1 on any error. Tools in `~/.claude/bin` are not on `PATH`; call `"$HOME/.claude/bin/ccgm-prose-lint"`.
+- `/rewrite --ste` rewrites to full Simplified Technical English.
+
 The rules never touch code, identifiers, API names, or technical terms whose plain-word swap would change the meaning.
 
 ## Relationship to editorial-critique
@@ -29,6 +32,9 @@ The rules never touch code, identifiers, API names, or technical terms whose pla
 mkdir -p ~/.claude/rules ~/.claude/commands
 cp rules/writing-system.md ~/.claude/rules/writing-system.md
 cp commands/rewrite.md ~/.claude/commands/rewrite.md
+mkdir -p ~/.claude/bin ~/.claude/lib
+cp lib/prose_lint.py ~/.claude/lib/prose_lint.py
+cp bin/ccgm-prose-lint ~/.claude/bin/ccgm-prose-lint && chmod +x ~/.claude/bin/ccgm-prose-lint
 ```
 
 ## Files
@@ -36,4 +42,7 @@ cp commands/rewrite.md ~/.claude/commands/rewrite.md
 | File | Description |
 |------|-------------|
 | `rules/writing-system.md` | The six rules, scope carve-outs, commit/PR and report subsections |
-| `commands/rewrite.md` | `/rewrite`: violations list, then rewrite; `mode:landing` for copy |
+| `commands/rewrite.md` | `/rewrite`: violations list, then rewrite; `mode:landing` for copy; `--ste` for full STE |
+| `lib/prose_lint.py` | `lint(text)` and `stats(text)`: the STE-lite measurements |
+| `bin/ccgm-prose-lint` | CLI over `prose_lint`: text, `--json`, `--strict` |
+| `tests/test_prose_lint.py` | pytest suite for the linter and CLI |

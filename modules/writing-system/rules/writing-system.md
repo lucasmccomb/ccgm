@@ -33,6 +33,18 @@ Report progress in plain sentences: what changed, what failed, what comes next. 
 
 This governs free-form summaries. When a command or skill mandates an exact output format (a JSON envelope, `/sds`'s final report, a statusline, a structured findings artifact), that format wins.
 
+## STE-lite Limits
+
+The measurable half of ASD-STE100. `ccgm-prose-lint` checks the sentence and paragraph limits (noun clusters and unnamed references are judged by reading): before delivering a document, run `test -x "$HOME/.claude/bin/ccgm-prose-lint"` as its own command; if it exits non-zero, note that the linter is not installed and go on; otherwise run `"$HOME/.claude/bin/ccgm-prose-lint" --strict FILE` as its own command.
+
+- Instruction sentences: 20 words or fewer. Descriptive sentences: 25 or fewer.
+- Paragraphs: 6 sentences or fewer, one topic, topic sentence first. Each list item counts as its own paragraph.
+- Noun clusters: 3 words or fewer. Break longer ones with a preposition.
+- Steps: imperative, one action per sentence, condition before the action.
+- One term per concept within a document.
+- Name a reference the first time it appears in text for the operator: "PR #1138 (autoheal signature quality)", not "#1138".
+- Same scope as the six rules: prose only. Code, identifiers, error strings, and technical terms are exempt.
+
 ## Why There Is No Word Blacklist
 
 Banning words one at a time ("no delve", "no em dashes") treats symptoms. The six rules are the system; a banned-word list is what you fall back on without one. For a deep, line-by-line review of long-form writing, run `/editorial-critique`; its detectors (AI-tell vocabulary, filler phrases) apply these rules at review time. For a quick single pass over existing text, run `/rewrite`.

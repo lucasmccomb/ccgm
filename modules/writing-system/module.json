@@ -1,13 +1,15 @@
 {
   "name": "writing-system",
   "displayName": "Writing System",
-  "description": "Orwell's six writing rules (1946) as an always-on prose standard for docs, PR text, commit messages, reports, and copy, plus a /rewrite command that applies them to existing text. Governs prose only, never code or technical terms.",
+  "description": "Orwell's six writing rules (1946) as an always-on prose standard for docs, PR text, commit messages, reports, and copy, plus a /rewrite command that applies them to existing text. Adds measurable STE-lite limits and a stdlib linter (ccgm-prose-lint). Governs prose only, never code or technical terms.",
   "category": "patterns",
   "scope": ["global"],
   "dependencies": [],
   "files": {
     "rules/writing-system.md": { "target": "rules/writing-system.md", "type": "rule", "template": false },
-    "commands/rewrite.md": { "target": "commands/rewrite.md", "type": "command", "template": false }
+    "commands/rewrite.md": { "target": "commands/rewrite.md", "type": "command", "template": false },
+    "lib/prose_lint.py": { "target": "lib/prose_lint.py", "type": "lib", "template": false },
+    "bin/ccgm-prose-lint": { "target": "bin/ccgm-prose-lint", "type": "script", "template": false }
   },
   "tags": ["writing", "prose", "style", "communication", "orwell"],
   "configPrompts": []

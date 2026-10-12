@@ -198,6 +198,35 @@ jobs:
           python3 -m pip install --quiet pytest
           ORRERY_STRICT=1 bash modules/orrery/tests/test-orrery.sh
 
+      - name: Output-ladder module tests (pytest + shell suites)
+        env:
+          # A browser E2E test fails (instead of skipping) when the Playwright
+          # toolchain is missing and this is set.
+          CCGM_E2E_REQUIRED: "1"
+        run: |
+          set -e
+          # Runs each listed tests/ directory: pytest when it holds test_*.py,
+          # every *.sh with bash. xplan's .sh suites already run in the hooks
+          # step above, so only its pytest files run here. Missing directories
+          # are skipped, so later epics only add files.
+          python3 -m venv /tmp/ccgm-output-ladder-test-venv
+          source /tmp/ccgm-output-ladder-test-venv/bin/activate
+          python3 -m pip install --quiet pytest
+          for d in modules/writing-system/tests modules/output-formatting/tests modules/commands-core/tests modules/explainer-video/tests modules/xplan/tests; do
+            [ -d "$d" ] || continue
+            echo "=== $d ==="
+            if ls "$d"/test_*.py >/dev/null 2>&1; then
+              python3 -m pytest "$d" -q
+            fi
+            if [ "$d" != "modules/xplan/tests" ]; then
+              for t in "$d"/*.sh; do
+                [ -e "$t" ] || continue
+                echo "--- $t ---"
+                bash "$t"
+              done
+            fi
+          done
+
   test-macos:
     runs-on: macos-latest
     steps:
@@ -388,3 +417,28 @@ jobs:
           source /tmp/ccgm-orrery-test-venv/bin/activate
           python3 -m pip install --quiet pytest
           ORRERY_STRICT=1 bash modules/orrery/tests/test-orrery.sh
+
+      - name: Output-ladder module tests (pytest + shell suites)
+        run: |
+          set -e
+          # Runs each listed tests/ directory: pytest when it holds test_*.py,
+          # every *.sh with bash. xplan's .sh suites already run in the hooks
+          # step above, so only its pytest files run here. Missing directories
+          # are skipped, so later epics only add files.
+          python3 -m venv /tmp/ccgm-output-ladder-test-venv
+          source /tmp/ccgm-output-ladder-test-venv/bin/activate
+          python3 -m pip install --quiet pytest
+          for d in modules/writing-system/tests modules/output-formatting/tests modules/commands-core/tests modules/explainer-video/tests modules/xplan/tests; do
+            [ -d "$d" ] || continue
+            echo "=== $d ==="
+            if ls "$d"/test_*.py >/dev/null 2>&1; then
+              python3 -m pytest "$d" -q
+            fi
+            if [ "$d" != "modules/xplan/tests" ]; then
+              for t in "$d"/*.sh; do
+                [ -e "$t" ] || continue
+                echo "--- $t ---"
+                bash "$t"
+              done
+            fi
+          done
