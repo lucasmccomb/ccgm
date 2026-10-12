@@ -1,6 +1,5 @@
 ---
 description: Explain a topic in the lowest medium that carries it - prose, diagram, page, or video - then verify the artifact and summarize in 5 lines or fewer
-allowed-tools: Read, Glob, Grep, Write, Bash, Skill
 argument-hint: "<topic> [as prose|diagram|page|video]"
 ---
 

@@ -23,10 +23,10 @@ if [ ! -f "$RULE" ]; then
 else
   LINES="$(wc -l < "$RULE" | tr -d ' ')"
   if [ "$LINES" -le 20 ]; then ok "rule is $LINES lines (budget 20)"; else fail "rule is $LINES lines, budget is 20"; fi
-  if head -n 1 "$RULE" | grep -q "^Applies to text addressed to the operator"; then
-    ok "rule's first line scopes it to operator-facing text"
+  if head -n 1 "$RULE" | grep -q "^# " && sed -n 3p "$RULE" | grep -q "^Applies to text addressed to the operator"; then
+    ok "rule has a heading on line 1 and the operator scope sentence directly under it"
   else
-    fail "rule's first line must start 'Applies to text addressed to the operator'"
+    fail "rule needs a '# ' heading on line 1 and 'Applies to text addressed to the operator' on line 3"
   fi
   if grep -q "output-medium" "$RULE" && grep -qi "skill" "$RULE"; then
     ok "rule points at the output-medium skill"

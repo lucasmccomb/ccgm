@@ -93,7 +93,8 @@ async function mermaidPage(browser) {
   const page = await browser.newPage();
   await page.goto('file://' + mermaid, { waitUntil: 'load' });
   await page.waitForSelector('#content pre.mermaid svg', { timeout: TIMEOUT });
-  assert(true, 'mermaid diagram rendered as SVG');
+  const svgs = await page.$$eval('#content pre.mermaid svg', (els) => els.length);
+  assert(svgs > 0, 'mermaid diagram rendered as SVG inside pre.mermaid (' + svgs + ')');
   await page.close();
 }
 

@@ -20,6 +20,7 @@ Use a diagram for a flow, sequence, dependency, state machine, architecture, or 
 - Use box-drawing characters: `┌ ─ ┐ │ └ ┘ ▶ ▼`.
 - Keep every line at 100 columns or fewer.
 - Put labels inside boxes. Make arrows show direction.
+- In `AskUserQuestion`, put the diagram in the option's `preview` field, which renders monospace beside the options. Never put it in the question text.
 
 Check the width before you send it. Save the diagram to a file, then run:
 

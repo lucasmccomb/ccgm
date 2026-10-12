@@ -1,6 +1,6 @@
-Applies to text addressed to the operator; a subagent reporting to its caller writes prose or its mandated envelope unless its spec asks for more.
-
 # Output Medium: Lowest Rung That Carries the Content
+
+Applies to text addressed to the operator; a subagent reporting to its caller writes prose or its mandated envelope unless its spec asks for more.
 
 | Content shape | Medium |
 |---|---|

@@ -109,6 +109,18 @@ def test_missing_input_exits_nonzero(tmp_path):
     assert "nope.md" in proc.stderr
 
 
+def test_unwritable_output_exits_2_without_traceback(tmp_path):
+    src = tmp_path / "in.md"
+    src.write_text("# Hi\n", encoding="utf-8")
+    bad = tmp_path / "no-such-dir" / "out.html"
+    proc = subprocess.run(
+        [sys.executable, str(TOOL), str(src), "-o", str(bad)], capture_output=True, text=True
+    )
+    assert proc.returncode == 2
+    assert proc.stderr.startswith(f"ccgm-md-page: cannot write {bad}:")
+    assert "Traceback" not in proc.stderr
+
+
 def test_never_opens_the_page(tmp_path):
     fake = tmp_path / "fakebin"
     fake.mkdir()

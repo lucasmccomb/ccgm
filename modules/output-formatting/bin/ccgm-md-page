@@ -211,7 +211,11 @@ def main(argv=None):
         m = H1.search(markdown)
         title = m.group(1).strip() if m else src.stem
     out = Path(args.output) if args.output else src.with_suffix(".html")
-    out.write_text(build_page(markdown, title), encoding="utf-8")
+    try:
+        out.write_text(build_page(markdown, title), encoding="utf-8")
+    except OSError as err:
+        print(f"ccgm-md-page: cannot write {out}: {err.strerror}", file=sys.stderr)
+        return 2
     print(out.resolve())
     return 0
 
