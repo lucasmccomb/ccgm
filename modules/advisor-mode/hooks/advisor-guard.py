@@ -1387,7 +1387,7 @@ def ladder_segment_allowed(words, name):
     print, so any arguments pass (argument_blocker already ran on the
     segment; a redirect is checked by the redirect scan). ccgm-md-page
     writes one file: OUT from `-o OUT`, else IN with its suffix replaced by
-    `.html`. That path must pass path_allowed, the same write-root check
+    `.html`. That path must end in .html and pass path_allowed, the same write-root check
     redirects use. Relative paths are denied (the cwd is unknowable here).
     ccgm-md-page IN [-o OUT] [--title T].
     """
@@ -1417,9 +1417,10 @@ def ladder_segment_allowed(words, name):
         index += 1
     if not source:
         return False
-    if out is None:
-        out = str(PurePosixPath(source).with_suffix(".html"))
-    return os.path.isabs(os.path.expanduser(source)) and os.path.isabs(os.path.expanduser(out)) and path_allowed(out)
+    source = os.path.expanduser(source)
+    out = os.path.expanduser(out) if out is not None else str(PurePosixPath(source).with_suffix(".html"))
+    # md-page writes an HTML document; any other suffix is a clobber, not a page.
+    return os.path.isabs(source) and os.path.isabs(out) and out.lower().endswith(".html") and path_allowed(out)
 
 
 def bash_segment_allowed(segment, after_cd=False):

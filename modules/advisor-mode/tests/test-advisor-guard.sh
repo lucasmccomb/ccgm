@@ -1069,6 +1069,13 @@ assert_exit 0 "md-page -o in temp root allowed" "$(bash_json "${B}/ccgm-md-page 
 assert_exit 0 "md-page into plans allowed" "$(bash_json "${B}/ccgm-md-page \$HOME/code/plans/x/research.md")"
 assert_exit 0 "md-page -o into plans allowed" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md -o \$HOME/code/plans/x/r.html")"
 
+assert_exit 0 "md-page tilde input, default output allowed" "$(bash_json "${B}/ccgm-md-page ~/code/plans/x/report.md")"
+assert_exit 0 "md-page tilde -o .html allowed" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md -o ~/code/plans/x/r.html")"
+assert_exit 0 "md-page uppercase .HTML allowed" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md -o ${TMPDIR}/R.HTML")"
+assert_exit 2 "md-page tilde -o .json denied" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md -o ~/code/plans/x/r.json")"
+assert_exit 2 "md-page -o settings.json in write root denied" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md -o \$HOME/.claude/settings.json")"
+assert_exit 2 "md-page -o /etc/x.html denied" "$(bash_json "${B}/ccgm-md-page ${TMPDIR}/r.md -o /etc/x.html")"
+assert_exit 2 "md-page tilde input outside roots denied" "$(bash_json "${B}/ccgm-md-page ~/code/repo/r.md")"
 assert_exit 2 "prose-lint bare name denied" "$(bash_json "ccgm-prose-lint ${TMPDIR}/a.md")"
 assert_exit 2 "prose-lint other directory denied" "$(bash_json "/tmp/evil/ccgm-prose-lint ${TMPDIR}/a.md")"
 assert_exit 2 "prose-lint look-alike name denied" "$(bash_json "${B}/ccgm-prose-lint-evil f")"
