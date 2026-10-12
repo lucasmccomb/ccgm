@@ -136,6 +136,21 @@ Build a handoff body (markdown, ~200 words max). Use the template:
 <known landmines, decisions made and why, anything that would surprise the next agent. Skip if nothing applies.>
 ```
 
+Check the handoff body before writing it.
+
+<!-- ccgm:section prose-lint-gate -->
+**Prose check.** Before publishing, write the prose of the document to a temp file (leave out code blocks) and run the linter with `--strict`:
+
+```bash
+LINT="${CCGM_BIN:-$HOME/.claude/bin}/ccgm-prose-lint"
+if [ -x "$LINT" ]; then "$LINT" --strict "$PROSE_FILE"; else echo "ccgm-prose-lint not installed; skipping the prose check"; fi
+```
+
+Exit 1 means an error-level finding (a sentence or paragraph over the length limit). Fix each one and run again until it exits 0. Warnings do not fail the run; fix the ones that are cheap to fix.
+<!-- /ccgm:section prose-lint-gate -->
+
+The check covers the handoff document only, never the kickoff prompt the lib prints.
+
 Write it via the existing handoff lib (auto-detects repo, branch, agent, PR, issue):
 
 ```bash
