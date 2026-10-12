@@ -83,12 +83,10 @@ very more most less least much many few such own same other another too then now
 again already never always often sometimes usually instead rather
 """.split())
 
-_COMMON_ACRONYMS = set("""
-PR PRS API APIS CI CD URL URLS JSON HTML CSS SQL CLI OK README TODO MCP LLM LLMS STE ASD UI
-UX ID IDS PDF HTTP HTTPS SSH GPU CPU EOF YAML TOML XML SVG SRI TTS DOM DNS TLS JS TS MD IO
-OS AI US UK USD UTC ASCII UUID SHA CSV RLS DB AWS GCP MIT FAQ GNU BSD PEP CCGM GUI SDK IDE
-JWT OAUTH REST CORS CDN RAM DST ISO UTF CLAUDE NPM PNG JPG GIF MP4 WAV ETA FYI AM PM NA
-LAN VPN TCP UDP IP ASAP CRUD ORM DX CTA SEO KPI ROI
+# Digit-bearing terms that are not references (matched case-insensitively).
+_COMMON_CODES = set("""
+E2E MP3 MP4 UTF8 UTF16 SHA1 SHA256 SHA384 SHA512 MD5 IPV4 IPV6 HTTP2 HTTP3 OAUTH2 S3 EC2 K8S
+I18N L10N A11Y B2B B2C ES6
 """.split())
 
 _ABBREVIATIONS = {
@@ -277,7 +275,7 @@ def _bare_references(line, sentence, seen):
     found = []
     for m in _REF.finditer(sentence):
         ref = m.group(0)
-        if ref in _COMMON_ACRONYMS or not re.search(r"\d", ref):
+        if ref.upper() in _COMMON_CODES or not re.search(r"\d", ref):
             continue  # all-caps words without a digit are emphasis or acronyms
         key = re.sub(r"\s+", " ", ref).lower()
         first = key not in seen

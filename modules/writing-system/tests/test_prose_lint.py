@@ -267,3 +267,14 @@ def test_third_person_verb_is_not_part_of_a_noun_cluster():
 
 def test_plain_noun_cluster_still_warns():
     assert "noun-cluster" in rules("The session transcript miner output is large.")
+
+
+def test_common_digit_bearing_terms_are_not_references():
+    for text in ("Run the E2E suite before merge.", "Compute the SHA256 of the file.",
+                 "Save it as MP4 or utf8 text.", "Store it in S3 over IPv6."):
+        assert "bare-reference" not in rules(text), text
+
+
+def test_epic_and_spec_codes_still_warn():
+    for text in ("Check E3 first.", "The spec is ASD-STE100 for now.", "Check ZQX9 first."):
+        assert "bare-reference" in rules(text), text
