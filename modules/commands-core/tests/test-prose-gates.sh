@@ -22,10 +22,18 @@ FILES=(
 for f in "${FILES[@]}"; do
   p="$ROOT/$f"
   if [ ! -f "$p" ]; then fail "$f missing"; continue; fi
-  if grep -qF '${CCGM_BIN:-$HOME/.claude/bin}/ccgm-prose-lint' "$p" && grep -qF -- '--strict' "$p"; then
+  if grep -qF '"$HOME/.claude/bin/ccgm-prose-lint" --strict' "$p"; then
     pass "$f calls the linter with --strict"
   else
     fail "$f lacks the linter call (absolute-path form with --strict)"
+  fi
+  if grep -qF 'test -x "$HOME/.claude/bin/ccgm-prose-lint"' "$p"; then
+    pass "$f checks the linter exists with test -x"
+  else
+    fail "$f lacks the test -x line"
+  fi
+  if grep -qF 'CCGM_BIN' "$p"; then
+    fail "$f still uses CCGM_BIN (guard cannot resolve it)"
   fi
   if grep -qF 'ccgm-prose-lint not installed; skipping the prose check' "$p"; then
     pass "$f has the skip note"

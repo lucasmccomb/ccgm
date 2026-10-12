@@ -106,14 +106,11 @@ Structure the issue body based on the type:
 Then check the body's prose before creating the issue.
 
 <!-- ccgm:section prose-lint-gate -->
-**Prose check.** Before publishing, write the prose of the document to a temp file (leave out code blocks) and run the linter with `--strict`:
+**Prose check.** Before publishing, run these steps as separate commands:
 
-```bash
-LINT="${CCGM_BIN:-$HOME/.claude/bin}/ccgm-prose-lint"
-if [ -x "$LINT" ]; then "$LINT" --strict "$PROSE_FILE"; else echo "ccgm-prose-lint not installed; skipping the prose check"; fi
-```
-
-Exit 1 means an error-level finding (a sentence or paragraph over the length limit). Fix each one and run again until it exits 0. Warnings do not fail the run; fix the ones that are cheap to fix.
+1. Write the document's prose (no code blocks, no Mermaid block) to a temp file in the session scratchpad or temp directory.
+2. Run `test -x "$HOME/.claude/bin/ccgm-prose-lint"` as its own command. If it exits non-zero, print `ccgm-prose-lint not installed; skipping the prose check` and continue.
+3. Otherwise run `"$HOME/.claude/bin/ccgm-prose-lint" --strict <temp file>` as its own command. Exit 1 means a sentence or paragraph is over the limit: fix it and run again until it exits 0. Warnings do not fail the run; fix the ones that are cheap to fix.
 <!-- /ccgm:section prose-lint-gate -->
 
 ### 5. Create the Issue
