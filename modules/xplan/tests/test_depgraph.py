@@ -103,6 +103,12 @@ def test_optimistic_memory_phrasings():
     ("Epic 1; also needs the DB", [1]),
     ("parallel-safe with Epic 1", []),
     ("Epic 2, parallel-safe with Epic 3", [2]),
+    ("Epic 1, after Wave 2 merges", [1]),
+    ("Epic 4 (see PR #12)", [4]),
+    ("Epic 4, PR #12", [4]),
+    ("Epic 4, pr 12 and issue #40", [4]),
+    ("issue #40", []),
+    ("Epic 2, #7", [2]),
 ])
 def test_dependency_grammar(tmp_path, text, expected):
     epics = [(n, W(1), D("None")) for n in range(1, 5)] + [(9, W(2), D(text))]
@@ -150,6 +156,15 @@ def test_later_wave_fails(tmp_path):
     code, _, err = run(f, "--check")
     assert code == 1
     assert "later wave" in err
+
+
+def test_duplicate_epic_number_fails(tmp_path):
+    f = plan_of(tmp_path, [(3, W(1), D("None")), (3, W(1), D("None")),
+                           (3, W(1), D("None"))])
+    code, out, err = run(f, "--check")
+    assert code == 1
+    assert err.count("E3: duplicate epic number") == 1
+    assert out.count("E3 Title 3") == 3
 
 
 def test_without_check_prints_graph_and_exits_zero(tmp_path):
