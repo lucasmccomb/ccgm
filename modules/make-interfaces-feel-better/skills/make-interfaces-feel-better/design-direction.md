@@ -54,6 +54,7 @@ Animation should be purposeful, not decorative. (`animations.md` covers the impl
 - **Framework defaults**: unstyled Bootstrap, Material Design without customization, default Tailwind gray palette
 - **Inconsistency**: mixing design patterns from different systems or frameworks
 - **Decoration without purpose**: shadows, borders, gradients, and icons added for visual filler rather than to communicate information
+- **Explanatory text**: Cut taglines, helper text and secondary labels. If a screen needs them to make sense, fix the layout.
 
 ## Implementation Checklist
 
