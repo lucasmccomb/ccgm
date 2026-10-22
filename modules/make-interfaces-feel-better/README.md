@@ -8,7 +8,7 @@ The skill ships a top-level `SKILL.md` plus reference files that the skill pulls
 
 | Reference | When it applies |
 |-----------|-----------------|
-| `design-direction.md` | Aesthetic identity (minimal/brutalist/editorial/…), typeface and color-palette selection, spacing scale, motion philosophy, avoiding generic AI-generated aesthetics. **CCGM addition, not upstream.** |
+| `design-direction.md` | Aesthetic identity (minimal/brutalist/editorial/…), typeface and color-palette selection, spacing scale, motion philosophy, avoiding generic AI-generated aesthetics, cutting taglines, helper text and secondary labels. **CCGM addition, not upstream.** |
 | `typography.md` | `text-wrap: balance` / `pretty`, font smoothing on macOS, tabular numbers for dynamic values |
 | `surfaces.md` | Concentric border radius, optical vs geometric alignment, shadows instead of borders, image outlines, hit areas |
 | `animations.md` | Interruptible animations (transitions vs keyframes), enter/exit transitions, icon micro-interactions, scale on press |

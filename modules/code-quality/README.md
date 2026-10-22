@@ -6,6 +6,7 @@ Code standards, testing requirements, error handling patterns, security practice
 
 This module installs a rules file that instructs Claude to:
 
+- Make each decision improve the user, developer, and agent experience (UX, DX, AX) without breaking anything
 - Choose the simplest implementation that fully meets the current requirements, rather than building for requirements that do not exist yet
 - Climb the dependency ladder deliberately: built-in first, then an established library, and hand-rolled code only when neither fits
 - Delete backward-compatibility shims and migrate callers instead of keeping old shapes alive
@@ -48,7 +49,7 @@ cp rules/menu-gen-test.md .claude/rules/menu-gen-test.md
 
 | File | Description |
 |------|-------------|
-| `rules/code-quality.md` | Rule file covering the simplest-implementation principle, the dependency ladder (built-in > established library > custom implementation), code standards, testing, error handling, security, build verification, and living documents |
+| `rules/code-quality.md` | Rule file covering the UX/DX/AX decision principle, the simplest-implementation principle, the dependency ladder (built-in > established library > custom implementation), code standards, testing, error handling, security, build verification, and living documents |
 | `rules/change-philosophy.md` | Rule file on elegant integration: redesign existing systems rather than bolting on, and delete backward-compatibility shims rather than preserving old shapes |
 | `rules/latent-vs-deterministic.md` | Rule file on classifying work as latent (judgment) vs deterministic (scripts) and pushing deterministic steps into code |
 | `rules/completeness.md` | Rule file on the Boil-the-Lake completeness principle and scoring rubric |
